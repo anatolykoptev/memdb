@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 class QueueMessage:
     def __init__(
         self,
-        op: Literal["add", "remove", "merge", "update"],
+        op: Literal["add", "remove", "merge", "update", "end"],
         # `str` for node and edge IDs, `GraphDBNode` and `GraphDBEdge` for actual objects
         before_node: list[str] | list[GraphDBNode] | None = None,
         before_edge: list[str] | list[GraphDBEdge] | None = None,
@@ -48,7 +48,7 @@ class QueueMessage:
         return f"QueueMessage(op={self.op}, before_node={self.before_node if self.before_node is None else len(self.before_node)}, after_node={self.after_node if self.after_node is None else len(self.after_node)})"
 
     def __lt__(self, other: "QueueMessage") -> bool:
-        op_priority = {"add": 2, "remove": 2, "merge": 1}
+        op_priority = {"add": 2, "remove": 2, "merge": 1, "end": 0}
         return op_priority[self.op] < op_priority[other.op]
 
 
@@ -103,7 +103,7 @@ class GraphStructureReorganizer:
     def _run_message_consumer_loop(self):
         while True:
             message = self.queue.get()
-            if message is None:
+            if message.op == "end":
                 break
 
             try:
@@ -140,7 +140,7 @@ class GraphStructureReorganizer:
         if not self.is_reorganize:
             return
 
-        self.add_message(None)
+        self.add_message(QueueMessage(op="end"))
         self.thread.join()
         logger.info("Reorganize thread stopped.")
         self._stop_scheduler = True
@@ -158,9 +158,6 @@ class GraphStructureReorganizer:
 
     def handle_add(self, message: QueueMessage):
         logger.debug(f"Handling add operation: {str(message)[:500]}")
-        assert message.before_node is None and message.before_edge is None, (
-            "Before node and edge should be None for `add` operation."
-        )
         # ———————— 1. check for conflicts ————————
         added_node = message.after_node[0]
         conflicts = self.conflict.detect(added_node, scope=added_node.metadata.memory_type)
@@ -586,7 +583,7 @@ class GraphStructureReorganizer:
 
     def _preprocess_message(self, message: QueueMessage) -> bool:
         message = self._convert_id_to_node(message)
-        if None in message.after_node:
+        if message.after_node is None or None in message.after_node:
             logger.debug(
                 f"Found non-existent node in after_node in message: {message}, skip this message."
             )
