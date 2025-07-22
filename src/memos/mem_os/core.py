@@ -646,14 +646,8 @@ class MOSCore:
                 )
             else:
                 messages_list = [
-                    [
-                        {"role": "user", "content": memory_content},
-                        {
-                            "role": "assistant",
-                            "content": "",
-                        },  # add by str to keep the format,assistant role is empty
-                    ]
-                ]
+                    [{"role": "user", "content": memory_content}]
+                ]  # for only user-str input and convert message
                 memories = self.mem_reader.get_memory(
                     messages_list,
                     type="chat",
