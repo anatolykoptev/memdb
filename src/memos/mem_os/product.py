@@ -327,7 +327,9 @@ class MOSProduct(MOSCore):
 
         return self._create_user_config(user_id, user_config)
 
-    def _build_system_prompt(self, memories_all: list[TextualMemoryItem], base_prompt: str | None = None) -> str:
+    def _build_system_prompt(
+        self, memories_all: list[TextualMemoryItem], base_prompt: str | None = None
+    ) -> str:
         """
         Build custom system prompt for the user with memory references.
 
