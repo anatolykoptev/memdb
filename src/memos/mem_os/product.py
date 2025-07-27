@@ -339,7 +339,9 @@ class MOSProduct(MOSCore):
 
         return self._create_user_config(user_id, user_config)
 
-    def _build_system_prompt(self, user_id: str, memories_all: list[TextualMemoryItem]) -> str:
+    def _build_system_prompt(
+        self, memories_all: list[TextualMemoryItem], base_prompt: str | None = None
+    ) -> str:
         """
         Build custom system prompt for the user with memory references.
 
@@ -751,7 +753,7 @@ class MOSProduct(MOSCore):
             memories_list = memories_result[0]["memories"]
             memories_list = self._filter_memories_by_threshold(memories_list)
         # Build custom system prompt with relevant memories
-        system_prompt = self._build_system_prompt(user_id, memories_list)
+        system_prompt = self._build_system_prompt(memories_list, base_prompt=None)
 
         # Get chat history
         if user_id not in self.chat_history_manager:
