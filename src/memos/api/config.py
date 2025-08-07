@@ -100,9 +100,9 @@ class APIConfig:
                 "backend": "universal_api",
                 "config": {
                     "provider": os.getenv("MOS_EMBEDDER_PROVIDER", "openai"),
-                    "api_key": os.getenv("OPENAI_API_KEY", "sk-xxxx"),
+                    "api_key": os.getenv("MOS_EMBEDDER_API_KEY", "sk-xxxx"),
                     "model_name_or_path": os.getenv("MOS_EMBEDDER_MODEL", "text-embedding-3-large"),
-                    "base_url": os.getenv("OPENAI_API_BASE", "http://openai.com"),
+                    "base_url": os.getenv("MOS_EMBEDDER_API_BASE", "http://openai.com"),
                 },
             }
         else:  # ollama
@@ -120,10 +120,9 @@ class APIConfig:
     def get_internet_config() -> dict[str, Any]:
         """Get embedder configuration."""
         return {
-            "backend": "xinyu",
+            "backend": "bocha",
             "config": {
-                "api_key": os.getenv("XINYU_API_KEY"),
-                "search_engine_id": os.getenv("XINYU_SEARCH_ENGINE_ID"),
+                "api_key": os.getenv("BOCHA_API_KEY"),
                 "max_results": 15,
                 "num_per_request": 10,
                 "reader": {
@@ -137,7 +136,7 @@ class APIConfig:
                                 "max_tokens": 5000,
                                 "top_p": 0.95,
                                 "top_k": 20,
-                                "api_key": "EMPTY",
+                                "api_key": os.getenv("MEMRADER_API_KEY", "EMPTY"),
                                 "api_base": os.getenv("MEMRADER_API_BASE"),
                                 "remove_think_prefix": True,
                                 "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
@@ -252,7 +251,6 @@ class APIConfig:
             "backend": "general_scheduler",
             "config": {
                 "top_k": int(os.getenv("MOS_SCHEDULER_TOP_K", "10")),
-                "top_n": int(os.getenv("MOS_SCHEDULER_TOP_N", "5")),
                 "act_mem_update_interval": int(
                     os.getenv("MOS_SCHEDULER_ACT_MEM_UPDATE_INTERVAL", "300")
                 ),
@@ -267,7 +265,7 @@ class APIConfig:
                     "MOS_SCHEDULER_ENABLE_PARALLEL_DISPATCH", "true"
                 ).lower()
                 == "true",
-                "enable_act_memory_update": True,
+                "enable_activation_memory": True,
             },
         }
 

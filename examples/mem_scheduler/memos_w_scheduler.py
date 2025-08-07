@@ -85,12 +85,18 @@ def run_with_scheduler_init():
 
     # default local graphdb uri
     if AuthConfig.default_config_exists():
-        auth_config = AuthConfig.from_local_yaml()
+        auth_config = AuthConfig.from_local_config()
 
         mos_config.mem_reader.config.llm.config.api_key = auth_config.openai.api_key
         mos_config.mem_reader.config.llm.config.api_base = auth_config.openai.base_url
 
         mem_cube_config.text_mem.config.graph_db.config.uri = auth_config.graph_db.uri
+        mem_cube_config.text_mem.config.graph_db.config.user = auth_config.graph_db.user
+        mem_cube_config.text_mem.config.graph_db.config.password = auth_config.graph_db.password
+        mem_cube_config.text_mem.config.graph_db.config.db_name = auth_config.graph_db.db_name
+        mem_cube_config.text_mem.config.graph_db.config.auto_create = (
+            auth_config.graph_db.auto_create
+        )
 
     # Initialization
     mos = MOS(mos_config)
@@ -118,8 +124,7 @@ def run_with_scheduler_init():
         query = item["question"]
         print(f"Query:\n {query}\n")
         response = mos.chat(query=query, user_id=user_id)
-        print(f"Answer:\n {response}")
-        print("===== Chat End =====")
+        print(f"Answer:\n {response}\n")
 
     show_web_logs(mem_scheduler=mos.mem_scheduler)
 

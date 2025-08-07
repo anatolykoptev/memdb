@@ -8,8 +8,8 @@ from pathlib import Path
 from memos.configs.mem_scheduler import AuthConfig, RabbitMQConfig
 from memos.dependency import require_python_package
 from memos.log import get_logger
-from memos.mem_scheduler.modules.base import BaseSchedulerModule
-from memos.mem_scheduler.modules.misc import AutoDroppingQueue
+from memos.mem_scheduler.general_modules.base import BaseSchedulerModule
+from memos.mem_scheduler.general_modules.misc import AutoDroppingQueue
 from memos.mem_scheduler.schemas.general_schemas import DIRECT_EXCHANGE_TYPE, FANOUT_EXCHANGE_TYPE
 
 
@@ -71,9 +71,9 @@ class RabbitMQSchedulerModule(BaseSchedulerModule):
 
         if config is None:
             if config_path is None and AuthConfig.default_config_exists():
-                auth_config = AuthConfig.from_local_yaml()
+                auth_config = AuthConfig.from_local_config()
             elif Path(config_path).exists():
-                auth_config = AuthConfig.from_local_yaml(config_path=config_path)
+                auth_config = AuthConfig.from_local_config(config_path=config_path)
             else:
                 logger.error("Fail to initialize auth_config")
                 return

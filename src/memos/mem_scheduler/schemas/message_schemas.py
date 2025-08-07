@@ -7,7 +7,7 @@ from typing_extensions import TypedDict
 
 from memos.log import get_logger
 from memos.mem_cube.general import GeneralMemCube
-from memos.mem_scheduler.modules.misc import DictConversionMixin
+from memos.mem_scheduler.general_modules.misc import DictConversionMixin
 
 from .general_schemas import NOT_INITIALIZED
 
@@ -138,6 +138,7 @@ class ScheduleLogForWebItem(BaseModel, DictConversionMixin):
     def debug_info(self) -> dict[str, Any]:
         """Return structured debug information for logging purposes."""
         return {
+            "content_preview:": self.log_content[:50],
             "log_id": self.item_id,
             "user_id": self.user_id,
             "mem_cube_id": self.mem_cube_id,

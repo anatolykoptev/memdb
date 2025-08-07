@@ -2,7 +2,7 @@ import threading
 import time
 
 from memos.configs.mem_scheduler import AuthConfig
-from memos.mem_scheduler.modules.rabbitmq_service import RabbitMQSchedulerModule
+from memos.mem_scheduler.general_modules.rabbitmq_service import RabbitMQSchedulerModule
 
 
 def publish_message(rabbitmq_module, message):
@@ -21,7 +21,7 @@ def main():
         print("Please set configs for rabbitmq.")
         return
     else:
-        rabbitmq_module.initialize_rabbitmq(config=AuthConfig.from_local_yaml().rabbitmq)
+        rabbitmq_module.initialize_rabbitmq(config=AuthConfig.from_local_config().rabbitmq)
 
     try:
         rabbitmq_module.wait_for_connection_ready()
