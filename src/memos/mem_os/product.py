@@ -733,7 +733,7 @@ class MOSProduct(MOSCore):
         if len(filtered) < min_num:
             filtered = filtered_person[:min_num] + filtered_outer[:min_num]
         else:
-            if len(per_memory_count) < min_num:
+            if per_memory_count < min_num:
                 filtered += filtered_person[per_memory_count:min_num]
         filtered_memory = sorted(filtered, key=lambda m: m.metadata.relativity, reverse=True)
         return filtered_memory
@@ -939,6 +939,8 @@ class MOSProduct(MOSCore):
             internet_search=internet_search,
             moscube=moscube,
         )["text_mem"]
+
+        memories_list = []
         if memories_result:
             memories_list = memories_result[0]["memories"]
             memories_list = self._filter_memories_by_threshold(memories_list, threshold)
