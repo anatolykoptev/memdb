@@ -1,9 +1,13 @@
 import concurrent.futures
 import copy
 import json
+import os
+import re
 
 from abc import ABC
 from typing import Any
+
+from tqdm import tqdm
 
 from memos import log
 from memos.chunkers import ChunkerFactory
@@ -16,12 +20,79 @@ from memos.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemory
 from memos.parsers.factory import ParserFactory
 from memos.templates.mem_reader_prompts import (
     SIMPLE_STRUCT_DOC_READER_PROMPT,
+    SIMPLE_STRUCT_DOC_READER_PROMPT_ZH,
     SIMPLE_STRUCT_MEM_READER_EXAMPLE,
+    SIMPLE_STRUCT_MEM_READER_EXAMPLE_ZH,
     SIMPLE_STRUCT_MEM_READER_PROMPT,
+    SIMPLE_STRUCT_MEM_READER_PROMPT_ZH,
 )
 
 
 logger = log.get_logger(__name__)
+PROMPT_DICT = {
+    "chat": {
+        "en": SIMPLE_STRUCT_MEM_READER_PROMPT,
+        "zh": SIMPLE_STRUCT_MEM_READER_PROMPT_ZH,
+        "en_example": SIMPLE_STRUCT_MEM_READER_EXAMPLE,
+        "zh_example": SIMPLE_STRUCT_MEM_READER_EXAMPLE_ZH,
+    },
+    "doc": {"en": SIMPLE_STRUCT_DOC_READER_PROMPT, "zh": SIMPLE_STRUCT_DOC_READER_PROMPT_ZH},
+}
+
+
+def detect_lang(text):
+    try:
+        if not text or not isinstance(text, str):
+            return "en"
+        chinese_pattern = r"[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002b73f\U0002b740-\U0002b81f\U0002b820-\U0002ceaf\uf900-\ufaff]"
+        chinese_chars = re.findall(chinese_pattern, text)
+        if len(chinese_chars) / len(re.sub(r"[\s\d\W]", "", text)) > 0.3:
+            return "zh"
+        return "en"
+    except Exception:
+        return "en"
+
+
+def _build_node(idx, message, info, scene_file, llm, parse_json_result, embedder):
+    # generate
+    raw = llm.generate(message)
+    if not raw:
+        return None
+
+    # parse_json_result
+    chunk_res = parse_json_result(raw)
+    if not chunk_res:
+        return None
+
+    value = chunk_res.get("value")
+    if not value:
+        return None
+
+    # embed
+    embedding = embedder.embed([value])[0]
+
+    # TextualMemoryItem
+    tags = chunk_res["tags"] if isinstance(chunk_res.get("tags"), list) else []
+    key = chunk_res.get("key", None)
+
+    node_i = TextualMemoryItem(
+        memory=value,
+        metadata=TreeNodeTextualMemoryMetadata(
+            user_id=info.get("user_id"),
+            session_id=info.get("session_id"),
+            memory_type="LongTermMemory",
+            status="activated",
+            tags=tags,
+            key=key,
+            embedding=embedding,
+            usage=[],
+            sources=[f"{scene_file}_{idx}"],
+            background="",
+            confidence=0.99,
+            type="fact",
+        ),
+    )
+    return node_i
 
 
 class SimpleStructMemReader(BaseMemReader, ABC):
@@ -40,11 +111,13 @@ class SimpleStructMemReader(BaseMemReader, ABC):
         self.chunker = ChunkerFactory.from_config(config.chunker)
 
     def _process_chat_data(self, scene_data_info, info):
-        prompt = SIMPLE_STRUCT_MEM_READER_PROMPT.replace(
-            "${conversation}", "\n".join(scene_data_info)
-        )
+        lang = detect_lang("\n".join(scene_data_info))
+        template = PROMPT_DICT["chat"][lang]
+        examples = PROMPT_DICT["chat"][f"{lang}_example"]
+
+        prompt = template.replace("${conversation}", "\n".join(scene_data_info))
         if self.config.remove_prompt_example:
-            prompt = prompt.replace(SIMPLE_STRUCT_MEM_READER_EXAMPLE, "")
+            prompt = prompt.replace(examples, "")
 
         messages = [{"role": "user", "content": prompt}]
 
@@ -180,7 +253,7 @@ class SimpleStructMemReader(BaseMemReader, ABC):
         elif type == "doc":
             for item in scene_data:
                 try:
-                    if not isinstance(item, str):
+                    if os.path.exists(item):
                         parsed_text = parser.parse(item)
                         results.append({"file": "pure_text", "text": parsed_text})
                     else:
@@ -193,46 +266,42 @@ class SimpleStructMemReader(BaseMemReader, ABC):
 
     def _process_doc_data(self, scene_data_info, info):
         chunks = self.chunker.chunk(scene_data_info["text"])
-        messages = [
-            [
-                {
-                    "role": "user",
-                    "content": SIMPLE_STRUCT_DOC_READER_PROMPT.replace("{chunk_text}", chunk.text),
-                }
-            ]
-            for chunk in chunks
-        ]
+        messages = []
+        for chunk in chunks:
+            lang = detect_lang(chunk.text)
+            template = PROMPT_DICT["doc"][lang]
+            prompt = template.replace("{chunk_text}", chunk.text)
+            message = [{"role": "user", "content": prompt}]
+            messages.append(message)
 
-        processed_chunks = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(self.llm.generate, message) for message in messages]
-            for future in concurrent.futures.as_completed(futures):
-                chunk_result = future.result()
-                if chunk_result:
-                    processed_chunks.append(chunk_result)
-
-        processed_chunks = [self.parse_json_result(r) for r in processed_chunks]
         doc_nodes = []
-        for i, chunk_res in enumerate(processed_chunks):
-            if chunk_res:
-                node_i = TextualMemoryItem(
-                    memory=chunk_res["value"],
-                    metadata=TreeNodeTextualMemoryMetadata(
-                        user_id=info.get("user_id"),
-                        session_id=info.get("session_id"),
-                        memory_type="LongTermMemory",
-                        status="activated",
-                        tags=chunk_res["tags"] if type(chunk_res["tags"]) is list else [],
-                        key=chunk_res["key"],
-                        embedding=self.embedder.embed([chunk_res["value"]])[0],
-                        usage=[],
-                        sources=[f"{scene_data_info['file']}_{i}"],
-                        background="",
-                        confidence=0.99,
-                        type="fact",
-                    ),
-                )
-                doc_nodes.append(node_i)
+        scene_file = scene_data_info["file"]
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+            futures = {
+                executor.submit(
+                    _build_node,
+                    idx,
+                    msg,
+                    info,
+                    scene_file,
+                    self.llm,
+                    self.parse_json_result,
+                    self.embedder,
+                ): idx
+                for idx, msg in enumerate(messages)
+            }
+            total = len(futures)
+
+            for future in tqdm(
+                concurrent.futures.as_completed(futures), total=total, desc="Processing"
+            ):
+                try:
+                    node = future.result()
+                    if node:
+                        doc_nodes.append(node)
+                except Exception as e:
+                    tqdm.write(f"[ERROR] {e}")
         return doc_nodes
 
     def parse_json_result(self, response_text):

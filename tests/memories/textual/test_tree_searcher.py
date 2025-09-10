@@ -4,6 +4,7 @@ import pytest
 
 from memos.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
 from memos.memories.textual.tree_text_memory.retrieve.searcher import Searcher
+from memos.reranker.base import BaseReranker
 
 
 @pytest.fixture
@@ -12,12 +13,12 @@ def mock_searcher():
     graph_store = MagicMock()
     embedder = MagicMock()
 
-    s = Searcher(dispatcher_llm, graph_store, embedder)
+    reranker = MagicMock(spec=BaseReranker)
+    s = Searcher(dispatcher_llm, graph_store, embedder, reranker)
 
     # Mock internals
     s.task_goal_parser = MagicMock()
     s.graph_retriever = MagicMock()
-    s.reranker = MagicMock()
     s.reasoner = MagicMock()
 
     return s
@@ -52,9 +53,10 @@ def test_searcher_fast_path(mock_searcher):
         [make_item("lt1", 0.8)[0]],  # long-term
         [make_item("um1", 0.7)[0]],  # user
     ]
-    mock_searcher.reranker.rerank.side_effect = [
-        [make_item("wm1", 0.9)],
-        [make_item("lt1", 0.8), make_item("um1", 0.7)],
+    mock_searcher.reranker.rerank.return_value = [
+        make_item("wm1", 0.9),
+        make_item("lt1", 0.8),
+        make_item("um1", 0.7),
     ]
 
     result = mock_searcher.search(

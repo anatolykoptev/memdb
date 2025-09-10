@@ -352,6 +352,7 @@ class MOSCore:
         self,
         memories: list[TextualMemoryItem] | list[str] | None = None,
         base_prompt: str | None = None,
+        **kwargs,
     ) -> str:
         """Build system prompt with optional memories context."""
         if base_prompt is None:
@@ -545,6 +546,8 @@ class MOSCore:
         top_k: int | None = None,
         mode: Literal["fast", "fine"] = "fast",
         internet_search: bool = False,
+        moscube: bool = False,
+        **kwargs,
     ) -> MOSSearchResult:
         """
         Search for textual memories across all registered MemCubes.
@@ -602,6 +605,7 @@ class MOSCore:
                         "session_id": self.session_id,
                         "chat_history": chat_history.chat_history,
                     },
+                    moscube=moscube,
                 )
                 result["text_mem"].append({"cube_id": mem_cube_id, "memories": memories})
                 logger.info(
@@ -659,7 +663,7 @@ class MOSCore:
             if self.mem_cubes[mem_cube_id].config.text_mem.backend != "tree_text":
                 add_memory = []
                 metadata = TextualMemoryMetadata(
-                    user_id=self.user_id, session_id=self.session_id, source="conversation"
+                    user_id=target_user_id, session_id=self.session_id, source="conversation"
                 )
                 for message in messages:
                     add_memory.append(
@@ -956,6 +960,30 @@ class MOSCore:
         self.mem_cubes[mem_cube_id].dump(dump_dir)
         logger.info(f"MemCube {mem_cube_id} dumped to {dump_dir}")
 
+    def load(
+        self,
+        load_dir: str,
+        user_id: str | None = None,
+        mem_cube_id: str | None = None,
+        memory_types: list[Literal["text_mem", "act_mem", "para_mem"]] | None = None,
+    ) -> None:
+        """Dump the MemCube to a dictionary.
+        Args:
+            load_dir (str): The directory to load the MemCube from.
+            user_id (str, optional): The identifier of the user to load the MemCube from.
+                If None, the default user is used.
+            mem_cube_id (str, optional): The identifier of the MemCube to load.
+                If None, the default MemCube for the user is used.
+        """
+        target_user_id = user_id if user_id is not None else self.user_id
+        accessible_cubes = self.user_manager.get_user_cubes(target_user_id)
+        if not mem_cube_id:
+            mem_cube_id = accessible_cubes[0].cube_id
+        if mem_cube_id not in self.mem_cubes:
+            raise ValueError(f"MemCube with ID {mem_cube_id} does not exist. please regiester")
+        self.mem_cubes[mem_cube_id].load(load_dir, memory_types=memory_types)
+        logger.info(f"MemCube {mem_cube_id} loaded from {load_dir}")
+
     def get_user_info(self) -> dict[str, Any]:
         """Get current user information including accessible cubes.
 
@@ -971,7 +999,7 @@ class MOSCore:
         return {
             "user_id": user.user_id,
             "user_name": user.user_name,
-            "role": user.role.value,
+            "role": user.role.value if hasattr(user.role, "value") else user.role,
             "created_at": user.created_at.isoformat(),
             "accessible_cubes": [
                 {

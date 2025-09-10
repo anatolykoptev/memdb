@@ -1,5 +1,4 @@
 import json
-import logging
 import traceback
 
 from datetime import datetime
@@ -12,6 +11,7 @@ from memos.api.config import APIConfig
 from memos.api.context.dependencies import G, get_g_object
 from memos.api.product_models import (
     BaseResponse,
+    ChatCompleteRequest,
     ChatRequest,
     GetMemoryRequest,
     MemoryCreateRequest,
@@ -25,11 +25,12 @@ from memos.api.product_models import (
     UserRegisterResponse,
 )
 from memos.configs.mem_os import MOSConfig
+from memos.log import get_logger
 from memos.mem_os.product import MOSProduct
 from memos.memos_tools.notification_service import get_error_bot_function, get_online_bot_function
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/product", tags=["Product API"])
 
@@ -148,7 +149,9 @@ def get_suggestion_queries_post(suggestion_req: SuggestionRequest):
     try:
         mos_product = get_mos_product_instance()
         suggestions = mos_product.get_suggestion_query(
-            user_id=suggestion_req.user_id, language=suggestion_req.language
+            user_id=suggestion_req.user_id,
+            language=suggestion_req.language,
+            message=suggestion_req.message,
         )
         return SuggestionResponse(
             message="Suggestions retrieved successfully", data={"query": suggestions}
@@ -246,6 +249,7 @@ def chat(chat_req: ChatRequest):
                     cube_id=chat_req.mem_cube_id,
                     history=chat_req.history,
                     internet_search=chat_req.internet_search,
+                    moscube=chat_req.moscube,
                 )
 
             except Exception as e:
@@ -265,6 +269,38 @@ def chat(chat_req: ChatRequest):
                 "Access-Control-Allow-Methods": "*",
             },
         )
+
+    except ValueError as err:
+        raise HTTPException(status_code=404, detail=str(traceback.format_exc())) from err
+    except Exception as err:
+        logger.error(f"Failed to start chat: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(traceback.format_exc())) from err
+
+
+@router.post("/chat/complete", summary="Chat with MemOS (Complete Response)")
+def chat_complete(chat_req: ChatCompleteRequest):
+    """Chat with MemOS for a specific user. Returns complete response (non-streaming)."""
+    try:
+        mos_product = get_mos_product_instance()
+
+        # Collect all responses from the generator
+        content, references = mos_product.chat(
+            query=chat_req.query,
+            user_id=chat_req.user_id,
+            cube_id=chat_req.mem_cube_id,
+            history=chat_req.history,
+            internet_search=chat_req.internet_search,
+            moscube=chat_req.moscube,
+            base_prompt=chat_req.base_prompt,
+            top_k=chat_req.top_k,
+            threshold=chat_req.threshold,
+        )
+
+        # Return the complete response
+        return {
+            "message": "Chat completed successfully",
+            "data": {"response": content, "references": references},
+        }
 
     except ValueError as err:
         raise HTTPException(status_code=404, detail=str(traceback.format_exc())) from err
