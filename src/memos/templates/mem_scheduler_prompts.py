@@ -354,6 +354,42 @@ Please provide your combined filtering analysis:
 """
 
 
+MEMORY_ANSWER_ABILITY_EVALUATION_PROMPT = """
+# Memory Answer Ability Evaluation Task
+
+## Task
+Evaluate whether the provided memories contain sufficient information to answer the user's query.
+
+## Evaluation Criteria
+Consider these factors:
+1. **Answer completeness**: Do the memories cover all aspects of the query?
+2. **Evidence relevance**: Do the memories directly support answering the query?
+3. **Detail specificity**: Do the memories contain necessary granularity?
+4. **Information gaps**: Are there obvious missing pieces of information?
+
+## Decision Rules
+- Return `True` for "result" ONLY when memories provide complete, relevant answers
+- Return `False` for "result" if memories are insufficient, irrelevant, or incomplete
+
+## User Query
+{query}
+
+## Available Memories
+{memory_list}
+
+## Required Output
+Return a JSON object with this exact structure:
+{{
+  "result": <boolean>,
+  "reason": "<brief explanation of your decision>"
+}}
+
+## Instructions
+- Only output the JSON object, nothing else
+- Be conservative: if there's any doubt about completeness, return true
+- Focus on whether the memories can fully answer the query without additional information
+"""
+
 PROMPT_MAPPING = {
     "intent_recognizing": INTENT_RECOGNIZING_PROMPT,
     "memory_reranking": MEMORY_RERANKING_PROMPT,
@@ -361,6 +397,7 @@ PROMPT_MAPPING = {
     "memory_filtering": MEMORY_FILTERING_PROMPT,
     "memory_redundancy_filtering": MEMORY_REDUNDANCY_FILTERING_PROMPT,
     "memory_combined_filtering": MEMORY_COMBINED_FILTERING_PROMPT,
+    "memory_answer_ability_evaluation": MEMORY_ANSWER_ABILITY_EVALUATION_PROMPT,
 }
 
 MEMORY_ASSEMBLY_TEMPLATE = """The retrieved memories are listed as follows:\n\n {memory_text}"""
