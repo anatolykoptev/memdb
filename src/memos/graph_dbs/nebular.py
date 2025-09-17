@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import numpy as np
 
-from memos import settings
 from memos.configs.graph_db import NebulaGraphDBConfig
 from memos.dependency import require_python_package
 from memos.graph_dbs.base import BaseGraphDB
@@ -143,8 +142,9 @@ class NebulaGraphDB(BaseGraphDB):
                     )
 
                 sess_conf = SessionConfig(graph=getattr(cfg, "space", None))
-
-                pool_conf = SessionPoolConfig(size=int(getattr(cfg, "max_client", 1000)))
+                pool_conf = SessionPoolConfig(
+                    size=int(getattr(cfg, "max_client", 1000)), wait_timeout=5000
+                )
 
                 client = NebulaClient(
                     hosts=conn_conf.hosts,
@@ -257,23 +257,25 @@ class NebulaGraphDB(BaseGraphDB):
         if getattr(config, "auto_create", False):
             self._ensure_database_exists()
 
-        self.execute_query(f"SESSION SET GRAPH `{self.db_name}`")
-
         # Create only if not exists
         self.create_index(dimensions=config.embedding_dimension)
         logger.info("Connected to NebulaGraph successfully.")
 
     @timed
-    def execute_query(self, gql: str, timeout: float = 10.0, auto_set_db: bool = True):
+    def execute_query(self, gql: str, timeout: float = 60.0, auto_set_db: bool = True):
         try:
             if auto_set_db and self.db_name:
-                self._client.execute(f"SESSION SET GRAPH `{self.db_name}`")
+                gql = f"""USE `{self.db_name}`
+                       {gql}"""
             return self._client.execute(gql, timeout=timeout)
         except Exception as e:
             emsg = str(e)
             if "Session not found" in emsg or "Connection not established" in emsg:
                 logger.warning(f"[execute_query] {e!s}, retry once...")
                 try:
+                    if auto_set_db and self.db_name:
+                        gql = f"""USE `{self.db_name}`
+                                  {gql}"""
                     return self._client.execute(gql, timeout=timeout)
                 except Exception:
                     logger.exception("[execute_query] retry failed")
@@ -907,7 +909,6 @@ class NebulaGraphDB(BaseGraphDB):
         where_clause = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
         gql = f"""
-               USE `{self.db_name}`
                MATCH (n@Memory)
                {where_clause}
                ORDER BY inner_product(n.{self.dim_field}, {gql_vector}) DESC
@@ -1262,7 +1263,6 @@ class NebulaGraphDB(BaseGraphDB):
         return_fields = self._build_return_fields(include_embedding)
 
         query = f"""
-            USE `{self.db_name}`
             MATCH (n@Memory)
             WHERE {where_clause}
             OPTIONAL MATCH (n)-[@PARENT]->(c@Memory)
@@ -1430,11 +1430,8 @@ class NebulaGraphDB(BaseGraphDB):
                 logger.info(f"✅ Graph Type {graph_type_name} already include {self.dim_field}")
 
         create_graph = f"CREATE GRAPH IF NOT EXISTS `{self.db_name}` TYPED {graph_type_name}"
-        set_graph_working = f"SESSION SET GRAPH `{self.db_name}`"
-
         try:
             self.execute_query(create_graph, auto_set_db=False)
-            self.execute_query(set_graph_working)
             logger.info(f"✅ Graph ``{self.db_name}`` is now the working graph.")
         except Exception as e:
             logger.error(f"❌ Failed to create tag: {e} trace: {traceback.format_exc()}")
