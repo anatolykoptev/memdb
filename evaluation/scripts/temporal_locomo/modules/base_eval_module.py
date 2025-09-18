@@ -1,5 +1,6 @@
 import json
 import os
+import traceback
 
 from collections import defaultdict
 from pathlib import Path
@@ -116,18 +117,7 @@ class BaseEvalModule:
         self.stats[self.frame][self.version]["memory_stats"]["cannot_answer_count"] = 0
         self.stats[self.frame][self.version]["memory_stats"]["answer_hit_rate"] = 0.0
 
-        # Initialize detailed memory stats for comprehensive analysis
-        self.stats[self.frame][self.version]["detailed_memory_stats"] = {
-            "query_analysis": [],  # List of detailed query analysis
-            "conversation_stats": defaultdict(dict),  # Per conversation statistics
-            "working_memory_snapshots": defaultdict(list),  # Working memory states over time
-            "query_history": defaultdict(list),  # Historical queries per conversation
-            "memory_retrieval_patterns": defaultdict(list),  # Memory retrieval patterns
-        }
-
         # Initialize memory history for tracking retrieval results
-        self.memory_history = defaultdict(list)
-
         self.stats_lock = Lock()
         self.scheduler_flag = True
         self.stats_dir = self.result_dir / "stats"
@@ -135,3 +125,106 @@ class BaseEvalModule:
         self.stats_path = self.stats_dir / "stats.txt"
 
         load_dotenv()
+
+    def print_eval_info(self):
+        """
+        Calculate and print the evaluation information including answer statistics for memory scheduler (thread-safe).
+        Shows total queries, can answer count, cannot answer count, and answer hit rate.
+        """
+        with self.stats_lock:
+            # Get statistics
+            total_queries = self.stats[self.frame][self.version]["memory_stats"]["total_queries"]
+            can_answer_count = self.stats[self.frame][self.version]["memory_stats"][
+                "can_answer_count"
+            ]
+            cannot_answer_count = self.stats[self.frame][self.version]["memory_stats"][
+                "cannot_answer_count"
+            ]
+            hit_rate = self.stats[self.frame][self.version]["memory_stats"]["answer_hit_rate"]
+
+            # Print basic statistics
+            print(f"Total Queries: {total_queries}")
+            logger.info(f"Total Queries: {total_queries}")
+
+            print(f"Can Answer Count: {can_answer_count}")
+            logger.info(f"Can Answer Count: {can_answer_count}")
+
+            print(f"Cannot Answer Count: {cannot_answer_count}")
+            logger.info(f"Cannot Answer Count: {cannot_answer_count}")
+
+            # Verify count consistency
+            if total_queries != (can_answer_count + cannot_answer_count):
+                print(
+                    f"WARNING: Count mismatch! Total ({total_queries}) != Can Answer ({can_answer_count}) + Cannot Answer ({cannot_answer_count})"
+                )
+                logger.warning(
+                    f"Count mismatch! Total ({total_queries}) != Can Answer ({can_answer_count}) + Cannot Answer ({cannot_answer_count})"
+                )
+
+            print(f"Answer Hit Rate: {hit_rate:.2f}% ({can_answer_count}/{total_queries})")
+            logger.info(f"Answer Hit Rate: {hit_rate:.2f}% ({can_answer_count}/{total_queries})")
+
+    def save_stats(self):
+        """
+        Serializes and saves the contents of self.stats to the specified path:
+        Base_dir/results/frame-version/stats
+
+        This method handles directory creation, thread-safe access to statistics data,
+        and proper JSON serialization of complex data structures.
+        """
+        try:
+            # Thread-safe access to the stats data using the lock
+            with self.stats_lock:
+                # Create a copy of the data to prevent modification during serialization
+                stats_data = dict(self.stats)
+
+                # Helper function to convert defaultdict to regular dict for JSON serialization
+                def convert_defaultdict(obj):
+                    if isinstance(obj, defaultdict):
+                        return dict(obj)
+                    return obj
+
+                # Debug: Print stats summary before saving
+                print(f"DEBUG: Saving stats for {self.frame}-{self.version}")
+                print(f"DEBUG: Stats path: {self.stats_path}")
+                print(f"DEBUG: Stats data keys: {list(stats_data.keys())}")
+                if self.frame in stats_data and self.version in stats_data[self.frame]:
+                    frame_data = stats_data[self.frame][self.version]
+                    print(f"DEBUG: Memory stats: {frame_data.get('memory_stats', {})}")
+                    print(
+                        f"DEBUG: Total queries: {frame_data.get('memory_stats', {}).get('total_queries', 0)}"
+                    )
+
+                # Serialize and save the statistics data to file
+                with self.stats_path.open("w", encoding="utf-8") as fw:
+                    json.dump(
+                        stats_data, fw, ensure_ascii=False, indent=2, default=convert_defaultdict
+                    )
+
+            self.logger.info(f"Successfully saved stats to: {self.stats_path}")
+            print(f"DEBUG: Stats file created at {self.stats_path}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to save stats: {e!s}")
+            self.logger.error(traceback.format_exc())
+            print(f"DEBUG: Error saving stats: {e}")
+
+    def get_answer_hit_rate(self):
+        """
+        Get current answer hit rate statistics.
+
+        Returns:
+            dict: Hit rate statistics
+        """
+        with self.stats_lock:
+            return {
+                "total_queries": self.stats[self.frame][self.version]["memory_stats"][
+                    "total_queries"
+                ],
+                "can_answer_count": self.stats[self.frame][self.version]["memory_stats"][
+                    "can_answer_count"
+                ],
+                "hit_rate_percentage": self.stats[self.frame][self.version]["memory_stats"][
+                    "answer_hit_rate"
+                ],
+            }

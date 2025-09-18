@@ -1,5 +1,4 @@
 import json
-import os
 import sys
 import traceback
 
@@ -9,6 +8,10 @@ from pathlib import Path
 from time import time
 
 from dotenv import load_dotenv
+from modules.constants import (
+    MEMOS_MODEL,
+    MEMOS_SCHEDULER_MODEL,
+)
 from modules.locomo_eval_module import LocomoEvalModelModules
 from modules.prompts import (
     SEARCH_PROMPT_MEM0,
@@ -51,74 +54,43 @@ class LocomoProcessor(LocomoEvalModelModules):
 
         self.processed_data_dir = self.result_dir / "processed_data"
 
-    def process_user(self, conv_idx, locomo_df, frame, version, top_k=20, num_workers=1):
-        user_search_path = self.result_dir / f"tmp/{frame}_locomo_search_results_{conv_idx}.json"
-
+    def process_user(self, conv_id, locomo_df, frame, version, top_k=20):
+        user_search_path = self.result_dir / f"tmp/{frame}_locomo_search_results_{conv_id}.json"
+        user_search_path.parent.mkdir(exist_ok=True, parents=True)
         search_results = defaultdict(list)
         response_results = defaultdict(list)
 
+        conversation = locomo_df["conversation"].iloc[conv_id]
+        speaker_a = conversation.get("speaker_a", "speaker_a")
+        speaker_b = conversation.get("speaker_b", "speaker_b")
+
         # Use temporal_locomo data if available, otherwise fall back to original locomo data
-        if self.temporal_locomo_data and conv_idx < len(self.temporal_locomo_data):
-            temporal_conv = self.temporal_locomo_data[conv_idx]
-            conv_id = temporal_conv["conversation_id"]
+        temporal_conv = self.temporal_locomo_data[conv_id]
+        conv_id = temporal_conv["conversation_id"]
 
-            # Extract speaker information from temporal data or fallback to default
-            if not locomo_df.empty and "conversation" in locomo_df.columns:
-                conversation = locomo_df["conversation"].iloc[conv_idx]
-                speaker_a = conversation.get("speaker_a", "speaker_a")
-                speaker_b = conversation.get("speaker_b", "speaker_b")
-            else:
-                # Use default speaker names when locomo_df is not available
-                speaker_a = "speaker_a"
-                speaker_b = "speaker_b"
-            speaker_a_user_id = f"{speaker_a}_{conv_idx}"
-            speaker_b_user_id = f"{speaker_b}_{conv_idx}"
+        # Process temporal data by days
+        day_groups = {}
+        for day_id, day_data in temporal_conv["days"].items():
+            day_groups[day_id] = day_data["qa_pairs"]
 
-            # Process temporal data by days
-            day_groups = {}
-            for day_id, day_data in temporal_conv["days"].items():
-                day_groups[day_id] = day_data["qa_pairs"]
-        else:
-            # Fallback to original locomo data processing
-            if locomo_df.empty or "qa" not in locomo_df.columns:
-                logger.warning(
-                    f"Skipping user {conv_idx}: locomo_df is empty or missing 'qa' column"
-                )
-                return
-
-            qa_set = locomo_df["qa"].iloc[conv_idx]
-            day_groups = self.group_and_sort_qa_by_day(qa_set)
-
-            if not locomo_df.empty and "conversation" in locomo_df.columns:
-                conversation = locomo_df["conversation"].iloc[conv_idx]
-                speaker_a = conversation.get("speaker_a", "speaker_a")
-                speaker_b = conversation.get("speaker_b", "speaker_b")
-            else:
-                # Use default speaker names when locomo_df is not available
-                speaker_a = "speaker_a"
-                speaker_b = "speaker_b"
-            speaker_a_user_id = f"{speaker_a}_{conv_idx}"
-            speaker_b_user_id = f"{speaker_b}_{conv_idx}"
-            conv_id = f"locomo_exp_user_{conv_idx}"
-
-        existing_results, loaded = self.load_existing_results(frame, version, conv_idx)
+        speaker_a_user_id = f"{conv_id}_speaker_a"
+        speaker_b_user_id = f"{conv_id}_speaker_b"
+        existing_results, loaded = self.load_existing_results(frame, version, conv_id)
         if loaded:
-            print(f"Loaded existing results for group {conv_idx}")
+            print(f"Loaded existing results for group {conv_id}")
             return existing_results
 
+        # ============== func =================
         metadata = {
             "speaker_a": speaker_a,
             "speaker_b": speaker_b,
             "speaker_a_user_id": speaker_a_user_id,
             "speaker_b_user_id": speaker_b_user_id,
-            "conv_idx": conv_idx,
             "conv_id": conv_id,
         }
 
         reversed_client = None
-        if frame in ["memos", "memos_scheduler"]:
-            speaker_a_user_id = conv_id + "_speaker_a"
-            speaker_b_user_id = conv_id + "_speaker_b"
+        if frame in [MEMOS_MODEL, MEMOS_SCHEDULER_MODEL]:
             client = self.get_client_from_storage(frame, speaker_a_user_id, version, top_k=top_k)
             reversed_client = self.get_client_from_storage(
                 frame, speaker_b_user_id, version, top_k=top_k
@@ -126,8 +98,9 @@ class LocomoProcessor(LocomoEvalModelModules):
         else:
             client = self.get_client_from_storage(frame, conv_id, version)
 
-        # ============== func =================
         oai_client = OpenAI(api_key=self.openai_api_key, base_url=self.openai_base_url)
+
+        self.pre_context_cache[conv_id] = None
 
         def process_qa(qa):
             try:
@@ -135,45 +108,61 @@ class LocomoProcessor(LocomoEvalModelModules):
                 qa_category = qa.get("category")
                 if qa_category == 5:
                     return None
+
+                # ==== Search ====
                 context, search_duration_ms = self.search_query(
                     client, query, metadata, frame, reversed_client=reversed_client, top_k=top_k
                 )
 
                 if not context:
-                    logger.info(f"No context found for query: {query[:100]}")
+                    logger.warning(f"No context found for query: {query[:100]}")
                     context = ""
 
+                # ==== Context Answerability Analysis (for memos_scheduler only) ====
+
+                if self.pre_context_cache[conv_id] is not None:
+                    can_answer = self.analyze_context_answerability(
+                        self.pre_context_cache[conv_id], query, oai_client
+                    )
+
+                    # Update statistics
+                    with self.stats_lock:
+                        self.stats[self.frame][self.version]["memory_stats"]["total_queries"] += 1
+                        if can_answer:
+                            self.stats[self.frame][self.version]["memory_stats"][
+                                "can_answer_count"
+                            ] += 1
+                        else:
+                            self.stats[self.frame][self.version]["memory_stats"][
+                                "cannot_answer_count"
+                            ] += 1
+
+                        # Calculate hit rate
+                        total_queries = self.stats[self.frame][self.version]["memory_stats"][
+                            "total_queries"
+                        ]
+                        can_answer_count = self.stats[self.frame][self.version]["memory_stats"][
+                            "can_answer_count"
+                        ]
+                        hit_rate = (
+                            (can_answer_count / total_queries * 100) if total_queries > 0 else 0
+                        )
+                        self.stats[self.frame][self.version]["memory_stats"]["answer_hit_rate"] = (
+                            hit_rate
+                        )
+                        self.save_stats()
+
+                self.pre_context_cache[conv_id] = context
+
+                self.print_eval_info()
+
+                # ==== Answer ====
                 gold_answer = qa.get("answer")
 
                 answer_start = time()
                 answer = self.locomo_response(frame, oai_client, context, query)
 
                 response_duration_ms = (time() - answer_start) * 1000
-
-                # Update detailed query analysis with category information
-                conv_key = f"{conv_id}_{speaker_a}_{speaker_b}"
-                if hasattr(self, "record_detailed_query_analysis"):
-                    # Get the latest memory data from memory_history
-                    latest_memory_data = None
-                    if self.memory_history.get(conv_key):
-                        latest_entry = self.memory_history[conv_key][-1]
-                        latest_memory_data = {
-                            "speaker_a_memories": latest_entry.get("speaker_a_memories", []),
-                            "speaker_b_memories": latest_entry.get("speaker_b_memories", []),
-                        }
-
-                    if latest_memory_data:
-                        # Update the last query analysis with category
-                        with self.stats_lock:
-                            query_analysis = self.stats[self.frame][self.version][
-                                "detailed_memory_stats"
-                            ]["query_analysis"]
-                            if query_analysis and query_analysis[-1]["query"] == query:
-                                query_analysis[-1]["query_category"] = qa_category
-                                query_analysis[-1]["gold_answer"] = gold_answer
-                                query_analysis[-1]["generated_answer"] = answer
-                                query_analysis[-1]["response_duration_ms"] = response_duration_ms
-                                query_analysis[-1]["search_duration_ms"] = search_duration_ms
 
                 logger.info(f"Processed question: {query[:100]}")
                 logger.info(f"Answer: {answer[:100]}")
@@ -185,14 +174,15 @@ class LocomoProcessor(LocomoEvalModelModules):
                     "search_context": context,
                     "response_duration_ms": response_duration_ms,
                     "search_duration_ms": search_duration_ms,
+                    "can_answer": can_answer if frame == "memos_scheduler" else None,
                 }
             except Exception as e:
                 logger.error(f"Error: {e}. traceback: {traceback.format_exc()}")
 
         # ===================================
         for day, qa_list in day_groups.items():
-            print(f"Processing user {conv_idx} day {day}")
-            for qa in tqdm(qa_list, desc=f"Processing user {conv_idx} day {day}"):
+            print(f"Processing user {conv_id} day {day}")
+            for qa in tqdm(qa_list, desc=f"Processing user {conv_id} day {day}"):
                 result = process_qa(qa)
 
                 if result:
@@ -221,16 +211,15 @@ class LocomoProcessor(LocomoEvalModelModules):
                     )
                     response_results[conv_id].append(result)
             logger.warning(
-                f"Finished processing user {conv_idx} day {day}, data_length: {len(qa_list)}"
+                f"Finished processing user {conv_id} day {day}, data_length: {len(qa_list)}"
             )
 
-        os.makedirs(f"{BASE_DIR}/results/locomo/{frame}-{version}/tmp/", exist_ok=True)
         with open(user_search_path, "w") as fw:
             json.dump(dict(search_results), fw, indent=2)
-            print(f"Save search results {conv_idx}")
+            print(f"Save search results {conv_id}")
 
         # Dump stats after processing each user
-        self.dump_stats(iteration=conv_idx)
+        self.save_stats()
 
         return search_results, response_results
 
@@ -244,11 +233,11 @@ class LocomoProcessor(LocomoEvalModelModules):
         Returns:
             tuple: Contains user results or error information
         """
-        idx, locomo_df, frame, version, top_k, num_workers = args
+        idx, locomo_df, frame, version, top_k = args
         try:
             print(f"Processing user {idx}...")
             user_search_results, user_response_results = self.process_user(
-                idx, locomo_df, frame, version, top_k, num_workers
+                idx, locomo_df, frame, version, top_k
             )
             return (user_search_results, user_response_results, None)
         except Exception as e:
@@ -281,13 +270,14 @@ class LocomoProcessor(LocomoEvalModelModules):
         num_users = 10
 
         # Prepare arguments for each user processing task
-        user_args = [
-            (idx, self.locomo_df, frame, version, top_k, num_workers) for idx in range(num_users)
-        ]
+        user_args = [(idx, self.locomo_df, frame, version, top_k) for idx in range(num_users)]
 
-        # === parallel running ====
         if num_workers > 1:
+            # === parallel running ====
             # Use ThreadPoolExecutor for parallel processing
+            print(
+                f"Starting parallel processing for {num_users} users, using {num_workers} workers for sessions..."
+            )
             with ThreadPoolExecutor(max_workers=num_workers) as executor:
                 # Submit all user processing tasks
                 future_to_user = {
@@ -312,7 +302,7 @@ class LocomoProcessor(LocomoEvalModelModules):
         else:
             # Serial processing
             print(
-                f"Starting processing for {num_users} users in serial mode, each user using {num_workers} workers for sessions..."
+                f"Starting serial processing for {num_users} users in serial mode, each user using {num_workers} workers for sessions..."
             )
             for idx, args in enumerate(user_args):
                 try:

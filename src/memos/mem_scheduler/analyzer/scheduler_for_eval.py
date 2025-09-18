@@ -250,7 +250,7 @@ class SchedulerForEval(GeneralScheduler):
     @time_it("search_for_eval")
     def search_for_eval(
         self, query: str, user_id: UserID | str, top_k: int, scheduler_flag: bool = True
-    ) -> tuple[list[str], bool]:
+    ) -> list[str]:
         """
         Original search_for_eval function refactored to use the new decomposed functions.
 
@@ -270,19 +270,11 @@ class SchedulerForEval(GeneralScheduler):
             cur_working_memory: list[TextualMemoryItem] = text_mem_base.get_working_memory()
             text_working_memory: list[str] = [w_m.memory for w_m in cur_working_memory]
 
-            # Use the evaluation function to check if memories can answer the query
-            can_answer = self.evaluate_memory_answer_ability(
-                query=query, memory_texts=text_working_memory, top_k=top_k
-            )
-            return text_working_memory, can_answer
+            return text_working_memory
         else:
             # Update working memory and get the result
             updated_memories = self.update_working_memory_for_eval(
                 query=query, user_id=user_id, top_k=top_k
             )
 
-            # Use the evaluation function to check if memories can answer the query
-            can_answer = self.evaluate_memory_answer_ability(
-                query=query, memory_texts=updated_memories, top_k=top_k
-            )
-            return updated_memories, can_answer
+            return updated_memories

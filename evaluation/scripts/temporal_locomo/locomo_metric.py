@@ -18,7 +18,7 @@ parser.add_argument(
 parser.add_argument(
     "--version",
     type=str,
-    default="v0.2.1",
+    default="v1.0.1",
     help="Version identifier for loading results (e.g., 1010)",
 )
 

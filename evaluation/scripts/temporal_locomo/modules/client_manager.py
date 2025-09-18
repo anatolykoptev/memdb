@@ -271,8 +271,8 @@ class EvalModuleWithClientManager(BaseEvalModule):
         # Process each conversation
         temporal_data = []
 
-        for conv_idx, conversation in enumerate(locomo_data):
-            logger.info(f"Processing conversation {conv_idx + 1}/{len(locomo_data)}")
+        for conv_id, conversation in enumerate(locomo_data):
+            logger.info(f"Processing conversation {conv_id + 1}/{len(locomo_data)}")
 
             # Get QA pairs for this conversation
             qa_set = conversation.get("qa", [])
@@ -281,7 +281,7 @@ class EvalModuleWithClientManager(BaseEvalModule):
             day_groups = self.group_and_sort_qa_by_day(qa_set)
 
             # Create temporal structure for this conversation
-            temporal_conversation = {"conversation_id": f"locomo_exp_user_{conv_idx}", "days": {}}
+            temporal_conversation = {"conversation_id": f"locomo_exp_user_{conv_id}", "days": {}}
 
             # Process each day group
             for day, qa_list in day_groups.items():
@@ -314,13 +314,13 @@ class EvalModuleWithClientManager(BaseEvalModule):
 
         return output_file
 
-    def load_existing_results(self, frame, version, conv_idx):
-        result_path = self.result_dir / f"/tmp/{frame}_locomo_search_results_{conv_idx}.json"
+    def load_existing_results(self, frame, version, conv_id):
+        result_path = self.result_dir / f"/tmp/{frame}_locomo_search_results_{conv_id}.json"
 
         if os.path.exists(result_path):
             try:
                 with open(result_path) as f:
                     return json.load(f), True
             except Exception as e:
-                print(f"Error loading existing results for group {conv_idx}: {e}")
+                print(f"Error loading existing results for group {conv_id}: {e}")
         return {}, False

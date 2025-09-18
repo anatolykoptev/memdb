@@ -191,3 +191,26 @@ ANSWER_PROMPT_MEMOS = """
 
    Answer:
    """
+
+CONTEXT_ANSWERABILITY_PROMPT = """
+You are an AI assistant that analyzes whether given context can answer a specific question.
+
+# TASK:
+Analyze the provided context and determine if it contains sufficient information to answer the given question.
+
+# INSTRUCTIONS:
+1. Carefully examine the context provided
+2. Identify if the context contains information directly related to the question
+3. Determine if the information is sufficient to provide a complete answer
+4. Consider both explicit mentions and implicit information that could be inferred
+5. Return only "YES" if the context can answer the question, "NO" if it cannot
+
+# CONTEXT:
+{context}
+
+# QUESTION:
+{question}
+
+# ANALYSIS:
+Can this context answer the question? (YES/NO):
+"""

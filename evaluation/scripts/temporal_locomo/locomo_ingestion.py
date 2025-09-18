@@ -35,17 +35,22 @@ class LocomoIngestor(LocomoEvalModelModules):
         date_format = "%I:%M %p on %d %B, %Y UTC"
         date_string = datetime.strptime(session_date, date_format).replace(tzinfo=timezone.utc)
         iso_date = date_string.isoformat()
-        conv_idx = metadata["conv_idx"]
-        conv_id = "locomo_exp_user_" + str(conv_idx)
+        conv_id = metadata["conv_id"]
+        conv_id = "locomo_exp_user_" + str(conv_id)
         dt = datetime.fromisoformat(iso_date)
         timestamp = int(dt.timestamp())
         print(f"Processing conv {conv_id}, session {metadata['session_key']}")
         start_time = time.time()
+        print_once = True  # Print example only once per session
 
         if frame == ZEP_MODEL:
             for chat in tqdm(session, desc=f"{metadata['session_key']}"):
                 data = chat.get("speaker") + ": " + chat.get("text")
-                print({"context": data, "conv_id": conv_id, "created_at": iso_date})
+
+                # Print example only once per session
+                if print_once:
+                    print({"context": data, "conv_id": conv_id, "created_at": iso_date})
+                    print_once = False
 
                 # Check if the group exists, if not create it
                 groups = client.group.get_all_groups()
@@ -84,7 +89,10 @@ class LocomoIngestor(LocomoEvalModelModules):
                         f"Unknown speaker {chat.get('speaker')} in session {metadata['session_key']}"
                     )
 
-                print({"context": data, "conv_id": conv_id, "created_at": iso_date})
+                # Print example only once per session
+                if print_once:
+                    print({"context": data, "conv_id": conv_id, "created_at": iso_date})
+                    print_once = False
 
             speaker_a_user_id = conv_id + "_speaker_a"
             speaker_b_user_id = conv_id + "_speaker_b"
@@ -119,7 +127,10 @@ class LocomoIngestor(LocomoEvalModelModules):
                         f"Unknown speaker {chat.get('speaker')} in session {metadata['session_key']}"
                     )
 
-                print({"context": data, "conv_id": conv_id, "created_at": iso_date})
+                # Print example only once per session
+                if print_once:
+                    print({"context": data, "conv_id": conv_id, "created_at": iso_date})
+                    print_once = False
 
             for i in range(0, len(messages), 2):
                 batch_messages = messages[i : i + 2]
@@ -162,16 +173,16 @@ class LocomoIngestor(LocomoEvalModelModules):
 
         return elapsed_time
 
-    def process_user_for_ingestion(self, conv_idx, frame, locomo_df, version, num_workers=1):
+    def process_user_for_ingestion(self, conv_id, frame, locomo_df, version, num_workers=1):
         try:
             # Check if locomo_df is empty or doesn't have the required columns
             if locomo_df.empty or "conversation" not in locomo_df.columns:
                 logger.warning(
-                    f"Skipping user {conv_idx}: locomo_df is empty or missing 'conversation' column"
+                    f"Skipping user {conv_id}: locomo_df is empty or missing 'conversation' column"
                 )
                 return 0
 
-            conversation = locomo_df["conversation"].iloc[conv_idx]
+            conversation = locomo_df["conversation"].iloc[conv_id]
             max_session_count = 35
             start_time = time.time()
             total_session_time = 0
@@ -179,23 +190,28 @@ class LocomoIngestor(LocomoEvalModelModules):
 
             revised_client = None
             if frame == "zep":
-                client = self.get_client_for_ingestion("zep")
+                client = self.get_client_for_ingestion(frame=frame, user_id=None, version="default")
             elif frame == "mem0" or frame == "mem0_graph":
-                client = self.get_client(frame)
-                client.delete_all(user_id=f"locomo_exp_user_{conv_idx}")
-                client.delete_all(user_id=f"{conversation.get('speaker_a')}_{conv_idx}")
-                client.delete_all(user_id=f"{conversation.get('speaker_b')}_{conv_idx}")
+                client = self.get_client_for_ingestion(frame=frame, user_id=None, version="default")
+                client.delete_all(user_id=f"locomo_exp_user_{conv_id}")
+                client.delete_all(user_id=f"{conversation.get('speaker_a')}_{conv_id}")
+                client.delete_all(user_id=f"{conversation.get('speaker_b')}_{conv_id}")
             elif frame in ["memos", "memos_scheduler"]:
-                conv_id = "locomo_exp_user_" + str(conv_idx)
+                conv_id = "locomo_exp_user_" + str(conv_id)
                 speaker_a_user_id = conv_id + "_speaker_a"
                 speaker_b_user_id = conv_id + "_speaker_b"
-                client = self.get_client_for_ingestion(speaker_a_user_id)
-                revised_client = self.get_client_for_ingestion(speaker_b_user_id)
+
+                client = self.get_client_for_ingestion(
+                    frame=frame, user_id=speaker_a_user_id, version=version
+                )
+                revised_client = self.get_client_for_ingestion(
+                    frame=frame, user_id=speaker_b_user_id, version=version
+                )
             else:
                 raise NotImplementedError()
 
             sessions_to_process = []
-            for session_idx in tqdm(range(max_session_count), desc=f"process_user {conv_idx}"):
+            for session_idx in tqdm(range(max_session_count), desc=f"process_user {conv_id}"):
                 session_key = f"session_{session_idx}"
                 session = conversation.get(session_key)
                 if session is None:
@@ -205,16 +221,16 @@ class LocomoIngestor(LocomoEvalModelModules):
                     "session_date": conversation.get(f"session_{session_idx}_date_time") + " UTC",
                     "speaker_a": conversation.get("speaker_a"),
                     "speaker_b": conversation.get("speaker_b"),
-                    "speaker_a_user_id": f"{conversation.get('speaker_a')}_{conv_idx}",
-                    "speaker_b_user_id": f"{conversation.get('speaker_b')}_{conv_idx}",
-                    "conv_idx": conv_idx,
+                    "speaker_a_user_id": f"{conversation.get('speaker_a')}_{conv_id}",
+                    "speaker_b_user_id": f"{conversation.get('speaker_b')}_{conv_id}",
+                    "conv_id": conv_id,
                     "session_key": session_key,
                 }
                 sessions_to_process.append((session, metadata))
                 valid_sessions += 1
 
             print(
-                f"Processing {valid_sessions} sessions for user {conv_idx} with {num_workers} workers"
+                f"Processing {valid_sessions} sessions for user {conv_id} with {num_workers} workers"
             )
             with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
                 futures = {
@@ -229,18 +245,18 @@ class LocomoIngestor(LocomoEvalModelModules):
                     try:
                         session_time = future.result()
                         total_session_time += session_time
-                        print(f"User {conv_idx}, {session_key} processed in {session_time} seconds")
+                        print(f"User {conv_id}, {session_key} processed in {session_time} seconds")
                     except Exception as e:
-                        print(f"Error processing user {conv_idx}, session {session_key}: {e!s}")
+                        print(f"Error processing user {conv_id}, session {session_key}: {e!s}")
 
             end_time = time.time()
             elapsed_time = round(end_time - start_time, 2)
-            print(f"User {conv_idx} processed successfully in {elapsed_time} seconds")
+            print(f"User {conv_id} processed successfully in {elapsed_time} seconds")
 
             return elapsed_time
 
         except Exception as e:
-            return f"Error processing user {conv_idx}: {e!s}. Exception: {traceback.format_exc()}"
+            return f"Error processing user {conv_id}: {e!s}. Exception: {traceback.format_exc()}"
 
     def run_ingestion(self):
         frame = self.frame
