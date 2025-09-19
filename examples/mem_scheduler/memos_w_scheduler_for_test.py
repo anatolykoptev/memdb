@@ -186,7 +186,7 @@ if __name__ == "__main__":
         )
 
     # Initialization
-    print("🔧 Initializing MOS with Enhanced Scheduler...")
+    print("🔧 Initializing MOS with Scheduler...")
     mos = MOSForTestScheduler(mos_config)
 
     user_id = "user_1"

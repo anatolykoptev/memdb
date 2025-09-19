@@ -153,8 +153,6 @@ class EvalModuleWithClientManager(BaseEvalModule):
                 # Replace the original scheduler
                 mos.mem_scheduler = scheduler_for_eval
 
-                # stop mem_scheduler thread
-                mos.mem_scheduler.stop()
             return mos
 
     def locomo_response(self, frame, llm_client, context: str, question: str) -> str:

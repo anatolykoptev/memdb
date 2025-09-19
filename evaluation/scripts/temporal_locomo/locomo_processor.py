@@ -100,7 +100,8 @@ class LocomoProcessor(LocomoEvalModelModules):
 
         oai_client = OpenAI(api_key=self.openai_api_key, base_url=self.openai_base_url)
 
-        self.pre_context_cache[conv_id] = None
+        with self.stats_lock:
+            self.pre_context_cache[conv_id] = None
 
         def process_qa(qa):
             try:
@@ -119,12 +120,14 @@ class LocomoProcessor(LocomoEvalModelModules):
                     context = ""
 
                 # ==== Context Answerability Analysis (for memos_scheduler only) ====
-
+                can_answer = False
+                can_answer_duration_ms = 0.0
                 if self.pre_context_cache[conv_id] is not None:
+                    can_answer_start = time()
                     can_answer = self.analyze_context_answerability(
                         self.pre_context_cache[conv_id], query, oai_client
                     )
-
+                    can_answer_duration_ms = (time() - can_answer_start) * 1000
                     # Update statistics
                     with self.stats_lock:
                         self.stats[self.frame][self.version]["memory_stats"]["total_queries"] += 1
@@ -151,8 +154,8 @@ class LocomoProcessor(LocomoEvalModelModules):
                             hit_rate
                         )
                         self.save_stats()
-
-                self.pre_context_cache[conv_id] = context
+                with self.stats_lock:
+                    self.pre_context_cache[conv_id] = context
 
                 self.print_eval_info()
 
@@ -174,6 +177,7 @@ class LocomoProcessor(LocomoEvalModelModules):
                     "search_context": context,
                     "response_duration_ms": response_duration_ms,
                     "search_duration_ms": search_duration_ms,
+                    "can_answer_duration_ms": can_answer_duration_ms,
                     "can_answer": can_answer if frame == "memos_scheduler" else None,
                 }
             except Exception as e:
@@ -191,16 +195,19 @@ class LocomoProcessor(LocomoEvalModelModules):
                         if result["search_context"]
                         else "No context"
                     )
-                    print(
-                        {
-                            "question": result["question"][:100],
-                            "answer": result["answer"][:100],
-                            "category": result["category"],
-                            "golden_answer": result["golden_answer"],
-                            "search_context": context_preview[:100],
-                            "search_duration_ms": result["search_duration_ms"],
-                        }
-                    )
+                    if "can_answer" in result:
+                        print("Print can_answer examples")
+                        print(
+                            {
+                                "question": result["question"][:100],
+                                "pre context can answer": result["can_answer"],
+                                "answer": result["answer"][:100],
+                                "category": result["category"],
+                                "golden_answer": result["golden_answer"],
+                                "search_context": context_preview[:100],
+                                "search_duration_ms": result["search_duration_ms"],
+                            }
+                        )
 
                     search_results[conv_id].append(
                         {
