@@ -54,11 +54,27 @@ class BaseEvalModule:
             )
         else:
             logger.warning(f"Temporal locomo dataset not found at {temporal_locomo_file}")
-        self.result_dir = Path(f"{BASE_DIR}/results/temporal_locomo/{self.frame}-{self.version}/")
+        # Configure result dir; if scheduler disabled and using memos scheduler, mark as ablation
+        if (
+            hasattr(self.args, "scheduler_flag")
+            and self.frame == "memos_scheduler"
+            and self.args.scheduler_flag is False
+        ):
+            self.result_dir = Path(
+                f"{BASE_DIR}/results/temporal_locomo/{self.frame}-{self.version}-ablation/"
+            )
+        else:
+            self.result_dir = Path(
+                f"{BASE_DIR}/results/temporal_locomo/{self.frame}-{self.version}/"
+            )
         self.result_dir.mkdir(parents=True, exist_ok=True)
 
-        self.search_path = self.result_dir / f"{self.frame}_locomo_search_results.json"
-        self.response_path = self.result_dir / Path(f"{self.frame}_locomo_responses.json")
+        self.search_path = self.result_dir / f"{self.frame}-{self.version}_search_results.json"
+        self.response_path = self.result_dir / f"{self.frame}-{self.version}_responses.json"
+        self.judged_path = self.result_dir / f"{self.frame}-{self.version}_judged.json"
+        self.grade_path = self.result_dir / f"{self.frame}-{self.version}_grades.json"
+        self.excel_path = self.result_dir / f"{self.frame}-{self.version}_metrics.xlsx"
+
         self.ingestion_storage_dir = self.result_dir / "storages"
         self.mos_config_path = Path(f"{BASE_DIR}/configs-example/mos_w_scheduler_config.json")
         self.mem_cube_config_path = Path(f"{BASE_DIR}/configs-example/mem_cube_config.json")
@@ -124,7 +140,8 @@ class BaseEvalModule:
 
         # Initialize memory history for tracking retrieval results
         self.stats_lock = Lock()
-        self.scheduler_flag = True
+        # Reflect CLI flag
+        self.scheduler_flag = bool(getattr(self.args, "scheduler_flag", True))
         self.stats_dir = self.result_dir / f"stats/{self.frame}_{self.version}"
         self.stats_dir.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
         self.stats_path = self.stats_dir / "stats.txt"
@@ -355,14 +372,3 @@ class BaseEvalModule:
         logger.info("QA pairs may be duplicated across days if they reference multiple days")
 
         return output_file
-
-    def load_existing_results(self, frame, version, conv_id):
-        result_path = self.result_dir / f"/tmp/{frame}_locomo_search_results_{conv_id}.json"
-
-        if os.path.exists(result_path):
-            try:
-                with open(result_path) as f:
-                    return json.load(f), True
-            except Exception as e:
-                print(f"Error loading existing results for group {conv_id}: {e}")
-        return {}, False
