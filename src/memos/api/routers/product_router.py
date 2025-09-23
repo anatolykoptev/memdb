@@ -1,14 +1,11 @@
 import json
+import time
 import traceback
 
-from datetime import datetime
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from memos.api.config import APIConfig
-from memos.api.context.dependencies import G, get_g_object
 from memos.api.product_models import (
     BaseResponse,
     ChatCompleteRequest,
@@ -79,18 +76,9 @@ def set_config(config):
 
 
 @router.post("/users/register", summary="Register a new user", response_model=UserRegisterResponse)
-def register_user(user_req: UserRegisterRequest, g: Annotated[G, Depends(get_g_object)]):
+def register_user(user_req: UserRegisterRequest):
     """Register a new user with configuration and default cube."""
     try:
-        # Set request-related information in g object
-        g.user_id = user_req.user_id
-        g.action = "user_register"
-        g.timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        logger.info(f"Starting user registration for user_id: {user_req.user_id}")
-        logger.info(f"Request trace_id: {g.trace_id}")
-        logger.info(f"Request timestamp: {g.timestamp}")
-
         # Get configuration for the user
         user_config, default_mem_cube = APIConfig.create_user_config(
             user_name=user_req.user_id, user_id=user_req.user_id
@@ -195,6 +183,7 @@ def get_all_memories(memory_req: GetMemoryRequest):
 def create_memory(memory_req: MemoryCreateRequest):
     """Create a new memory for a specific user."""
     try:
+        time_start_add = time.time()
         mos_product = get_mos_product_instance()
         mos_product.add(
             user_id=memory_req.user_id,
@@ -205,6 +194,9 @@ def create_memory(memory_req: MemoryCreateRequest):
             source=memory_req.source,
             user_profile=memory_req.user_profile,
             session_id=memory_req.session_id,
+        )
+        logger.info(
+            f"time add api : add time user_id: {memory_req.user_id} time is: {time.time() - time_start_add}"
         )
         return SimpleResponse(message="Memory created successfully")
 
@@ -219,6 +211,7 @@ def create_memory(memory_req: MemoryCreateRequest):
 def search_memories(search_req: SearchRequest):
     """Search memories for a specific user."""
     try:
+        time_start_search = time.time()
         mos_product = get_mos_product_instance()
         result = mos_product.search(
             query=search_req.query,
@@ -226,6 +219,9 @@ def search_memories(search_req: SearchRequest):
             install_cube_ids=[search_req.mem_cube_id] if search_req.mem_cube_id else None,
             top_k=search_req.top_k,
             session_id=search_req.session_id,
+        )
+        logger.info(
+            f"time search api : add time user_id: {search_req.user_id} time is: {time.time() - time_start_search}"
         )
         return SearchResponse(message="Search completed successfully", data=result)
 
