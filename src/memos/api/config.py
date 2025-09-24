@@ -100,8 +100,10 @@ class APIConfig:
                 "backend": "http_bge",
                 "config": {
                     "url": os.getenv("MOS_RERANKER_URL"),
-                    "model": "bge-reranker-v2-m3",
+                    "model": os.getenv("MOS_RERANKER_MODEL", "bge-reranker-v2-m3"),
                     "timeout": 10,
+                    "headers_extra": os.getenv("MOS_RERANKER_HEADERS_EXTRA"),
+                    "rerank_source": os.getenv("MOS_RERANK_SOURCE"),
                 },
             }
         else:
@@ -271,7 +273,7 @@ class APIConfig:
     def get_scheduler_config() -> dict[str, Any]:
         """Get scheduler configuration."""
         return {
-            "backend": "general_scheduler",
+            "backend": "optimized_scheduler",
             "config": {
                 "top_k": int(os.getenv("MOS_SCHEDULER_TOP_K", "10")),
                 "act_mem_update_interval": int(
