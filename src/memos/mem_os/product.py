@@ -417,9 +417,12 @@ class MOSProduct(MOSCore):
         mem_block_o, mem_block_p = _format_mem_block(memories_all)
         mem_block = mem_block_o + "\n" + mem_block_p
         prefix = (base_prompt.strip() + "\n\n") if base_prompt else ""
-        return (prefix + sys_body +
-                "\n\n# Memories\n## PersonalMemory & OuterMemory (ordered)\n" +
-                mem_block)
+        return (
+            prefix
+            + sys_body
+            + "\n\n# Memories\n## PersonalMemory & OuterMemory (ordered)\n"
+            + mem_block
+        )
 
     def _build_base_system_prompt(
         self,
@@ -433,10 +436,7 @@ class MOSProduct(MOSCore):
         """
         now = datetime.now()
         formatted_date = now.strftime("%Y-%m-%d (%A)")
-        sys_body = get_memos_prompt(date=formatted_date,
-                                    tone=tone,
-                                    verbosity=verbosity,
-                                    mode=mode)
+        sys_body = get_memos_prompt(date=formatted_date, tone=tone, verbosity=verbosity, mode=mode)
         prefix = (base_prompt.strip() + "\n\n") if base_prompt else ""
         return prefix + sys_body
 
@@ -454,12 +454,16 @@ class MOSProduct(MOSCore):
         mem_block_o, mem_block_p = _format_mem_block(memories_all)
 
         if mode == "enhance":
-            return ("# Memories\n## PersonalMemory (ordered)\n" + mem_block_p +
-                    "\n## OuterMemory (ordered)\n" + mem_block_o + "\n\n")
+            return (
+                "# Memories\n## PersonalMemory (ordered)\n"
+                + mem_block_p
+                + "\n## OuterMemory (ordered)\n"
+                + mem_block_o
+                + "\n\n"
+            )
         else:
             mem_block = mem_block_o + "\n" + mem_block_p
-            return ("# Memories\n## PersonalMemory & OuterMemory (ordered)\n" +
-                    mem_block + "\n\n")
+            return "# Memories\n## PersonalMemory & OuterMemory (ordered)\n" + mem_block + "\n\n"
 
     def _build_enhance_system_prompt(
         self,
@@ -981,16 +985,14 @@ class MOSProduct(MOSCore):
         memories_list = []
         if memories_result:
             memories_list = memories_result[0]["memories"]
-            memories_list = self._filter_memories_by_threshold(
-                memories_list, threshold)
+            memories_list = self._filter_memories_by_threshold(memories_list, threshold)
             new_memories_list = []
             for m in memories_list:
                 m.metadata.embedding = []
                 new_memories_list.append(m)
             memories_list = new_memories_list
         # Build base system prompt without memory
-        system_prompt = self._build_base_system_prompt(base_prompt,
-                                                       mode="base")
+        system_prompt = self._build_base_system_prompt(base_prompt, mode="base")
 
         # Build memory context to be included in user message
         memory_context = self._build_memory_context(memories_list, mode="base")
@@ -1077,8 +1079,7 @@ class MOSProduct(MOSCore):
         system_prompt = self._build_base_system_prompt(mode="enhance")
 
         # Build memory context to be included in user message
-        memory_context = self._build_memory_context(memories_list,
-                                                    mode="enhance")
+        memory_context = self._build_memory_context(memories_list, mode="enhance")
 
         # Combine memory context with user query
         user_content = memory_context + query if memory_context else query
