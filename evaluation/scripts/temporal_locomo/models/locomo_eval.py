@@ -9,7 +9,6 @@ import numpy as np
 
 from bert_score import score as bert_score
 from dotenv import load_dotenv
-from modules.locomo_eval_module import LocomoEvalModelModules
 from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
 from nltk.translate.meteor_score import meteor_score
 from openai import AsyncOpenAI
@@ -19,6 +18,7 @@ from scipy.spatial.distance import cosine
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
+from evaluation.scripts.temporal_locomo.modules.locomo_eval_module import LocomoEvalModelModules
 from memos.log import get_logger
 
 

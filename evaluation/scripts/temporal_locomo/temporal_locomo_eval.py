@@ -5,14 +5,14 @@ import sys
 
 from pathlib import Path
 
-from locomo_eval import LocomoEvaluator
-from locomo_ingestion import LocomoIngestor
-from locomo_metric import LocomoMetric
-from locomo_processor import LocomoProcessor
 from modules.locomo_eval_module import LocomoEvalModelModules
 from modules.schemas import ContextUpdateMethod
 from modules.utils import compute_can_answer_count_by_pre_evidences
 
+from evaluation.scripts.temporal_locomo.models.locomo_eval import LocomoEvaluator
+from evaluation.scripts.temporal_locomo.models.locomo_ingestion import LocomoIngestor
+from evaluation.scripts.temporal_locomo.models.locomo_metric import LocomoMetric
+from evaluation.scripts.temporal_locomo.models.locomo_processor import LocomoProcessor
 from memos.log import get_logger
 
 
@@ -33,7 +33,7 @@ class TemporalLocomoEval(LocomoEvalModelModules):
         self.locomo_evaluator = LocomoEvaluator(args=args)
         self.locomo_metric = LocomoMetric(args=args)
 
-    def run_eval_pipeline(self):
+    def run_eval_pipeline(self, skip_ingestion=True, skip_processing=False):
         """
         Run the complete evaluation pipeline including dataset conversion,
         data ingestion, and processing.
@@ -53,20 +53,22 @@ class TemporalLocomoEval(LocomoEvalModelModules):
             print(f"Temporal locomo dataset found at {temporal_locomo_file}, skipping conversion.")
 
         # Step 2: Data ingestion
-        print("\n" + "=" * 50)
-        print("Step 2: Data Ingestion")
-        print("=" * 50)
-        self.locomo_ingestor.run_ingestion()
+        if not skip_ingestion:
+            print("\n" + "=" * 50)
+            print("Step 2: Data Ingestion")
+            print("=" * 50)
+            self.locomo_ingestor.run_ingestion()
 
         # Step 3: Processing and evaluation
-        print("\n" + "=" * 50)
-        print("Step 3: Processing and Evaluation")
-        print("=" * 50)
-        print("Running locomo processing to search and answer...")
+        if not skip_processing:
+            print("\n" + "=" * 50)
+            print("Step 3: Processing and Evaluation")
+            print("=" * 50)
+            print("Running locomo processing to search and answer...")
 
-        print("Starting locomo processing to generate search and response results...")
-        self.locomo_processor.run_locomo_processing(num_users=self.num_of_users)
-        print("Processing completed successfully.")
+            print("Starting locomo processing to generate search and response results...")
+            self.locomo_processor.run_locomo_processing(num_users=self.num_of_users)
+            print("Processing completed successfully.")
 
         # Optional: run post-hoc evaluation over generated responses if available
         try:

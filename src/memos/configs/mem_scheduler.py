@@ -30,7 +30,7 @@ class BaseSchedulerConfig(BaseConfig):
         lt=20,
         description=f"Maximum worker threads in pool (default: {DEFAULT_THREAD__POOL_MAX_WORKERS})",
     )
-    consume_interval_seconds: int = Field(
+    consume_interval_seconds: float = Field(
         default=DEFAULT_CONSUME_INTERVAL_SECONDS,
         gt=0,
         le=60,

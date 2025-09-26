@@ -7,19 +7,19 @@ from pathlib import Path
 from time import time
 
 from dotenv import load_dotenv
-from modules.constants import (
+
+from evaluation.scripts.temporal_locomo.modules.constants import (
     MEMOS_SCHEDULER_MODEL,
 )
-from modules.locomo_eval_module import LocomoEvalModelModules
-from modules.prompts import (
+from evaluation.scripts.temporal_locomo.modules.locomo_eval_module import LocomoEvalModelModules
+from evaluation.scripts.temporal_locomo.modules.prompts import (
     SEARCH_PROMPT_MEM0,
     SEARCH_PROMPT_MEM0_GRAPH,
     SEARCH_PROMPT_MEMOS,
     SEARCH_PROMPT_ZEP,
 )
-from modules.schemas import ContextUpdateMethod, RecordingCase
-from modules.utils import save_evaluation_cases
-
+from evaluation.scripts.temporal_locomo.modules.schemas import ContextUpdateMethod, RecordingCase
+from evaluation.scripts.temporal_locomo.modules.utils import save_evaluation_cases
 from memos.log import get_logger
 
 
