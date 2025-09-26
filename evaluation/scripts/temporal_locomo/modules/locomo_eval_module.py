@@ -194,6 +194,10 @@ class LocomoEvalModelModules(EvalModuleWithClientManager):
         start = time.time()
         client: MOS = client
 
+        if not self.scheduler_flag:
+            # if not scheduler_flag, search to update working memory
+            self.memos_search(client, query, conv_id, speaker_a, speaker_b, reversed_client)
+
         # Search for speaker A
         search_a_results = client.mem_scheduler.search_for_eval(
             query=query,

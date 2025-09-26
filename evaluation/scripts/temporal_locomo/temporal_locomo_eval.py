@@ -10,6 +10,7 @@ from locomo_ingestion import LocomoIngestor
 from locomo_metric import LocomoMetric
 from locomo_processor import LocomoProcessor
 from modules.locomo_eval_module import LocomoEvalModelModules
+from modules.schemas import ContextUpdateMethod
 from modules.utils import compute_can_answer_count_by_pre_evidences
 
 from memos.log import get_logger
@@ -29,6 +30,8 @@ class TemporalLocomoEval(LocomoEvalModelModules):
 
         self.locomo_ingestor = LocomoIngestor(args=args)
         self.locomo_processor = LocomoProcessor(args=args)
+        self.locomo_evaluator = LocomoEvaluator(args=args)
+        self.locomo_metric = LocomoMetric(args=args)
 
     def run_eval_pipeline(self):
         """
@@ -53,14 +56,7 @@ class TemporalLocomoEval(LocomoEvalModelModules):
         print("\n" + "=" * 50)
         print("Step 2: Data Ingestion")
         print("=" * 50)
-        if not self.ingestion_storage_dir.exists() or not any(self.ingestion_storage_dir.iterdir()):
-            print(f"Directory {self.ingestion_storage_dir} not found, starting data ingestion...")
-            self.locomo_ingestor.run_ingestion()
-            print("Data ingestion completed.")
-        else:
-            print(
-                f"Directory {self.ingestion_storage_dir} already exists and is not empty, skipping ingestion."
-            )
+        self.locomo_ingestor.run_ingestion()
 
         # Step 3: Processing and evaluation
         print("\n" + "=" * 50)
@@ -74,22 +70,20 @@ class TemporalLocomoEval(LocomoEvalModelModules):
 
         # Optional: run post-hoc evaluation over generated responses if available
         try:
-            evaluator = LocomoEvaluator(args=args)
-
-            if os.path.exists(evaluator.response_path):
+            if os.path.exists(self.response_path):
                 print("Running LocomoEvaluator over existing response results...")
-                asyncio.run(evaluator.run())
+                asyncio.run(self.locomo_evaluator.run())
             else:
                 print(
                     f"Skipping LocomoEvaluator: response file not found at {evaluator.response_path}"
                 )
             # Run metrics summarization if judged file is produced
-            metric = LocomoMetric(args=args)
-            if os.path.exists(metric.judged_path):
+
+            if os.path.exists(self.judged_path):
                 print("Running LocomoMetric over judged results...")
-                metric.run()
+                self.locomo_metric.run()
             else:
-                print(f"Skipping LocomoMetric: judged file not found at {metric.judged_path}")
+                print(f"Skipping LocomoMetric: judged file not found at {self.judged_path}")
         except Exception as e:
             logger.error(f"LocomoEvaluator step skipped due to error: {e}", exc_info=True)
 
@@ -143,8 +137,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scheduler-flag",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Enable or disable memory scheduler features",
+    )
+    parser.add_argument(
+        "--context_update_method",
+        type=str,
+        default="chat_history",
+        choices=ContextUpdateMethod.values(),
+        help="Method to update context: direct (use current context directly), chat_history (use template with history), current_context (use current context)",
     )
     args = parser.parse_args()
 
