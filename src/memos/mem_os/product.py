@@ -742,16 +742,39 @@ class MOSProduct(MOSCore):
             thread.start()
 
     def _filter_memories_by_threshold(
-        self, memories: list[TextualMemoryItem], threshold: float = 0.30, min_num: int = 3
+        self,
+        memories: list[TextualMemoryItem],
+        threshold: float = 0.30,
+        min_num: int = 3,
+        memory_type: Literal["OuterMemory"] = "OuterMemory",
     ) -> list[TextualMemoryItem]:
         """
-        Filter memories by threshold.
+        Filter memories by threshold and type, at least min_num memories for Non-OuterMemory.
+        Args:
+            memories: list[TextualMemoryItem],
+            threshold: float,
+            min_num: int,
+            memory_type: Literal["OuterMemory"],
+        Returns:
+            list[TextualMemoryItem]
         """
         sorted_memories = sorted(memories, key=lambda m: m.metadata.relativity, reverse=True)
-        filtered = [m for m in sorted_memories if m.metadata.relativity >= threshold]
+        filtered_person = [m for m in memories if m.metadata.memory_type != memory_type]
+        filtered_outer = [m for m in memories if m.metadata.memory_type == memory_type]
+        filtered = []
+        per_memory_count = 0
+        for m in sorted_memories:
+            if m.metadata.relativity >= threshold:
+                if m.metadata.memory_type != memory_type:
+                    per_memory_count += 1
+                filtered.append(m)
         if len(filtered) < min_num:
-            filtered = sorted_memories[:min_num]
-        return filtered
+            filtered = filtered_person[:min_num] + filtered_outer[:min_num]
+        else:
+            if per_memory_count < min_num:
+                filtered += filtered_person[per_memory_count:min_num]
+        filtered_memory = sorted(filtered, key=lambda m: m.metadata.relativity, reverse=True)
+        return filtered_memory
 
     def register_mem_cube(
         self,
@@ -954,12 +977,17 @@ class MOSProduct(MOSCore):
             internet_search=internet_search,
             moscube=moscube,
         )["text_mem"]
+
         memories_list = []
         if memories_result:
             memories_list = memories_result[0]["memories"]
             memories_list = self._filter_memories_by_threshold(
                 memories_list, threshold)
-
+            new_memories_list = []
+            for m in memories_list:
+                m.metadata.embedding = []
+                new_memories_list.append(m)
+            memories_list = new_memories_list
         # Build base system prompt without memory
         system_prompt = self._build_base_system_prompt(base_prompt,
                                                        mode="base")
@@ -999,7 +1027,7 @@ class MOSProduct(MOSCore):
         user_id: str,
         cube_id: str | None = None,
         history: MessageList | None = None,
-        top_k: int = 10,
+        top_k: int = 20,
         internet_search: bool = False,
         moscube: bool = False,
     ) -> Generator[str, None, None]:
