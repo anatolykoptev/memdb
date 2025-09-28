@@ -33,7 +33,7 @@ class TemporalLocomoEval(LocomoEvalModelModules):
         self.locomo_evaluator = LocomoEvaluator(args=args)
         self.locomo_metric = LocomoMetric(args=args)
 
-    def run_eval_pipeline(self, skip_ingestion=True, skip_processing=False):
+    def run_answer_hit_eval_pipeline(self, skip_ingestion=True, skip_processing=False):
         """
         Run the complete evaluation pipeline including dataset conversion,
         data ingestion, and processing.
@@ -99,6 +99,32 @@ class TemporalLocomoEval(LocomoEvalModelModules):
         print(f"  - Statistics: {self.stats_path}")
         print("=" * 80)
 
+    def run_inference_eval_pipeline(self, skip_ingestion=True, skip_processing=False):
+        """
+        Run the complete evaluation pipeline including dataset conversion,
+        data ingestion, and processing.
+        """
+        print("=" * 80)
+        print("Starting TimeLocomo Evaluation Pipeline")
+        print("=" * 80)
+
+        # Step 1: Check if temporal_locomo dataset exists, if not convert it
+        temporal_locomo_file = self.data_dir / "temporal_locomo" / "temporal_locomo_qa.json"
+        if not temporal_locomo_file.exists():
+            print(f"Temporal locomo dataset not found at {temporal_locomo_file}")
+            print("Converting locomo dataset to temporal_locomo format...")
+            self.convert_locomo_to_temporal_locomo(output_dir=self.data_dir / "temporal_locomo")
+            print("Dataset conversion completed.")
+        else:
+            print(f"Temporal locomo dataset found at {temporal_locomo_file}, skipping conversion.")
+
+        # Step 2: Data ingestion
+        if not skip_ingestion:
+            print("\n" + "=" * 50)
+            print("Step 2: Data Ingestion")
+            print("=" * 50)
+            self.locomo_ingestor.run_ingestion()
+
     def compute_can_answer_count_by_pre_evidences(self, rounds_to_consider):
         """
         Compute can-answer statistics per day for each conversation using the
@@ -120,7 +146,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--frame",
         type=str,
-        default="memos_scheduler",
+        default="memos",
         choices=["zep", "memos", "mem0", "mem0_graph", "memos_scheduler"],
         help="Specify the memory framework (zep or memos or mem0 or mem0_graph)",
     )
@@ -152,8 +178,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     evaluator = TemporalLocomoEval(args=args)
-    evaluator.run_eval_pipeline()
-
-    # rule-based baselines
-    evaluator.compute_can_answer_count_by_pre_evidences(rounds_to_consider=float("inf"))
-    evaluator.compute_can_answer_count_by_pre_evidences(rounds_to_consider=1)
+    evaluator.run_answer_hit_eval_pipeline()

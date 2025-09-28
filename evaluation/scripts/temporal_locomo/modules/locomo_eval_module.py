@@ -531,6 +531,25 @@ class LocomoEvalModelModules(EvalModuleWithClientManager):
             json.dump(dict(search_results), fw, indent=2)
             print(f"Save search results {conv_id}")
 
+        search_durations = []
+        for result in response_results[conv_id]:
+            if "search_duration_ms" in result:
+                search_durations.append(result["search_duration_ms"])
+
+        if search_durations:
+            avg_search_duration = sum(search_durations) / len(search_durations)
+            with self.stats_lock:
+                if self.stats[self.frame][self.version]["memory_stats"]["avg_search_duration_ms"]:
+                    self.stats[self.frame][self.version]["memory_stats"][
+                        "avg_search_duration_ms"
+                    ] = (
+                        self.stats[self.frame][self.version]["memory_stats"][
+                            "avg_search_duration_ms"
+                        ]
+                        + avg_search_duration
+                    ) / 2
+                print(f"Average search duration: {avg_search_duration:.2f} ms")
+
         # Dump stats after processing each user
         self.save_stats()
 
