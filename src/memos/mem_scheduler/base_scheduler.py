@@ -59,7 +59,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         self.enable_activation_memory = self.config.get("enable_activation_memory", False)
         self.act_mem_dump_path = self.config.get("act_mem_dump_path", DEFAULT_ACT_MEM_DUMP_PATH)
         self.search_method = TreeTextMemory_SEARCH_METHOD
-        self.enable_parallel_dispatch = self.config.get("enable_parallel_dispatch", False)
+        self.enable_parallel_dispatch = self.config.get("enable_parallel_dispatch", True)
         self.thread_pool_max_workers = self.config.get(
             "thread_pool_max_workers", DEFAULT_THREAD_POOL_MAX_WORKERS
         )

@@ -10,6 +10,7 @@ from memos.log import get_logger
 from memos.mem_scheduler.general_modules.base import BaseSchedulerModule
 from memos.mem_scheduler.general_modules.task_threads import ThreadManager
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
+from memos.mem_scheduler.schemas.task_schemas import RunningTaskItem
 
 
 logger = get_logger(__name__)
@@ -28,7 +29,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
     - Thread race competition for parallel task execution
     """
 
-    def __init__(self, max_workers=30, enable_parallel_dispatch=False, config=None):
+    def __init__(self, max_workers=30, enable_parallel_dispatch=True, config=None):
         super().__init__()
         self.config = config
 
@@ -57,6 +58,68 @@ class SchedulerDispatcher(BaseSchedulerModule):
 
         # Thread race module for competitive task execution
         self.thread_manager = ThreadManager(thread_pool_executor=self.dispatcher_executor)
+
+        # Task tracking for monitoring
+        self._running_tasks: dict[str, RunningTaskItem] = {}
+        self._task_lock = threading.Lock()
+
+    def _create_task_wrapper(self, handler: Callable, task_item: RunningTaskItem):
+        """
+        Create a wrapper around the handler to track task execution and capture results.
+
+        Args:
+            handler: The original handler function
+            task_item: The RunningTaskItem to track
+
+        Returns:
+            Wrapped handler function that captures results and logs completion
+        """
+
+        def wrapped_handler(messages: list[ScheduleMessageItem]):
+            try:
+                # Execute the original handler
+                result = handler(messages)
+
+                # Mark task as completed and remove from tracking
+                with self._task_lock:
+                    if task_item.item_id in self._running_tasks:
+                        task_item.mark_completed(result)
+                        del self._running_tasks[task_item.item_id]
+
+                logger.info(f"Task completed: {task_item.get_execution_info()}")
+                return result
+
+            except Exception as e:
+                # Mark task as failed and remove from tracking
+                with self._task_lock:
+                    if task_item.item_id in self._running_tasks:
+                        task_item.mark_failed(str(e))
+                        del self._running_tasks[task_item.item_id]
+
+                logger.error(f"Task failed: {task_item.get_execution_info()}, Error: {e}")
+                raise
+
+        return wrapped_handler
+
+    def get_running_tasks(self) -> dict[str, RunningTaskItem]:
+        """
+        Get a copy of currently running tasks.
+
+        Returns:
+            Dictionary of running tasks keyed by task ID
+        """
+        with self._task_lock:
+            return self._running_tasks.copy()
+
+    def get_running_task_count(self) -> int:
+        """
+        Get the count of currently running tasks.
+
+        Returns:
+            Number of running tasks
+        """
+        with self._task_lock:
+            return len(self._running_tasks)
 
     def register_handler(self, label: str, handler: Callable[[list[ScheduleMessageItem]], None]):
         """
@@ -126,7 +189,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
     def _default_message_handler(self, messages: list[ScheduleMessageItem]) -> None:
         logger.debug(f"Using _default_message_handler to deal with messages: {messages}")
 
-    def group_messages_by_user_and_cube(
+    def _group_messages_by_user_and_mem_cube(
         self, messages: list[ScheduleMessageItem]
     ) -> dict[str, dict[str, list[ScheduleMessageItem]]]:
         """
@@ -176,25 +239,51 @@ class SchedulerDispatcher(BaseSchedulerModule):
             logger.debug("Received empty message list, skipping dispatch")
             return
 
-        # Group messages by their labels, and organize messages by label
-        label_groups = defaultdict(list)
-        for message in msg_list:
-            label_groups[message.label].append(message)
+        # Group messages by user_id and mem_cube_id first
+        user_cube_groups = self._group_messages_by_user_and_mem_cube(msg_list)
 
-        # Process each label group
-        for label, msgs in label_groups.items():
-            handler = self.handlers.get(label, self._default_message_handler)
+        # Process each user and mem_cube combination
+        for user_id, cube_groups in user_cube_groups.items():
+            for mem_cube_id, user_cube_msgs in cube_groups.items():
+                # Group messages by their labels within each user/mem_cube combination
+                label_groups = defaultdict(list)
+                for message in user_cube_msgs:
+                    label_groups[message.label].append(message)
 
-            # dispatch to different handler
-            logger.debug(f"Dispatch {len(msgs)} message(s) to {label} handler.")
-            if self.enable_parallel_dispatch and self.dispatcher_executor is not None:
-                # Capture variables in lambda to avoid loop variable issues
-                future = self.dispatcher_executor.submit(handler, msgs)
-                self._futures.add(future)
-                future.add_done_callback(self._handle_future_result)
-                logger.info(f"Dispatched {len(msgs)} message(s) as future task")
-            else:
-                handler(msgs)
+                # Process each label group within this user/mem_cube combination
+                for label, msgs in label_groups.items():
+                    handler = self.handlers.get(label, self._default_message_handler)
+
+                    # Create task tracking item for this dispatch
+                    task_item = RunningTaskItem(
+                        user_id=user_id,
+                        mem_cube_id=mem_cube_id,
+                        task_info=f"Processing {len(msgs)} message(s) with label '{label}' for user {user_id} and mem_cube {mem_cube_id}",
+                        task_name=f"{label}_handler",
+                        messages=msgs,
+                    )
+
+                    # Add to running tasks
+                    with self._task_lock:
+                        self._running_tasks[task_item.item_id] = task_item
+
+                    # Create wrapped handler for task tracking
+                    wrapped_handler = self._create_task_wrapper(handler, task_item)
+
+                    # dispatch to different handler
+                    logger.debug(
+                        f"Dispatch {len(msgs)} message(s) to {label} handler for user {user_id} and mem_cube {mem_cube_id}."
+                    )
+                    logger.info(f"Task started: {task_item.get_execution_info()}")
+
+                    if self.enable_parallel_dispatch and self.dispatcher_executor is not None:
+                        # Capture variables in lambda to avoid loop variable issues
+                        future = self.dispatcher_executor.submit(wrapped_handler, msgs)
+                        self._futures.add(future)
+                        future.add_done_callback(self._handle_future_result)
+                        logger.info(f"Dispatched {len(msgs)} message(s) as future task")
+                    else:
+                        wrapped_handler(msgs)
 
     def join(self, timeout: float | None = None) -> bool:
         """Wait for all dispatched tasks to complete.
