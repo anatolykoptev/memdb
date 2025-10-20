@@ -1,3 +1,4 @@
+import multiprocessing
 import queue
 import threading
 import time
@@ -21,7 +22,9 @@ from memos.mem_scheduler.monitors.general_monitor import SchedulerGeneralMonitor
 from memos.mem_scheduler.schemas.general_schemas import (
     DEFAULT_ACT_MEM_DUMP_PATH,
     DEFAULT_CONSUME_INTERVAL_SECONDS,
+    DEFAULT_STARTUP_MODE,
     DEFAULT_THREAD_POOL_MAX_WORKERS,
+    STARTUP_BY_PROCESS,
     MemCubeID,
     TreeTextMemory_SEARCH_METHOD,
     UserID,
@@ -64,6 +67,11 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             "thread_pool_max_workers", DEFAULT_THREAD_POOL_MAX_WORKERS
         )
 
+        # startup mode configuration
+        self.scheduler_startup_mode = self.config.get(
+            "scheduler_startup_mode", DEFAULT_STARTUP_MODE
+        )
+
         self.retriever: SchedulerRetriever | None = None
         self.db_engine: Engine | None = None
         self.monitor: SchedulerGeneralMonitor | None = None
@@ -88,7 +96,8 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         self._web_log_message_queue: Queue[ScheduleLogForWebItem] = Queue(
             maxsize=self.max_web_log_queue_size
         )
-        self._consumer_thread = None  # Reference to our consumer thread
+        self._consumer_thread = None  # Reference to our consumer thread/process
+        self._consumer_process = None  # Reference to our consumer process
         self._running = False
         self._consume_interval = self.config.get(
             "consume_interval_seconds", DEFAULT_CONSUME_INTERVAL_SECONDS
@@ -574,10 +583,10 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
 
     def start(self) -> None:
         """
-        Start the message consumer thread and initialize dispatcher resources.
+        Start the message consumer thread/process and initialize dispatcher resources.
 
         Initializes and starts:
-        1. Message consumer thread
+        1. Message consumer thread or process (based on startup_mode)
         2. Dispatcher thread pool (if parallel dispatch enabled)
         """
         if self._running:
@@ -590,20 +599,32 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                 f"Initializing dispatcher thread pool with {self.thread_pool_max_workers} workers"
             )
 
-        # Start consumer thread
+        # Start consumer based on startup mode
         self._running = True
-        self._consumer_thread = threading.Thread(
-            target=self._message_consumer,
-            daemon=True,
-            name="MessageConsumerThread",
-        )
-        self._consumer_thread.start()
-        logger.info("Message consumer thread started")
+
+        if self.scheduler_startup_mode == STARTUP_BY_PROCESS:
+            # Start consumer process
+            self._consumer_process = multiprocessing.Process(
+                target=self._message_consumer,
+                daemon=True,
+                name="MessageConsumerProcess",
+            )
+            self._consumer_process.start()
+            logger.info("Message consumer process started")
+        else:
+            # Default to thread mode
+            self._consumer_thread = threading.Thread(
+                target=self._message_consumer,
+                daemon=True,
+                name="MessageConsumerThread",
+            )
+            self._consumer_thread.start()
+            logger.info("Message consumer thread started")
 
     def stop(self) -> None:
         """Stop all scheduler components gracefully.
 
-        1. Stops message consumer thread
+        1. Stops message consumer thread/process
         2. Shuts down dispatcher thread pool
         3. Cleans up resources
         """
@@ -611,11 +632,24 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             logger.warning("Memory Scheduler is not running")
             return
 
-        # Signal consumer thread to stop
+        # Signal consumer thread/process to stop
         self._running = False
 
-        # Wait for consumer thread
-        if self._consumer_thread and self._consumer_thread.is_alive():
+        # Wait for consumer thread or process
+        if self.scheduler_startup_mode == STARTUP_BY_PROCESS and self._consumer_process:
+            if self._consumer_process.is_alive():
+                self._consumer_process.join(timeout=5.0)
+                if self._consumer_process.is_alive():
+                    logger.warning("Consumer process did not stop gracefully, terminating...")
+                    self._consumer_process.terminate()
+                    self._consumer_process.join(timeout=2.0)
+                    if self._consumer_process.is_alive():
+                        logger.error("Consumer process could not be terminated")
+                    else:
+                        logger.info("Consumer process terminated")
+                else:
+                    logger.info("Consumer process stopped")
+        elif self._consumer_thread and self._consumer_thread.is_alive():
             self._consumer_thread.join(timeout=5.0)
             if self._consumer_thread.is_alive():
                 logger.warning("Consumer thread did not stop gracefully")
