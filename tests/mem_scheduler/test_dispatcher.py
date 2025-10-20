@@ -233,7 +233,7 @@ class TestSchedulerDispatcher(unittest.TestCase):
         self.assertEqual(len(label2_messages), 1)
         self.assertEqual(label2_messages[0].item_id, "msg2")
 
-    def test_group_messages_by_user_and_cube(self):
+    def test_group_messages_by_user_and_mem_cube(self):
         """Test grouping messages by user and cube."""
         # Check actual grouping logic
         with patch("memos.mem_scheduler.general_modules.dispatcher.logger.debug"):
