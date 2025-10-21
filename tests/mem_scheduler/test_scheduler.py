@@ -26,6 +26,7 @@ from memos.mem_scheduler.schemas.general_schemas import (
 )
 from memos.mem_scheduler.schemas.message_schemas import (
     ScheduleLogForWebItem,
+    ScheduleMessageItem,
 )
 from memos.memories.textual.tree import TreeTextMemory
 
@@ -337,3 +338,221 @@ class TestGeneralScheduler(unittest.TestCase):
             # If layers attribute doesn't exist, verify our fix handles this case
             print("⚠️  DynamicCache doesn't have 'layers' attribute in this transformers version")
             print("✅ Test passed - our code should handle this gracefully")
+
+    def test_get_running_tasks_no_filter(self):
+        """Test get_running_tasks method without filter."""
+        # Mock dispatcher and its get_running_tasks method
+        mock_task_item = MagicMock()
+        mock_task_item.item_id = "task_1"
+        mock_task_item.user_id = "user_1"
+        mock_task_item.mem_cube_id = "cube_1"
+        mock_task_item.task_info = {"type": "query"}
+        mock_task_item.task_name = "test_task"
+        mock_task_item.start_time = datetime.now()
+        mock_task_item.end_time = None
+        mock_task_item.status = "running"
+        mock_task_item.result = None
+        mock_task_item.error_message = None
+        mock_task_item.messages = []
+
+        # Mock the dispatcher's get_running_tasks method
+        with patch.object(
+            self.scheduler.dispatcher, "get_running_tasks", return_value={"task_1": mock_task_item}
+        ) as mock_get_running_tasks:
+            # Call get_running_tasks
+            result = self.scheduler.get_running_tasks()
+
+            # Verify result structure
+            self.assertIsInstance(result, dict)
+            self.assertIn("task_1", result)
+
+            task_dict = result["task_1"]
+            self.assertEqual(task_dict["item_id"], "task_1")
+            self.assertEqual(task_dict["user_id"], "user_1")
+            self.assertEqual(task_dict["mem_cube_id"], "cube_1")
+            self.assertEqual(task_dict["task_info"], {"type": "query"})
+            self.assertEqual(task_dict["task_name"], "test_task")
+            self.assertEqual(task_dict["status"], "running")
+            self.assertIsNone(task_dict["result"])
+            self.assertIsNone(task_dict["error_message"])
+            self.assertEqual(task_dict["messages"], [])
+
+            # Verify dispatcher method was called without filter
+            mock_get_running_tasks.assert_called_once_with(filter_func=None)
+
+    def test_get_running_tasks_with_filter(self):
+        """Test get_running_tasks method with filter function."""
+        # Mock dispatcher and its get_running_tasks method
+        mock_task_item1 = MagicMock()
+        mock_task_item1.item_id = "task_1"
+        mock_task_item1.user_id = "user_1"
+        mock_task_item1.mem_cube_id = "cube_1"
+        mock_task_item1.task_info = {"type": "query"}
+        mock_task_item1.task_name = "test_task_1"
+        mock_task_item1.start_time = datetime.now()
+        mock_task_item1.end_time = None
+        mock_task_item1.status = "running"
+        mock_task_item1.result = None
+        mock_task_item1.error_message = None
+        mock_task_item1.messages = []
+
+        # Define a filter function
+        def user_filter(task):
+            return task.user_id == "user_1"
+
+        # Mock the filtered result (only task_1 matches the filter)
+        with patch.object(
+            self.scheduler.dispatcher, "get_running_tasks", return_value={"task_1": mock_task_item1}
+        ) as mock_get_running_tasks:
+            # Call get_running_tasks with filter
+            result = self.scheduler.get_running_tasks(filter_func=user_filter)
+
+            # Verify result
+            self.assertIsInstance(result, dict)
+            self.assertIn("task_1", result)
+            self.assertEqual(len(result), 1)
+
+            # Verify dispatcher method was called with filter
+            mock_get_running_tasks.assert_called_once_with(filter_func=user_filter)
+
+    def test_get_running_tasks_empty_result(self):
+        """Test get_running_tasks method when no tasks are running."""
+        # Mock dispatcher to return empty dict
+        with patch.object(
+            self.scheduler.dispatcher, "get_running_tasks", return_value={}
+        ) as mock_get_running_tasks:
+            # Call get_running_tasks
+            result = self.scheduler.get_running_tasks()
+
+            # Verify empty result
+            self.assertIsInstance(result, dict)
+            self.assertEqual(len(result), 0)
+
+            # Verify dispatcher method was called
+            mock_get_running_tasks.assert_called_once_with(filter_func=None)
+
+    def test_get_running_tasks_no_dispatcher(self):
+        """Test get_running_tasks method when dispatcher is None."""
+        # Temporarily set dispatcher to None
+        original_dispatcher = self.scheduler.dispatcher
+        self.scheduler.dispatcher = None
+
+        # Call get_running_tasks
+        result = self.scheduler.get_running_tasks()
+
+        # Verify empty result and warning behavior
+        self.assertIsInstance(result, dict)
+        self.assertEqual(len(result), 0)
+
+        # Restore dispatcher
+        self.scheduler.dispatcher = original_dispatcher
+
+    def test_get_running_tasks_multiple_tasks(self):
+        """Test get_running_tasks method with multiple tasks."""
+        # Mock multiple task items
+        mock_task_item1 = MagicMock()
+        mock_task_item1.item_id = "task_1"
+        mock_task_item1.user_id = "user_1"
+        mock_task_item1.mem_cube_id = "cube_1"
+        mock_task_item1.task_info = {"type": "query"}
+        mock_task_item1.task_name = "test_task_1"
+        mock_task_item1.start_time = datetime.now()
+        mock_task_item1.end_time = None
+        mock_task_item1.status = "running"
+        mock_task_item1.result = None
+        mock_task_item1.error_message = None
+        mock_task_item1.messages = []
+
+        mock_task_item2 = MagicMock()
+        mock_task_item2.item_id = "task_2"
+        mock_task_item2.user_id = "user_2"
+        mock_task_item2.mem_cube_id = "cube_2"
+        mock_task_item2.task_info = {"type": "answer"}
+        mock_task_item2.task_name = "test_task_2"
+        mock_task_item2.start_time = datetime.now()
+        mock_task_item2.end_time = None
+        mock_task_item2.status = "completed"
+        mock_task_item2.result = "success"
+        mock_task_item2.error_message = None
+        mock_task_item2.messages = ["message1", "message2"]
+
+        with patch.object(
+            self.scheduler.dispatcher,
+            "get_running_tasks",
+            return_value={"task_1": mock_task_item1, "task_2": mock_task_item2},
+        ) as mock_get_running_tasks:
+            # Call get_running_tasks
+            result = self.scheduler.get_running_tasks()
+
+            # Verify result structure
+            self.assertIsInstance(result, dict)
+            self.assertEqual(len(result), 2)
+            self.assertIn("task_1", result)
+            self.assertIn("task_2", result)
+
+            # Verify task_1 details
+            task1_dict = result["task_1"]
+            self.assertEqual(task1_dict["item_id"], "task_1")
+            self.assertEqual(task1_dict["user_id"], "user_1")
+            self.assertEqual(task1_dict["status"], "running")
+
+            # Verify task_2 details
+            task2_dict = result["task_2"]
+            self.assertEqual(task2_dict["item_id"], "task_2")
+            self.assertEqual(task2_dict["user_id"], "user_2")
+            self.assertEqual(task2_dict["status"], "completed")
+            self.assertEqual(task2_dict["result"], "success")
+            self.assertEqual(task2_dict["messages"], ["message1", "message2"])
+
+            # Verify dispatcher method was called
+            mock_get_running_tasks.assert_called_once_with(filter_func=None)
+
+    def test_message_handler_receives_submitted_message(self):
+        """Test that handlers receive messages after scheduler startup and message submission."""
+        # Create a mock handler that tracks received messages
+        received_messages = []
+
+        def mock_handler(messages: list[ScheduleMessageItem]) -> None:
+            """Mock handler that records received messages."""
+            received_messages.extend(messages)
+
+        # Register the mock handler
+        test_label = "test_handler"
+        handlers = {test_label: mock_handler}
+        self.scheduler.register_handlers(handlers)
+
+        # Verify handler is registered
+        self.assertIn(test_label, self.scheduler.handlers)
+        self.assertEqual(self.scheduler.handlers[test_label], mock_handler)
+
+        # Start the scheduler
+        self.scheduler.start()
+
+        # Create and submit a test message
+        test_message = ScheduleMessageItem(
+            label=test_label,
+            content="Test message content",
+            user_id="test_user",
+            mem_cube_id="test_mem_cube",
+            mem_cube="test_mem_cube_obj",  # Required field - can be string or GeneralMemCube
+            timestamp=datetime.now(),
+        )
+
+        self.scheduler.submit_messages(test_message)
+
+        # Wait for message processing to complete
+        import time
+
+        time.sleep(2.0)  # Allow sufficient time for message processing
+
+        # Verify the handler received the message
+        self.assertEqual(
+            len(received_messages), 1, f"Expected 1 message, got {len(received_messages)}"
+        )
+        self.assertEqual(received_messages[0].label, test_label)
+        self.assertEqual(received_messages[0].content, "Test message content")
+        self.assertEqual(received_messages[0].user_id, "test_user")
+        self.assertEqual(received_messages[0].mem_cube_id, "test_mem_cube")
+
+        # Stop the scheduler
+        self.scheduler.stop()

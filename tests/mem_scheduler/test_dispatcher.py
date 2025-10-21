@@ -459,3 +459,190 @@ class TestSchedulerDispatcher(unittest.TestCase):
             self.assertIn("Messages: 2 items", expected_log)
             self.assertIn("Stuck message 1", expected_log)
             self.assertIn("Stuck message 2", expected_log)
+
+    def test_get_running_tasks_no_filter(self):
+        """Test get_running_tasks without filter returns all running tasks."""
+        # Create test tasks manually
+        task1 = RunningTaskItem(
+            user_id="user1",
+            mem_cube_id="cube1",
+            task_info="Test task 1",
+            task_name="handler1",
+        )
+        task2 = RunningTaskItem(
+            user_id="user2",
+            mem_cube_id="cube2",
+            task_info="Test task 2",
+            task_name="handler2",
+        )
+
+        # Add tasks to dispatcher's running tasks
+        with self.dispatcher._task_lock:
+            self.dispatcher._running_tasks[task1.item_id] = task1
+            self.dispatcher._running_tasks[task2.item_id] = task2
+
+        # Get all running tasks
+        running_tasks = self.dispatcher.get_running_tasks()
+
+        # Verify all tasks are returned
+        self.assertEqual(len(running_tasks), 2)
+        self.assertIn(task1.item_id, running_tasks)
+        self.assertIn(task2.item_id, running_tasks)
+        self.assertEqual(running_tasks[task1.item_id], task1)
+        self.assertEqual(running_tasks[task2.item_id], task2)
+
+        # Clean up
+        with self.dispatcher._task_lock:
+            self.dispatcher._running_tasks.clear()
+
+    def test_get_running_tasks_filter_by_user_id(self):
+        """Test get_running_tasks with user_id filter."""
+        # Create test tasks with different user_ids
+        task1 = RunningTaskItem(
+            user_id="user1",
+            mem_cube_id="cube1",
+            task_info="Test task 1",
+            task_name="handler1",
+        )
+        task2 = RunningTaskItem(
+            user_id="user2",
+            mem_cube_id="cube2",
+            task_info="Test task 2",
+            task_name="handler2",
+        )
+        task3 = RunningTaskItem(
+            user_id="user1",
+            mem_cube_id="cube3",
+            task_info="Test task 3",
+            task_name="handler3",
+        )
+
+        # Add tasks to dispatcher's running tasks
+        with self.dispatcher._task_lock:
+            self.dispatcher._running_tasks[task1.item_id] = task1
+            self.dispatcher._running_tasks[task2.item_id] = task2
+            self.dispatcher._running_tasks[task3.item_id] = task3
+
+        # Filter by user_id
+        user1_tasks = self.dispatcher.get_running_tasks(lambda task: task.user_id == "user1")
+
+        # Verify only user1 tasks are returned
+        self.assertEqual(len(user1_tasks), 2)
+        self.assertIn(task1.item_id, user1_tasks)
+        self.assertIn(task3.item_id, user1_tasks)
+        self.assertNotIn(task2.item_id, user1_tasks)
+
+        # Clean up
+        with self.dispatcher._task_lock:
+            self.dispatcher._running_tasks.clear()
+
+    def test_get_running_tasks_filter_by_multiple_conditions(self):
+        """Test get_running_tasks with multiple filter conditions."""
+        # Create test tasks with different attributes
+        task1 = RunningTaskItem(
+            user_id="user1",
+            mem_cube_id="cube1",
+            task_info="Test task 1",
+            task_name="test_handler",
+        )
+        task2 = RunningTaskItem(
+            user_id="user1",
+            mem_cube_id="cube2",
+            task_info="Test task 2",
+            task_name="other_handler",
+        )
+        task3 = RunningTaskItem(
+            user_id="user2",
+            mem_cube_id="cube1",
+            task_info="Test task 3",
+            task_name="test_handler",
+        )
+
+        # Add tasks to dispatcher's running tasks
+        with self.dispatcher._task_lock:
+            self.dispatcher._running_tasks[task1.item_id] = task1
+            self.dispatcher._running_tasks[task2.item_id] = task2
+            self.dispatcher._running_tasks[task3.item_id] = task3
+
+        # Filter by multiple conditions: user_id == "user1" AND task_name == "test_handler"
+        filtered_tasks = self.dispatcher.get_running_tasks(
+            lambda task: task.user_id == "user1" and task.task_name == "test_handler"
+        )
+
+        # Verify only task1 matches both conditions
+        self.assertEqual(len(filtered_tasks), 1)
+        self.assertIn(task1.item_id, filtered_tasks)
+        self.assertNotIn(task2.item_id, filtered_tasks)
+        self.assertNotIn(task3.item_id, filtered_tasks)
+
+        # Clean up
+        with self.dispatcher._task_lock:
+            self.dispatcher._running_tasks.clear()
+
+    def test_get_running_tasks_filter_by_status(self):
+        """Test get_running_tasks with status filter."""
+        # Create test tasks with different statuses
+        task1 = RunningTaskItem(
+            user_id="user1",
+            mem_cube_id="cube1",
+            task_info="Test task 1",
+            task_name="handler1",
+        )
+        task2 = RunningTaskItem(
+            user_id="user2",
+            mem_cube_id="cube2",
+            task_info="Test task 2",
+            task_name="handler2",
+        )
+
+        # Manually set different statuses
+        task1.status = "running"
+        task2.status = "completed"
+
+        # Add tasks to dispatcher's running tasks
+        with self.dispatcher._task_lock:
+            self.dispatcher._running_tasks[task1.item_id] = task1
+            self.dispatcher._running_tasks[task2.item_id] = task2
+
+        # Filter by status
+        running_status_tasks = self.dispatcher.get_running_tasks(
+            lambda task: task.status == "running"
+        )
+
+        # Verify only running tasks are returned
+        self.assertEqual(len(running_status_tasks), 1)
+        self.assertIn(task1.item_id, running_status_tasks)
+        self.assertNotIn(task2.item_id, running_status_tasks)
+
+        # Clean up
+        with self.dispatcher._task_lock:
+            self.dispatcher._running_tasks.clear()
+
+    def test_get_running_tasks_thread_safety(self):
+        """Test get_running_tasks is thread-safe."""
+        # Create test task
+        task1 = RunningTaskItem(
+            user_id="user1",
+            mem_cube_id="cube1",
+            task_info="Test task 1",
+            task_name="handler1",
+        )
+
+        # Add task to dispatcher's running tasks
+        with self.dispatcher._task_lock:
+            self.dispatcher._running_tasks[task1.item_id] = task1
+
+        # Get running tasks (should work without deadlock)
+        running_tasks = self.dispatcher.get_running_tasks()
+
+        # Verify task is returned
+        self.assertEqual(len(running_tasks), 1)
+        self.assertIn(task1.item_id, running_tasks)
+
+        # Test with filter (should also work without deadlock)
+        filtered_tasks = self.dispatcher.get_running_tasks(lambda task: task.user_id == "user1")
+        self.assertEqual(len(filtered_tasks), 1)
+
+        # Clean up
+        with self.dispatcher._task_lock:
+            self.dispatcher._running_tasks.clear()

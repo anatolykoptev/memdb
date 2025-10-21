@@ -243,6 +243,57 @@ def search_memories(search_req: APISearchRequest):
     )
 
 
+@router.post("/search_ws", summary="Search memories with scheduler", response_model=SearchResponse)
+def search_memories_ws(search_req: APISearchRequest):
+    """Search memories for a specific user."""
+    # Create UserContext object - how to assign values
+    user_context = UserContext(
+        user_id=search_req.user_id,
+        mem_cube_id=search_req.mem_cube_id,
+        session_id=search_req.session_id or "default_session",
+    )
+    logger.info(f"Search user_id is: {user_context.mem_cube_id}")
+    memories_result: MOSSearchResult = {
+        "text_mem": [],
+        "act_mem": [],
+        "para_mem": [],
+    }
+    target_session_id = search_req.session_id
+    if not target_session_id:
+        target_session_id = "default_session"
+    search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
+
+    # Create MemCube and perform search
+    naive_mem_cube = _create_naive_mem_cube()
+    search_results = naive_mem_cube.text_mem.search(
+        query=search_req.query,
+        user_name=user_context.mem_cube_id,
+        top_k=search_req.top_k,
+        mode=search_req.mode,
+        manual_close_internet=not search_req.internet_search,
+        moscube=search_req.moscube,
+        search_filter=search_filter,
+        info={
+            "user_id": search_req.user_id,
+            "session_id": target_session_id,
+            "chat_history": search_req.chat_history,
+        },
+    )
+    formatted_memories = [_format_memory_item(data) for data in search_results]
+
+    memories_result["text_mem"].append(
+        {
+            "cube_id": search_req.mem_cube_id,
+            "memories": formatted_memories,
+        }
+    )
+
+    return SearchResponse(
+        message="Search completed successfully",
+        data=memories_result,
+    )
+
+
 @router.post("/add", summary="Add memories", response_model=MemoryResponse)
 def add_memories(add_req: APIADDRequest):
     """Add memories for a specific user."""

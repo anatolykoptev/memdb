@@ -722,6 +722,60 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
 
         return self.dispatcher.unregister_handlers(labels)
 
+    def get_running_tasks(self, filter_func: Callable | None = None) -> dict[str, dict]:
+        """
+        Get currently running tasks, optionally filtered by a custom function.
+
+        This method delegates to the dispatcher's get_running_tasks method.
+
+        Args:
+            filter_func: Optional function to filter tasks. Should accept a RunningTaskItem
+                        and return True if the task should be included in results.
+
+        Returns:
+            dict[str, dict]: Dictionary mapping task IDs to task information dictionaries.
+                           Each task dict contains: item_id, user_id, mem_cube_id, task_info,
+                           task_name, start_time, end_time, status, result, error_message, messages
+
+        Examples:
+            # Get all running tasks
+            all_tasks = scheduler.get_running_tasks()
+
+            # Get tasks for specific user
+            user_tasks = scheduler.get_running_tasks(
+                filter_func=lambda task: task.user_id == "user123"
+            )
+
+            # Get tasks with specific status
+            active_tasks = scheduler.get_running_tasks(
+                filter_func=lambda task: task.status == "running"
+            )
+        """
+        if not self.dispatcher:
+            logger.warning("Dispatcher is not initialized, returning empty tasks dict")
+            return {}
+
+        running_tasks = self.dispatcher.get_running_tasks(filter_func=filter_func)
+
+        # Convert RunningTaskItem objects to dictionaries for easier consumption
+        result = {}
+        for task_id, task_item in running_tasks.items():
+            result[task_id] = {
+                "item_id": task_item.item_id,
+                "user_id": task_item.user_id,
+                "mem_cube_id": task_item.mem_cube_id,
+                "task_info": task_item.task_info,
+                "task_name": task_item.task_name,
+                "start_time": task_item.start_time,
+                "end_time": task_item.end_time,
+                "status": task_item.status,
+                "result": task_item.result,
+                "error_message": task_item.error_message,
+                "messages": task_item.messages,
+            }
+
+        return result
+
     def _cleanup_queues(self) -> None:
         """Ensure all queues are emptied and marked as closed."""
         try:

@@ -105,6 +105,42 @@ class APIAnalyzerForScheduler:
             logger.error(f"Error in search operation: {e}")
             return {"error": str(e), "success": False}
 
+    def search_ws(
+        self,
+        user_id: str,
+        mem_cube_id: str,
+        query: str,
+        top_k: int = 50,
+        session_id: str | None = None,
+        use_requests: bool = True,
+    ) -> dict[str, Any]:
+        """
+        Search for memories using the product/search_ws API endpoint (with scheduler).
+
+        Args:
+            user_id: User identifier
+            mem_cube_id: Memory cube identifier
+            query: Search query string
+            top_k: Number of top results to return
+            session_id: Optional session identifier
+            use_requests: Whether to use requests library (True) or http.client (False)
+
+        Returns:
+            Dictionary containing the API response
+        """
+        payload = {"user_id": user_id, "mem_cube_id": mem_cube_id, "query": query, "top_k": top_k}
+        if session_id:
+            payload["session_id"] = session_id
+
+        try:
+            if use_requests:
+                return self._search_ws_with_requests(payload)
+            else:
+                return self._search_ws_with_http_client(payload)
+        except Exception as e:
+            logger.error(f"Error in search_ws operation: {e}")
+            return {"error": str(e), "success": False}
+
     def _search_with_requests(self, payload: dict[str, Any]) -> dict[str, Any]:
         """
         Perform search using requests library.
@@ -137,6 +173,77 @@ class APIAnalyzerForScheduler:
                 "data": {},
                 "text": response.text,
             }
+
+    def _search_ws_with_requests(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        Perform search_ws using requests library.
+
+        Args:
+            payload: Request payload
+
+        Returns:
+            Dictionary containing the API response
+        """
+        url = f"{self.base_url}/product/search_ws"
+
+        response = requests.post(
+            url, headers=self.default_headers, data=json.dumps(payload), timeout=self.timeout
+        )
+
+        logger.info(f"Search_ws request to {url} completed with status: {response.status_code}")
+
+        try:
+            return {
+                "success": True,
+                "status_code": response.status_code,
+                "data": response.json() if response.content else {},
+                "text": response.text,
+            }
+        except json.JSONDecodeError:
+            return {
+                "success": True,
+                "status_code": response.status_code,
+                "data": {},
+                "text": response.text,
+            }
+
+    def _search_ws_with_http_client(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        Perform search_ws using http.client.
+
+        Args:
+            payload: Request payload
+
+        Returns:
+            Dictionary containing the API response
+        """
+        conn = self._get_connection()
+
+        try:
+            conn.request("POST", "/product/search_ws", json.dumps(payload), self.default_headers)
+
+            response = conn.getresponse()
+            data = response.read()
+            response_text = data.decode("utf-8")
+
+            logger.info(f"Search_ws request completed with status: {response.status}")
+
+            try:
+                response_data = json.loads(response_text) if response_text else {}
+            except json.JSONDecodeError:
+                response_data = {}
+
+            return {
+                "success": True,
+                "status_code": response.status,
+                "data": response_data,
+                "text": response_text,
+            }
+        except Exception as e:
+            logger.error(f"Error in search_ws with http.client: {e}")
+            return {"error": str(e), "success": False}
+        finally:
+            conn.close()
 
     def _search_with_http_client(self, payload: dict[str, Any]) -> dict[str, Any]:
         """
@@ -329,3 +436,13 @@ if __name__ == "__main__":
         top=50,
     )
     print("Search result:", search_result)
+
+    # Example search_ws operation
+    search_ws_result = analyzer.search_ws(
+        user_id="test_user_id",
+        mem_cube_id="test_mem_cube_id",
+        query="What are some good places to celebrate New Year's Eve in Shanghai?",
+        top_k=10,
+        session_id="test_session_id",
+    )
+    print("Search_ws result:", search_ws_result)
