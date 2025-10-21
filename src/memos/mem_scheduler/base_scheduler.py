@@ -22,6 +22,7 @@ from memos.mem_scheduler.monitors.general_monitor import SchedulerGeneralMonitor
 from memos.mem_scheduler.schemas.general_schemas import (
     DEFAULT_ACT_MEM_DUMP_PATH,
     DEFAULT_CONSUME_INTERVAL_SECONDS,
+    DEFAULT_MAX_INTERNAL_MESSAGE_QUEUE_SIZE,
     DEFAULT_STARTUP_MODE,
     DEFAULT_THREAD_POOL_MAX_WORKERS,
     STARTUP_BY_PROCESS,
@@ -88,7 +89,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
 
         # internal message queue
         self.max_internal_message_queue_size = self.config.get(
-            "max_internal_message_queue_size", 10000
+            "max_internal_message_queue_size", DEFAULT_MAX_INTERNAL_MESSAGE_QUEUE_SIZE
         )
         self.memos_message_queue: Queue[ScheduleMessageItem] = Queue(
             maxsize=self.max_internal_message_queue_size
