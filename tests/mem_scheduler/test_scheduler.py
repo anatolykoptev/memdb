@@ -202,6 +202,246 @@ class TestGeneralScheduler(unittest.TestCase):
         # Stop the scheduler
         self.scheduler.stop()
 
+    def test_robustness(self):
+        """Test dispatcher robustness when thread pool is overwhelmed with tasks."""
+        import threading
+        import time
+
+        # Create a scheduler with a small thread pool for testing
+        small_max_workers = 3
+        self.scheduler.dispatcher.max_workers = small_max_workers
+
+        # Recreate dispatcher with smaller thread pool
+        from memos.context.context import ContextThreadPoolExecutor
+
+        if self.scheduler.dispatcher.dispatcher_executor:
+            self.scheduler.dispatcher.dispatcher_executor.shutdown(wait=True)
+
+        self.scheduler.dispatcher.dispatcher_executor = ContextThreadPoolExecutor(
+            max_workers=small_max_workers, thread_name_prefix="test_dispatcher"
+        )
+
+        # Track task completion
+        completed_tasks = []
+        failed_tasks = []
+        task_lock = threading.Lock()
+
+        def slow_handler(messages: list[ScheduleMessageItem]) -> None:
+            """Handler that simulates slow processing to overwhelm thread pool."""
+            try:
+                task_id = messages[0].content if messages else "unknown"
+                # Simulate slow processing (reduced from 2.0s to 20ms)
+                time.sleep(0.02)
+                with task_lock:
+                    completed_tasks.append(task_id)
+            except Exception as e:
+                with task_lock:
+                    failed_tasks.append(str(e))
+
+        def fast_handler(messages: list[ScheduleMessageItem]) -> None:
+            """Handler for quick tasks to test mixed workload."""
+            try:
+                task_id = messages[0].content if messages else "unknown"
+                time.sleep(0.001)  # Quick processing (reduced from 0.1s to 1ms)
+                with task_lock:
+                    completed_tasks.append(f"fast_{task_id}")
+            except Exception as e:
+                with task_lock:
+                    failed_tasks.append(str(e))
+
+        # Register handlers
+        slow_label = "slow_task"
+        fast_label = "fast_task"
+        self.scheduler.register_handlers({slow_label: slow_handler, fast_label: fast_handler})
+
+        # Start the scheduler
+        self.scheduler.start()
+
+        # Test 1: Overwhelm thread pool with slow tasks
+        print("Test 1: Overwhelming thread pool with slow tasks...")
+        num_slow_tasks = small_max_workers * 3  # 9 tasks for 3 workers
+
+        slow_messages = []
+        for i in range(num_slow_tasks):
+            message = ScheduleMessageItem(
+                label=slow_label,
+                content=f"slow_task_{i}",
+                user_id=f"test_user_{i}",
+                mem_cube_id=f"test_mem_cube_{i}",
+                mem_cube="test_mem_cube_obj",
+                timestamp=datetime.now(),
+            )
+            slow_messages.append(message)
+
+        # Submit all slow tasks at once - directly dispatch instead of using submit_messages
+        start_time = time.time()
+        try:
+            # Directly dispatch messages to bypass queue and immediately start processing
+            self.scheduler.dispatcher.dispatch(slow_messages)
+        except Exception as e:
+            print(f"Exception during task dispatch: {e}")
+
+        # Test 2: Add fast tasks while slow tasks are running
+        print("Test 2: Adding fast tasks while thread pool is busy...")
+        time.sleep(0.005)  # Let slow tasks start (reduced from 0.5s to 5ms)
+
+        num_fast_tasks = 5
+        fast_messages = []
+        for i in range(num_fast_tasks):
+            message = ScheduleMessageItem(
+                label=fast_label,
+                content=f"fast_task_{i}",
+                user_id=f"fast_user_{i}",
+                mem_cube_id=f"fast_mem_cube_{i}",
+                mem_cube="fast_mem_cube_obj",
+                timestamp=datetime.now(),
+            )
+            fast_messages.append(message)
+
+        try:
+            # Directly dispatch fast messages
+            self.scheduler.dispatcher.dispatch(fast_messages)
+        except Exception as e:
+            print(f"Exception during fast task dispatch: {e}")
+
+        # Test 3: Check thread pool status during overload
+        print("Test 3: Monitoring thread pool status...")
+        running_tasks = self.scheduler.dispatcher.get_running_tasks()
+        running_count = self.scheduler.dispatcher.get_running_task_count()
+        print(f"Running tasks count: {running_count}")
+        print(f"Running tasks: {list(running_tasks.keys())}")
+
+        # Test 4: Wait for some tasks to complete and verify recovery
+        print("Test 4: Waiting for task completion and recovery...")
+        max_wait_time = 0.5  # Maximum wait time (reduced from 15.0s to 0.5s)
+        wait_start = time.time()
+
+        while time.time() - wait_start < max_wait_time:
+            with task_lock:
+                total_completed = len(completed_tasks)
+                total_failed = len(failed_tasks)
+
+            if total_completed + total_failed >= num_slow_tasks + num_fast_tasks:
+                break
+
+            time.sleep(0.01)  # Check every 10ms (reduced from 1.0s)
+
+        # Final verification
+        execution_time = time.time() - start_time
+        with task_lock:
+            final_completed = len(completed_tasks)
+            final_failed = len(failed_tasks)
+
+        print(f"Execution completed in {execution_time:.2f} seconds")
+        print(f"Completed tasks: {final_completed}")
+        print(f"Failed tasks: {final_failed}")
+        print(f"Completed task IDs: {completed_tasks}")
+        if failed_tasks:
+            print(f"Failed task errors: {failed_tasks}")
+
+        # Assertions for robustness test
+        # At least some tasks should complete successfully
+        self.assertGreater(final_completed, 0, "No tasks completed successfully")
+
+        # Total processed should be reasonable (allowing for some failures under stress)
+        total_processed = final_completed + final_failed
+        expected_total = num_slow_tasks + num_fast_tasks
+        self.assertGreaterEqual(
+            total_processed,
+            expected_total * 0.7,  # Allow 30% failure rate under extreme stress
+            f"Too few tasks processed: {total_processed}/{expected_total}",
+        )
+
+        # Fast tasks should generally complete faster than slow tasks
+        fast_completed = [task for task in completed_tasks if task.startswith("fast_")]
+        self.assertGreater(len(fast_completed), 0, "No fast tasks completed")
+
+        # Test 5: Verify thread pool recovery after stress
+        print("Test 5: Testing thread pool recovery...")
+        recovery_messages = []
+        for i in range(3):  # Small number of recovery tasks
+            message = ScheduleMessageItem(
+                label=fast_label,
+                content=f"recovery_task_{i}",
+                user_id=f"recovery_user_{i}",
+                mem_cube_id=f"recovery_mem_cube_{i}",
+                mem_cube="recovery_mem_cube_obj",
+                timestamp=datetime.now(),
+            )
+            recovery_messages.append(message)
+
+        # Clear previous results
+        with task_lock:
+            completed_tasks.clear()
+            failed_tasks.clear()
+
+        # Submit recovery tasks - directly dispatch
+        try:
+            self.scheduler.dispatcher.dispatch(recovery_messages)
+        except Exception as e:
+            print(f"Exception during recovery task dispatch: {e}")
+
+        # Wait for recovery tasks to be processed
+        time.sleep(0.05)  # Give time for recovery tasks to complete (reduced from 3.0s to 50ms)
+
+        with task_lock:
+            recovery_completed = len(completed_tasks)
+            recovery_failed = len(failed_tasks)
+
+        print(f"Recovery test - Completed: {recovery_completed}, Failed: {recovery_failed}")
+
+        # Recovery tasks should complete successfully
+        self.assertGreaterEqual(
+            recovery_completed,
+            len(recovery_messages) * 0.8,  # Allow some margin
+            "Thread pool did not recover properly after stress test",
+        )
+
+        # Stop the scheduler
+        self.scheduler.stop()
+
+        # Test 6: Simulate dispatcher monitor restart functionality
+        print("Test 6: Testing dispatcher monitor restart functionality...")
+
+        # Force a failure condition by setting failure count high
+        monitor = self.scheduler.dispatcher_monitor
+        if monitor and hasattr(monitor, "_pools"):
+            with monitor._pool_lock:
+                pool_name = monitor.dispatcher_pool_name
+                if pool_name in monitor._pools:
+                    # Simulate multiple failures to trigger restart
+                    monitor._pools[pool_name]["failure_count"] = monitor.max_failures - 1
+                    monitor._pools[pool_name]["healthy"] = False
+                    print(f"Set failure count to {monitor._pools[pool_name]['failure_count']}")
+
+                    # Trigger one more failure to cause restart
+                    monitor._check_pools_health()
+
+                    # Wait a bit for restart to complete
+                    time.sleep(0.02)  # Reduced from 2s to 20ms
+
+                    # Check if pool was restarted (failure count should be reset)
+                    if pool_name in monitor._pools:
+                        final_failure_count = monitor._pools[pool_name]["failure_count"]
+                        is_healthy = monitor._pools[pool_name]["healthy"]
+                        print(
+                            f"After restart - Failure count: {final_failure_count}, Healthy: {is_healthy}"
+                        )
+
+                        # Verify restart worked
+                        assert final_failure_count < monitor.max_failures, (
+                            f"Expected failure count to be reset, got {final_failure_count}"
+                        )
+                        print("Dispatcher monitor restart functionality verified!")
+                    else:
+                        print("Pool not found after restart attempt")
+                else:
+                    print(f"Pool {pool_name} not found in monitor registry")
+        else:
+            print("Dispatcher monitor not available or pools not accessible")
+
+        print("Robustness test completed successfully!")
+
         # Verify cleanup
         self.assertFalse(self.scheduler._running)
 
