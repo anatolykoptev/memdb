@@ -10,8 +10,7 @@ from typing import Any, TypeVar
 
 from sqlalchemy import Boolean, Column, DateTime, String, Text, and_, create_engine
 from sqlalchemy.engine import Engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from memos.log import get_logger
 from memos.mem_user.user_manager import UserManager

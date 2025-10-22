@@ -202,6 +202,71 @@ class TestGeneralScheduler(unittest.TestCase):
         # Stop the scheduler
         self.scheduler.stop()
 
+    def test_redis_message_queue(self):
+        """Test Redis message queue functionality for sending and receiving messages."""
+        import asyncio
+        import time
+
+        from unittest.mock import MagicMock, patch
+
+        # Mock Redis connection and operations
+        mock_redis = MagicMock()
+        mock_redis.xadd = MagicMock(return_value=b"1234567890-0")
+
+        # Track received messages
+        received_messages = []
+
+        def redis_handler(messages: list[ScheduleMessageItem]) -> None:
+            """Handler for Redis messages."""
+            received_messages.extend(messages)
+
+        # Register Redis handler
+        redis_label = "test_redis"
+        handlers = {redis_label: redis_handler}
+        self.scheduler.register_handlers(handlers)
+
+        # Enable Redis queue for this test
+        with (
+            patch.object(self.scheduler, "use_redis_queue", True),
+            patch.object(self.scheduler, "_redis_conn", mock_redis),
+        ):
+            # Start scheduler
+            self.scheduler.start()
+
+            # Create test message for Redis
+            redis_message = ScheduleMessageItem(
+                label=redis_label,
+                content="Redis test message",
+                user_id="redis_user",
+                mem_cube_id="redis_cube",
+                mem_cube="redis_mem_cube_obj",
+                timestamp=datetime.now(),
+            )
+
+            # Submit message to Redis queue
+            asyncio.run(self.scheduler.submit_messages(redis_message))
+
+            # Verify Redis xadd was called
+            mock_redis.xadd.assert_called_once()
+            call_args = mock_redis.xadd.call_args
+            self.assertEqual(call_args[0][0], "user:queries:stream")
+
+            # Verify message data was serialized correctly
+            message_data = call_args[0][1]
+            self.assertEqual(message_data["label"], redis_label)
+            self.assertEqual(message_data["content"], "Redis test message")
+            self.assertEqual(message_data["user_id"], "redis_user")
+            self.assertEqual(message_data["cube_id"], "redis_cube")  # Note: to_dict uses cube_id
+
+            # Simulate Redis message consumption
+            # This would normally be handled by the Redis consumer in the scheduler
+            time.sleep(0.1)  # Brief wait for async operations
+
+            # Stop scheduler
+            self.scheduler.stop()
+
+        print("Redis message queue test completed successfully!")
+
     def test_robustness(self):
         """Test dispatcher robustness when thread pool is overwhelmed with tasks."""
         import threading
@@ -778,7 +843,9 @@ class TestGeneralScheduler(unittest.TestCase):
             timestamp=datetime.now(),
         )
 
-        self.scheduler.submit_messages(test_message)
+        import asyncio
+
+        asyncio.run(self.scheduler.submit_messages(test_message))
 
         # Wait for message processing to complete
         import time

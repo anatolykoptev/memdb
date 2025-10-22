@@ -1,7 +1,6 @@
 import threading
 import time
 
-from datetime import datetime
 from time import perf_counter
 
 from memos.configs.mem_scheduler import BaseSchedulerConfig
@@ -14,6 +13,7 @@ from memos.mem_scheduler.schemas.general_schemas import (
     DEFAULT_DISPATCHER_MONITOR_MAX_FAILURES,
     DEFAULT_STUCK_THREAD_TOLERANCE,
 )
+from memos.mem_scheduler.utils.db_utils import get_utc_now
 
 
 logger = get_logger(__name__)
@@ -84,7 +84,7 @@ class SchedulerDispatcherMonitor(BaseSchedulerModule):
                 "max_workers": max_workers,
                 "restart": restart_on_failure,
                 "failure_count": 0,
-                "last_active": datetime.utcnow(),
+                "last_active": get_utc_now(),
                 "healthy": True,
             }
             logger.info(f"Registered thread pool '{name}' for monitoring")
@@ -168,6 +168,7 @@ class SchedulerDispatcherMonitor(BaseSchedulerModule):
 
         # Clear the pool registry
         self._pools.clear()
+
         logger.info("Thread pool monitor and all pools stopped")
 
     def _check_pools_health(self) -> None:
@@ -281,12 +282,12 @@ class SchedulerDispatcherMonitor(BaseSchedulerModule):
             return False, "No active worker threads"
 
         # Check if threads are stuck (no activity for specified intervals)
-        time_delta = (datetime.utcnow() - pool_info["last_active"]).total_seconds()
+        time_delta = (get_utc_now() - pool_info["last_active"]).total_seconds()
         if time_delta >= self.check_interval * stuck_max_interval:
             return False, f"No recent activity for {time_delta:.1f} seconds"
 
         # If we got here, pool appears healthy
-        pool_info["last_active"] = datetime.utcnow()
+        pool_info["last_active"] = get_utc_now()
 
         # Log health status with comprehensive information
         if self.dispatcher:
@@ -338,7 +339,7 @@ class SchedulerDispatcherMonitor(BaseSchedulerModule):
                 pool_info["executor"] = new_executor
                 pool_info["failure_count"] = 0
                 pool_info["healthy"] = True
-                pool_info["last_active"] = datetime.utcnow()
+                pool_info["last_active"] = get_utc_now()
 
                 elapsed_time = perf_counter() - start_time
                 if elapsed_time > 1:

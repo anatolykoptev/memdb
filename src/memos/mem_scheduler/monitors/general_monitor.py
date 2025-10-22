@@ -28,6 +28,7 @@ from memos.mem_scheduler.schemas.monitor_schemas import (
     MemoryMonitorManager,
     QueryMonitorQueue,
 )
+from memos.mem_scheduler.utils.db_utils import get_utc_now
 from memos.mem_scheduler.utils.misc_utils import extract_json_dict
 from memos.memories.textual.tree import TreeTextMemory
 
@@ -256,7 +257,7 @@ class SchedulerGeneralMonitor(BaseSchedulerModule):
         activation_db_manager.sync_with_orm(size_limit=self.activation_mem_monitor_capacity)
 
     def timed_trigger(self, last_time: datetime, interval_seconds: float) -> bool:
-        now = datetime.utcnow()
+        now = get_utc_now()
         elapsed = (now - last_time).total_seconds()
         if elapsed >= interval_seconds:
             return True
