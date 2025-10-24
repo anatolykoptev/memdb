@@ -18,6 +18,7 @@ from memos.configs.graph_db import GraphDBConfigFactory
 from memos.configs.internet_retriever import InternetRetrieverConfigFactory
 from memos.configs.llm import LLMConfigFactory
 from memos.configs.mem_reader import MemReaderConfigFactory
+from memos.configs.mem_scheduler import SchedulerConfigFactory
 from memos.configs.reranker import RerankerConfigFactory
 from memos.embedders.factory import EmbedderFactory
 from memos.graph_dbs.factory import GraphStoreFactory
@@ -26,7 +27,9 @@ from memos.log import get_logger
 from memos.mem_cube.navie import NaiveMemCube
 from memos.mem_os.product_server import MOSServer
 from memos.mem_reader.factory import MemReaderFactory
-from memos.mem_scheduler.general_modules.dispatcher import SchedulerDispatcher
+from memos.mem_scheduler.orm_modules.base_model import BaseDBManager
+from memos.mem_scheduler.scheduler_factory import SchedulerFactory
+from memos.mem_scheduler.schemas.general_schemas import SearchMode
 from memos.memories.textual.tree_text_memory.organize.manager import MemoryManager
 from memos.memories.textual.tree_text_memory.retrieve.internet_retriever_factory import (
     InternetRetrieverFactory,
@@ -136,12 +139,18 @@ def init_server():
         online_bot=False,
     )
 
-    scheduler_config = APIConfig.get_scheduler_config()
-    scheduler_dispathcer = SchedulerDispatcher(
-        max_workers=scheduler_config["config"]["thread_pool_max_workers"],
-        enable_parallel_dispatch=scheduler_config["config"]["enable_parallel_dispatch"],
-        config=scheduler_config,
+    # Initialize Scheduler
+    scheduler_config_dict = APIConfig.get_scheduler_config()
+    scheduler_config = SchedulerConfigFactory(
+        backend="optimized_scheduler", config=scheduler_config_dict
     )
+    mem_scheduler = SchedulerFactory.from_config(scheduler_config)
+    mem_scheduler.initialize_modules(
+        chat_llm=llm,
+        process_llm=mem_reader.llm,
+        db_engine=BaseDBManager.create_default_sqlite_engine(),
+    )
+    mem_scheduler.start()
 
     return (
         graph_db,
@@ -153,7 +162,7 @@ def init_server():
         memory_manager,
         default_cube_config,
         mos_server,
-        scheduler_dispathcer,
+        mem_scheduler,
     )
 
 
@@ -219,7 +228,15 @@ def search_memories(search_req: APISearchRequest):
         "para_mem": [],
     }
 
-    formatted_memories = fast_search_memories(search_req=search_req, user_context=user_context)
+    search_mode = search_req.mode
+
+    if search_mode == SearchMode.FAST:
+        formatted_memories = fast_search_memories(search_req=search_req, user_context=user_context)
+    elif search_mode == SearchMode.FINE or search_mode == SearchMode.MIXTURE:
+        formatted_memories = fine_search_memories(search_req=search_req, user_context=user_context)
+    else:
+        logger.error(f"Unsupported search mode: {search_mode}")
+        raise HTTPException(status_code=400, detail=f"Unsupported search mode: {search_mode}")
 
     memories_result["text_mem"].append(
         {
@@ -232,6 +249,36 @@ def search_memories(search_req: APISearchRequest):
         message="Search completed successfully",
         data=memories_result,
     )
+
+
+def fine_search_memories(
+    search_req: APISearchRequest,
+    user_context: UserContext,
+):
+    target_session_id = search_req.session_id
+    if not target_session_id:
+        target_session_id = "default_session"
+    search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
+
+    # Create MemCube and perform search
+    naive_mem_cube = _create_naive_mem_cube()
+    search_results = naive_mem_cube.text_mem.search(
+        query=search_req.query,
+        user_name=user_context.mem_cube_id,
+        top_k=search_req.top_k,
+        mode=search_req.mode,
+        manual_close_internet=not search_req.internet_search,
+        moscube=search_req.moscube,
+        search_filter=search_filter,
+        info={
+            "user_id": search_req.user_id,
+            "session_id": target_session_id,
+            "chat_history": search_req.chat_history,
+        },
+    )
+    formatted_memories = [_format_memory_item(data) for data in search_results]
+
+    return formatted_memories
 
 
 def fast_search_memories(

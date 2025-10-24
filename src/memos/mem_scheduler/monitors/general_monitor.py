@@ -65,7 +65,7 @@ class SchedulerGeneralMonitor(BaseSchedulerModule):
                 "No database engine provided; falling back to default temporary SQLite engine. "
                 "This is intended for testing only. Consider providing a configured engine for production use."
             )
-            self.db_engine = BaseDBManager.create_default_engine()
+            self.db_engine = BaseDBManager.create_default_sqlite_engine()
 
         self.query_monitors: dict[UserID, dict[MemCubeID, DBManagerForQueryMonitorQueue]] = {}
         self.working_memory_monitors: dict[

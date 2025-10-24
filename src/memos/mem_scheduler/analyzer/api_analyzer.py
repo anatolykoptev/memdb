@@ -56,6 +56,10 @@ class APIAnalyzerForScheduler:
         # Reusable connection for http.client
         self._connection = None
 
+        # Attributes
+        self.user_id = "test_user_id"
+        self.mem_cube_id = "test_mem_cube_id"
+
         logger.info(f"APIAnalyzerForScheduler initialized with base_url: {self.base_url}")
 
     def _get_connection(self) -> http.client.HTTPConnection | http.client.HTTPSConnection:
@@ -301,31 +305,315 @@ class APIAnalyzerForScheduler:
         """Cleanup method to close connection when object is destroyed."""
         self._close_connection()
 
+    def analyze_service(self):
+        # Example add operation
+        messages = [
+            {"role": "user", "content": "Where should I go for New Year's Eve in Shanghai?"},
+            {
+                "role": "assistant",
+                "content": "You could head to the Bund for the countdown, attend a rooftop party, or enjoy the fireworks at Disneyland Shanghai.",
+            },
+        ]
+
+        add_result = self.add(
+            messages=messages, user_id="test_user_id", mem_cube_id="test_mem_cube_id"
+        )
+        print("Add result:", add_result)
+
+        # Example search operation
+        search_result = self.search(
+            user_id="test_user_id",
+            mem_cube_id="test_mem_cube_id",
+            query="What are some good places to celebrate New Year's Eve in Shanghai?",
+            top=50,
+        )
+        print("Search result:", search_result)
+
+    def analyze_features(self):
+        try:
+            # Test basic search functionality
+            search_result = self.search(
+                user_id="test_user_id",
+                mem_cube_id="test_mem_cube_id",
+                query="What are some good places to celebrate New Year's Eve in Shanghai?",
+                top=50,
+            )
+            print("Search result:", search_result)
+        except Exception as e:
+            logger.error(f"Feature analysis failed: {e}")
+
+
+class DirectSearchMemoriesAnalyzer:
+    """
+    Direct analyzer for testing search_memories function
+    Used for debugging and analyzing search_memories function behavior without starting a full API server
+    """
+
+    def __init__(self):
+        """Initialize the analyzer"""
+        # Import necessary modules
+        try:
+            from memos.api.product_models import APIADDRequest, APISearchRequest
+            from memos.api.routers.server_router import add_memories, search_memories
+            from memos.types import MessageDict, UserContext
+
+            self.APISearchRequest = APISearchRequest
+            self.APIADDRequest = APIADDRequest
+            self.search_memories = search_memories
+            self.add_memories = add_memories
+            self.UserContext = UserContext
+            self.MessageDict = MessageDict
+
+            logger.info("DirectSearchMemoriesAnalyzer initialized successfully")
+        except ImportError as e:
+            logger.error(f"Failed to import modules: {e}")
+            raise
+
+    def create_test_search_request(
+        self,
+        query="test query",
+        user_id="test_user",
+        mem_cube_id="test_cube",
+        mode="fast",
+        top_k=10,
+        chat_history=None,
+        session_id=None,
+    ):
+        """
+        Create a test APISearchRequest object with the given parameters.
+
+        Args:
+            query: Search query string
+            user_id: User ID for the request
+            mem_cube_id: Memory cube ID for the request
+            mode: Search mode ("fast" or "fine")
+            top_k: Number of results to return
+            chat_history: Chat history for context (optional)
+            session_id: Session ID for the request (optional)
+
+        Returns:
+            APISearchRequest: A configured request object
+        """
+        return self.APISearchRequest(
+            query=query,
+            user_id=user_id,
+            mem_cube_id=mem_cube_id,
+            mode=mode,
+            top_k=top_k,
+            chat_history=chat_history,
+            session_id=session_id,
+        )
+
+    def create_test_add_request(
+        self,
+        user_id="test_user",
+        mem_cube_id="test_cube",
+        messages=None,
+        memory_content=None,
+        session_id=None,
+    ):
+        """
+        Create a test APIADDRequest object with the given parameters.
+
+        Args:
+            user_id: User ID for the request
+            mem_cube_id: Memory cube ID for the request
+            messages: List of messages to add (optional)
+            memory_content: Direct memory content to add (optional)
+            session_id: Session ID for the request (optional)
+
+        Returns:
+            APIADDRequest: A configured request object
+        """
+        if messages is None and memory_content is None:
+            # Default test messages
+            messages = [
+                {"role": "user", "content": "What's the weather like today?"},
+                {
+                    "role": "assistant",
+                    "content": "I don't have access to real-time weather data, but you can check a weather app or website for current conditions.",
+                },
+            ]
+
+        # Ensure we have a valid session_id
+        if session_id is None:
+            session_id = "test_session_" + str(hash(user_id + mem_cube_id))[:8]
+
+        return self.APIADDRequest(
+            user_id=user_id,
+            mem_cube_id=mem_cube_id,
+            messages=messages,
+            memory_content=memory_content,
+            session_id=session_id,
+            doc_path=None,
+            source="api_analyzer_test",
+            chat_history=None,
+            operation=None,
+        )
+
+    def test_add_memories_basic(self, user_id="test_user_add", mem_cube_id="test_cube_add"):
+        """Basic add_memories test"""
+        print("=" * 60)
+        print("Starting basic add_memories test")
+        print("=" * 60)
+
+        try:
+            # Create test request with default messages
+            add_req = self.create_test_add_request(user_id=user_id, mem_cube_id=mem_cube_id)
+
+            print("Test request created:")
+            print(f"  User ID: {add_req.user_id}")
+            print(f"  Mem Cube ID: {add_req.mem_cube_id}")
+            print(f"  Messages: {add_req.messages}")
+            print(f"  Session ID: {add_req.session_id}")
+
+            # Call add_memories function
+            print("\nCalling add_memories function...")
+            result = self.add_memories(add_req)
+
+            print(f"Add result: {result}")
+            print("Basic add_memories test completed successfully")
+            return result
+
+        except Exception as e:
+            print(f"Basic add_memories test failed: {e}")
+            import traceback
+
+            traceback.print_exc()
+            return None
+
+    def test_search_memories_basic(self, query: str, mode: str, topk: int):
+        """Basic search_memories test"""
+        print("=" * 60)
+        print("Starting basic search_memories test")
+        print("=" * 60)
+
+        try:
+            # Create test request
+            search_req = self.create_test_search_request(
+                query=query,
+                user_id="test_user_id",
+                mem_cube_id="test_mem_cube_id",
+                mode=mode,
+                top_k=topk,
+            )
+
+            print("Test request parameters:")
+            print(f"  - query: {search_req.query}")
+            print(f"  - user_id: {search_req.user_id}")
+            print(f"  - mem_cube_id: {search_req.mem_cube_id}")
+            print(f"  - mode: {search_req.mode}")
+            print(f"  - top_k: {search_req.top_k}")
+            print(f"  - internet_search: {search_req.internet_search}")
+            print(f"  - moscube: {search_req.moscube}")
+            print()
+
+            # Call search_memories function
+            print("Calling search_memories function...")
+            result = self.search_memories(search_req)
+
+            print("✅ Function call successful!")
+            print(f"Return result type: {type(result)}")
+            print(f"Return result: {result}")
+
+            # Analyze return result
+            if hasattr(result, "message"):
+                print(f"Message: {result.message}")
+            if hasattr(result, "data"):
+                print(f"Data type: {type(result.data)}")
+                if result.data and isinstance(result.data, dict):
+                    for key, value in result.data.items():
+                        print(f"  {key}: {len(value) if isinstance(value, list) else value}")
+
+            return result
+
+        except Exception as e:
+            print(f"❌ Test failed: {e}")
+            import traceback
+
+            print("Detailed error information:")
+            traceback.print_exc()
+            return None
+
+    def run_all_tests(self):
+        """Run all available tests"""
+        print("🚀 Starting comprehensive test suite")
+        print("=" * 80)
+
+        # Test add_memories functions (more likely to have dependency issues)
+        print("\n\n📝 Testing ADD_MEMORIES functions:")
+        try:
+            print("\n" + "-" * 40)
+            self.test_add_memories_basic()
+            print("✅ Basic add memories test completed")
+        except Exception as e:
+            print(f"❌ Basic add memories test failed: {e}")
+
+        # Test search_memories functions first (less likely to fail)
+        print("\n🔍 Testing SEARCH_MEMORIES functions:")
+        try:
+            self.test_search_memories_basic(
+                query="What are some good places to celebrate New Year's Eve in Shanghai?",
+                mode="fast",
+                topk=3,
+            )
+            print("✅ Search memories test completed successfully")
+        except Exception as e:
+            print(f"❌ Search memories test failed: {e}")
+
+        print("\n" + "=" * 80)
+        print("✅ All tests completed!")
+
 
 # Example usage
 if __name__ == "__main__":
-    # Initialize the analyzer
-    analyzer = APIAnalyzerForScheduler()
+    import argparse
 
-    # Example add operation
-    messages = [
-        {"role": "user", "content": "Where should I go for New Year's Eve in Shanghai?"},
-        {
-            "role": "assistant",
-            "content": "You could head to the Bund for the countdown, attend a rooftop party, or enjoy the fireworks at Disneyland Shanghai.",
-        },
-    ]
-
-    add_result = analyzer.add(
-        messages=messages, user_id="test_user_id", mem_cube_id="test_mem_cube_id"
+    parser = argparse.ArgumentParser(description="API Analyzer for Memory Scheduler")
+    parser.add_argument(
+        "--mode",
+        choices=["direct", "api"],
+        default="direct",
+        help="Test mode: 'direct' for direct function testing, 'api' for API testing (default: direct)",
     )
-    print("Add result:", add_result)
 
-    # Example search operation
-    search_result = analyzer.search(
-        user_id="test_user_id",
-        mem_cube_id="test_mem_cube_id",
-        query="What are some good places to celebrate New Year's Eve in Shanghai?",
-        top=50,
-    )
-    print("Search result:", search_result)
+    args = parser.parse_args()
+
+    if args.mode == "direct":
+        # Direct test mode for search_memories and add_memories functions
+        print("Using direct test mode")
+        try:
+            direct_analyzer = DirectSearchMemoriesAnalyzer()
+            direct_analyzer.run_all_tests()
+        except Exception as e:
+            print(f"Direct test mode failed: {e}")
+            import traceback
+
+            traceback.print_exc()
+    else:
+        # Original API test mode
+        print("Using API test mode")
+        analyzer = APIAnalyzerForScheduler()
+
+        # Test add operation
+        messages = [
+            {"role": "user", "content": "Where should I go for New Year's Eve in Shanghai?"},
+            {
+                "role": "assistant",
+                "content": "You could head to the Bund for the countdown, attend a rooftop party, or enjoy the fireworks at Disneyland Shanghai.",
+            },
+        ]
+
+        add_result = analyzer.add(
+            messages=messages, user_id="test_user_id", mem_cube_id="test_mem_cube_id"
+        )
+        print("Add result:", add_result)
+
+        # Test search operation
+        search_result = analyzer.search(
+            user_id="test_user_id",
+            mem_cube_id="test_mem_cube_id",
+            query="What are some good places to celebrate New Year's Eve in Shanghai?",
+            top=50,
+        )
+        print("Search result:", search_result)

@@ -1,5 +1,14 @@
+from enum import Enum
 from pathlib import Path
 from typing import NewType
+
+
+class SearchMode(str, Enum):
+    """Enumeration for search modes."""
+
+    FAST = "fast"
+    FINE = "fine"
+    MIXTURE = "mixture"
 
 
 FILE_PATH = Path(__file__).absolute()
