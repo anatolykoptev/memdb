@@ -1,3 +1,4 @@
+import json
 import os
 import traceback
 
@@ -29,7 +30,12 @@ from memos.mem_os.product_server import MOSServer
 from memos.mem_reader.factory import MemReaderFactory
 from memos.mem_scheduler.orm_modules.base_model import BaseDBManager
 from memos.mem_scheduler.scheduler_factory import SchedulerFactory
-from memos.mem_scheduler.schemas.general_schemas import SearchMode
+from memos.mem_scheduler.schemas.general_schemas import (
+    API_MIX_SEARCH_LABEL,
+    SearchMode,
+)
+from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
+from memos.mem_scheduler.utils.db_utils import get_utc_now
 from memos.memories.textual.tree_text_memory.organize.manager import MemoryManager
 from memos.memories.textual.tree_text_memory.retrieve.internet_retriever_factory import (
     InternetRetrieverFactory,
@@ -101,6 +107,21 @@ def _get_default_memory_size(cube_config) -> dict[str, int]:
     }
 
 
+def _create_naive_mem_cube() -> NaiveMemCube:
+    """Create a NaiveMemCube instance with initialized components."""
+    naive_mem_cube = NaiveMemCube(
+        llm=llm,
+        embedder=embedder,
+        mem_reader=mem_reader,
+        graph_db=graph_db,
+        reranker=reranker,
+        internet_retriever=internet_retriever,
+        memory_manager=memory_manager,
+        default_cube_config=default_cube_config,
+    )
+    return naive_mem_cube
+
+
 def init_server():
     """Initialize server components and configurations."""
     # Get default cube configuration
@@ -152,6 +173,10 @@ def init_server():
     )
     mem_scheduler.start()
 
+    # Initialize SchedulerAPIModule
+    api_module = mem_scheduler.api_module
+
+    naive_mem_cube = _create_naive_mem_cube()
     return (
         graph_db,
         mem_reader,
@@ -163,6 +188,8 @@ def init_server():
         default_cube_config,
         mos_server,
         mem_scheduler,
+        naive_mem_cube,
+        api_module,
     )
 
 
@@ -178,22 +205,9 @@ def init_server():
     default_cube_config,
     mos_server,
     mem_scheduler,
+    naive_mem_cube,
+    api_module,
 ) = init_server()
-
-
-def _create_naive_mem_cube() -> NaiveMemCube:
-    """Create a NaiveMemCube instance with initialized components."""
-    naive_mem_cube = NaiveMemCube(
-        llm=llm,
-        embedder=embedder,
-        mem_reader=mem_reader,
-        graph_db=graph_db,
-        reranker=reranker,
-        internet_retriever=internet_retriever,
-        memory_manager=memory_manager,
-        default_cube_config=default_cube_config,
-    )
-    return naive_mem_cube
 
 
 def _format_memory_item(memory_data: Any) -> dict[str, Any]:
@@ -257,30 +271,99 @@ def mix_search_memories(
     search_req: APISearchRequest,
     user_context: UserContext,
 ):
-    target_session_id = search_req.session_id
-    if not target_session_id:
-        target_session_id = "default_session"
-    search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
+    """
+    Mix search memories: fast search + async fine search
+    """
+    # Get fast memories first
+    fast_memories = fast_search_memories(search_req, user_context)
 
-    # Create MemCube and perform search
-    naive_mem_cube = _create_naive_mem_cube()
-    search_results = naive_mem_cube.text_mem.search(
-        query=search_req.query,
-        user_name=user_context.mem_cube_id,
-        top_k=search_req.top_k,
-        mode=search_req.mode,
-        manual_close_internet=not search_req.internet_search,
-        moscube=search_req.moscube,
-        search_filter=search_filter,
-        info={
-            "user_id": search_req.user_id,
-            "session_id": target_session_id,
-            "chat_history": search_req.chat_history,
-        },
-    )
-    formatted_memories = [_format_memory_item(data) for data in search_results]
+    # Check if scheduler and dispatcher are available for async execution
+    if mem_scheduler and hasattr(mem_scheduler, "dispatcher") and mem_scheduler.dispatcher:
+        try:
+            # Create message for async fine search
+            message_content = {
+                "search_req": {
+                    "query": search_req.query,
+                    "user_id": search_req.user_id,
+                    "session_id": search_req.session_id,
+                    "top_k": search_req.top_k,
+                    "internet_search": search_req.internet_search,
+                    "moscube": search_req.moscube,
+                    "chat_history": search_req.chat_history,
+                },
+                "user_context": {"mem_cube_id": user_context.mem_cube_id},
+            }
 
-    return formatted_memories
+            message = ScheduleMessageItem(
+                item_id=f"mix_search_{search_req.user_id}_{get_utc_now().timestamp()}",
+                user_id=search_req.user_id,
+                mem_cube_id=user_context.mem_cube_id,
+                label=API_MIX_SEARCH_LABEL,
+                mem_cube=naive_mem_cube,
+                content=json.dumps(message_content),
+                timestamp=get_utc_now(),
+            )
+
+            # Submit async task
+            mem_scheduler.dispatcher.submit_message(message)
+            logger.info(f"Submitted async fine search task for user {search_req.user_id}")
+
+            # Try to get pre-computed fine memories if available
+            try:
+                pre_fine_memories = api_module.get_pre_fine_memories(
+                    user_id=search_req.user_id, mem_cube_id=user_context.mem_cube_id
+                )
+                if pre_fine_memories:
+                    # Merge fast and pre-computed fine memories
+                    all_memories = fast_memories + pre_fine_memories
+                    # Remove duplicates based on content
+                    seen_contents = set()
+                    unique_memories = []
+                    for memory in all_memories:
+                        content_key = memory.get("content", "")
+                        if content_key not in seen_contents:
+                            seen_contents.add(content_key)
+                            unique_memories.append(memory)
+                    return unique_memories
+            except Exception as e:
+                logger.warning(f"Failed to get pre-computed fine memories: {e}")
+
+        except Exception as e:
+            logger.error(f"Failed to submit async fine search task: {e}")
+            # Fall back to synchronous execution
+
+    # Fallback: synchronous fine search
+    try:
+        fine_memories = fine_search_memories(search_req, user_context)
+
+        # Merge fast and fine memories
+        all_memories = fast_memories + fine_memories
+
+        # Remove duplicates based on content
+        seen_contents = set()
+        unique_memories = []
+        for memory in all_memories:
+            content_key = memory.get("content", "")
+            if content_key not in seen_contents:
+                seen_contents.add(content_key)
+                unique_memories.append(memory)
+
+        # Sync search data to Redis
+        try:
+            api_module.sync_search_data(
+                user_id=search_req.user_id,
+                mem_cube_id=user_context.mem_cube_id,
+                query=search_req.query,
+                formatted_memories=unique_memories,
+            )
+        except Exception as e:
+            logger.error(f"Failed to sync search data: {e}")
+
+        return unique_memories
+
+    except Exception as e:
+        logger.error(f"Fine search failed: {e}")
+        return fast_memories
 
 
 def fine_search_memories(
@@ -293,12 +376,11 @@ def fine_search_memories(
     search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
 
     # Create MemCube and perform search
-    naive_mem_cube = _create_naive_mem_cube()
     search_results = naive_mem_cube.text_mem.search(
         query=search_req.query,
         user_name=user_context.mem_cube_id,
         top_k=search_req.top_k,
-        mode=search_req.mode,
+        mode=SearchMode.FINE,
         manual_close_internet=not search_req.internet_search,
         moscube=search_req.moscube,
         search_filter=search_filter,
@@ -323,12 +405,11 @@ def fast_search_memories(
     search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
 
     # Create MemCube and perform search
-    naive_mem_cube = _create_naive_mem_cube()
     search_results = naive_mem_cube.text_mem.search(
         query=search_req.query,
         user_name=user_context.mem_cube_id,
         top_k=search_req.top_k,
-        mode=search_req.mode,
+        mode=SearchMode.FAST,
         manual_close_internet=not search_req.internet_search,
         moscube=search_req.moscube,
         search_filter=search_filter,
