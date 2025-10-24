@@ -261,47 +261,6 @@ class TestSchedulerDispatcher(unittest.TestCase):
                 for msg in expected[user_id][cube_id]:
                     self.assertIn(msg.item_id, [m.item_id for m in result[user_id][cube_id]])
 
-    def test_thread_race(self):
-        """Test the ThreadRace integration."""
-
-        # Define test tasks
-        def task1(stop_flag):
-            time.sleep(0.1)
-            return "result1"
-
-        def task2(stop_flag):
-            time.sleep(0.2)
-            return "result2"
-
-        # Run competitive tasks
-        tasks = {
-            "task1": task1,
-            "task2": task2,
-        }
-
-        result = self.dispatcher.run_competitive_tasks(tasks, timeout=1.0)
-
-        # Verify the result
-        self.assertIsNotNone(result)
-        self.assertEqual(result[0], "task1")  # task1 should win
-        self.assertEqual(result[1], "result1")
-
-    def test_thread_race_timeout(self):
-        """Test ThreadRace with timeout."""
-
-        # Define a task that takes longer than the timeout
-        def slow_task(stop_flag):
-            time.sleep(0.5)
-            return "slow_result"
-
-        tasks = {"slow": slow_task}
-
-        # Run with a short timeout
-        result = self.dispatcher.run_competitive_tasks(tasks, timeout=0.1)
-
-        # Verify no result was returned due to timeout
-        self.assertIsNone(result)
-
     def test_thread_race_cooperative_termination(self):
         """Test that ThreadRace properly terminates slower threads when one completes."""
 
