@@ -232,8 +232,10 @@ def search_memories(search_req: APISearchRequest):
 
     if search_mode == SearchMode.FAST:
         formatted_memories = fast_search_memories(search_req=search_req, user_context=user_context)
-    elif search_mode == SearchMode.FINE or search_mode == SearchMode.MIXTURE:
+    elif search_mode == SearchMode.FINE:
         formatted_memories = fine_search_memories(search_req=search_req, user_context=user_context)
+    elif search_mode == SearchMode.MIXTURE:
+        formatted_memories = mix_search_memories(search_req=search_req, user_context=user_context)
     else:
         logger.error(f"Unsupported search mode: {search_mode}")
         raise HTTPException(status_code=400, detail=f"Unsupported search mode: {search_mode}")
@@ -249,6 +251,36 @@ def search_memories(search_req: APISearchRequest):
         message="Search completed successfully",
         data=memories_result,
     )
+
+
+def mix_search_memories(
+    search_req: APISearchRequest,
+    user_context: UserContext,
+):
+    target_session_id = search_req.session_id
+    if not target_session_id:
+        target_session_id = "default_session"
+    search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
+
+    # Create MemCube and perform search
+    naive_mem_cube = _create_naive_mem_cube()
+    search_results = naive_mem_cube.text_mem.search(
+        query=search_req.query,
+        user_name=user_context.mem_cube_id,
+        top_k=search_req.top_k,
+        mode=search_req.mode,
+        manual_close_internet=not search_req.internet_search,
+        moscube=search_req.moscube,
+        search_filter=search_filter,
+        info={
+            "user_id": search_req.user_id,
+            "session_id": target_session_id,
+            "chat_history": search_req.chat_history,
+        },
+    )
+    formatted_memories = [_format_memory_item(data) for data in search_results]
+
+    return formatted_memories
 
 
 def fine_search_memories(

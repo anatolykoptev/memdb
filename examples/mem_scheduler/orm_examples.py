@@ -6,6 +6,7 @@ This script demonstrates how to use the BaseDBManager's new environment variable
 for MySQL and Redis connections.
 """
 
+import multiprocessing
 import os
 import sys
 
@@ -17,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from memos.log import get_logger
 from memos.mem_scheduler.orm_modules.base_model import BaseDBManager, DatabaseError
+from memos.mem_scheduler.orm_modules.redis_model import RedisDBManager, SimpleListManager
 
 
 logger = get_logger(__name__)
@@ -171,6 +173,175 @@ def test_manual_env_loading():
         print(f"❌ Error loading environment file: {e}")
 
 
+def test_redis_lockable_orm_with_list():
+    """Test RedisDBManager with list[str] type synchronization"""
+    print("\n" + "=" * 60)
+    print("Testing RedisDBManager with list[str]")
+    print("=" * 60)
+
+    try:
+        from memos.mem_scheduler.orm_modules.redis_model import RedisDBManager
+
+        # Create a simple list manager instance
+        list_manager = SimpleListManager(["apple", "banana", "cherry"])
+        print(f"Original list manager: {list_manager}")
+
+        # Create RedisDBManager instance
+        redis_client = BaseDBManager.load_redis_engine_from_env()
+        if redis_client is None:
+            print("❌ Failed to create Redis connection - check environment variables")
+            return
+
+        db_manager = RedisDBManager(
+            redis_client=redis_client,
+            user_id="test_user",
+            mem_cube_id="test_list_cube",
+            obj=list_manager,
+        )
+
+        # Save to Redis
+        db_manager.save_to_db(list_manager)
+        print("✅ List manager saved to Redis")
+
+        # Load from Redis
+        loaded_manager = db_manager.load_from_db()
+        if loaded_manager:
+            print(f"Loaded list manager: {loaded_manager}")
+            print(f"Items match: {list_manager.items == loaded_manager.items}")
+        else:
+            print("❌ Failed to load list manager from Redis")
+
+        # Clean up
+        redis_client.delete("lockable_orm:test_user:test_list_cube:data")
+        redis_client.delete("lockable_orm:test_user:test_list_cube:lock")
+        redis_client.delete("lockable_orm:test_user:test_list_cube:version")
+        redis_client.close()
+
+    except Exception as e:
+        print(f"❌ Error in RedisDBManager test: {e}")
+
+
+def modify_list_process(process_id: int, items_to_add: list[str]):
+    """Function to be run in separate processes to modify the list using merge_items"""
+    try:
+        from memos.mem_scheduler.orm_modules.redis_model import RedisDBManager
+
+        # Create Redis connection
+        redis_client = BaseDBManager.load_redis_engine_from_env()
+        if redis_client is None:
+            print(f"Process {process_id}: Failed to create Redis connection")
+            return
+
+        # Create a temporary list manager for this process with items to add
+        temp_manager = SimpleListManager()
+
+        db_manager = RedisDBManager(
+            redis_client=redis_client,
+            user_id="test_user",
+            mem_cube_id="multiprocess_list",
+            obj=temp_manager,
+        )
+
+        print(f"Process {process_id}: Starting modification with items: {items_to_add}")
+        for item in items_to_add:
+            db_manager.obj.add_item(item)
+            # Use sync_with_orm which internally uses merge_items
+            db_manager.sync_with_orm(size_limit=None)
+
+        print(f"Process {process_id}: Successfully synchronized with Redis")
+
+        redis_client.close()
+
+    except Exception as e:
+        print(f"Process {process_id}: Error - {e}")
+        import traceback
+
+        traceback.print_exc()
+
+
+def test_multiprocess_synchronization():
+    """Test multiprocess synchronization with RedisDBManager"""
+    print("\n" + "=" * 60)
+    print("Testing Multiprocess Synchronization")
+    print("=" * 60)
+
+    try:
+        # Initialize Redis with empty list
+        redis_client = BaseDBManager.load_redis_engine_from_env()
+        if redis_client is None:
+            print("❌ Failed to create Redis connection")
+            return
+
+        # Initialize with empty list
+        initial_manager = SimpleListManager([])
+        db_manager = RedisDBManager(
+            redis_client=redis_client,
+            user_id="test_user",
+            mem_cube_id="multiprocess_list",
+            obj=initial_manager,
+        )
+        db_manager.save_to_db(initial_manager)
+        print("✅ Initialized empty list manager in Redis")
+
+        # Define items for each process to add
+        process_items = [
+            ["item1", "item2"],
+            ["item3", "item4"],
+            ["item5", "item6"],
+            ["item1", "item7"],  # item1 is duplicate, should not be added twice
+        ]
+
+        # Create and start processes
+        processes = []
+        for i, items in enumerate(process_items):
+            p = multiprocessing.Process(target=modify_list_process, args=(i + 1, items))
+            processes.append(p)
+            p.start()
+
+        # Wait for all processes to complete
+        for p in processes:
+            p.join()
+
+        print("\n" + "-" * 40)
+        print("All processes completed. Checking final result...")
+
+        # Load final result
+        final_db_manager = RedisDBManager(
+            redis_client=redis_client,
+            user_id="test_user",
+            mem_cube_id="multiprocess_list",
+            obj=SimpleListManager([]),
+        )
+        final_manager = final_db_manager.load_from_db()
+
+        if final_manager:
+            print(f"Final synchronized list manager: {final_manager}")
+            print(f"Final list length: {len(final_manager)}")
+            print("Expected items: {'item1', 'item2', 'item3', 'item4', 'item5', 'item6', 'item7'}")
+            print(f"Actual items: {set(final_manager.items)}")
+
+            # Check if all unique items are present
+            expected_items = {"item1", "item2", "item3", "item4", "item5", "item6", "item7"}
+            actual_items = set(final_manager.items)
+
+            if expected_items == actual_items:
+                print("✅ All processes contributed correctly - synchronization successful!")
+            else:
+                print(f"❌ Expected items: {expected_items}")
+                print(f"   Actual items: {actual_items}")
+        else:
+            print("❌ Failed to load final result")
+
+        # Clean up
+        redis_client.delete("lockable_orm:test_user:multiprocess_list:data")
+        redis_client.delete("lockable_orm:test_user:multiprocess_list:lock")
+        redis_client.delete("lockable_orm:test_user:multiprocess_list:version")
+        redis_client.close()
+
+    except Exception as e:
+        print(f"❌ Error in multiprocess synchronization test: {e}")
+
+
 def main():
     """Main function to run all tests"""
     print("ORM Examples - Environment Variable Loading Tests")
@@ -187,6 +358,12 @@ def main():
 
     # Test Redis connection loading
     test_redis_connection_from_env()
+
+    # Test RedisLockableORM with list[str]
+    test_redis_lockable_orm_with_list()
+
+    # Test multiprocess synchronization
+    test_multiprocess_synchronization()
 
     print("\n" + "=" * 80)
     print("All tests completed!")
