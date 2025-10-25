@@ -1,4 +1,6 @@
-from typing import TYPE_CHECKING, Any
+import json
+
+from typing import TYPE_CHECKING
 
 from memos.api.product_models import APISearchRequest
 from memos.configs.mem_scheduler import GeneralSchedulerConfig
@@ -6,6 +8,7 @@ from memos.log import get_logger
 from memos.mem_cube.general import GeneralMemCube
 from memos.mem_scheduler.general_modules.api_misc import SchedulerAPIModule
 from memos.mem_scheduler.general_scheduler import GeneralScheduler
+from memos.mem_scheduler.schemas.api_schemas import TaskRunningStatus
 from memos.mem_scheduler.schemas.general_schemas import (
     API_MIX_SEARCH_LABEL,
     QUERY_LABEL,
@@ -14,6 +17,7 @@ from memos.mem_scheduler.schemas.general_schemas import (
     UserID,
 )
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
+from memos.mem_scheduler.utils.db_utils import get_utc_now
 from memos.memories.textual.tree import TextualMemoryItem, TreeTextMemory
 from memos.types import UserContext
 
@@ -35,26 +39,12 @@ class OptimizedScheduler(GeneralScheduler):
             API_MIX_SEARCH_LABEL: self._api_mix_search_message_consumer,
         }
 
-    def _format_memory_item(self, memory_data: Any) -> dict[str, Any]:
-        """Format a single memory item for API response."""
-        memory = memory_data.model_dump()
-        memory_id = memory["id"]
-        ref_id = f"[{memory_id.split('-')[0]}]"
-
-        memory["ref_id"] = ref_id
-        memory["metadata"]["embedding"] = []
-        memory["metadata"]["sources"] = []
-        memory["metadata"]["ref_id"] = ref_id
-        memory["metadata"]["id"] = memory_id
-        memory["metadata"]["memory"] = memory["memory"]
-
-        return memory
-
-    def fine_search_memories(
+    def search_memories(
         self,
         search_req: APISearchRequest,
         user_context: UserContext,
         mem_cube: GeneralMemCube,
+        mode: SearchMode,
     ):
         """Fine search memories function copied from server_router to avoid circular import"""
         target_session_id = search_req.session_id
@@ -67,7 +57,7 @@ class OptimizedScheduler(GeneralScheduler):
             query=search_req.query,
             user_name=user_context.mem_cube_id,
             top_k=search_req.top_k,
-            mode=SearchMode.FINE,
+            mode=mode,
             manual_close_internet=not search_req.internet_search,
             moscube=search_req.moscube,
             search_filter=search_filter,
@@ -77,12 +67,110 @@ class OptimizedScheduler(GeneralScheduler):
                 "chat_history": search_req.chat_history,
             },
         )
-        formatted_memories = [self._format_memory_item(data) for data in search_results]
+        return search_results
 
-        return formatted_memories
+    def submit_memory_history_async_task(
+        self,
+        search_req: APISearchRequest,
+        user_context: UserContext,
+    ):
+        # Create message for async fine search
+        message_content = {
+            "search_req": {
+                "query": search_req.query,
+                "user_id": search_req.user_id,
+                "session_id": search_req.session_id,
+                "top_k": search_req.top_k,
+                "internet_search": search_req.internet_search,
+                "moscube": search_req.moscube,
+                "chat_history": search_req.chat_history,
+            },
+            "user_context": {"mem_cube_id": user_context.mem_cube_id},
+        }
+
+        async_task_id = f"mix_search_{search_req.user_id}_{get_utc_now().timestamp()}"
+
+        # Get mem_cube for the message
+        mem_cube = self.current_mem_cube
+
+        message = ScheduleMessageItem(
+            item_id=async_task_id,
+            user_id=search_req.user_id,
+            mem_cube_id=user_context.mem_cube_id,
+            label=API_MIX_SEARCH_LABEL,
+            mem_cube=mem_cube,
+            content=json.dumps(message_content),
+            timestamp=get_utc_now(),
+        )
+
+        # Submit async task
+        self.submit_messages([message])
+        logger.info(f"Submitted async fine search task for user {search_req.user_id}")
+        return async_task_id
+
+    def mix_search_memories(
+        self,
+        search_req: APISearchRequest,
+        user_context: UserContext,
+    ):
+        """
+        Mix search memories: fast search + async fine search
+        """
+
+        # Get mem_cube for fast search
+        mem_cube = self.current_mem_cube
+
+        # Perform fast search
+        fast_memories = self.search_memories(
+            search_req=search_req,
+            user_context=user_context,
+            mem_cube=mem_cube,
+            mode=SearchMode.FAST,
+        )
+
+        async_task_id = self.submit_memory_history_async_task(
+            search_req=search_req,
+            user_context=user_context,
+        )
+
+        # Try to get pre-computed fine memories if available
+        pre_fine_memories = self.api_module.get_pre_memories(
+            user_id=search_req.user_id, mem_cube_id=user_context.mem_cube_id
+        )
+        if not pre_fine_memories:
+            return fast_memories
+
+        # Merge fast and pre-computed fine memories
+        combined_memories = fast_memories + pre_fine_memories
+        # Remove duplicates based on content
+        seen_contents = set()
+        unique_memories = []
+        for memory in combined_memories:
+            content_key = memory.get("content", "")
+            if content_key not in seen_contents:
+                seen_contents.add(content_key)
+                unique_memories.append(memory)
+
+        # Sync search data to Redis
+        self.api_module.sync_search_data(
+            item_id=async_task_id,
+            user_id=search_req.user_id,
+            mem_cube_id=user_context.mem_cube_id,
+            query=search_req.query,
+            formatted_memories=unique_memories,
+            running_status=TaskRunningStatus.COMPLETED,
+        )
+
+        # Rerank Memories - need to convert formatted memories back to TextualMemoryItem objects
+
+        return unique_memories[: search_req.top_k]
 
     def update_search_memories_to_redis(
-        self, user_id: str, mem_cube_id: str, messages: list[ScheduleMessageItem]
+        self,
+        user_id: str,
+        mem_cube_id: str,
+        messages: list[ScheduleMessageItem],
+        task_status: str = "running",
     ):
         mem_cube = messages[0].mem_cube
 
@@ -105,11 +193,20 @@ class OptimizedScheduler(GeneralScheduler):
 
             # Sync search data to Redis
             try:
+                # Convert task_status string to TaskRunningStatus enum
+                running_status = (
+                    TaskRunningStatus.COMPLETED
+                    if task_status == "completed"
+                    else TaskRunningStatus.RUNNING
+                )
+
                 self.api_module.sync_search_data(
-                    user_id=search_req.user_id,
-                    mem_cube_id=user_context.mem_cube_id,
-                    query=search_req.query,
+                    item_id=msg.item_id,
+                    user_id=search_req["user_id"],
+                    mem_cube_id=user_context["mem_cube_id"],
+                    query=search_req["query"],
                     formatted_memories=formatted_memories,
+                    running_status=running_status,
                 )
             except Exception as e:
                 logger.error(f"Failed to sync search data: {e}")
