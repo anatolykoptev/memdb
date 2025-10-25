@@ -107,21 +107,6 @@ def _get_default_memory_size(cube_config) -> dict[str, int]:
     }
 
 
-def _create_naive_mem_cube() -> NaiveMemCube:
-    """Create a NaiveMemCube instance with initialized components."""
-    naive_mem_cube = NaiveMemCube(
-        llm=llm,
-        embedder=embedder,
-        mem_reader=mem_reader,
-        graph_db=graph_db,
-        reranker=reranker,
-        internet_retriever=internet_retriever,
-        memory_manager=memory_manager,
-        default_cube_config=default_cube_config,
-    )
-    return naive_mem_cube
-
-
 def init_server():
     """Initialize server components and configurations."""
     # Get default cube configuration
@@ -176,7 +161,17 @@ def init_server():
     # Initialize SchedulerAPIModule
     api_module = mem_scheduler.api_module
 
-    naive_mem_cube = _create_naive_mem_cube()
+    naive_mem_cube = NaiveMemCube(
+        llm=llm,
+        embedder=embedder,
+        mem_reader=mem_reader,
+        graph_db=graph_db,
+        reranker=reranker,
+        internet_retriever=internet_retriever,
+        memory_manager=memory_manager,
+        default_cube_config=default_cube_config,
+    )
+
     return (
         graph_db,
         mem_reader,
@@ -433,7 +428,6 @@ def add_memories(add_req: APIADDRequest):
         mem_cube_id=add_req.mem_cube_id,
         session_id=add_req.session_id or "default_session",
     )
-    naive_mem_cube = _create_naive_mem_cube()
     target_session_id = add_req.session_id
     if not target_session_id:
         target_session_id = "default_session"
@@ -477,7 +471,6 @@ def chat_complete(chat_req: APIChatCompleteRequest):
     """Chat with MemOS for a specific user. Returns complete response (non-streaming)."""
     try:
         # Collect all responses from the generator
-        naive_mem_cube = _create_naive_mem_cube()
         content, references = mos_server.chat(
             query=chat_req.query,
             user_id=chat_req.user_id,
