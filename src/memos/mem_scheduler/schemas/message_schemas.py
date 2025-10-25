@@ -35,6 +35,7 @@ DEFAULT_MEMORY_CAPACITIES = {
 class ScheduleMessageItem(BaseModel, DictConversionMixin):
     item_id: str = Field(description="uuid", default_factory=lambda: str(uuid4()))
     user_id: str = Field(..., description="user id")
+    session_id: str | None = Field(default=None, description="session id")
     mem_cube_id: str = Field(..., description="memcube id")
     label: str = Field(..., description="Label of the schedule message")
     mem_cube: GeneralMemCube | str = Field(..., description="memcube for schedule")
@@ -55,6 +56,7 @@ class ScheduleMessageItem(BaseModel, DictConversionMixin):
             "example": {
                 "item_id": "123e4567-e89b-12d3-a456-426614174000",  # Sample UUID
                 "user_id": "user123",  # Example user identifier
+                "session_id": "session123",  # Example session identifier
                 "mem_cube_id": "cube456",  # Sample memory cube ID
                 "label": "sample_label",  # Demonstration label value
                 "mem_cube": "obj of GeneralMemCube",  # Added mem_cube example
@@ -76,6 +78,7 @@ class ScheduleMessageItem(BaseModel, DictConversionMixin):
         return {
             "item_id": self.item_id,
             "user_id": self.user_id,
+            "session_id": self.session_id,
             "cube_id": self.mem_cube_id,
             "label": self.label,
             "cube": "Not Applicable",  # Custom cube serialization
@@ -90,6 +93,8 @@ class ScheduleMessageItem(BaseModel, DictConversionMixin):
             item_id=data.get("item_id", str(uuid4())),
             user_id=data["user_id"],
             mem_cube_id=data["cube_id"],
+            session_id=data["session_id"],
+            cube_id=data["cube_id"],
             label=data["label"],
             mem_cube="Not Applicable",  # Custom cube deserialization
             content=data["content"],
