@@ -204,7 +204,6 @@ class TestGeneralScheduler(unittest.TestCase):
 
     def test_redis_message_queue(self):
         """Test Redis message queue functionality for sending and receiving messages."""
-        import asyncio
         import time
 
         from unittest.mock import MagicMock, patch
@@ -244,7 +243,7 @@ class TestGeneralScheduler(unittest.TestCase):
             )
 
             # Submit message to Redis queue
-            asyncio.run(self.scheduler.submit_messages(redis_message))
+            self.scheduler.submit_messages(redis_message)
 
             # Verify Redis xadd was called
             mock_redis.xadd.assert_called_once()
