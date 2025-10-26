@@ -8,12 +8,14 @@ for search and add operations with reusable instance variables.
 import http.client
 import json
 
+from time import sleep
 from typing import Any
 from urllib.parse import urlparse
 
 import requests
 
 from memos.log import get_logger
+from memos.mem_scheduler.schemas.general_schemas import SearchMode
 
 
 logger = get_logger(__name__)
@@ -535,7 +537,252 @@ class DirectSearchMemoriesAnalyzer:
             traceback.print_exc()
             return None
 
-    def run_all_tests(self):
+    def test_mix_search_memories_continuous_questions(
+        self, user_id="test_user_mix", mem_cube_id="test_cube_mix"
+    ):
+        """
+        Test mix_search_memories function with continuous questions to verify its effectiveness.
+        This test simulates a conversation scenario where multiple related questions are asked
+        to evaluate how well the mix search handles context and memory retrieval.
+        """
+        print(
+            f"Testing mix_search_memories with continuous questions for user: {user_id}, cube: {mem_cube_id}"
+        )
+
+        try:
+            # Import mix_search_memories function
+            from memos.api.routers.server_router import mix_search_memories
+
+            # First, add some test memories to work with
+            print("\n--- Step 1: Adding test memories for continuous question testing ---")
+
+            # Add memories about travel and food preferences
+            test_conversations = [
+                [
+                    {"role": "user", "content": "I love Italian food, especially pasta and pizza"},
+                    {
+                        "role": "assistant",
+                        "content": "That's great! Italian cuisine has so many delicious options. Do you have a favorite type of pasta?",
+                    },
+                ],
+                [
+                    {"role": "user", "content": "I'm planning a trip to Rome next month"},
+                    {
+                        "role": "assistant",
+                        "content": "Rome is amazing! You'll love the history, architecture, and of course the authentic Italian food there.",
+                    },
+                ],
+                [
+                    {
+                        "role": "user",
+                        "content": "What are the best restaurants in Rome for authentic pasta?",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "Some excellent choices include Checchino dal 1887 for traditional Roman dishes, and Da Enzo for authentic carbonara and cacio e pepe.",
+                    },
+                ],
+                [
+                    {
+                        "role": "user",
+                        "content": "I also enjoy Japanese cuisine, particularly sushi and ramen",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "Japanese food is wonderful! The attention to detail and fresh ingredients make it special.",
+                    },
+                ],
+                [
+                    {"role": "user", "content": "Are there any good Japanese restaurants in Rome?"},
+                    {
+                        "role": "assistant",
+                        "content": "Yes! Try Metamorfosi for high-end Japanese-Italian fusion, or Sakana for more traditional Japanese dishes.",
+                    },
+                ],
+            ]
+
+            # Add all test conversations
+            for i, messages in enumerate(test_conversations):
+                add_request = self.create_test_add_request(
+                    user_id=user_id,
+                    mem_cube_id=mem_cube_id,
+                    messages=messages,
+                    session_id=f"continuous_test_session_{i}",
+                )
+
+                self.add_memories(add_request)
+
+            print("\n--- Step 2: Testing continuous questions with mix_search_memories ---")
+
+            # Define a series of related questions to test continuous conversation
+            continuous_questions = [
+                {
+                    "query": "What food do I like?",
+                    "description": "Basic preference question",
+                    "chat_history": [],
+                },
+                {
+                    "query": "Where am I planning to travel?",
+                    "description": "Travel destination question",
+                    "chat_history": [
+                        {"role": "user", "content": "What food do I like?"},
+                        {
+                            "role": "assistant",
+                            "content": "Based on our conversation, you enjoy Italian food, especially pasta and pizza, and also Japanese cuisine like sushi and ramen.",
+                        },
+                    ],
+                },
+                {
+                    "query": "Can you recommend restaurants that serve my favorite food in my travel destination?",
+                    "description": "Complex contextual question combining food preferences and travel plans",
+                    "chat_history": [
+                        {"role": "user", "content": "What food do I like?"},
+                        {
+                            "role": "assistant",
+                            "content": "You enjoy Italian food, especially pasta and pizza, and also Japanese cuisine like sushi and ramen.",
+                        },
+                        {"role": "user", "content": "Where am I planning to travel?"},
+                        {
+                            "role": "assistant",
+                            "content": "You're planning a trip to Rome next month.",
+                        },
+                    ],
+                },
+                {
+                    "query": "What specific pasta dishes should I try in Rome?",
+                    "description": "Detailed follow-up question",
+                    "chat_history": [
+                        {
+                            "role": "user",
+                            "content": "Can you recommend restaurants that serve my favorite food in my travel destination?",
+                        },
+                        {
+                            "role": "assistant",
+                            "content": "For Italian food in Rome, try Checchino dal 1887 for traditional Roman dishes, and Da Enzo for authentic carbonara. For Japanese food, consider Metamorfosi for fusion or Sakana for traditional dishes.",
+                        },
+                    ],
+                },
+            ]
+
+            # Test each question in the continuous conversation
+            for i, question_data in enumerate(continuous_questions):
+                print(f"\n--- Question {i + 1}: {question_data['description']} ---")
+                print(f"Query: {question_data['query']}")
+
+                # Create search request with chat history for context
+                search_request = self.create_test_search_request(
+                    query=question_data["query"],
+                    user_id=user_id,
+                    mem_cube_id=mem_cube_id,
+                    mode=SearchMode.MIXTURE,  # Use mixture mode to test mix_search_memories
+                    top_k=10,
+                    chat_history=question_data["chat_history"],
+                    session_id="continuous_test_main_session",
+                )
+
+                # Create user context
+                user_context = self.UserContext(user_id=user_id, mem_cube_id=mem_cube_id)
+
+                # Call mix_search_memories function
+                mix_search_result = mix_search_memories(search_request, user_context)
+
+                print(f"Mix search returned {len(mix_search_result)} results")
+
+                # Analyze the results
+
+                print("Top 3 results:")
+                for j, result in enumerate(mix_search_result[:3]):
+                    if isinstance(result, dict):
+                        memory_content = result.get("memory", result.get("content", str(result)))
+                        print(f"  {j + 1}. {memory_content[:100]}...")
+                    else:
+                        print(f"  {j + 1}. {str(result)[:100]}...")
+
+                # Check if results are relevant to the question context
+                relevant_count = 0
+
+                for result in mix_search_result:
+                    if isinstance(result, dict):
+                        content = result.get("memory", result.get("content", "")).lower()
+                    else:
+                        content = str(result).lower()
+
+                    # Check for relevance based on key terms
+                    if any(
+                        term in content
+                        for term in [
+                            "italian",
+                            "pasta",
+                            "pizza",
+                            "rome",
+                            "japanese",
+                            "sushi",
+                            "restaurant",
+                        ]
+                    ):
+                        relevant_count += 1
+
+                relevance_ratio = (
+                    relevant_count / len(mix_search_result) if mix_search_result else 0
+                )
+                print(
+                    f"Relevance: {relevant_count}/{len(mix_search_result)} results ({relevance_ratio:.2%})"
+                )
+                sleep(5)
+
+            print("\n--- Step 3: Testing memory accumulation effect ---")
+
+            # Test how mix_search_memories handles accumulated context
+            accumulated_query = "Based on everything we've discussed, what's the perfect Rome itinerary for someone with my food preferences?"
+
+            # Build comprehensive chat history
+            comprehensive_history = []
+            for question_data in continuous_questions:
+                comprehensive_history.append({"role": "user", "content": question_data["query"]})
+                comprehensive_history.append(
+                    {"role": "assistant", "content": f"Response to: {question_data['query']}"}
+                )
+
+            final_search_request = self.create_test_search_request(
+                query=accumulated_query,
+                user_id=user_id,
+                mem_cube_id=mem_cube_id,
+                mode="mixture",
+                top_k=15,
+                chat_history=comprehensive_history,
+                session_id="continuous_test_final_session",
+            )
+
+            user_context = self.UserContext(user_id=user_id, mem_cube_id=mem_cube_id)
+
+            try:
+                final_result = mix_search_memories(final_search_request, user_context)
+                print(f"Final comprehensive search returned {len(final_result)} results")
+
+                if final_result:
+                    print("Final search top results:")
+                    for i, result in enumerate(final_result[:5]):
+                        if isinstance(result, dict):
+                            content = result.get("memory", result.get("content", str(result)))
+                        else:
+                            content = str(result)
+                        print(f"  {i + 1}. {content[:150]}...")
+
+            except Exception as e:
+                print(f"Error in final comprehensive search: {e}")
+                import traceback
+
+                traceback.print_exc()
+
+            print("\n=== Continuous questions test completed ===")
+
+        except Exception as e:
+            print(f"Error in continuous questions test: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    def run_all_tests(self, mode: SearchMode):
         """Run all available tests"""
         print("🚀 Starting comprehensive test suite")
         print("=" * 80)
@@ -554,12 +801,20 @@ class DirectSearchMemoriesAnalyzer:
         try:
             self.test_search_memories_basic(
                 query="What are some good places to celebrate New Year's Eve in Shanghai?",
-                mode="fast",
+                mode=mode,
                 topk=3,
             )
             print("✅ Search memories test completed successfully")
         except Exception as e:
             print(f"❌ Search memories test failed: {e}")
+
+        # Test mix_search_memories with continuous questions
+        print("\n🔄 Testing MIX_SEARCH_MEMORIES with continuous questions:")
+        try:
+            self.test_mix_search_memories_continuous_questions()
+            print("✅ Mix search memories continuous questions test completed")
+        except Exception as e:
+            print(f"❌ Mix search memories test failed: {e}")
 
         print("\n" + "=" * 80)
         print("✅ All tests completed!")
@@ -584,7 +839,7 @@ if __name__ == "__main__":
         print("Using direct test mode")
         try:
             direct_analyzer = DirectSearchMemoriesAnalyzer()
-            direct_analyzer.run_all_tests()
+            direct_analyzer.run_all_tests(mode=SearchMode.MIXTURE)
         except Exception as e:
             print(f"Direct test mode failed: {e}")
             import traceback

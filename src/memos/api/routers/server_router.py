@@ -1,7 +1,7 @@
 import os
 import traceback
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
 
@@ -37,6 +37,10 @@ from memos.memories.textual.tree_text_memory.retrieve.internet_retriever_factory
     InternetRetrieverFactory,
 )
 from memos.reranker.factory import RerankerFactory
+
+
+if TYPE_CHECKING:
+    from memos.mem_scheduler.optimized_scheduler import OptimizedScheduler
 from memos.types import MOSSearchResult, UserContext
 
 
@@ -157,7 +161,7 @@ def init_server():
     scheduler_config = SchedulerConfigFactory(
         backend="optimized_scheduler", config=scheduler_config_dict
     )
-    mem_scheduler = SchedulerFactory.from_config(scheduler_config)
+    mem_scheduler: OptimizedScheduler = SchedulerFactory.from_config(scheduler_config)
     mem_scheduler.initialize_modules(
         chat_llm=llm,
         process_llm=mem_reader.llm,

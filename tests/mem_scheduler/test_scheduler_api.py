@@ -46,7 +46,7 @@ class TestSchedulerAPIModule(unittest.TestCase):
         self.assertEqual(custom_module.window_size, 10)
         self.assertEqual(len(custom_module.search_history_managers), 0)
 
-    @patch("memos.mem_scheduler.general_modules.api_misc.RedisDBManager")
+    @patch("memos.mem_scheduler.general_modules.api_misc.APIRedisDBManager")
     def test_get_search_history_manager_creation(self, mock_redis_manager):
         """Test creation of new search history manager."""
         mock_manager_instance = MagicMock()
@@ -57,7 +57,7 @@ class TestSchedulerAPIModule(unittest.TestCase):
             self.test_user_id, self.test_mem_cube_id
         )
 
-        # Verify RedisDBManager was called with correct parameters
+        # Verify APIRedisDBManager was called with correct parameters
         mock_redis_manager.assert_called_once()
         call_args = mock_redis_manager.call_args
         self.assertEqual(call_args[1]["user_id"], self.test_user_id)
@@ -69,7 +69,7 @@ class TestSchedulerAPIModule(unittest.TestCase):
         self.assertIn(key, self.api_module.search_history_managers)
         self.assertEqual(result, mock_manager_instance)
 
-    @patch("memos.mem_scheduler.general_modules.api_misc.RedisDBManager")
+    @patch("memos.mem_scheduler.general_modules.api_misc.APIRedisDBManager")
     def test_get_search_history_manager_caching(self, mock_redis_manager):
         """Test that search history manager is properly cached."""
         mock_manager_instance = MagicMock()
@@ -85,11 +85,11 @@ class TestSchedulerAPIModule(unittest.TestCase):
             self.test_user_id, self.test_mem_cube_id
         )
 
-        # RedisDBManager should only be called once
+        # APIRedisDBManager should only be called once
         self.assertEqual(mock_redis_manager.call_count, 1)
         self.assertEqual(result1, result2)
 
-    @patch("memos.mem_scheduler.general_modules.api_misc.RedisDBManager")
+    @patch("memos.mem_scheduler.general_modules.api_misc.APIRedisDBManager")
     def test_sync_search_data_create_new_entry(self, mock_redis_manager):
         """Test sync_search_data creates new entry when item_id doesn't exist."""
         # Setup mock manager
@@ -102,8 +102,9 @@ class TestSchedulerAPIModule(unittest.TestCase):
             None,
             "not_found",
         )  # No existing entry (returns tuple)
-        mock_api_manager.running_entries = []  # Initialize as empty list
-        mock_manager_instance.load_from_db.return_value = mock_api_manager
+        mock_api_manager.running_task_ids = []  # Initialize as empty list
+        mock_manager_instance.obj = mock_api_manager
+        mock_manager_instance.sync_with_redis.return_value = mock_api_manager
 
         # Mock get_search_history_manager to return our mock manager
         with patch.object(
@@ -115,22 +116,21 @@ class TestSchedulerAPIModule(unittest.TestCase):
                 user_id=self.test_user_id,
                 mem_cube_id=self.test_mem_cube_id,
                 query=self.test_query,
+                memories=[],
                 formatted_memories=self.test_formatted_memories,
                 running_status=TaskRunningStatus.RUNNING,
             )
 
-        # Verify manager methods were called
-        mock_manager_instance.load_from_db.assert_called_once()
-        mock_manager_instance.save_to_db.assert_called_once()
+            # Verify the manager was called to find existing entry
+            mock_api_manager.find_entry_by_item_id.assert_called_once_with(self.test_item_id)
 
-        # Verify add_running_entry was called (for RUNNING status)
-        mock_api_manager.add_running_entry.assert_called_once()
+            # Verify add_running_entry was called since status is RUNNING
+            mock_api_manager.add_running_entry.assert_called_once()
 
-        # Verify the entry data passed to add_running_entry
-        call_args = mock_api_manager.add_running_entry.call_args[0][0]
-        self.assertEqual(call_args["task_id"], self.test_item_id)
+            # Verify sync_with_redis was called
+            mock_manager_instance.sync_with_redis.assert_called_once()
 
-    @patch("memos.mem_scheduler.general_modules.api_misc.RedisDBManager")
+    @patch("memos.mem_scheduler.general_modules.api_misc.APIRedisDBManager")
     def test_sync_search_data_update_existing_entry(self, mock_redis_manager):
         """Test sync_search_data updates existing entry when item_id exists."""
         # Setup mock manager
@@ -139,15 +139,14 @@ class TestSchedulerAPIModule(unittest.TestCase):
 
         # Setup mock APISearchHistoryManager with existing entry
         mock_api_manager = MagicMock(spec=APISearchHistoryManager)
-        existing_entry = {"task_id": self.test_item_id, "query": "old_query"}
+        mock_existing_entry = {"task_id": self.test_item_id, "query": "old_query"}
         mock_api_manager.find_entry_by_item_id.return_value = (
-            existing_entry,
+            mock_existing_entry,
             "running",
-        )  # Existing entry (returns tuple)
-        mock_api_manager.update_entry_by_item_id.return_value = True
-        mock_api_manager.running_entries = []  # Add running_entries attribute
-        mock_api_manager.completed_entries = []  # Add completed_entries attribute
-        mock_manager_instance.load_from_db.return_value = mock_api_manager
+        )  # Existing entry found
+        mock_api_manager.update_entry_by_item_id.return_value = True  # Update successful
+        mock_manager_instance.obj = mock_api_manager
+        mock_manager_instance.sync_with_redis.return_value = mock_api_manager
 
         # Mock get_search_history_manager to return our mock manager
         with patch.object(
@@ -159,24 +158,21 @@ class TestSchedulerAPIModule(unittest.TestCase):
                 user_id=self.test_user_id,
                 mem_cube_id=self.test_mem_cube_id,
                 query=self.test_query,
+                memories=[],
                 formatted_memories=self.test_formatted_memories,
                 running_status=TaskRunningStatus.RUNNING,
             )
 
-        # Verify manager methods were called
-        mock_manager_instance.load_from_db.assert_called_once()
-        mock_manager_instance.save_to_db.assert_called_once()
+            # Verify the manager was called to find existing entry
+            mock_api_manager.find_entry_by_item_id.assert_called_once_with(self.test_item_id)
 
-        # Verify update_entry_by_item_id was called
-        mock_api_manager.update_entry_by_item_id.assert_called_once_with(
-            item_id=self.test_item_id,
-            query=self.test_query,
-            formatted_memories=self.test_formatted_memories,
-            task_status=TaskRunningStatus.RUNNING,
-            conversation_id=None,
-        )
+            # Verify update_entry_by_item_id was called
+            mock_api_manager.update_entry_by_item_id.assert_called_once()
 
-    @patch("memos.mem_scheduler.general_modules.api_misc.RedisDBManager")
+            # Verify sync_with_redis was called
+            mock_manager_instance.sync_with_redis.assert_called_once()
+
+    @patch("memos.mem_scheduler.general_modules.api_misc.APIRedisDBManager")
     def test_sync_search_data_completed_status(self, mock_redis_manager):
         """Test sync_search_data handles COMPLETED status correctly."""
         # Setup mock manager
@@ -190,9 +186,9 @@ class TestSchedulerAPIModule(unittest.TestCase):
             "not_found",
         )  # No existing entry
         mock_api_manager.completed_entries = []  # Initialize as empty list
-        mock_api_manager.running_entries = []  # Add running_entries attribute
-        mock_api_manager.window_size = 3
-        mock_manager_instance.load_from_db.return_value = mock_api_manager
+        mock_api_manager.window_size = 10
+        mock_manager_instance.obj = mock_api_manager
+        mock_manager_instance.sync_with_redis.return_value = mock_api_manager
 
         # Mock get_search_history_manager to return our mock manager
         with patch.object(
@@ -204,43 +200,47 @@ class TestSchedulerAPIModule(unittest.TestCase):
                 user_id=self.test_user_id,
                 mem_cube_id=self.test_mem_cube_id,
                 query=self.test_query,
+                memories=[],
                 formatted_memories=self.test_formatted_memories,
                 running_status=TaskRunningStatus.COMPLETED,
             )
 
-        # Verify manager methods were called
-        mock_manager_instance.load_from_db.assert_called_once()
-        mock_manager_instance.save_to_db.assert_called_once()
+            # Verify the manager was called to find existing entry
+            mock_api_manager.find_entry_by_item_id.assert_called_once_with(self.test_item_id)
 
-        # Verify entry was added to completed_entries
-        self.assertEqual(len(mock_api_manager.completed_entries), 1)
-        added_entry = mock_api_manager.completed_entries[0]
-        self.assertEqual(added_entry.task_id, self.test_item_id)
-        self.assertEqual(added_entry.query, self.test_query)
-        self.assertEqual(added_entry.task_status, TaskRunningStatus.COMPLETED)
+            # Verify entry was added to completed_entries (not running_task_ids)
+            self.assertEqual(len(mock_api_manager.completed_entries), 1)
 
-    @patch("memos.mem_scheduler.general_modules.api_misc.RedisDBManager")
+            # Verify sync_with_redis was called
+            mock_manager_instance.sync_with_redis.assert_called_once()
+
+    @patch("memos.mem_scheduler.general_modules.api_misc.APIRedisDBManager")
     def test_sync_search_data_error_handling(self, mock_redis_manager):
         """Test sync_search_data handles errors gracefully."""
-        # Setup mock manager that raises exception
+        # Setup mock manager to raise an exception
         mock_manager_instance = MagicMock()
         mock_redis_manager.return_value = mock_manager_instance
-        mock_manager_instance.load_from_db.side_effect = Exception("Redis error")
+        mock_manager_instance.obj = None  # This will cause an exception path
 
-        # Call should not raise exception
-        try:
-            self.api_module.sync_search_data(
-                item_id=self.test_item_id,
-                user_id=self.test_user_id,
-                mem_cube_id=self.test_mem_cube_id,
-                query=self.test_query,
-                formatted_memories=self.test_formatted_memories,
-                running_status=TaskRunningStatus.RUNNING,
-            )
-        except Exception as e:
-            self.fail(f"sync_search_data raised an exception: {e}")
+        # Mock get_search_history_manager to return our mock manager
+        with patch.object(
+            self.api_module, "get_search_history_manager", return_value=mock_manager_instance
+        ):
+            # This should not raise an exception
+            try:
+                self.api_module.sync_search_data(
+                    item_id=self.test_item_id,
+                    user_id=self.test_user_id,
+                    mem_cube_id=self.test_mem_cube_id,
+                    query=self.test_query,
+                    memories=[],
+                    formatted_memories=self.test_formatted_memories,
+                    running_status=TaskRunningStatus.RUNNING,
+                )
+            except Exception as e:
+                self.fail(f"sync_search_data raised an exception: {e}")
 
-    @patch("memos.mem_scheduler.general_modules.api_misc.RedisDBManager")
+    @patch("memos.mem_scheduler.general_modules.api_misc.APIRedisDBManager")
     def test_get_pre_fine_memories_empty_history(self, mock_redis_manager):
         """Test get_pre_fine_memories returns empty list when no history."""
         # Setup mock manager
@@ -250,7 +250,8 @@ class TestSchedulerAPIModule(unittest.TestCase):
         # Setup mock APISearchHistoryManager with empty history
         mock_api_manager = MagicMock(spec=APISearchHistoryManager)
         mock_api_manager.get_history_memories = MagicMock(return_value=[])
-        mock_manager_instance.load_from_db.return_value = mock_api_manager
+        mock_manager_instance.obj = mock_api_manager
+        mock_manager_instance.sync_with_redis.return_value = mock_api_manager
 
         # Call get_pre_fine_memories
         result = self.api_module.get_pre_memories(

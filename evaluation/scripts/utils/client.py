@@ -3,10 +3,14 @@ import os
 import sys
 import time
 import uuid
+
 from contextlib import suppress
 from datetime import datetime
-from dotenv import load_dotenv
+
 import requests
+
+from dotenv import load_dotenv
+
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 load_dotenv()
@@ -307,7 +311,7 @@ class MemuClient:
                 agent_name=self.agent_id,
                 session_date=iso_date,
             )
-            self.wait_for_completion(response.task_id)
+            self.wait_for_completion(response.item_id)
         except Exception as error:
             print("❌ Error saving conversation:", error)
 

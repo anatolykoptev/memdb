@@ -62,6 +62,8 @@ class SchedulerDispatcher(BaseSchedulerModule):
         # Task tracking for monitoring
         self._running_tasks: dict[str, RunningTaskItem] = {}
         self._task_lock = threading.Lock()
+        self._completed_tasks = []
+        self.completed_tasks_max_show_size = 10
 
     def _create_task_wrapper(self, handler: Callable, task_item: RunningTaskItem):
         """
@@ -85,7 +87,9 @@ class SchedulerDispatcher(BaseSchedulerModule):
                     if task_item.item_id in self._running_tasks:
                         task_item.mark_completed(result)
                         del self._running_tasks[task_item.item_id]
-
+                        self._completed_tasks.append(task_item)
+                        if len(self._completed_tasks) > self.completed_tasks_max_show_size:
+                            self._completed_tasks[-self.completed_tasks_max_show_size :]
                 logger.info(f"Task completed: {task_item.get_execution_info()}")
                 return result
 
@@ -95,7 +99,8 @@ class SchedulerDispatcher(BaseSchedulerModule):
                     if task_item.item_id in self._running_tasks:
                         task_item.mark_failed(str(e))
                         del self._running_tasks[task_item.item_id]
-
+                        if len(self._completed_tasks) > self.completed_tasks_max_show_size:
+                            self._completed_tasks[-self.completed_tasks_max_show_size :]
                 logger.error(f"Task failed: {task_item.get_execution_info()}, Error: {e}")
                 raise
 

@@ -8,15 +8,14 @@ from memos.log import get_logger
 from memos.mem_cube.general import GeneralMemCube
 from memos.mem_scheduler.general_modules.api_misc import SchedulerAPIModule
 from memos.mem_scheduler.general_scheduler import GeneralScheduler
-from memos.mem_scheduler.schemas.api_schemas import TaskRunningStatus
 from memos.mem_scheduler.schemas.general_schemas import (
     API_MIX_SEARCH_LABEL,
-    QUERY_LABEL,
     MemCubeID,
     SearchMode,
     UserID,
 )
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
+from memos.mem_scheduler.utils.api_utils import format_textual_memory_item
 from memos.mem_scheduler.utils.db_utils import get_utc_now
 from memos.memories.textual.tree import TextualMemoryItem, TreeTextMemory
 from memos.types import UserContext
@@ -24,6 +23,7 @@ from memos.types import UserContext
 
 if TYPE_CHECKING:
     from memos.mem_scheduler.schemas.monitor_schemas import MemoryMonitorItem
+    from memos.reranker.http_bge import HTTPBGEReranker
 
 
 logger = get_logger(__name__)
@@ -35,9 +35,11 @@ class OptimizedScheduler(GeneralScheduler):
     def __init__(self, config: GeneralSchedulerConfig):
         super().__init__(config)
         self.api_module = SchedulerAPIModule()
-        self.message_consumers = {
-            API_MIX_SEARCH_LABEL: self._api_mix_search_message_consumer,
-        }
+        self.register_handlers(
+            {
+                API_MIX_SEARCH_LABEL: self._api_mix_search_message_consumer,
+            }
+        )
 
     def search_memories(
         self,
@@ -128,7 +130,7 @@ class OptimizedScheduler(GeneralScheduler):
             mode=SearchMode.FAST,
         )
 
-        async_task_id = self.submit_memory_history_async_task(
+        self.submit_memory_history_async_task(
             search_req=search_req,
             user_context=user_context,
         )
@@ -138,78 +140,74 @@ class OptimizedScheduler(GeneralScheduler):
             user_id=search_req.user_id, mem_cube_id=user_context.mem_cube_id
         )
         if not pre_fine_memories:
-            return fast_memories
+            # Format fast memories for return
+            formatted_memories = [format_textual_memory_item(data) for data in fast_memories]
+            return formatted_memories
 
-        # Merge fast and pre-computed fine memories
+        # Merge fast and pre-computed fine memories (both are TextualMemoryItem objects)
         combined_memories = fast_memories + pre_fine_memories
-        # Remove duplicates based on content
+        # Remove duplicates based on memory content
         seen_contents = set()
         unique_memories = []
         for memory in combined_memories:
-            content_key = memory.get("content", "")
+            # Both fast_memories and pre_fine_memories are TextualMemoryItem objects
+            content_key = memory.memory  # Use .memory attribute instead of .get("content", "")
             if content_key not in seen_contents:
                 seen_contents.add(content_key)
                 unique_memories.append(memory)
 
-        # Sync search data to Redis
-        self.api_module.sync_search_data(
-            item_id=async_task_id,
-            user_id=search_req.user_id,
-            mem_cube_id=user_context.mem_cube_id,
-            query=search_req.query,
-            formatted_memories=unique_memories,
-            running_status=TaskRunningStatus.COMPLETED,
+        # Rerank Memories - reranker expects TextualMemoryItem objects
+        reranker: HTTPBGEReranker = mem_cube.text_mem.reranker
+
+        # Use search_req parameters for reranking
+        target_session_id = search_req.session_id
+        if not target_session_id:
+            target_session_id = "default_session"
+        search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
+
+        sorted_results = reranker.rerank(
+            query=search_req.query,  # Use search_req.query instead of undefined query
+            graph_results=unique_memories,  # Pass TextualMemoryItem objects directly
+            top_k=search_req.top_k,  # Use search_req.top_k instead of undefined top_k
+            search_filter=search_filter,
         )
 
-        # Rerank Memories - need to convert formatted memories back to TextualMemoryItem objects
+        formatted_memories = [
+            format_textual_memory_item(item) for item, score in sorted_results[: search_req.top_k]
+        ]
 
-        return unique_memories[: search_req.top_k]
+        return formatted_memories
 
     def update_search_memories_to_redis(
         self,
         user_id: str,
         mem_cube_id: str,
         messages: list[ScheduleMessageItem],
-        task_status: str = "running",
     ):
         mem_cube = messages[0].mem_cube
 
-        # for status update
-        self._set_current_context_from_message(msg=messages[0])
-
-        # update query monitors
         for msg in messages:
-            self.monitor.register_query_monitor_if_not_exists(
-                user_id=user_id, mem_cube_id=mem_cube_id
-            )
-
-            content_dict = msg.content
+            content_dict = json.loads(msg.content)
             search_req = content_dict["search_req"]
             user_context = content_dict["user_context"]
 
-            formatted_memories = self.fine_search_memories(
-                search_req=search_req, user_context=user_context, mem_cube=mem_cube
+            fine_memories: list[TextualMemoryItem] = self.search_memories(
+                search_req=APISearchRequest(**content_dict["search_req"]),
+                user_context=UserContext(**content_dict["user_context"]),
+                mem_cube=mem_cube,
+                mode=SearchMode.FINE,
             )
+            formatted_memories = [format_textual_memory_item(data) for data in fine_memories]
 
             # Sync search data to Redis
-            try:
-                # Convert task_status string to TaskRunningStatus enum
-                running_status = (
-                    TaskRunningStatus.COMPLETED
-                    if task_status == "completed"
-                    else TaskRunningStatus.RUNNING
-                )
-
-                self.api_module.sync_search_data(
-                    item_id=msg.item_id,
-                    user_id=search_req["user_id"],
-                    mem_cube_id=user_context["mem_cube_id"],
-                    query=search_req["query"],
-                    formatted_memories=formatted_memories,
-                    running_status=running_status,
-                )
-            except Exception as e:
-                logger.error(f"Failed to sync search data: {e}")
+            self.api_module.sync_search_data(
+                item_id=msg.item_id,
+                user_id=search_req["user_id"],
+                mem_cube_id=user_context["mem_cube_id"],
+                query=search_req["query"],
+                memories=fine_memories,
+                formatted_memories=formatted_memories,
+            )
 
     def _api_mix_search_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
         """
@@ -218,12 +216,12 @@ class OptimizedScheduler(GeneralScheduler):
         Args:
             messages: List of query messages to process
         """
-        logger.info(f"Messages {messages} assigned to {QUERY_LABEL} handler.")
+        logger.info(f"Messages {messages} assigned to {API_MIX_SEARCH_LABEL} handler.")
 
         # Process the query in a session turn
         grouped_messages = self.dispatcher._group_messages_by_user_and_mem_cube(messages=messages)
 
-        self.validate_schedule_messages(messages=messages, label=QUERY_LABEL)
+        self.validate_schedule_messages(messages=messages, label=API_MIX_SEARCH_LABEL)
 
         for user_id in grouped_messages:
             for mem_cube_id in grouped_messages[user_id]:
