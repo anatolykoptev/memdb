@@ -162,8 +162,14 @@ class APISearchHistoryManager(BaseModel, DictConversionMixin):
         """
         # Check completed entries
         for entry in self.completed_entries:
-            if entry.item_id == item_id:
-                return entry.to_dict(), "completed"
+            try:
+                if hasattr(entry, "item_id") and entry.item_id == item_id:
+                    return entry.to_dict(), "completed"
+                elif isinstance(entry, dict) and entry.get("item_id") == item_id:
+                    return entry, "completed"
+            except AttributeError as e:
+                logger.warning(f"Entry missing item_id attribute: {e}, entry type: {type(entry)}")
+                continue
 
         return None, "not_found"
 

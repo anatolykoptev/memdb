@@ -213,17 +213,44 @@ class APIRedisDBManager:
         merged_manager = APISearchHistoryManager(window_size=original_window_size)
 
         # Merge completed entries - combine both sources and deduplicate by task_id
+        # Ensure all entries are APIMemoryHistoryEntryItem instances
+        from memos.mem_scheduler.schemas.api_schemas import APIMemoryHistoryEntryItem
+
         all_completed = {}
 
         # Add Redis completed entries
         for entry in redis_manager.completed_entries:
-            task_id = entry.get("task_id") if isinstance(entry, dict) else entry.item_id
-            all_completed[task_id] = entry
+            if isinstance(entry, dict):
+                # Convert dict to APIMemoryHistoryEntryItem instance
+                try:
+                    entry_obj = APIMemoryHistoryEntryItem(**entry)
+                    task_id = entry_obj.item_id
+                    all_completed[task_id] = entry_obj
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to convert dict entry to APIMemoryHistoryEntryItem: {e}"
+                    )
+                    continue
+            else:
+                task_id = entry.item_id
+                all_completed[task_id] = entry
 
         # Add current instance completed entries (these take priority if duplicated)
         for entry in obj_instance.completed_entries:
-            task_id = entry.get("task_id") if isinstance(entry, dict) else entry.item_id
-            all_completed[task_id] = entry
+            if isinstance(entry, dict):
+                # Convert dict to APIMemoryHistoryEntryItem instance
+                try:
+                    entry_obj = APIMemoryHistoryEntryItem(**entry)
+                    task_id = entry_obj.item_id
+                    all_completed[task_id] = entry_obj
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to convert dict entry to APIMemoryHistoryEntryItem: {e}"
+                    )
+                    continue
+            else:
+                task_id = entry.item_id
+                all_completed[task_id] = entry
 
         # Sort by created_time and apply size limit
         completed_list = list(all_completed.values())
@@ -232,17 +259,8 @@ class APIRedisDBManager:
             """Helper function to safely extract created_time for sorting"""
             from datetime import datetime
 
-            if isinstance(entry, dict):
-                created_time = entry.get("created_time")
-                # Handle string datetime conversion
-                if isinstance(created_time, str):
-                    try:
-                        return datetime.fromisoformat(created_time.replace("Z", "+00:00"))
-                    except (ValueError, AttributeError):
-                        return datetime.min
-                return created_time or datetime.min
-            else:
-                return getattr(entry, "created_time", datetime.min)
+            # All entries should now be APIMemoryHistoryEntryItem instances
+            return getattr(entry, "created_time", datetime.min)
 
         completed_list.sort(key=get_created_time, reverse=True)
         merged_manager.completed_entries = completed_list[:size_limit]

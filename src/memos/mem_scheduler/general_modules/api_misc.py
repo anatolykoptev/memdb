@@ -79,10 +79,8 @@ class SchedulerAPIModule(BaseSchedulerModule):
                 created_time=get_utc_now(),
             )
 
-            entry_dict = search_entry.to_dict()
-
-            # Add directly to completed list
-            search_history.completed_entries.append(entry_dict)
+            # Add directly to completed list as APIMemoryHistoryEntryItem instance
+            search_history.completed_entries.append(search_entry)
 
             # Maintain window size
             if len(search_history.completed_entries) > search_history.window_size:

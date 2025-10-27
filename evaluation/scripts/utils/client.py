@@ -183,6 +183,7 @@ class MemosApiClient:
                 "mem_cube_id": user_id,
                 "conversation_id": "",
                 "top_k": top_k,
+                "mode": "mixture",
             },
             ensure_ascii=False,
         )
@@ -230,6 +231,7 @@ class MemosApiOnlineClient:
                 "query": query,
                 "user_id": user_id,
                 "memory_limit_number": top_k,
+                "mode": "mixture",
             }
         )
 
