@@ -311,7 +311,7 @@ class MemuClient:
                 agent_name=self.agent_id,
                 session_date=iso_date,
             )
-            self.wait_for_completion(response.task_id)
+            self.wait_for_completion(response.item_id)
         except Exception as error:
             print("❌ Error saving conversation:", error)
 
