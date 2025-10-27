@@ -103,7 +103,7 @@ class APISearchHistoryManager(BaseModel, DictConversionMixin):
         logger.warning(f"Task ID {task_id} not found in running task ids")
         return False
 
-    def get_running_task_ids(self) -> list[str]:
+    def get_running_item_ids(self) -> list[str]:
         """Get all running task IDs"""
         return self.running_item_ids.copy()
 

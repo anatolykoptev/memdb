@@ -1,7 +1,6 @@
 import os
 import traceback
 
-from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
@@ -153,7 +152,6 @@ def init_server():
 
     # Build component configurations
     graph_db_config = _build_graph_db_config()
-    print(graph_db_config)
     llm_config = _build_llm_config()
     embedder_config = _build_embedder_config()
     mem_reader_config = _build_mem_reader_config()
@@ -235,22 +233,6 @@ def init_server():
         db_engine=BaseDBManager.create_default_sqlite_engine(),
     )
     mem_scheduler.current_mem_cube = naive_mem_cube
-    mem_scheduler.start()
-
-    # Initialize SchedulerAPIModule
-    api_module = mem_scheduler.api_module
-
-    # Initialize Scheduler
-    scheduler_config_dict = APIConfig.get_scheduler_config()
-    scheduler_config = SchedulerConfigFactory(
-        backend="optimized_scheduler", config=scheduler_config_dict
-    )
-    mem_scheduler = SchedulerFactory.from_config(scheduler_config)
-    mem_scheduler.initialize_modules(
-        chat_llm=llm,
-        process_llm=mem_reader.llm,
-        db_engine=BaseDBManager.create_default_sqlite_engine(),
-    )
     mem_scheduler.start()
 
     # Initialize SchedulerAPIModule
@@ -385,11 +367,11 @@ def search_memories(search_req: APISearchRequest):
         )
         return [_format_memory_item(data) for data in results]
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        text_future = executor.submit(_search_text)
-        pref_future = executor.submit(_search_pref)
-        text_formatted_memories = text_future.result()
-        pref_formatted_memories = pref_future.result()
+    # Use mem_scheduler dispatcher for multi-threading
+    tasks = {"text_search": (_search_text, ()), "pref_search": (_search_pref, ())}
+    results = mem_scheduler.dispatcher.run_multiple_tasks(tasks)
+    text_formatted_memories = results["text_search"]
+    pref_formatted_memories = results["pref_search"]
 
     memories_result["text_mem"].append(
         {
@@ -547,11 +529,11 @@ def add_memories(add_req: APIADDRequest):
             for memory_id, memory in zip(pref_ids_local, pref_memories_local, strict=False)
         ]
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        text_future = executor.submit(_process_text_mem)
-        pref_future = executor.submit(_process_pref_mem)
-        text_response_data = text_future.result()
-        pref_response_data = pref_future.result()
+    # Use mem_scheduler dispatcher for multi-threading
+    tasks = {"text_mem": (_process_text_mem, ()), "pref_mem": (_process_pref_mem, ())}
+    results = mem_scheduler.dispatcher.run_multiple_tasks(tasks)
+    text_response_data = results["text_mem"]
+    pref_response_data = results["pref_mem"]
 
     return MemoryResponse(
         message="Memory added successfully",

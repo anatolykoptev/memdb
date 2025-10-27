@@ -248,15 +248,15 @@ class APIRedisDBManager:
         merged_manager.completed_entries = completed_list[:size_limit]
 
         # Merge running task IDs - combine both sources and deduplicate
-        all_running_task_ids = set()
+        all_running_item_ids = set()
 
         # Add Redis running task IDs
-        all_running_task_ids.update(redis_manager.running_item_ids)
+        all_running_item_ids.update(redis_manager.running_item_ids)
 
         # Add current instance running task IDs
-        all_running_task_ids.update(obj_instance.running_item_ids)
+        all_running_item_ids.update(obj_instance.running_item_ids)
 
-        merged_manager.running_item_ids = list(all_running_task_ids)
+        merged_manager.running_item_ids = list(all_running_item_ids)
 
         logger.info(
             f"Merged manager: {len(merged_manager.completed_entries)} completed, {len(merged_manager.running_item_ids)} running task IDs"

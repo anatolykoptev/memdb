@@ -91,8 +91,8 @@ class SchedulerAPIModule(BaseSchedulerModule):
                 ]
 
             # Remove from running task IDs
-            if item_id in search_history.running_task_ids:
-                search_history.running_task_ids.remove(item_id)
+            if item_id in search_history.running_item_ids:
+                search_history.running_item_ids.remove(item_id)
 
             logger.info(f"Created new entry with item_id: {item_id}")
 

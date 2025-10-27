@@ -36,6 +36,11 @@ class SchedulerDispatcher(BaseSchedulerModule):
         # Main dispatcher thread pool
         self.max_workers = max_workers
 
+        # Get multi-task timeout from config
+        self.multi_task_running_timeout = (
+            self.config.get("multi_task_running_timeout") if self.config else None
+        )
+
         # Only initialize thread pool if in parallel mode
         self.enable_parallel_dispatch = enable_parallel_dispatch
         self.thread_name_prefix = "dispatcher"
@@ -361,17 +366,17 @@ class SchedulerDispatcher(BaseSchedulerModule):
 
     def run_multiple_tasks(
         self,
-        tasks: dict[str, tuple[Callable, tuple, dict]],
+        tasks: dict[str, tuple[Callable, tuple]],
         use_thread_pool: bool | None = None,
-        timeout: float | None = 30.0,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """
         Execute multiple tasks concurrently and return all results.
 
         Args:
-            tasks: Dictionary mapping task names to (function, args, kwargs) tuples
+            tasks: Dictionary mapping task names to (task_execution_function, task_execution_parameters) tuples
             use_thread_pool: Whether to use ThreadPoolExecutor. If None, uses dispatcher's parallel mode setting
-            timeout: Maximum time to wait for all tasks to complete (in seconds). None for infinite timeout.
+            timeout: Maximum time to wait for all tasks to complete (in seconds). If None, uses config default.
 
         Returns:
             Dictionary mapping task names to their results
@@ -383,7 +388,13 @@ class SchedulerDispatcher(BaseSchedulerModule):
         if use_thread_pool is None:
             use_thread_pool = self.enable_parallel_dispatch
 
-        logger.info(f"Executing {len(tasks)} tasks concurrently (thread_pool: {use_thread_pool})")
+        # Use config timeout if not explicitly provided
+        if timeout is None:
+            timeout = self.multi_task_running_timeout
+
+        logger.info(
+            f"Executing {len(tasks)} tasks concurrently (thread_pool: {use_thread_pool}, timeout: {timeout})"
+        )
 
         try:
             results = self.thread_manager.run_multiple_tasks(
