@@ -1,6 +1,7 @@
 import json
 import os
 
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 from memos.api.product_models import APISearchRequest
@@ -39,6 +40,8 @@ class OptimizedScheduler(GeneralScheduler):
         super().__init__(config)
         self.window_size = int(os.getenv("API_SEARCH_WINDOW_SIZE", 5))
         self.history_memory_turns = int(os.getenv("API_SEARCH_HISTORY_TURNS", 5))
+        self.session_counter = OrderedDict()
+        self.max_session_history = 5
 
         self.api_module = SchedulerAPIModule(
             window_size=self.window_size,
@@ -54,13 +57,14 @@ class OptimizedScheduler(GeneralScheduler):
         self,
         search_req: APISearchRequest,
         user_context: UserContext,
+        session_id: str | None = None,
     ):
         # Create message for async fine search
         message_content = {
             "search_req": {
                 "query": search_req.query,
                 "user_id": search_req.user_id,
-                "session_id": search_req.session_id,
+                "session_id": session_id,
                 "top_k": search_req.top_k,
                 "internet_search": search_req.internet_search,
                 "moscube": search_req.moscube,
@@ -163,6 +167,7 @@ class OptimizedScheduler(GeneralScheduler):
         self.submit_memory_history_async_task(
             search_req=search_req,
             user_context=user_context,
+            session_id=search_req.session_id,
         )
 
         # Try to get pre-computed fine memories if available
@@ -171,6 +176,7 @@ class OptimizedScheduler(GeneralScheduler):
             mem_cube_id=user_context.mem_cube_id,
             turns=self.history_memory_turns,
         )
+
         if not history_memories:
             fast_memories = searcher.post_retrieve(
                 retrieved_results=fast_retrieved_memories,
@@ -214,6 +220,23 @@ class OptimizedScheduler(GeneralScheduler):
             search_req = content_dict["search_req"]
             user_context = content_dict["user_context"]
 
+            session_id = search_req.get("session_id")
+            if session_id:
+                if session_id not in self.session_counter:
+                    self.session_counter[session_id] = 0
+                else:
+                    self.session_counter[session_id] += 1
+                session_turn = self.session_counter[session_id]
+
+                # Move the current session to the end to mark it as recently used
+                self.session_counter.move_to_end(session_id)
+
+                # If the counter exceeds the max size, remove the oldest item
+                if len(self.session_counter) > self.max_session_history:
+                    self.session_counter.popitem(last=False)
+            else:
+                session_turn = 0
+
             memories: list[TextualMemoryItem] = self.search_memories(
                 search_req=APISearchRequest(**content_dict["search_req"]),
                 user_context=UserContext(**content_dict["user_context"]),
@@ -230,6 +253,8 @@ class OptimizedScheduler(GeneralScheduler):
                 query=search_req["query"],
                 memories=memories,
                 formatted_memories=formatted_memories,
+                session_id=session_id,
+                conversation_turn=session_turn,
             )
 
     def _api_mix_search_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:

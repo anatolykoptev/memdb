@@ -8,7 +8,6 @@ from memos.mem_scheduler.schemas.api_schemas import (
     APISearchHistoryManager,
     TaskRunningStatus,
 )
-from memos.mem_scheduler.utils.db_utils import get_utc_now
 from memos.memories.textual.item import TextualMemoryItem
 
 
@@ -45,7 +44,8 @@ class SchedulerAPIModule(BaseSchedulerModule):
         query: str,
         memories: list[TextualMemoryItem],
         formatted_memories: Any,
-        conversation_id: str | None = None,
+        session_id: str | None = None,
+        conversation_turn: int = 0,
     ) -> Any:
         logger.info(
             f"Syncing search data for item_id: {item_id}, user_id: {user_id}, mem_cube_id: {mem_cube_id}"
@@ -66,7 +66,7 @@ class SchedulerAPIModule(BaseSchedulerModule):
                 query=query,
                 formatted_memories=formatted_memories,
                 task_status=TaskRunningStatus.COMPLETED,  # Use the provided running_status
-                conversation_id=conversation_id,
+                session_id=session_id,
                 memories=memories,
             )
 
@@ -76,18 +76,18 @@ class SchedulerAPIModule(BaseSchedulerModule):
                 logger.warning(f"Failed to update entry with item_id: {item_id}")
         else:
             # Add new entry based on running_status
-            search_entry = APIMemoryHistoryEntryItem(
+            entry_item = APIMemoryHistoryEntryItem(
                 item_id=item_id,
                 query=query,
                 formatted_memories=formatted_memories,
                 memories=memories,
                 task_status=TaskRunningStatus.COMPLETED,
-                conversation_id=conversation_id,
-                created_time=get_utc_now(),
+                session_id=session_id,
+                conversation_turn=conversation_turn,
             )
 
             # Add directly to completed list as APIMemoryHistoryEntryItem instance
-            search_history.completed_entries.append(search_entry)
+            search_history.completed_entries.append(entry_item)
 
             # Maintain window size
             if len(search_history.completed_entries) > search_history.window_size:
