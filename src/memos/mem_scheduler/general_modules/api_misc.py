@@ -16,16 +16,20 @@ logger = get_logger(__name__)
 
 
 class SchedulerAPIModule(BaseSchedulerModule):
-    def __init__(self, window_size=5):
+    def __init__(self, window_size: int | None = None, history_memory_turns: int | None = None):
         super().__init__()
         self.window_size = window_size
+        self.history_memory_turns = history_memory_turns
         self.search_history_managers: dict[str, APIRedisDBManager] = {}
-        self.pre_memory_turns = 5
 
     def get_search_history_manager(self, user_id: str, mem_cube_id: str) -> APIRedisDBManager:
         """Get or create a Redis manager for search history."""
+        logger.info(
+            f"Getting search history manager for user_id: {user_id}, mem_cube_id: {mem_cube_id}"
+        )
         key = f"search_history:{user_id}:{mem_cube_id}"
         if key not in self.search_history_managers:
+            logger.info(f"Creating new search history manager for key: {key}")
             self.search_history_managers[key] = APIRedisDBManager(
                 user_id=user_id,
                 mem_cube_id=mem_cube_id,
@@ -43,6 +47,9 @@ class SchedulerAPIModule(BaseSchedulerModule):
         formatted_memories: Any,
         conversation_id: str | None = None,
     ) -> Any:
+        logger.info(
+            f"Syncing search data for item_id: {item_id}, user_id: {user_id}, mem_cube_id: {mem_cube_id}"
+        )
         # Get the search history manager
         manager = self.get_search_history_manager(user_id, mem_cube_id)
         manager.sync_with_redis(size_limit=self.window_size)
@@ -101,36 +108,21 @@ class SchedulerAPIModule(BaseSchedulerModule):
         manager.sync_with_redis(size_limit=self.window_size)
         return manager
 
-    def get_pre_memories(self, user_id: str, mem_cube_id: str) -> list:
-        """
-        Get pre-computed memories from the most recent completed search entry.
-
-        Args:
-            user_id: User identifier
-            mem_cube_id: Memory cube identifier
-
-        Returns:
-            List of TextualMemoryItem objects from the most recent completed search
-        """
-        manager = self.get_search_history_manager(user_id, mem_cube_id)
-
-        existing_data = manager.load_from_db()
-        if existing_data is None:
-            return []
-
-        search_history: APISearchHistoryManager = existing_data
-
-        # Get memories from the most recent completed entry
-        history_memories = search_history.get_history_memories(turns=self.pre_memory_turns)
-        return history_memories
-
-    def get_history_memories(self, user_id: str, mem_cube_id: str, n: int) -> list:
+    def get_history_memories(
+        self, user_id: str, mem_cube_id: str, turns: int | None = None
+    ) -> list:
         """Get history memories for backward compatibility with tests."""
+        logger.info(
+            f"Getting history memories for user_id: {user_id}, mem_cube_id: {mem_cube_id}, turns: {turns}"
+        )
         manager = self.get_search_history_manager(user_id, mem_cube_id)
         existing_data = manager.load_from_db()
 
         if existing_data is None:
             return []
+
+        if turns is None:
+            turns = self.history_memory_turns
 
         # Handle different data formats
         if isinstance(existing_data, APISearchHistoryManager):
@@ -142,4 +134,4 @@ class SchedulerAPIModule(BaseSchedulerModule):
             except Exception:
                 return []
 
-        return search_history.get_history_memories(turns=n)
+        return search_history.get_history_memories(turns=turns)
