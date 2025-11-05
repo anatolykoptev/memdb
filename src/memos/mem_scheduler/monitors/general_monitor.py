@@ -206,7 +206,7 @@ class SchedulerGeneralMonitor(BaseSchedulerModule):
         self.working_mem_monitor_capacity = min(
             DEFAULT_WORKING_MEM_MONITOR_SIZE_LIMIT,
             (
-                text_mem_base.memory_manager.memory_size["WorkingMemory"]
+                int(text_mem_base.memory_manager.memory_size["WorkingMemory"])
                 + self.partial_retention_number
             ),
         )
