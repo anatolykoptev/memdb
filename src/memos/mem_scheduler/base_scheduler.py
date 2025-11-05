@@ -539,8 +539,8 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             if self.disable_handlers and message.label in self.disable_handlers:
                 logger.info(f"Skipping disabled handler: {message.label} - {message.content}")
                 continue
-        self.memos_message_queue.put(message)
-        logger.info(f"Submitted message to local queue: {message.label} - {message.content}")
+            self.memos_message_queue.put(message)
+            logger.info(f"Submitted message to local queue: {message.label} - {message.content}")
 
         with contextlib.suppress(Exception):
             if messages:
@@ -609,7 +609,6 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
 
                 if messages:
                     try:
-                        print(f"dispatch {len(messages)} messages")
                         self.dispatcher.dispatch(messages)
                     except Exception as e:
                         logger.error(f"Error dispatching messages: {e!s}")

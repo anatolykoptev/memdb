@@ -174,7 +174,7 @@ class NacosConfigManager:
     @classmethod
     def start_watch_if_enabled(cls) -> None:
         enable = os.getenv("NACOS_ENABLE_WATCH", "false").lower() == "true"
-        print("enable:", enable)
+        logger.info(f"NACOS_ENABLE_WATCH: {enable}")
         if not enable:
             return
         interval = int(os.getenv("NACOS_WATCH_INTERVAL", "60"))

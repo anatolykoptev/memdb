@@ -33,17 +33,17 @@ DEFAULT_MEMORY_CAPACITIES = {
 
 class ScheduleMessageItem(BaseModel, DictConversionMixin):
     item_id: str = Field(description="uuid", default_factory=lambda: str(uuid4()))
-    redis_message_id: str = Field(description="the message get from redis stream", default="")
+    redis_message_id: str = Field(default="", description="the message get from redis stream")
     user_id: str = Field(..., description="user id")
     mem_cube_id: str = Field(..., description="memcube id")
-    session_id: str | None = Field(None, description="Session ID for soft-filtering memories")
+    session_id: str = Field(default="", description="Session ID for soft-filtering memories")
     label: str = Field(..., description="Label of the schedule message")
     content: str = Field(..., description="Content of the schedule message")
     timestamp: datetime = Field(
         default_factory=get_utc_now, description="submit time for schedule_messages"
     )
-    user_name: str | None = Field(
-        default=None,
+    user_name: str = Field(
+        default="",
         description="user name / display name (optional)",
     )
 

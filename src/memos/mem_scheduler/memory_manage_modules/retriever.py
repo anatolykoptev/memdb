@@ -21,6 +21,7 @@ from memos.mem_scheduler.utils.misc_utils import extract_json_obj, extract_list_
 from memos.memories.textual.item import TextualMemoryMetadata
 from memos.memories.textual.tree import TextualMemoryItem, TreeTextMemory
 
+# Extract JSON response
 from .memory_filter import MemoryFilter
 
 
@@ -63,9 +64,6 @@ class SchedulerRetriever(BaseSchedulerModule):
         response = self.process_llm.generate([{"role": "user", "content": prompt}])
 
         try:
-            # Extract JSON response
-            from memos.mem_scheduler.utils.misc_utils import extract_json_obj
-
             result = extract_json_obj(response)
 
             # Validate response structure
@@ -116,12 +114,12 @@ class SchedulerRetriever(BaseSchedulerModule):
                 )
                 logger.debug(
                     f"[Enhance][batch={batch_index}] Prompt (first 200 chars, len={len(prompt)}): "
-                    f"{prompt[:200]}..."
+                    f"{prompt[:200]}]..."
                 )
 
                 response = self.process_llm.generate([{"role": "user", "content": prompt}])
                 logger.debug(
-                    f"[Enhance][batch={batch_index}] Response (first 200 chars): {response[:200]}..."
+                    f"[Enhance][batch={batch_index}] Response (first 200 chars): {response}..."
                 )
 
                 processed_text_memories = extract_list_items_in_answer(response)

@@ -169,9 +169,6 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             raise ConnectionError("Not connected to Redis. Redis connection not available.")
 
         try:
-            # Ensure the consumer group and stream exist before reading
-            self._ensure_consumer_group()
-
             # Calculate timeout for Redis
             redis_timeout = None
             if block and timeout is not None:
@@ -195,7 +192,6 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                     logger.warning(
                         f"Consumer group or stream missing for '{self.stream_name}/{self.consumer_group}'. Attempting to create and retry."
                     )
-                    self._ensure_consumer_group()
                     messages = self._redis_conn.xreadgroup(
                         self.consumer_group,
                         self.consumer_name,
@@ -263,9 +259,6 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             return 0
 
         try:
-            # Ensure consumer group exists
-            self._ensure_consumer_group()
-
             # Get pending messages info for the consumer group
             # XPENDING returns info about pending messages that haven't been acknowledged
             pending_info = self._redis_conn.xpending(self.stream_name, self.consumer_group)
@@ -432,7 +425,6 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                 # Test the connection
                 self._redis_conn.ping()
                 self._is_connected = True
-                self._ensure_consumer_group()
                 logger.debug("Redis connection established successfully")
             except Exception as e:
                 logger.error(f"Failed to connect to Redis: {e}")

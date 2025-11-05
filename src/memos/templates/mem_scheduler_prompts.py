@@ -390,7 +390,6 @@ Return a JSON object with this exact structure:
 - Focus on whether the memories can fully answer the query without additional information
 """
 
-
 MEMORY_ENHANCEMENT_PROMPT = """
 You are a knowledgeable and precise AI assistant.
 
@@ -429,7 +428,6 @@ Wrap the final output inside:
 
 Answer:
 """
-
 
 PROMPT_MAPPING = {
     "intent_recognizing": INTENT_RECOGNIZING_PROMPT,

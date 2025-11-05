@@ -119,22 +119,10 @@ def extract_list_items(text: str, bullet_prefixes: tuple[str, ...] = ("- ",)) ->
         if matched:
             continue
 
-        # Removed loose fallback for "• " to strictly comply with "- " prefix format
-
     if items:
         return items
-
-    # Fallback: try parsing as a JSON array (e.g., ["item1", "item2", ...])
-    try:
-        data = extract_json_obj(normalized)
-        if isinstance(data, list):
-            result: list[str] = []
-            for x in data:
-                result.append(x if isinstance(x, str) else str(x))
-            return result
-    except Exception:
-        # Swallow and return empty list below
-        pass
+    else:
+        logger.error(f"Fail to parse {text}")
 
     return []
 

@@ -418,9 +418,6 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         logger.info(
                             f"Dispatch {len(msgs)} message(s) to {label} handler for user {user_id} and mem_cube {mem_cube_id}."
                         )
-                        print(
-                            f"Dispatch {len(msgs)} message(s) to {label} handler for user {user_id} and mem_cube {mem_cube_id}."
-                        )
                     else:
                         wrapped_handler(msgs)
 
