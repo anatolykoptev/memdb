@@ -70,13 +70,14 @@ class OptimizedScheduler(GeneralScheduler):
         search_req: APISearchRequest,
         user_context: UserContext,
         memories_to_store: dict | None = None,
+        session_id: str | None = None,
     ):
         # Create message for async fine search
         message_content = {
             "search_req": {
                 "query": search_req.query,
                 "user_id": search_req.user_id,
-                "session_id": search_req.session_id,
+                "session_id": session_id,
                 "top_k": search_req.top_k,
                 "internet_search": search_req.internet_search,
                 "moscube": search_req.moscube,
