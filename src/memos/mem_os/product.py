@@ -609,7 +609,6 @@ class MOSProduct(MOSCore):
             message_item = ScheduleMessageItem(
                 user_id=user_id,
                 mem_cube_id=mem_cube_id,
-                mem_cube=self.mem_cubes[mem_cube_id],
                 label=label,
                 content=query,
                 timestamp=datetime.utcnow(),

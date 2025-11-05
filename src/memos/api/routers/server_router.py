@@ -1,7 +1,6 @@
 import os
 import traceback
 
-from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
@@ -22,6 +21,7 @@ from memos.configs.mem_reader import MemReaderConfigFactory
 from memos.configs.mem_scheduler import SchedulerConfigFactory
 from memos.configs.reranker import RerankerConfigFactory
 from memos.configs.vec_db import VectorDBConfigFactory
+from memos.context.context import ContextThreadPoolExecutor as ThreadPoolExecutor
 from memos.embedders.factory import EmbedderFactory
 from memos.graph_dbs.factory import GraphStoreFactory
 from memos.llms.factory import LLMFactory
@@ -234,11 +234,13 @@ def init_server():
         process_llm=mem_reader.llm,
         db_engine=BaseDBManager.create_default_sqlite_engine(),
     )
-    mem_scheduler.current_mem_cube = naive_mem_cube
-    mem_scheduler.start()
+    mem_scheduler.init_mem_cube(mem_cube=naive_mem_cube)
 
     # Initialize SchedulerAPIModule
     api_module = mem_scheduler.api_module
+
+    if os.getenv("API_SCHEDULER_ON", True):
+        mem_scheduler.start()
 
     return (
         graph_db,
@@ -335,8 +337,10 @@ def search_memories(search_req: APISearchRequest):
         "para_mem": [],
         "pref_mem": "",
     }
-
-    search_mode = search_req.mode
+    if search_req.mode == SearchMode.NOT_INITIALIZED:
+        search_mode = os.getenv("SEARCH_MODE", SearchMode.FAST)
+    else:
+        search_mode = search_req.mode
 
     def _search_text():
         if search_mode == SearchMode.FAST:
@@ -417,22 +421,38 @@ def fine_search_memories(
         target_session_id = "default_session"
     search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
 
-    # Create MemCube and perform search
-    search_results = naive_mem_cube.text_mem.search(
+    searcher = mem_scheduler.searcher
+
+    info = {
+        "user_id": search_req.user_id,
+        "session_id": target_session_id,
+        "chat_history": search_req.chat_history,
+    }
+
+    fast_retrieved_memories = searcher.retrieve(
         query=search_req.query,
         user_name=user_context.mem_cube_id,
         top_k=search_req.top_k,
-        mode=SearchMode.FINE,
+        mode=SearchMode.FAST,
         manual_close_internet=not search_req.internet_search,
         moscube=search_req.moscube,
         search_filter=search_filter,
-        info={
-            "user_id": search_req.user_id,
-            "session_id": target_session_id,
-            "chat_history": search_req.chat_history,
-        },
+        info=info,
     )
-    formatted_memories = [_format_memory_item(data) for data in search_results]
+
+    fast_memories = searcher.post_retrieve(
+        retrieved_results=fast_retrieved_memories,
+        top_k=search_req.top_k,
+        user_name=user_context.mem_cube_id,
+        info=info,
+    )
+
+    enhanced_results, _ = mem_scheduler.retriever.enhance_memories_with_query(
+        query_history=[search_req.query],
+        memories=fast_memories,
+    )
+
+    formatted_memories = [_format_memory_item(data) for data in enhanced_results]
 
     return formatted_memories
 

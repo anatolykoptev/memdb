@@ -77,7 +77,7 @@ class Searcher:
 
     def post_retrieve(
         self,
-        retrieved_results: list[TextualMemoryItem],
+        retrieved_results,
         top_k: int,
         user_name: str | None = None,
         info=None,

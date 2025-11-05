@@ -359,7 +359,7 @@ class APIConfig:
                 ),
                 "context_window_size": int(os.getenv("MOS_SCHEDULER_CONTEXT_WINDOW_SIZE", "5")),
                 "thread_pool_max_workers": int(
-                    os.getenv("MOS_SCHEDULER_THREAD_POOL_MAX_WORKERS", "10")
+                    os.getenv("MOS_SCHEDULER_THREAD_POOL_MAX_WORKERS", "100")
                 ),
                 "consume_interval_seconds": float(
                     os.getenv("MOS_SCHEDULER_CONSUME_INTERVAL_SECONDS", "0.01")
@@ -368,7 +368,10 @@ class APIConfig:
                     "MOS_SCHEDULER_ENABLE_PARALLEL_DISPATCH", "true"
                 ).lower()
                 == "true",
-                "enable_activation_memory": True,
+                "enable_activation_memory": os.getenv(
+                    "MOS_SCHEDULER_ENABLE_ACTIVATION_MEMORY", "true"
+                ).lower()
+                == "true",
             },
         }
 

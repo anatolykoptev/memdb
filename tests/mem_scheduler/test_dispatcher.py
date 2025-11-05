@@ -90,7 +90,6 @@ class TestSchedulerDispatcher(unittest.TestCase):
             ScheduleMessageItem(
                 item_id="msg1",
                 user_id="user1",
-                mem_cube="cube1",
                 mem_cube_id="msg1",
                 label="label1",
                 content="Test content 1",
@@ -99,7 +98,6 @@ class TestSchedulerDispatcher(unittest.TestCase):
             ScheduleMessageItem(
                 item_id="msg2",
                 user_id="user1",
-                mem_cube="cube1",
                 mem_cube_id="msg2",
                 label="label2",
                 content="Test content 2",
@@ -108,7 +106,6 @@ class TestSchedulerDispatcher(unittest.TestCase):
             ScheduleMessageItem(
                 item_id="msg3",
                 user_id="user2",
-                mem_cube="cube2",
                 mem_cube_id="msg3",
                 label="label1",
                 content="Test content 3",

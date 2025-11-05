@@ -8,7 +8,9 @@ from typing import Any
 from memos.context.context import ContextThreadPoolExecutor
 from memos.log import get_logger
 from memos.mem_scheduler.general_modules.base import BaseSchedulerModule
+from memos.mem_scheduler.general_modules.redis_queue import SchedulerRedisQueue
 from memos.mem_scheduler.general_modules.task_threads import ThreadManager
+from memos.mem_scheduler.schemas.general_schemas import DEFAULT_STOP_WAIT
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.schemas.task_schemas import RunningTaskItem
 
@@ -29,12 +31,22 @@ class SchedulerDispatcher(BaseSchedulerModule):
     - Thread race competition for parallel task execution
     """
 
-    def __init__(self, max_workers=30, enable_parallel_dispatch=True, config=None):
+    def __init__(
+        self,
+        max_workers: int = 30,
+        memos_message_queue: Any | None = None,
+        use_redis_queue: bool | None = None,
+        enable_parallel_dispatch: bool = True,
+        config=None,
+    ):
         super().__init__()
         self.config = config
 
         # Main dispatcher thread pool
         self.max_workers = max_workers
+
+        self.memos_message_queue = memos_message_queue
+        self.use_redis_queue = use_redis_queue
 
         # Get multi-task timeout from config
         self.multi_task_running_timeout = (
@@ -70,6 +82,11 @@ class SchedulerDispatcher(BaseSchedulerModule):
         self._completed_tasks = []
         self.completed_tasks_max_show_size = 10
 
+        # Configure shutdown wait behavior from config or default
+        self.stop_wait = (
+            self.config.get("stop_wait", DEFAULT_STOP_WAIT) if self.config else DEFAULT_STOP_WAIT
+        )
+
     def _create_task_wrapper(self, handler: Callable, task_item: RunningTaskItem):
         """
         Create a wrapper around the handler to track task execution and capture results.
@@ -87,6 +104,18 @@ class SchedulerDispatcher(BaseSchedulerModule):
                 # Execute the original handler
                 result = handler(messages)
 
+                # acknowledge redis messages
+
+                if (
+                    self.use_redis_queue
+                    and self.memos_message_queue is not None
+                    and isinstance(self.memos_message_queue, SchedulerRedisQueue)
+                ):
+                    for msg in messages:
+                        redis_message_id = msg.redis_message_id
+                        # Acknowledge message processing
+                        self.memos_message_queue.ack_message(redis_message_id=redis_message_id)
+
                 # Mark task as completed and remove from tracking
                 with self._task_lock:
                     if task_item.item_id in self._running_tasks:
@@ -94,7 +123,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         del self._running_tasks[task_item.item_id]
                         self._completed_tasks.append(task_item)
                         if len(self._completed_tasks) > self.completed_tasks_max_show_size:
-                            self._completed_tasks[-self.completed_tasks_max_show_size :]
+                            self._completed_tasks.pop(0)
                 logger.info(f"Task completed: {task_item.get_execution_info()}")
                 return result
 
@@ -105,7 +134,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         task_item.mark_failed(str(e))
                         del self._running_tasks[task_item.item_id]
                         if len(self._completed_tasks) > self.completed_tasks_max_show_size:
-                            self._completed_tasks[-self.completed_tasks_max_show_size :]
+                            self._completed_tasks.pop(0)
                 logger.error(f"Task failed: {task_item.get_execution_info()}, Error: {e}")
                 raise
 
@@ -224,6 +253,31 @@ class SchedulerDispatcher(BaseSchedulerModule):
         logger.info(f"Unregistered handlers for {len(labels)} labels")
         return results
 
+    def stats(self) -> dict[str, int]:
+        """
+        Lightweight runtime stats for monitoring.
+
+        Returns:
+            {
+                'running': <number of running tasks>,
+                'inflight': <number of futures tracked (pending+running)>,
+                'handlers': <registered handler count>,
+            }
+        """
+        try:
+            running = self.get_running_task_count()
+        except Exception:
+            running = 0
+        try:
+            inflight = len(self._futures)
+        except Exception:
+            inflight = 0
+        try:
+            handlers = len(self.handlers)
+        except Exception:
+            handlers = 0
+        return {"running": running, "inflight": inflight, "handlers": handlers}
+
     def _default_message_handler(self, messages: list[ScheduleMessageItem]) -> None:
         logger.debug(f"Using _default_message_handler to deal with messages: {messages}")
 
@@ -309,17 +363,16 @@ class SchedulerDispatcher(BaseSchedulerModule):
                     wrapped_handler = self._create_task_wrapper(handler, task_item)
 
                     # dispatch to different handler
-                    logger.debug(
-                        f"Dispatch {len(msgs)} message(s) to {label} handler for user {user_id} and mem_cube {mem_cube_id}."
-                    )
-                    logger.info(f"Task started: {task_item.get_execution_info()}")
-
+                    logger.debug(f"Task started: {task_item.get_execution_info()}")
                     if self.enable_parallel_dispatch and self.dispatcher_executor is not None:
                         # Capture variables in lambda to avoid loop variable issues
-                        future = self.dispatcher_executor.submit(wrapped_handler, msgs)
-                        self._futures.add(future)
-                        future.add_done_callback(self._handle_future_result)
-                        logger.info(f"Dispatched {len(msgs)} message(s) as future task")
+                        _ = self.dispatcher_executor.submit(wrapped_handler, msgs)
+                        logger.info(
+                            f"Dispatch {len(msgs)} message(s) to {label} handler for user {user_id} and mem_cube {mem_cube_id}."
+                        )
+                        print(
+                            f"Dispatch {len(msgs)} message(s) to {label} handler for user {user_id} and mem_cube {mem_cube_id}."
+                        )
                     else:
                         wrapped_handler(msgs)
 
@@ -412,17 +465,9 @@ class SchedulerDispatcher(BaseSchedulerModule):
         """Gracefully shutdown the dispatcher."""
         self._running = False
 
-        if self.dispatcher_executor is not None:
-            # Cancel pending tasks
-            cancelled = 0
-            for future in self._futures:
-                if future.cancel():
-                    cancelled += 1
-            logger.info(f"Cancelled {cancelled}/{len(self._futures)} pending tasks")
-
         # Shutdown executor
         try:
-            self.dispatcher_executor.shutdown(wait=True)
+            self.dispatcher_executor.shutdown(wait=self.stop_wait, cancel_futures=True)
         except Exception as e:
             logger.error(f"Executor shutdown error: {e}", exc_info=True)
         finally:
