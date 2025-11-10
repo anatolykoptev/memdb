@@ -48,7 +48,7 @@
 </div>
 
 
-Get Free API: [Try API](https://memos-dashboard.openmem.net/login/) 
+Get Free API: [Try API](https://memos-dashboard.openmem.net/quickstart/?source=github) 
  
 
 ---
