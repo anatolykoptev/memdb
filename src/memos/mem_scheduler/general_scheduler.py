@@ -240,7 +240,7 @@ class GeneralScheduler(BaseScheduler):
             try:
                 user_id = message.user_id
                 mem_cube_id = message.mem_cube_id
-                mem_cube = self.current_mem_cube
+                mem_cube = self.mem_cube
                 content = message.content
                 user_name = message.user_name
 
@@ -404,7 +404,7 @@ class GeneralScheduler(BaseScheduler):
             try:
                 user_id = message.user_id
                 mem_cube_id = message.mem_cube_id
-                mem_cube = self.current_mem_cube
+                mem_cube = self.mem_cube
                 content = message.content
                 user_name = message.user_name
 
@@ -505,7 +505,7 @@ class GeneralScheduler(BaseScheduler):
 
         def process_message(message: ScheduleMessageItem):
             try:
-                mem_cube = self.current_mem_cube
+                mem_cube = self.mem_cube
 
                 user_id = message.user_id
                 session_id = message.session_id
@@ -523,7 +523,9 @@ class GeneralScheduler(BaseScheduler):
 
                 # Use pref_mem.get_memory to process the memories
                 pref_memories = pref_mem.get_memory(
-                    messages_list, type="chat", info={"user_id": user_id, "session_id": session_id}
+                    messages_list,
+                    type="chat",
+                    info={"user_id": user_id, "session_id": session_id, "mem_cube_id": mem_cube_id},
                 )
                 # Add pref_mem to vector db
                 pref_ids = pref_mem.add(pref_memories)

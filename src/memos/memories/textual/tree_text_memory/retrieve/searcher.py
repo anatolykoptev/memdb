@@ -108,7 +108,7 @@ class Searcher:
     def search(
         self,
         query: str,
-        top_k: int,
+        top_k: int = 10,
         info=None,
         mode="fast",
         memory_type="All",
@@ -182,7 +182,7 @@ class Searcher:
         query_embedding = None
 
         # fine mode will trigger initial embedding search
-        if mode == "fine":
+        if mode == "fine_old":
             logger.info("[SEARCH] Fine mode: embedding search")
             query_embedding = self.embedder.embed([query])[0]
 

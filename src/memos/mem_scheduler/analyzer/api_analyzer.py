@@ -681,7 +681,7 @@ if __name__ == "__main__":
         print("Using direct test mode")
         try:
             direct_analyzer = DirectSearchMemoriesAnalyzer()
-            direct_analyzer.run_all_tests(mode=SearchMode.FINE)
+            direct_analyzer.run_all_tests(mode=SearchMode.MIXTURE)
         except Exception as e:
             print(f"Direct test mode failed: {e}")
             import traceback

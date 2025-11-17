@@ -47,6 +47,10 @@ class BaseSchedulerModule:
 
         return base_prompt
 
+    def get_mem_cube(self, mem_cube_id: str) -> GeneralMemCube:
+        logger.error(f"mem_cube {mem_cube_id} does not exists.")
+        return self.current_mem_cube
+
     @property
     def chat_llm(self) -> BaseLLM:
         """The memory cube associated with this MemChat."""
