@@ -5,6 +5,7 @@ import traceback
 from memos.configs.mem_scheduler import GeneralSchedulerConfig
 from memos.context.context import ContextThreadPoolExecutor
 from memos.log import get_logger
+from memos.mem_cube.base import BaseMemCube
 from memos.mem_cube.general import GeneralMemCube
 from memos.mem_scheduler.base_scheduler import BaseScheduler
 from memos.mem_scheduler.schemas.general_schemas import (
@@ -52,9 +53,6 @@ class GeneralScheduler(BaseScheduler):
         self, user_id: str, mem_cube_id: str, messages: list[ScheduleMessageItem]
     ):
         mem_cube = self.current_mem_cube
-
-        # for status update
-        self._set_current_context_from_message(msg=messages[0])
 
         # update query monitors
         for msg in messages:
@@ -140,7 +138,7 @@ class GeneralScheduler(BaseScheduler):
                 label=QUERY_LABEL,
                 user_id=user_id,
                 mem_cube_id=mem_cube_id,
-                mem_cube=self.current_mem_cube,
+                mem_cube=self.mem_cube,
             )
 
     def _query_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
@@ -185,13 +183,11 @@ class GeneralScheduler(BaseScheduler):
                 if len(messages) == 0:
                     return
 
-                # for status update
-                self._set_current_context_from_message(msg=messages[0])
-
     def _add_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
         logger.info(f"Messages {messages} assigned to {ADD_LABEL} handler.")
         # Process the query in a session turn
         grouped_messages = self.dispatcher._group_messages_by_user_and_mem_cube(messages=messages)
+        mem_cube = self.mem_cube
 
         self.validate_schedule_messages(messages=messages, label=ADD_LABEL)
         try:
@@ -201,9 +197,6 @@ class GeneralScheduler(BaseScheduler):
                     if len(messages) == 0:
                         return
 
-                    # for status update
-                    self._set_current_context_from_message(msg=messages[0])
-
                     # submit logs
                     for msg in messages:
                         try:
@@ -212,7 +205,6 @@ class GeneralScheduler(BaseScheduler):
                             logger.error(f"Error: {e}. Content: {msg.content}", exc_info=True)
                             userinput_memory_ids = []
 
-                        mem_cube = self.current_mem_cube
                         for memory_id in userinput_memory_ids:
                             try:
                                 mem_item: TextualMemoryItem = mem_cube.text_mem.get(
@@ -234,7 +226,7 @@ class GeneralScheduler(BaseScheduler):
                                 memory_type=mem_type,
                                 user_id=msg.user_id,
                                 mem_cube_id=msg.mem_cube_id,
-                                mem_cube=self.current_mem_cube,
+                                mem_cube=self.mem_cube,
                                 log_func_callback=self._submit_web_logs,
                             )
 
@@ -461,7 +453,7 @@ class GeneralScheduler(BaseScheduler):
         mem_ids: list[str],
         user_id: str,
         mem_cube_id: str,
-        mem_cube: GeneralMemCube,
+        mem_cube: BaseMemCube,
         text_mem: TreeTextMemory,
         user_name: str,
     ) -> None:
@@ -513,10 +505,11 @@ class GeneralScheduler(BaseScheduler):
 
         def process_message(message: ScheduleMessageItem):
             try:
+                mem_cube = self.current_mem_cube
+
                 user_id = message.user_id
                 session_id = message.session_id
                 mem_cube_id = message.mem_cube_id
-                mem_cube = self.current_mem_cube
                 content = message.content
                 messages_list = json.loads(content)
 

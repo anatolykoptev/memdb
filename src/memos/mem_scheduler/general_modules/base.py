@@ -18,8 +18,6 @@ class BaseSchedulerModule:
         self._chat_llm = None
         self._process_llm = None
 
-        self.mem_cubes: dict[str, GeneralMemCube] = {}
-
     def load_template(self, template_name: str) -> str:
         if template_name not in PROMPT_MAPPING:
             logger.error("Prompt template is not found!")
@@ -48,10 +46,6 @@ class BaseSchedulerModule:
             return base_prompt + memory_context
 
         return base_prompt
-
-    def get_mem_cube(self, mem_cube_id: str) -> GeneralMemCube:
-        logger.error(f"mem_cube {mem_cube_id} does not exists.")
-        return self.mem_cubes.get(mem_cube_id, None)
 
     @property
     def chat_llm(self) -> BaseLLM:

@@ -61,12 +61,12 @@ from memos.memories.textual.tree_text_memory.retrieve.internet_retriever_factory
 )
 from memos.reranker.factory import RerankerFactory
 from memos.templates.instruction_completion import instruct_completion
+from memos.types import MOSSearchResult, UserContext
+from memos.vec_dbs.factory import VecDBFactory
 
 
 if TYPE_CHECKING:
     from memos.mem_scheduler.optimized_scheduler import OptimizedScheduler
-from memos.types import MOSSearchResult, UserContext
-from memos.vec_dbs.factory import VecDBFactory
 
 
 logger = get_logger(__name__)
@@ -359,10 +359,8 @@ def search_memories(search_req: APISearchRequest):
         "pref_mem": [],
         "pref_note": "",
     }
-    if search_req.mode == SearchMode.NOT_INITIALIZED:
-        search_mode = os.getenv("SEARCH_MODE", SearchMode.FAST)
-    else:
-        search_mode = search_req.mode
+
+    search_mode = search_req.mode
 
     def _search_text():
         if search_mode == SearchMode.FAST:
@@ -456,31 +454,53 @@ def fine_search_memories(
         "chat_history": search_req.chat_history,
     }
 
-    fast_retrieved_memories = searcher.retrieve(
+    fast_memories = searcher.search(
         query=search_req.query,
         user_name=user_context.mem_cube_id,
         top_k=search_req.top_k,
         mode=SearchMode.FAST,
-        manual_close_internet=not search_req.internet_search,
-        moscube=search_req.moscube,
+        memory_type="All",
         search_filter=search_filter,
         info=info,
     )
 
-    fast_memories = searcher.post_retrieve(
-        retrieved_results=fast_retrieved_memories,
-        top_k=search_req.top_k,
-        user_name=user_context.mem_cube_id,
-        info=info,
-    )
-
-    enhanced_results, _ = mem_scheduler.retriever.enhance_memories_with_query(
+    enhanced_memories, _ = mem_scheduler.retriever.enhance_memories_with_query(
         query_history=[search_req.query],
         memories=fast_memories,
     )
 
-    formatted_memories = [_format_memory_item(data) for data in enhanced_results]
+    if len(enhanced_memories) < len(fast_memories):
+        logger.info(
+            f"Enhanced memories ({len(enhanced_memories)}) are less than fast memories ({len(fast_memories)}). Recalling for more."
+        )
+        missing_info_hint, trigger = mem_scheduler.retriever.recall_for_missing_memories(
+            query=search_req.query,
+            memories=fast_memories,
+        )
+        retrieval_size = len(fast_memories) - len(enhanced_memories)
+        logger.info(f"Retrieval size: {retrieval_size}")
+        if trigger:
+            logger.info(f"Triggering additional search with hint: {missing_info_hint}")
+            additional_memories = searcher.search(
+                query=missing_info_hint,
+                user_name=user_context.mem_cube_id,
+                top_k=retrieval_size,
+                mode=SearchMode.FAST,
+                memory_type="All",
+                search_filter=search_filter,
+                info=info,
+            )
+        else:
+            logger.info("Not triggering additional search, using fast memories.")
+            additional_memories = fast_memories[:retrieval_size]
 
+        enhanced_memories += additional_memories
+        logger.info(
+            f"Added {len(additional_memories)} more memories. Total enhanced memories: {len(enhanced_memories)}"
+        )
+    formatted_memories = [_format_memory_item(data) for data in enhanced_memories]
+
+    logger.info(f"Found {len(formatted_memories)} memories for user {search_req.user_id}")
     return formatted_memories
 
 
@@ -562,7 +582,6 @@ def add_memories(add_req: APIADDRequest):
                     user_id=add_req.user_id,
                     session_id=target_session_id,
                     mem_cube_id=add_req.mem_cube_id,
-                    mem_cube=naive_mem_cube,
                     label=MEM_READ_LABEL,
                     content=json.dumps(mem_ids_local),
                     timestamp=datetime.utcnow(),
@@ -577,7 +596,6 @@ def add_memories(add_req: APIADDRequest):
                 user_id=add_req.user_id,
                 session_id=target_session_id,
                 mem_cube_id=add_req.mem_cube_id,
-                mem_cube=naive_mem_cube,
                 label=ADD_LABEL,
                 content=json.dumps(mem_ids_local),
                 timestamp=datetime.utcnow(),
@@ -604,7 +622,6 @@ def add_memories(add_req: APIADDRequest):
                     user_id=add_req.user_id,
                     session_id=target_session_id,
                     mem_cube_id=add_req.mem_cube_id,
-                    mem_cube=naive_mem_cube,
                     label=PREF_ADD_LABEL,
                     content=json.dumps(messages_list),
                     timestamp=datetime.utcnow(),

@@ -1,3 +1,4 @@
+import os
 import uuid
 
 from typing import Generic, Literal, TypeVar
@@ -172,7 +173,7 @@ class APISearchRequest(BaseRequest):
     user_id: str = Field(None, description="User ID")
     mem_cube_id: str | None = Field(None, description="Cube ID to search in")
     mode: SearchMode = Field(
-        SearchMode.NOT_INITIALIZED, description="search mode: fast, fine, or mixture"
+        os.getenv("SEARCH_MODE", SearchMode.FAST), description="search mode: fast, fine, or mixture"
     )
     internet_search: bool = Field(False, description="Whether to use internet search")
     moscube: bool = Field(False, description="Whether to use MemOSCube")

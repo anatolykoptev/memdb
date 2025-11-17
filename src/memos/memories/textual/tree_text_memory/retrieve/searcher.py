@@ -72,7 +72,7 @@ class Searcher:
         search_filter: dict | None = None,
         user_name: str | None = None,
         **kwargs,
-    ) -> list[TextualMemoryItem]:
+    ) -> list[tuple[TextualMemoryItem, float]]:
         logger.info(
             f"[RECALL] Start query='{query}', top_k={top_k}, mode={mode}, memory_type={memory_type}"
         )
@@ -94,7 +94,7 @@ class Searcher:
 
     def post_retrieve(
         self,
-        retrieved_results: list[TextualMemoryItem],
+        retrieved_results: list[tuple[TextualMemoryItem, float]],
         top_k: int,
         user_name: str | None = None,
         info=None,

@@ -14,6 +14,7 @@ from memos.configs.mem_scheduler import AuthConfig, BaseSchedulerConfig
 from memos.context.context import ContextThread
 from memos.llms.base import BaseLLM
 from memos.log import get_logger
+from memos.mem_cube.base import BaseMemCube
 from memos.mem_cube.general import GeneralMemCube
 from memos.mem_scheduler.general_modules.dispatcher import SchedulerDispatcher
 from memos.mem_scheduler.general_modules.misc import AutoDroppingQueue as Queue
@@ -56,7 +57,8 @@ from memos.templates.mem_scheduler_prompts import MEMORY_ASSEMBLY_TEMPLATE
 
 
 if TYPE_CHECKING:
-    from memos.mem_cube.base import BaseMemCube
+    from memos.memories.textual.tree_text_memory.retrieve.searcher import Searcher
+    from memos.reranker.http_bge import HTTPBGEReranker
 
 
 logger = get_logger(__name__)
@@ -143,6 +145,15 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         self.auth_config = None
         self.rabbitmq_config = None
 
+    def init_mem_cube(self, mem_cube):
+        self.mem_cube = mem_cube
+        self.text_mem: TreeTextMemory = self.mem_cube.text_mem
+        self.searcher: Searcher = self.text_mem.get_searcher(
+            manual_close_internet=False,
+            moscube=False,
+        )
+        self.reranker: HTTPBGEReranker = self.text_mem.reranker
+
     def initialize_modules(
         self,
         chat_llm: BaseLLM,
@@ -208,22 +219,15 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             logger.warning(f"Error during cleanup: {e}")
 
     @property
-    def mem_cube(self) -> GeneralMemCube:
+    def mem_cube(self) -> BaseMemCube:
         """The memory cube associated with this MemChat."""
         return self.current_mem_cube
 
     @mem_cube.setter
-    def mem_cube(self, value: GeneralMemCube) -> None:
+    def mem_cube(self, value: BaseMemCube) -> None:
         """The memory cube associated with this MemChat."""
         self.current_mem_cube = value
         self.retriever.mem_cube = value
-
-    def _set_current_context_from_message(self, msg: ScheduleMessageItem) -> None:
-        """Update current user/cube context from the incoming message (thread-safe)."""
-        with self._context_lock:
-            self.current_user_id = msg.user_id
-            self.current_mem_cube_id = msg.mem_cube_id
-            self.current_mem_cube = self.get_mem_cube(msg.mem_cube_id)
 
     def transform_working_memories_to_monitors(
         self, query_keywords, memories: list[TextualMemoryItem]
