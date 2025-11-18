@@ -13,12 +13,6 @@ print(f"Config: {mem_scheduler.config}")
 print(f"use_redis_queue: {mem_scheduler.use_redis_queue}")
 print(f"Queue type: {type(mem_scheduler.memos_message_queue).__name__}")
 print(f"Queue maxsize: {getattr(mem_scheduler.memos_message_queue, 'maxsize', 'N/A')}")
-
-# Check if Redis queue is connected
-if hasattr(mem_scheduler.memos_message_queue, "_is_connected"):
-    print(f"Redis connected: {mem_scheduler.memos_message_queue._is_connected}")
-if hasattr(mem_scheduler.memos_message_queue, "_redis_conn"):
-    print(f"Redis connection: {mem_scheduler.memos_message_queue._redis_conn}")
 print("=====================================\n")
 
 queue = mem_scheduler.memos_message_queue

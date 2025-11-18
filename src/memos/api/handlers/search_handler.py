@@ -105,7 +105,7 @@ class SearchHandler(BaseHandler):
         )
 
     def _get_search_mode(self, mode: str) -> str:
-        return os.getenv("SEARCH_MODE", SearchMode.FAST)
+        return mode
 
     def _search_text(
         self,
