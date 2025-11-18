@@ -7,13 +7,13 @@ from memos.configs.mem_scheduler import BaseSchedulerConfig
 from memos.context.context import ContextThread, ContextThreadPoolExecutor
 from memos.log import get_logger
 from memos.mem_scheduler.general_modules.base import BaseSchedulerModule
-from memos.mem_scheduler.general_modules.dispatcher import SchedulerDispatcher
 from memos.mem_scheduler.schemas.general_schemas import (
     DEFAULT_DISPATCHER_MONITOR_CHECK_INTERVAL,
     DEFAULT_DISPATCHER_MONITOR_MAX_FAILURES,
     DEFAULT_STOP_WAIT,
     DEFAULT_STUCK_THREAD_TOLERANCE,
 )
+from memos.mem_scheduler.task_schedule_modules.dispatcher import SchedulerDispatcher
 from memos.mem_scheduler.utils.db_utils import get_utc_now
 
 

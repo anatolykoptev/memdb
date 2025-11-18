@@ -17,8 +17,12 @@ from memos.api.handlers.formatters_handler import (
 )
 from memos.api.product_models import APISearchRequest, SearchResponse
 from memos.context.context import ContextThreadPoolExecutor
+from memos.log import get_logger
 from memos.mem_scheduler.schemas.general_schemas import SearchMode
 from memos.types import MOSSearchResult, UserContext
+
+
+logger = get_logger(__name__)
 
 
 class SearchHandler(BaseHandler):
@@ -101,18 +105,7 @@ class SearchHandler(BaseHandler):
         )
 
     def _get_search_mode(self, mode: str) -> str:
-        """
-        Get search mode with environment variable fallback.
-
-        Args:
-            mode: Requested search mode
-
-        Returns:
-            Search mode string
-        """
-        if mode == SearchMode.NOT_INITIALIZED:
-            return os.getenv("SEARCH_MODE", SearchMode.FAST)
-        return mode
+        return os.getenv("SEARCH_MODE", SearchMode.FAST)
 
     def _search_text(
         self,
@@ -133,16 +126,16 @@ class SearchHandler(BaseHandler):
         """
         try:
             if search_mode == SearchMode.FAST:
-                memories = self._fast_search(search_req, user_context)
+                text_memories = self._fast_search(search_req, user_context)
             elif search_mode == SearchMode.FINE:
-                memories = self._fine_search(search_req, user_context)
+                text_memories = self._fine_search(search_req, user_context)
             elif search_mode == SearchMode.MIXTURE:
-                memories = self._mix_search(search_req, user_context)
+                text_memories = self._mix_search(search_req, user_context)
             else:
                 self.logger.error(f"Unsupported search mode: {search_mode}")
                 return []
 
-            return [format_memory_item(data) for data in memories]
+            return text_memories
 
         except Exception as e:
             self.logger.error("Error in search_text: %s; traceback: %s", e, traceback.format_exc())
@@ -199,7 +192,7 @@ class SearchHandler(BaseHandler):
         target_session_id = search_req.session_id or "default_session"
         search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
 
-        return self.naive_mem_cube.text_mem.search(
+        search_results = self.naive_mem_cube.text_mem.search(
             query=search_req.query,
             user_name=user_context.mem_cube_id,
             top_k=search_req.top_k,
@@ -213,6 +206,10 @@ class SearchHandler(BaseHandler):
                 "chat_history": search_req.chat_history,
             },
         )
+
+        formatted_memories = [format_memory_item(data) for data in search_results]
+
+        return formatted_memories
 
     def _fine_search(
         self,
@@ -261,12 +258,45 @@ class SearchHandler(BaseHandler):
         )
 
         # Enhance with query
-        enhanced_results, _ = self.mem_scheduler.retriever.enhance_memories_with_query(
+        enhanced_memories, _ = self.mem_scheduler.retriever.enhance_memories_with_query(
             query_history=[search_req.query],
             memories=fast_memories,
         )
 
-        return enhanced_results
+        if len(enhanced_memories) < len(fast_memories):
+            logger.info(
+                f"Enhanced memories ({len(enhanced_memories)}) are less than fast memories ({len(fast_memories)}). Recalling for more."
+            )
+            missing_info_hint, trigger = self.mem_scheduler.retriever.recall_for_missing_memories(
+                query=search_req.query,
+                memories=fast_memories,
+            )
+            retrieval_size = len(fast_memories) - len(enhanced_memories)
+            logger.info(f"Retrieval size: {retrieval_size}")
+            if trigger:
+                logger.info(f"Triggering additional search with hint: {missing_info_hint}")
+                additional_memories = searcher.search(
+                    query=missing_info_hint,
+                    user_name=user_context.mem_cube_id,
+                    top_k=retrieval_size,
+                    mode=SearchMode.FAST,
+                    memory_type="All",
+                    search_filter=search_filter,
+                    info=info,
+                )
+            else:
+                logger.info("Not triggering additional search, using fast memories.")
+                additional_memories = fast_memories[:retrieval_size]
+
+            enhanced_memories += additional_memories
+            logger.info(
+                f"Added {len(additional_memories)} more memories. Total enhanced memories: {len(enhanced_memories)}"
+            )
+        formatted_memories = [format_memory_item(data) for data in enhanced_memories]
+
+        logger.info(f"Found {len(formatted_memories)} memories for user {search_req.user_id}")
+
+        return formatted_memories
 
     def _mix_search(
         self,

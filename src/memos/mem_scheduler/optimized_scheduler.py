@@ -20,6 +20,7 @@ from memos.mem_scheduler.schemas.general_schemas import (
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.utils.api_utils import format_textual_memory_item
 from memos.mem_scheduler.utils.db_utils import get_utc_now
+from memos.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
 from memos.memories.textual.tree import TextualMemoryItem, TreeTextMemory
 from memos.types import UserContext
 
@@ -87,7 +88,7 @@ class OptimizedScheduler(GeneralScheduler):
         )
 
         # Submit async task
-        self.submit_messages([message])
+        self.memos_message_queue.submit_messages([message])
         logger.info(f"Submitted async fine search task for user {search_req.user_id}")
         return async_task_id
 
@@ -321,7 +322,7 @@ class OptimizedScheduler(GeneralScheduler):
         logger.info(f"Messages {messages} assigned to {API_MIX_SEARCH_LABEL} handler.")
 
         # Process the query in a session turn
-        grouped_messages = self.dispatcher._group_messages_by_user_and_mem_cube(messages=messages)
+        grouped_messages = group_messages_by_user_and_mem_cube(messages)
 
         self.validate_schedule_messages(messages=messages, label=API_MIX_SEARCH_LABEL)
 

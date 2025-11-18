@@ -23,6 +23,7 @@ from memos.mem_scheduler.schemas.general_schemas import (
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.schemas.monitor_schemas import QueryMonitorItem
 from memos.mem_scheduler.utils.filter_utils import is_all_chinese, is_all_english
+from memos.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
 from memos.memories.textual.item import TextualMemoryItem
 from memos.memories.textual.preference import PreferenceTextMemory
 from memos.memories.textual.tree import TreeTextMemory
@@ -151,7 +152,7 @@ class GeneralScheduler(BaseScheduler):
         logger.info(f"Messages {messages} assigned to {QUERY_LABEL} handler.")
 
         # Process the query in a session turn
-        grouped_messages = self.dispatcher._group_messages_by_user_and_mem_cube(messages=messages)
+        grouped_messages = group_messages_by_user_and_mem_cube(messages)
 
         self.validate_schedule_messages(messages=messages, label=QUERY_LABEL)
 
@@ -173,7 +174,7 @@ class GeneralScheduler(BaseScheduler):
         """
         logger.info(f"Messages {messages} assigned to {ANSWER_LABEL} handler.")
         # Process the query in a session turn
-        grouped_messages = self.dispatcher._group_messages_by_user_and_mem_cube(messages=messages)
+        grouped_messages = group_messages_by_user_and_mem_cube(messages)
 
         self.validate_schedule_messages(messages=messages, label=ANSWER_LABEL)
 
@@ -186,7 +187,7 @@ class GeneralScheduler(BaseScheduler):
     def _add_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
         logger.info(f"Messages {messages} assigned to {ADD_LABEL} handler.")
         # Process the query in a session turn
-        grouped_messages = self.dispatcher._group_messages_by_user_and_mem_cube(messages=messages)
+        grouped_messages = group_messages_by_user_and_mem_cube(messages)
         mem_cube = self.mem_cube
 
         self.validate_schedule_messages(messages=messages, label=ADD_LABEL)

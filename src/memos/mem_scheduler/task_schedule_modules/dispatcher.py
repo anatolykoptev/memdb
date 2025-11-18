@@ -10,12 +10,13 @@ from typing import Any
 from memos.context.context import ContextThreadPoolExecutor
 from memos.log import get_logger
 from memos.mem_scheduler.general_modules.base import BaseSchedulerModule
-from memos.mem_scheduler.general_modules.redis_queue import SchedulerRedisQueue
 from memos.mem_scheduler.general_modules.task_threads import ThreadManager
 from memos.mem_scheduler.schemas.general_schemas import DEFAULT_STOP_WAIT
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.schemas.task_schemas import RunningTaskItem
+from memos.mem_scheduler.task_schedule_modules.redis_queue import SchedulerRedisQueue
 from memos.mem_scheduler.utils.metrics import MetricsRegistry
+from memos.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
 
 
 logger = get_logger(__name__)
@@ -329,38 +330,6 @@ class SchedulerDispatcher(BaseSchedulerModule):
     def _default_message_handler(self, messages: list[ScheduleMessageItem]) -> None:
         logger.debug(f"Using _default_message_handler to deal with messages: {messages}")
 
-    def _group_messages_by_user_and_mem_cube(
-        self, messages: list[ScheduleMessageItem]
-    ) -> dict[str, dict[str, list[ScheduleMessageItem]]]:
-        """
-        Groups messages into a nested dictionary structure first by user_id, then by mem_cube_id.
-
-        Args:
-            messages: List of ScheduleMessageItem objects to be grouped
-
-        Returns:
-            A nested dictionary with the structure:
-            {
-                "user_id_1": {
-                    "mem_cube_id_1": [msg1, msg2, ...],
-                    "mem_cube_id_2": [msg3, msg4, ...],
-                    ...
-                },
-                "user_id_2": {
-                    ...
-                },
-                ...
-            }
-            Where each msg is the original ScheduleMessageItem object
-        """
-        grouped_dict = defaultdict(lambda: defaultdict(list))
-
-        for msg in messages:
-            grouped_dict[msg.user_id][msg.mem_cube_id].append(msg)
-
-        # Convert defaultdict to regular dict for cleaner output
-        return {user_id: dict(cube_groups) for user_id, cube_groups in grouped_dict.items()}
-
     def _handle_future_result(self, future):
         self._futures.remove(future)
         try:
@@ -380,7 +349,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
             return
 
         # Group messages by user_id and mem_cube_id first
-        user_cube_groups = self._group_messages_by_user_and_mem_cube(msg_list)
+        user_cube_groups = group_messages_by_user_and_mem_cube(msg_list)
 
         # Process each user and mem_cube combination
         for user_id, cube_groups in user_cube_groups.items():
