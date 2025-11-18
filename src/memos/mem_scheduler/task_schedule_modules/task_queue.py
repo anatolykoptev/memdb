@@ -85,9 +85,8 @@ class ScheduleTaskQueue:
         # Discover all active streams via queue API
         streams: list[tuple[str, str]] = []
 
-        keys = self.get_stream_keys()
-        for stream_key in keys:
-            # stream_key example: "{prefix}:{user_id}:{mem_cube_id}"
+        stream_keys = self.get_stream_keys()
+        for stream_key in stream_keys:
             try:
                 parts = stream_key.split(":")
                 if len(parts) >= 3:

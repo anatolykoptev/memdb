@@ -14,7 +14,6 @@ from memos.mem_scheduler.general_modules.task_threads import ThreadManager
 from memos.mem_scheduler.schemas.general_schemas import DEFAULT_STOP_WAIT
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.schemas.task_schemas import RunningTaskItem
-from memos.mem_scheduler.task_schedule_modules.redis_queue import SchedulerRedisQueue
 from memos.mem_scheduler.utils.metrics import MetricsRegistry
 from memos.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
 
@@ -152,15 +151,15 @@ class SchedulerDispatcher(BaseSchedulerModule):
 
                 # acknowledge redis messages
 
-                if (
-                    self.use_redis_queue
-                    and self.memos_message_queue is not None
-                    and isinstance(self.memos_message_queue, SchedulerRedisQueue)
-                ):
+                if self.use_redis_queue and self.memos_message_queue is not None:
                     for msg in messages:
                         redis_message_id = msg.redis_message_id
                         # Acknowledge message processing
-                        self.memos_message_queue.ack_message(redis_message_id=redis_message_id)
+                        self.memos_message_queue.ack_message(
+                            user_id=msg.user_id,
+                            mem_cube_id=msg.mem_cube_id,
+                            redis_message_id=redis_message_id,
+                        )
 
                 # Mark task as completed and remove from tracking
                 with self._task_lock:

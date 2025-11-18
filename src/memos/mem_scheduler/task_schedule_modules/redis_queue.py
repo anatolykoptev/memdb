@@ -151,7 +151,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             raise
 
     def ack_message(self, user_id, mem_cube_id, redis_message_id):
-        stream_key = f"{self.stream_key_prefix}:{user_id}:{mem_cube_id}"
+        stream_key = self.get_stream_key(user_id=user_id, mem_cube_id=mem_cube_id)
 
         self.redis.xack(stream_key, self.consumer_group, redis_message_id)
 
