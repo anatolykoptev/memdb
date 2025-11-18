@@ -213,7 +213,7 @@ class ChatHandler(BaseHandler):
                         query=chat_req.query,
                         top_k=20,
                         session_id=chat_req.session_id,
-                        mode=SearchMode.FINE if chat_req.internet_search else SearchMode.FAST,
+                        mode=SearchMode.FAST,
                         internet_search=chat_req.internet_search,  # TODO this param is not worked at fine mode
                         moscube=chat_req.moscube,
                         chat_history=chat_req.history,

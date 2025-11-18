@@ -43,6 +43,7 @@ class Searcher:
         internet_retriever: None = None,
         moscube: bool = False,
         search_strategy: dict | None = None,
+        manual_close_internet: bool = True,
     ):
         self.graph_store = graph_store
         self.embedder = embedder
@@ -58,7 +59,7 @@ class Searcher:
         self.moscube = moscube
         self.vec_cot = search_strategy.get("cot", False) if search_strategy else False
         self.use_fast_graph = search_strategy.get("fast_graph", False) if search_strategy else False
-
+        self.manual_close_internet = manual_close_internet
         self._usage_executor = ContextThreadPoolExecutor(max_workers=4, thread_name_prefix="usage")
 
     @timed
@@ -458,7 +459,7 @@ class Searcher:
         user_id: str | None = None,
     ):
         """Retrieve and rerank from Internet source"""
-        if not self.internet_retriever or mode == "fast":
+        if not self.internet_retriever or self.manual_close_internet:
             logger.info(f"[PATH-C] '{query}' Skipped (no retriever, fast mode)")
             return []
         if memory_type not in ["All"]:
