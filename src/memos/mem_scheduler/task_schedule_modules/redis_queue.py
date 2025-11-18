@@ -298,18 +298,8 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         if not self._redis_conn:
             return []
 
-        keys: list[str] = []
         try:
-            for stream_key in self._redis_conn.scan_iter(f"{self.stream_key_prefix}:*"):
-                try:
-                    # Redis may return bytes; normalize to str
-                    if isinstance(stream_key, bytes):
-                        keys.append(stream_key.decode("utf-8"))
-                    else:
-                        keys.append(str(stream_key))
-                except Exception as e:
-                    logger.debug(f"Failed to decode stream key {stream_key}: {e}")
-            return keys
+            return self._redis_conn.scan_iter(f"{self.stream_key_prefix}:*")
         except Exception as e:
             logger.error(f"Failed to list Redis stream keys: {e}")
             return []

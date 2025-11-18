@@ -265,7 +265,6 @@ class GeneralScheduler(BaseScheduler):
                     mem_ids=mem_ids,
                     user_id=user_id,
                     mem_cube_id=mem_cube_id,
-                    mem_cube=mem_cube,
                     text_mem=text_mem,
                     user_name=user_name,
                 )
@@ -290,7 +289,6 @@ class GeneralScheduler(BaseScheduler):
         mem_ids: list[str],
         user_id: str,
         mem_cube_id: str,
-        mem_cube: GeneralMemCube,
         text_mem: TreeTextMemory,
         user_name: str,
     ) -> None:
@@ -301,7 +299,6 @@ class GeneralScheduler(BaseScheduler):
             mem_ids: List of memory IDs to process
             user_id: User ID
             mem_cube_id: Memory cube ID
-            mem_cube: Memory cube instance
             text_mem: Text memory instance
         """
         try:

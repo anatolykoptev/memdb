@@ -237,7 +237,7 @@ class SearchHandler(BaseHandler):
             "chat_history": search_req.chat_history,
         }
 
-        # Fast retrieve
+        # Fine retrieve
         fast_retrieved_memories = searcher.retrieve(
             query=search_req.query,
             user_name=user_context.mem_cube_id,

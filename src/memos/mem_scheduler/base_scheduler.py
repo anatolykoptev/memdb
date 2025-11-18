@@ -118,7 +118,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             maxsize=self.max_internal_message_queue_size,
             disabled_handlers=self.disabled_handlers,
         )
-
+        self.searcher: Searcher | None = None
         self.retriever: SchedulerRetriever | None = None
         self.db_engine: Engine | None = None
         self.monitor: SchedulerGeneralMonitor | None = None
@@ -145,7 +145,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         self.mem_cube = mem_cube
         self.text_mem: TreeTextMemory = self.mem_cube.text_mem
         self.searcher: Searcher = self.text_mem.get_searcher(
-            manual_close_internet=os.getenv("ENABLE_INTERNET", "false").lower() == "true",
+            manual_close_internet=os.getenv("ENABLE_INTERNET", "true").lower() == "false",
             moscube=False,
         )
         self.reranker: HTTPBGEReranker = self.text_mem.reranker
