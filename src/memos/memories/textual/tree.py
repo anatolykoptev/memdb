@@ -198,7 +198,7 @@ class TreeTextMemory(BaseTextMemory):
                 internet_retriever=None,
                 moscube=moscube,
                 search_strategy=self.search_strategy,
-                manual_close_internet=manual_close_internet
+                manual_close_internet=manual_close_internet,
             )
         else:
             searcher = Searcher(
@@ -210,7 +210,7 @@ class TreeTextMemory(BaseTextMemory):
                 internet_retriever=self.internet_retriever,
                 moscube=moscube,
                 search_strategy=self.search_strategy,
-                manual_close_internet=manual_close_internet
+                manual_close_internet=manual_close_internet,
             )
         return searcher.search(
             query, top_k, info, mode, memory_type, search_filter, user_name=user_name
