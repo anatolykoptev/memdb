@@ -35,6 +35,22 @@ class ScheduleTaskQueue:
 
         self.disabled_handlers = disabled_handlers
 
+    def ack_message(
+        self,
+        user_id,
+        mem_cube_id,
+        redis_message_id,
+    ) -> None:
+        if not isinstance(self.memos_message_queue, SchedulerRedisQueue):
+            logger.warning("ack_message is only supported for Redis queues")
+            return
+
+        self.memos_message_queue.ack_message(
+            user_id=user_id,
+            mem_cube_id=mem_cube_id,
+            redis_message_id=redis_message_id,
+        )
+
     def debug_mode_on(self):
         self.memos_message_queue.stream_key_prefix = (
             f"debug_mode:{self.memos_message_queue.stream_key_prefix}"

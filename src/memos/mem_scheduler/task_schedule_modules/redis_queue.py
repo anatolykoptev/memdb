@@ -150,7 +150,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             logger.error(f"Failed to add message to Redis queue: {e}")
             raise
 
-    def ack_message(self, user_id, mem_cube_id, redis_message_id):
+    def ack_message(self, user_id, mem_cube_id, redis_message_id) -> None:
         stream_key = self.get_stream_key(user_id=user_id, mem_cube_id=mem_cube_id)
 
         self.redis.xack(stream_key, self.consumer_group, redis_message_id)
@@ -296,7 +296,13 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             return []
 
         try:
-            return self._redis_conn.scan_iter(f"{self.stream_key_prefix}:*")
+            # Use match parameter and decode byte strings to regular strings
+            stream_keys = [
+                key.decode("utf-8") if isinstance(key, bytes) else key
+                for key in self._redis_conn.scan_iter(match=f"{self.stream_key_prefix}:*")
+            ]
+            logger.debug(f"get stream_keys from redis: {stream_keys}")
+            return stream_keys
         except Exception as e:
             logger.error(f"Failed to list Redis stream keys: {e}")
             return []
