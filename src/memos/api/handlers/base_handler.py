@@ -8,6 +8,7 @@ dependency injection and common functionality.
 from typing import Any
 
 from memos.log import get_logger
+from memos.mem_scheduler.base_scheduler import BaseScheduler
 
 
 logger = get_logger(__name__)
@@ -123,7 +124,7 @@ class BaseHandler:
         return self.deps.mem_reader
 
     @property
-    def mem_scheduler(self):
+    def mem_scheduler(self) -> BaseScheduler:
         """Get scheduler instance."""
         return self.deps.mem_scheduler
 

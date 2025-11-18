@@ -202,7 +202,7 @@ class AddHandler(BaseHandler):
                     content=json.dumps(messages_list),
                     timestamp=datetime.utcnow(),
                 )
-                self.mem_scheduler.submit_messages(messages=[message_item_pref])
+                self.mem_scheduler.memos_message_queue.submit_messages(messages=[message_item_pref])
                 self.logger.info("Submitted preference add to scheduler (async mode)")
             except Exception as e:
                 self.logger.error(f"Failed to submit PREF_ADD task: {e}", exc_info=True)
@@ -275,7 +275,7 @@ class AddHandler(BaseHandler):
                     timestamp=datetime.utcnow(),
                     user_name=add_req.mem_cube_id,
                 )
-                self.mem_scheduler.submit_messages(messages=[message_item_read])
+                self.mem_scheduler.memos_message_queue.submit_messages(messages=[message_item_read])
                 self.logger.info(f"Submitted async memory read task: {json.dumps(mem_ids)}")
             except Exception as e:
                 self.logger.error(f"Failed to submit async memory tasks: {e}", exc_info=True)
@@ -291,4 +291,4 @@ class AddHandler(BaseHandler):
                 timestamp=datetime.utcnow(),
                 user_name=add_req.mem_cube_id,
             )
-            self.mem_scheduler.submit_messages(messages=[message_item_add])
+            self.mem_scheduler.memos_message_queue.submit_messages(messages=[message_item_add])

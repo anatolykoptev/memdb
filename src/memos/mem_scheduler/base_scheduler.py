@@ -1,5 +1,5 @@
-import contextlib
 import multiprocessing
+import os
 import threading
 import time
 
@@ -14,10 +14,9 @@ from memos.configs.mem_scheduler import AuthConfig, BaseSchedulerConfig
 from memos.context.context import ContextThread
 from memos.llms.base import BaseLLM
 from memos.log import get_logger
+from memos.mem_cube.base import BaseMemCube
 from memos.mem_cube.general import GeneralMemCube
-from memos.mem_scheduler.general_modules.dispatcher import SchedulerDispatcher
 from memos.mem_scheduler.general_modules.misc import AutoDroppingQueue as Queue
-from memos.mem_scheduler.general_modules.redis_queue import SchedulerRedisQueue
 from memos.mem_scheduler.general_modules.scheduler_logger import SchedulerLoggerModule
 from memos.mem_scheduler.memory_manage_modules.retriever import SchedulerRetriever
 from memos.mem_scheduler.monitors.dispatcher_monitor import SchedulerDispatcherMonitor
@@ -43,6 +42,9 @@ from memos.mem_scheduler.schemas.message_schemas import (
     ScheduleMessageItem,
 )
 from memos.mem_scheduler.schemas.monitor_schemas import MemoryMonitorItem
+from memos.mem_scheduler.task_schedule_modules.dispatcher import SchedulerDispatcher
+from memos.mem_scheduler.task_schedule_modules.redis_queue import SchedulerRedisQueue
+from memos.mem_scheduler.task_schedule_modules.task_queue import ScheduleTaskQueue
 from memos.mem_scheduler.utils.db_utils import get_utc_now
 from memos.mem_scheduler.utils.filter_utils import (
     transform_name_to_key,
@@ -56,7 +58,8 @@ from memos.templates.mem_scheduler_prompts import MEMORY_ASSEMBLY_TEMPLATE
 
 
 if TYPE_CHECKING:
-    from memos.mem_cube.base import BaseMemCube
+    from memos.memories.textual.tree_text_memory.retrieve.searcher import Searcher
+    from memos.reranker.http_bge import HTTPBGEReranker
 
 
 logger = get_logger(__name__)
@@ -88,37 +91,8 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             "scheduler_startup_mode", DEFAULT_STARTUP_MODE
         )
 
-        # message queue configuration
-        self.use_redis_queue = self.config.get("use_redis_queue", DEFAULT_USE_REDIS_QUEUE)
-        self.max_internal_message_queue_size = self.config.get(
-            "max_internal_message_queue_size", DEFAULT_MAX_INTERNAL_MESSAGE_QUEUE_SIZE
-        )
-
-        # Initialize message queue based on configuration
-        if self.use_redis_queue:
-            self.memos_message_queue = SchedulerRedisQueue(
-                maxsize=self.max_internal_message_queue_size
-            )
-        else:
-            self.memos_message_queue: Queue[ScheduleMessageItem] = Queue(
-                maxsize=self.max_internal_message_queue_size
-            )
-
-        self.retriever: SchedulerRetriever | None = None
-        self.db_engine: Engine | None = None
-        self.monitor: SchedulerGeneralMonitor | None = None
-        self.dispatcher_monitor: SchedulerDispatcherMonitor | None = None
-        self.mem_reader = None  # Will be set by MOSCore
-        self.dispatcher = SchedulerDispatcher(
-            config=self.config,
-            memos_message_queue=self.memos_message_queue,
-            use_redis_queue=self.use_redis_queue,
-            max_workers=self.thread_pool_max_workers,
-            enable_parallel_dispatch=self.enable_parallel_dispatch,
-        )
-
         # optional configs
-        self.disable_handlers: list | None = self.config.get("disable_handlers", None)
+        self.disabled_handlers: list | None = self.config.get("disabled_handlers", None)
 
         self.max_web_log_queue_size = self.config.get(
             "max_web_log_queue_size", DEFAULT_MAX_WEB_LOG_QUEUE_SIZE
@@ -134,6 +108,30 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         )
         self.consume_batch = self.config.get("consume_batch", DEFAULT_CONSUME_BATCH)
 
+        # message queue configuration
+        self.use_redis_queue = self.config.get("use_redis_queue", DEFAULT_USE_REDIS_QUEUE)
+        self.max_internal_message_queue_size = self.config.get(
+            "max_internal_message_queue_size", DEFAULT_MAX_INTERNAL_MESSAGE_QUEUE_SIZE
+        )
+        self.memos_message_queue = ScheduleTaskQueue(
+            use_redis_queue=self.use_redis_queue,
+            maxsize=self.max_internal_message_queue_size,
+            disabled_handlers=self.disabled_handlers,
+        )
+        self.searcher: Searcher | None = None
+        self.retriever: SchedulerRetriever | None = None
+        self.db_engine: Engine | None = None
+        self.monitor: SchedulerGeneralMonitor | None = None
+        self.dispatcher_monitor: SchedulerDispatcherMonitor | None = None
+        self.mem_reader = None  # Will be set by MOSCore
+        self.dispatcher = SchedulerDispatcher(
+            config=self.config,
+            memos_message_queue=self.memos_message_queue,
+            use_redis_queue=self.use_redis_queue,
+            max_workers=self.thread_pool_max_workers,
+            enable_parallel_dispatch=self.enable_parallel_dispatch,
+        )
+
         # other attributes
         self._context_lock = threading.Lock()
         self.current_user_id: UserID | str | None = None
@@ -142,6 +140,15 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         self.auth_config_path: str | Path | None = self.config.get("auth_config_path", None)
         self.auth_config = None
         self.rabbitmq_config = None
+
+    def init_mem_cube(self, mem_cube):
+        self.mem_cube = mem_cube
+        self.text_mem: TreeTextMemory = self.mem_cube.text_mem
+        self.searcher: Searcher = self.text_mem.get_searcher(
+            manual_close_internet=os.getenv("ENABLE_INTERNET", "true").lower() == "false",
+            moscube=False,
+        )
+        self.reranker: HTTPBGEReranker = self.text_mem.reranker
 
     def initialize_modules(
         self,
@@ -199,6 +206,9 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
 
         # start queue monitor if enabled and a bot is set later
 
+    def debug_mode_on(self):
+        self.memos_message_queue.debug_mode_on()
+
     def _cleanup_on_init_failure(self):
         """Clean up resources if initialization fails."""
         try:
@@ -208,22 +218,15 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             logger.warning(f"Error during cleanup: {e}")
 
     @property
-    def mem_cube(self) -> GeneralMemCube:
+    def mem_cube(self) -> BaseMemCube:
         """The memory cube associated with this MemChat."""
         return self.current_mem_cube
 
     @mem_cube.setter
-    def mem_cube(self, value: GeneralMemCube) -> None:
+    def mem_cube(self, value: BaseMemCube) -> None:
         """The memory cube associated with this MemChat."""
         self.current_mem_cube = value
         self.retriever.mem_cube = value
-
-    def _set_current_context_from_message(self, msg: ScheduleMessageItem) -> None:
-        """Update current user/cube context from the incoming message (thread-safe)."""
-        with self._context_lock:
-            self.current_user_id = msg.user_id
-            self.current_mem_cube_id = msg.mem_cube_id
-            self.current_mem_cube = self.get_mem_cube(msg.mem_cube_id)
 
     def transform_working_memories_to_monitors(
         self, query_keywords, memories: list[TextualMemoryItem]
@@ -523,29 +526,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             logger.error(f"Error in update_activation_memory_periodically: {e}", exc_info=True)
 
     def submit_messages(self, messages: ScheduleMessageItem | list[ScheduleMessageItem]):
-        """Submit messages to the message queue (either local queue or Redis)."""
-        if isinstance(messages, ScheduleMessageItem):
-            messages = [messages]  # transform single message to list
-
-        for message in messages:
-            if not isinstance(message, ScheduleMessageItem):
-                error_msg = f"Invalid message type: {type(message)}, expected ScheduleMessageItem"
-                logger.error(error_msg)
-                raise TypeError(error_msg)
-
-            if getattr(message, "timestamp", None) is None:
-                with contextlib.suppress(Exception):
-                    message.timestamp = datetime.utcnow()
-
-            if self.disable_handlers and message.label in self.disable_handlers:
-                logger.info(f"Skipping disabled handler: {message.label} - {message.content}")
-                continue
-            self.memos_message_queue.put(message)
-            logger.info(f"Submitted message to local queue: {message.label} - {message.content}")
-
-        with contextlib.suppress(Exception):
-            if messages:
-                self.dispatcher.on_messages_enqueued(messages)
+        self.memos_message_queue.submit_messages(messages=messages)
 
     def _submit_web_logs(
         self, messages: ScheduleLogForWebItem | list[ScheduleLogForWebItem]
@@ -606,10 +587,16 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             try:
                 # Get messages in batches based on consume_batch setting
 
-                messages = self.memos_message_queue.get(block=True, batch_size=self.consume_batch)
+                messages = self.memos_message_queue.get_messages(batch_size=self.consume_batch)
 
                 if messages:
                     try:
+                        import contextlib
+
+                        with contextlib.suppress(Exception):
+                            if messages:
+                                self.dispatcher.on_messages_enqueued(messages)
+
                         self.dispatcher.dispatch(messages)
                     except Exception as e:
                         logger.error(f"Error dispatching messages: {e!s}")
@@ -878,7 +865,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             if isinstance(self.memos_message_queue, SchedulerRedisQueue):
                 # For Redis queue, prefer XINFO GROUPS to compute pending
                 groups_info = self.memos_message_queue.redis.xinfo_groups(
-                    self.memos_message_queue.stream_name
+                    self.memos_message_queue.stream_key_prefix
                 )
                 if groups_info:
                     for group in groups_info:
