@@ -177,10 +177,6 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         try:
             stream_key = self.get_stream_key(user_id=user_id, mem_cube_id=mem_cube_id)
 
-            if stream_key not in self.seen_streams:
-                self.seen_streams.add(stream_key)
-                self._ensure_consumer_group(stream_key=stream_key)
-
             # Calculate timeout for Redis
             redis_timeout = None
             if block and timeout is not None:
@@ -204,6 +200,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                     logger.warning(
                         f"Consumer group or stream missing for '{stream_key}/{self.consumer_group}'. Attempting to create and retry."
                     )
+                    self._ensure_consumer_group(stream_key=stream_key)
                     messages = self._redis_conn.xreadgroup(
                         self.consumer_group,
                         self.consumer_name,
@@ -354,10 +351,9 @@ class SchedulerRedisQueue(RedisSchedulerModule):
 
             for stream_key in stream_keys:
                 # Delete the entire stream
-                self._redis_conn.delete(self.stream_key_prefix)
-                logger.info(f"Cleared Redis stream: {self.stream_key_prefix}")
-                # Recreate the consumer group
-                self._ensure_consumer_group(stream_key=stream_key)
+                self._redis_conn.delete(stream_key)
+                logger.info(f"Cleared Redis stream: {stream_key}")
+
         except Exception as e:
             logger.error(f"Failed to clear Redis queue: {e}")
 

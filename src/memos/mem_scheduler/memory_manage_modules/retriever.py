@@ -11,6 +11,8 @@ from memos.mem_scheduler.general_modules.base import BaseSchedulerModule
 from memos.mem_scheduler.schemas.general_schemas import (
     DEFAULT_SCHEDULER_RETRIEVER_BATCH_SIZE,
     DEFAULT_SCHEDULER_RETRIEVER_RETRIES,
+    FINE_STRATEGY,
+    FineStrategy,
     TreeTextMemory_FINE_SEARCH_METHOD,
     TreeTextMemory_SEARCH_METHOD,
 )
@@ -93,9 +95,15 @@ class SchedulerRetriever(BaseSchedulerModule):
                 if len(query_history) > 1
                 else query_history[0]
             )
-        text_memories = "\n".join([f"- {mem}" for i, mem in enumerate(batch_texts)])
+        # Include numbering for rewrite mode to help LLM reference original memory IDs
+        if FINE_STRATEGY == FineStrategy.REWRITE:
+            text_memories = "\n".join([f"- [{i}] {mem}" for i, mem in enumerate(batch_texts)])
+            prompt_name = "memory_rewrite_enhancement"
+        else:
+            text_memories = "\n".join([f"- {mem}" for i, mem in enumerate(batch_texts)])
+            prompt_name = "memory_recreate_enhancement"
         return self.build_prompt(
-            "memory_enhancement",
+            prompt_name,
             query_history=query_history,
             memories=text_memories,
         )
@@ -109,9 +117,11 @@ class SchedulerRetriever(BaseSchedulerModule):
     ) -> tuple[list[TextualMemoryItem], bool]:
         attempt = 0
         text_memories = [one.memory for one in memories]
+
         prompt = self._build_enhancement_prompt(
             query_history=query_history, batch_texts=text_memories
         )
+
         llm_response = None
         while attempt <= max(0, retries) + 1:
             try:
@@ -121,14 +131,51 @@ class SchedulerRetriever(BaseSchedulerModule):
                     # create new
                     enhanced_memories = []
                     user_id = memories[0].metadata.user_id
-                    for new_mem in processed_text_memories:
-                        enhanced_memories.append(
-                            TextualMemoryItem(
-                                memory=new_mem, metadata=TextualMemoryMetadata(user_id=user_id)
+                    if FINE_STRATEGY == FineStrategy.RECREATE:
+                        for new_mem in processed_text_memories:
+                            enhanced_memories.append(
+                                TextualMemoryItem(
+                                    memory=new_mem, metadata=TextualMemoryMetadata(user_id=user_id)
+                                )
                             )
-                        )
+                    elif FINE_STRATEGY == FineStrategy.REWRITE:
+                        # Parse index from each processed line and rewrite corresponding original memory
+                        def _parse_index_and_text(s: str) -> tuple[int | None, str]:
+                            import re
+
+                            s = (s or "").strip()
+                            # Preferred: [index] text
+                            m = re.match(r"^\s*\[(\d+)\]\s*(.+)$", s)
+                            if m:
+                                return int(m.group(1)), m.group(2).strip()
+                            # Fallback: index: text or index - text
+                            m = re.match(r"^\s*(\d+)\s*[:\-\)]\s*(.+)$", s)
+                            if m:
+                                return int(m.group(1)), m.group(2).strip()
+                            return None, s
+
+                        idx_to_original = dict(enumerate(memories))
+                        for j, item in enumerate(processed_text_memories):
+                            idx, new_text = _parse_index_and_text(item)
+                            if idx is not None and idx in idx_to_original:
+                                orig = idx_to_original[idx]
+                            else:
+                                # Fallback: align by order if index missing/invalid
+                                orig = memories[j] if j < len(memories) else None
+                            if not orig:
+                                continue
+                            enhanced_memories.append(
+                                TextualMemoryItem(
+                                    id=orig.id,
+                                    memory=new_text,
+                                    metadata=orig.metadata,
+                                )
+                            )
+                    else:
+                        logger.error(f"Fine search strategy {FINE_STRATEGY} not exists")
+
                     logger.info(
-                        f"[enhance_memories_with_query] ✅ done | prompt={prompt} | llm_response={llm_response}"
+                        f"[enhance_memories_with_query] ✅ done | Strategy={FINE_STRATEGY} | prompt={prompt} | llm_response={llm_response}"
                     )
                     return enhanced_memories, True
                 else:

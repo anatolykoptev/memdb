@@ -206,6 +206,9 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
 
         # start queue monitor if enabled and a bot is set later
 
+    def debug_mode_on(self):
+        self.memos_message_queue.debug_mode_on()
+
     def _cleanup_on_init_failure(self):
         """Clean up resources if initialization fails."""
         try:

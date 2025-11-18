@@ -35,6 +35,11 @@ class ScheduleTaskQueue:
 
         self.disabled_handlers = disabled_handlers
 
+    def debug_mode_on(self):
+        self.memos_message_queue.stream_key_prefix = (
+            f"debug_mode:{self.memos_message_queue.stream_key_prefix}"
+        )
+
     def get_stream_keys(self) -> list[str]:
         if isinstance(self.memos_message_queue, SchedulerRedisQueue):
             return self.memos_message_queue.get_stream_keys()

@@ -390,7 +390,7 @@ Return a JSON object with this exact structure:
 - Focus on whether the memories can fully answer the query without additional information
 """
 
-MEMORY_ENHANCEMENT_PROMPT = """
+MEMORY_RECREATE_ENHANCEMENT_PROMPT = """
 You are a knowledgeable and precise AI assistant.
 
 # GOAL
@@ -415,6 +415,49 @@ Wrap the final output inside:
 <answer>
 - enhanced memory 1
 - enhanced memory 2
+...
+</answer>
+
+## User Query
+{query_history}
+
+## Original Memories
+{memories}
+
+Final Output:
+"""
+
+# Rewrite version: return enhanced memories with original IDs
+MEMORY_REWRITE_ENHANCEMENT_PROMPT = """
+You are a knowledgeable and precise AI assistant.
+
+# GOAL
+Transform raw memories into clean, query-relevant facts — preserving timestamps and resolving ambiguities without inference. Return each enhanced fact with the ID of the original memory being modified.
+
+# RULES & THINKING STEPS
+1. Keep ONLY what’s relevant to the user’s query. Delete irrelevant memories entirely.
+2. Preserve ALL explicit timestamps (e.g., “on October 6”, “daily”, “after injury”).
+3. Resolve all ambiguities using only memory content:
+   - Pronouns → full name: “she” → “Melanie”
+   - Vague nouns → specific detail: “home” → “her childhood home in Guangzhou”
+   - “the user” → identity from context (e.g., “Melanie” if travel/running memories)
+4. Never invent, assume, or extrapolate.
+5. Each output line must be a standalone, clear, factual statement.
+6. Output format: one line per fact, starting with "- ", no extra text.
+
+# IMPORTANT FOR REWRITE
+- Each output line MUST include the original memory’s ID shown in the input list.
+- Use the index shown for each original memory (e.g., "[0]", "[1]") as the ID to reference which memory you are rewriting.
+- For every rewritten line, prefix with the corresponding index in square brackets.
+
+# OUTPUT FORMAT (STRICT)
+Return ONLY the following block, with **one enhanced memory per line**.
+Each line MUST start with "- " (dash + space) AND include index in square brackets.
+
+Wrap the final output inside:
+<answer>
+- [index] enhanced memory 1
+- [index] enhanced memory 2
 ...
 </answer>
 
@@ -471,7 +514,8 @@ PROMPT_MAPPING = {
     "memory_redundancy_filtering": MEMORY_REDUNDANCY_FILTERING_PROMPT,
     "memory_combined_filtering": MEMORY_COMBINED_FILTERING_PROMPT,
     "memory_answer_ability_evaluation": MEMORY_ANSWER_ABILITY_EVALUATION_PROMPT,
-    "memory_enhancement": MEMORY_ENHANCEMENT_PROMPT,
+    "memory_recreate_enhancement": MEMORY_RECREATE_ENHANCEMENT_PROMPT,
+    "memory_rewrite_enhancement": MEMORY_REWRITE_ENHANCEMENT_PROMPT,
     "enlarge_recall": ENLARGE_RECALL_PROMPT_ONE_SENTENCE,
 }
 
