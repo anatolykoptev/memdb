@@ -25,9 +25,6 @@ def my_test_handler(messages: list[ScheduleMessageItem]):
     print(f"My test handler received {len(messages)} messages:")
     for msg in messages:
         print(f" my_test_handler - {msg.item_id}: {msg.content}")
-        print(
-            f"{queue._redis_conn.xinfo_groups(queue.stream_key_prefix)} qsize: {queue.qsize()} messages:{messages}"
-        )
 
 
 # 2. Register the handler

@@ -150,7 +150,6 @@ class SchedulerDispatcher(BaseSchedulerModule):
                     self.metrics.on_done(label=m.label, mem_cube_id=m.mem_cube_id, now=time.time())
 
                 # acknowledge redis messages
-
                 if self.use_redis_queue and self.memos_message_queue is not None:
                     for msg in messages:
                         redis_message_id = msg.redis_message_id
