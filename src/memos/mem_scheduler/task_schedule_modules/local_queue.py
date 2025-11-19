@@ -79,8 +79,7 @@ class SchedulerLocalQueue(RedisSchedulerModule):
 
     def get(
         self,
-        user_id: str,
-        mem_cube_id: str,
+        stream_key: str,
         block: bool = True,
         timeout: float | None = None,
         batch_size: int | None = None,
@@ -90,8 +89,6 @@ class SchedulerLocalQueue(RedisSchedulerModule):
                 f"get() called with invalid batch_size: {batch_size}. Returning empty list."
             )
             return []
-
-        stream_key = self.get_stream_key(user_id=user_id, mem_cube_id=mem_cube_id)
 
         # Return empty list if queue does not exist
         if stream_key not in self.queue_streams:

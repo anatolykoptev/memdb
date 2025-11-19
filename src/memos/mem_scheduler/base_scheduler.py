@@ -54,11 +54,11 @@ from memos.mem_scheduler.webservice_modules.redis_service import RedisSchedulerM
 from memos.memories.activation.kv import KVCacheMemory
 from memos.memories.activation.vllmkv import VLLMKVCacheItem, VLLMKVCacheMemory
 from memos.memories.textual.tree import TextualMemoryItem, TreeTextMemory
+from memos.memories.textual.tree_text_memory.retrieve.searcher import Searcher
 from memos.templates.mem_scheduler_prompts import MEMORY_ASSEMBLY_TEMPLATE
 
 
 if TYPE_CHECKING:
-    from memos.memories.textual.tree_text_memory.retrieve.searcher import Searcher
     from memos.reranker.http_bge import HTTPBGEReranker
 
 
@@ -141,14 +141,21 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         self.auth_config = None
         self.rabbitmq_config = None
 
-    def init_mem_cube(self, mem_cube):
+    def init_mem_cube(
+        self,
+        mem_cube: BaseMemCube,
+        searcher: Searcher | None = None,
+    ):
         self.mem_cube = mem_cube
         self.text_mem: TreeTextMemory = self.mem_cube.text_mem
-        self.searcher: Searcher = self.text_mem.get_searcher(
-            manual_close_internet=os.getenv("ENABLE_INTERNET", "true").lower() == "false",
-            moscube=False,
-        )
         self.reranker: HTTPBGEReranker = self.text_mem.reranker
+        if searcher is None:
+            self.searcher: Searcher = self.text_mem.get_searcher(
+                manual_close_internet=os.getenv("ENABLE_INTERNET", "true").lower() == "false",
+                moscube=False,
+            )
+        else:
+            self.searcher = searcher
 
     def initialize_modules(
         self,

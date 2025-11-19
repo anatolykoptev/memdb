@@ -5,6 +5,7 @@ This module provides a Redis-based queue implementation that can replace
 the local memos_message_queue functionality in BaseScheduler.
 """
 
+import re
 import time
 
 from collections.abc import Callable
@@ -165,8 +166,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
 
     def get(
         self,
-        user_id: str,
-        mem_cube_id: str,
+        stream_key: str,
         block: bool = True,
         timeout: float | None = None,
         batch_size: int | None = None,
@@ -175,8 +175,6 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             raise ConnectionError("Not connected to Redis. Redis connection not available.")
 
         try:
-            stream_key = self.get_stream_key(user_id=user_id, mem_cube_id=mem_cube_id)
-
             # Calculate timeout for Redis
             redis_timeout = None
             if block and timeout is not None:
@@ -295,17 +293,21 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         if not self._redis_conn:
             return []
 
-        try:
-            # Use match parameter and decode byte strings to regular strings
-            stream_keys = [
-                key.decode("utf-8") if isinstance(key, bytes) else key
-                for key in self._redis_conn.scan_iter(match=f"{self.stream_key_prefix}:*")
-            ]
-            logger.debug(f"get stream_keys from redis: {stream_keys}")
-            return stream_keys
-        except Exception as e:
-            logger.error(f"Failed to list Redis stream keys: {e}")
-            return []
+        # First, get all keys that might match (using Redis pattern matching)
+        redis_pattern = f"{self.stream_key_prefix}:*"
+        raw_keys = [
+            key.decode("utf-8") if isinstance(key, bytes) else key
+            for key in self._redis_conn.scan_iter(match=redis_pattern)
+        ]
+
+        # Second, filter using Python regex to ensure exact prefix match
+        # Escape special regex characters in the prefix, then add :.*
+        escaped_prefix = re.escape(self.stream_key_prefix)
+        regex_pattern = f"^{escaped_prefix}:"
+        stream_keys = [key for key in raw_keys if re.match(regex_pattern, key)]
+
+        logger.debug(f"get stream_keys from redis: {stream_keys}")
+        return stream_keys
 
     def size(self) -> int:
         """

@@ -18,7 +18,7 @@ from memos.api.handlers.formatters_handler import (
 from memos.api.product_models import APISearchRequest, SearchResponse
 from memos.context.context import ContextThreadPoolExecutor
 from memos.log import get_logger
-from memos.mem_scheduler.schemas.general_schemas import SearchMode
+from memos.mem_scheduler.schemas.general_schemas import FINE_STRATEGY, FineStrategy, SearchMode
 from memos.types import MOSSearchResult, UserContext
 
 
@@ -40,7 +40,7 @@ class SearchHandler(BaseHandler):
             dependencies: HandlerDependencies instance
         """
         super().__init__(dependencies)
-        self._validate_dependencies("naive_mem_cube", "mem_scheduler")
+        self._validate_dependencies("naive_mem_cube", "mem_scheduler", "searcher")
 
     def handle_search_memories(self, search_req: APISearchRequest) -> SearchResponse:
         """
@@ -211,11 +211,17 @@ class SearchHandler(BaseHandler):
 
         return formatted_memories
 
+    def _deep_search(
+        self, search_req: APISearchRequest, user_context: UserContext, max_thinking_depth: int
+    ) -> list:
+        logger.error("waiting to be implemented")
+        return []
+
     def _fine_search(
         self,
         search_req: APISearchRequest,
         user_context: UserContext,
-    ) -> list:
+    ) -> list[str]:
         """
         Fine-grained search with query enhancement.
 
@@ -226,10 +232,13 @@ class SearchHandler(BaseHandler):
         Returns:
             List of enhanced search results
         """
+        if FINE_STRATEGY == FineStrategy.DEEP_SEARCH:
+            return self._deep_search(
+                search_req=search_req, user_context=user_context, max_thinking_depth=3
+            )
+
         target_session_id = search_req.session_id or "default_session"
         search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
-
-        searcher = self.mem_scheduler.searcher
 
         info = {
             "user_id": search_req.user_id,
@@ -238,7 +247,7 @@ class SearchHandler(BaseHandler):
         }
 
         # Fine retrieve
-        fast_retrieved_memories = searcher.retrieve(
+        raw_retrieved_memories = self.searcher.retrieve(
             query=search_req.query,
             user_name=user_context.mem_cube_id,
             top_k=search_req.top_k,
@@ -250,8 +259,8 @@ class SearchHandler(BaseHandler):
         )
 
         # Post retrieve
-        fast_memories = searcher.post_retrieve(
-            retrieved_results=fast_retrieved_memories,
+        raw_memories = self.searcher.post_retrieve(
+            retrieved_results=raw_retrieved_memories,
             top_k=search_req.top_k,
             user_name=user_context.mem_cube_id,
             info=info,
@@ -260,22 +269,22 @@ class SearchHandler(BaseHandler):
         # Enhance with query
         enhanced_memories, _ = self.mem_scheduler.retriever.enhance_memories_with_query(
             query_history=[search_req.query],
-            memories=fast_memories,
+            memories=raw_memories,
         )
 
-        if len(enhanced_memories) < len(fast_memories):
+        if len(enhanced_memories) < len(raw_memories):
             logger.info(
-                f"Enhanced memories ({len(enhanced_memories)}) are less than fast memories ({len(fast_memories)}). Recalling for more."
+                f"Enhanced memories ({len(enhanced_memories)}) are less than raw memories ({len(raw_memories)}). Recalling for more."
             )
             missing_info_hint, trigger = self.mem_scheduler.retriever.recall_for_missing_memories(
                 query=search_req.query,
-                memories=fast_memories,
+                memories=raw_memories,
             )
-            retrieval_size = len(fast_memories) - len(enhanced_memories)
+            retrieval_size = len(raw_memories) - len(enhanced_memories)
             logger.info(f"Retrieval size: {retrieval_size}")
             if trigger:
                 logger.info(f"Triggering additional search with hint: {missing_info_hint}")
-                additional_memories = searcher.search(
+                additional_memories = self.searcher.search(
                     query=missing_info_hint,
                     user_name=user_context.mem_cube_id,
                     top_k=retrieval_size,
@@ -286,7 +295,7 @@ class SearchHandler(BaseHandler):
                 )
             else:
                 logger.info("Not triggering additional search, using fast memories.")
-                additional_memories = fast_memories[:retrieval_size]
+                additional_memories = raw_memories[:retrieval_size]
 
             enhanced_memories += additional_memories
             logger.info(

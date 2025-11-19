@@ -9,6 +9,7 @@ from typing import Any
 
 from memos.log import get_logger
 from memos.mem_scheduler.base_scheduler import BaseScheduler
+from memos.memories.textual.tree_text_memory.retrieve.searcher import Searcher
 
 
 logger = get_logger(__name__)
@@ -28,6 +29,7 @@ class HandlerDependencies:
         naive_mem_cube: Any | None = None,
         mem_reader: Any | None = None,
         mem_scheduler: Any | None = None,
+        searcher: Any | None = None,
         embedder: Any | None = None,
         reranker: Any | None = None,
         graph_db: Any | None = None,
@@ -58,6 +60,7 @@ class HandlerDependencies:
         self.naive_mem_cube = naive_mem_cube
         self.mem_reader = mem_reader
         self.mem_scheduler = mem_scheduler
+        self.searcher = searcher
         self.embedder = embedder
         self.reranker = reranker
         self.graph_db = graph_db
@@ -127,6 +130,11 @@ class BaseHandler:
     def mem_scheduler(self) -> BaseScheduler:
         """Get scheduler instance."""
         return self.deps.mem_scheduler
+
+    @property
+    def searcher(self) -> Searcher:
+        """Get scheduler instance."""
+        return self.deps.searcher
 
     @property
     def embedder(self):

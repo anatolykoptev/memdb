@@ -5,8 +5,6 @@ This module provides a Redis-based queue implementation that can replace
 the local memos_message_queue functionality in BaseScheduler.
 """
 
-from collections import defaultdict
-
 from memos.log import get_logger
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.task_schedule_modules.local_queue import SchedulerLocalQueue
@@ -58,9 +56,10 @@ class ScheduleTaskQueue:
 
     def get_stream_keys(self) -> list[str]:
         if isinstance(self.memos_message_queue, SchedulerRedisQueue):
-            return self.memos_message_queue.get_stream_keys()
+            stream_keys = self.memos_message_queue.get_stream_keys()
         else:
-            return list(self.memos_message_queue.queue_streams.keys())
+            stream_keys = list(self.memos_message_queue.queue_streams.keys())
+        return stream_keys
 
     def submit_messages(self, messages: ScheduleMessageItem | list[ScheduleMessageItem]):
         """Submit messages to the message queue (either local queue or Redis)."""
@@ -98,50 +97,25 @@ class ScheduleTaskQueue:
                         )
 
     def get_messages(self, batch_size: int) -> list[ScheduleMessageItem]:
-        # Discover all active streams via queue API
-        streams: list[tuple[str, str]] = []
-
         stream_keys = self.get_stream_keys()
-        for stream_key in stream_keys:
-            try:
-                parts = stream_key.split(":")
-                if len(parts) >= 3:
-                    user_id = parts[-2]
-                    mem_cube_id = parts[-1]
-                    streams.append((user_id, mem_cube_id))
-            except Exception as e:
-                logger.debug(f"Failed to parse stream key {stream_key}: {e}")
 
-        if not streams:
+        if len(stream_keys) == 0:
             return []
 
         messages: list[ScheduleMessageItem] = []
 
-        # Group by user: {user_id: [mem_cube_id, ...]}
+        for stream_key in stream_keys:
+            fetched = self.memos_message_queue.get(
+                stream_key=stream_key,
+                block=False,
+                batch_size=batch_size,
+            )
 
-        streams_by_user: dict[str, list[str]] = defaultdict(list)
-        for user_id, mem_cube_id in streams:
-            streams_by_user[user_id].append(mem_cube_id)
-
-        # For each user, fairly consume up to batch_size across their streams
-        for user_id, mem_cube_ids in streams_by_user.items():
-            if not mem_cube_ids:
-                continue
-
-            # First pass: give each stream an equal share for this user
-            for mem_cube_id in mem_cube_ids:
-                fetched = self.memos_message_queue.get(
-                    user_id=user_id,
-                    mem_cube_id=mem_cube_id,
-                    block=False,
-                    batch_size=batch_size,
-                )
-
-                messages.extend(fetched)
-
-        logger.info(
-            f"Fetched {len(messages)} messages across users with per-user batch_size={batch_size}"
-        )
+            messages.extend(fetched)
+        if len(messages) > 0:
+            logger.debug(
+                f"Fetched {len(messages)} messages across users with per-user batch_size={batch_size}"
+            )
         return messages
 
     def clear(self):
