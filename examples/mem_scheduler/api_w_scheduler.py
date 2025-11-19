@@ -25,6 +25,10 @@ def my_test_handler(messages: list[ScheduleMessageItem]):
     print(f"My test handler received {len(messages)} messages:")
     for msg in messages:
         print(f" my_test_handler - {msg.item_id}: {msg.content}")
+        user_status_running = handle_scheduler_status(
+            user_name=USER_MEM_CUBE, mem_scheduler=mem_scheduler, instance_id="api_w_scheduler"
+        )
+        print(f"[Monitor] Status for {USER_MEM_CUBE} after submit:", user_status_running)
 
 
 # 2. Register the handler
@@ -56,10 +60,6 @@ for mes in messages_to_send:
 
 # 5.1 Monitor status for specific mem_cube while running
 USER_MEM_CUBE = "test_mem_cube"
-user_status_running = handle_scheduler_status(
-    user_name=USER_MEM_CUBE, mem_scheduler=mem_scheduler, instance_id="api_w_scheduler"
-)
-print(f"[Monitor] Status for {USER_MEM_CUBE} after submit:", user_status_running)
 
 # 6. Wait for messages to be processed (limited to 100 checks)
 print("Waiting for messages to be consumed (max 100 checks)...")

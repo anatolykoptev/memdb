@@ -18,6 +18,7 @@ class FineStrategy(str, Enum):
 
     REWRITE = "rewrite"
     RECREATE = "recreate"
+    DEEP_SEARCH = "deep_search"
 
 
 FILE_PATH = Path(__file__).absolute()
