@@ -58,14 +58,18 @@ class NaiveMemCube(BaseMemCube):
         )
         self._act_mem: BaseActMemory | None = None
         self._para_mem: BaseParaMemory | None = None
-        self._pref_mem: BaseTextMemory | None = SimplePreferenceTextMemory(
-            extractor_llm=llm,
-            vector_db=vector_db,
-            embedder=embedder,
-            reranker=reranker,
-            extractor=pref_extractor,
-            adder=pref_adder,
-            retriever=pref_retriever,
+        self._pref_mem: BaseTextMemory | None = (
+            SimplePreferenceTextMemory(
+                extractor_llm=llm,
+                vector_db=vector_db,
+                embedder=embedder,
+                reranker=reranker,
+                extractor=pref_extractor,
+                adder=pref_adder,
+                retriever=pref_retriever,
+            )
+            if os.getenv("ENABLE_PREFERENCE_MEMORY", "false").lower() == "true"
+            else None
         )
 
     def load(

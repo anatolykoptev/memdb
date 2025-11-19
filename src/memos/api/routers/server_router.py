@@ -187,7 +187,11 @@ def init_server():
 
     # Create component instances
     graph_db = GraphStoreFactory.from_config(graph_db_config)
-    vector_db = VecDBFactory.from_config(vector_db_config)
+    vector_db = (
+        VecDBFactory.from_config(vector_db_config)
+        if os.getenv("ENABLE_PREFERENCE_MEMORY", "false").lower() == "true"
+        else None
+    )
     llm = LLMFactory.from_config(llm_config)
     embedder = EmbedderFactory.from_config(embedder_config)
     mem_reader = MemReaderFactory.from_config(mem_reader_config)
@@ -195,24 +199,36 @@ def init_server():
     internet_retriever = InternetRetrieverFactory.from_config(
         internet_retriever_config, embedder=embedder
     )
-    pref_extractor = ExtractorFactory.from_config(
-        config_factory=pref_extractor_config,
-        llm_provider=llm,
-        embedder=embedder,
-        vector_db=vector_db,
+    pref_extractor = (
+        ExtractorFactory.from_config(
+            config_factory=pref_extractor_config,
+            llm_provider=llm,
+            embedder=embedder,
+            vector_db=vector_db,
+        )
+        if os.getenv("ENABLE_PREFERENCE_MEMORY", "false").lower() == "true"
+        else None
     )
-    pref_adder = AdderFactory.from_config(
-        config_factory=pref_adder_config,
-        llm_provider=llm,
-        embedder=embedder,
-        vector_db=vector_db,
+    pref_adder = (
+        AdderFactory.from_config(
+            config_factory=pref_adder_config,
+            llm_provider=llm,
+            embedder=embedder,
+            vector_db=vector_db,
+        )
+        if os.getenv("ENABLE_PREFERENCE_MEMORY", "false").lower() == "true"
+        else None
     )
-    pref_retriever = RetrieverFactory.from_config(
-        config_factory=pref_retriever_config,
-        llm_provider=llm,
-        embedder=embedder,
-        reranker=reranker,
-        vector_db=vector_db,
+    pref_retriever = (
+        RetrieverFactory.from_config(
+            config_factory=pref_retriever_config,
+            llm_provider=llm,
+            embedder=embedder,
+            reranker=reranker,
+            vector_db=vector_db,
+        )
+        if os.getenv("ENABLE_PREFERENCE_MEMORY", "false").lower() == "true"
+        else None
     )
 
     # Initialize memory manager

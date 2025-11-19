@@ -53,8 +53,8 @@ Designed for **AI companions, role-playing NPCs, and multi-agent systems**, MemO
 </div>
 
 
-Get Free API: [Try API](https://memos-dashboard.openmem.net/quickstart/?source=github) 
- 
+Get Free API: [Try API](https://memos-dashboard.openmem.net/quickstart/?source=github)
+
 
 ---
 
