@@ -6,8 +6,7 @@ from typing import Generic, Literal, TypeVar
 from pydantic import BaseModel, Field
 
 # Import message types from core types module
-from memos.mem_scheduler.schemas.general_schemas import SearchMode
-from memos.types import MessageDict, PermissionDict
+from memos.types import MessageDict, PermissionDict, SearchMode
 
 
 T = TypeVar("T")

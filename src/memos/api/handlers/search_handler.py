@@ -18,8 +18,7 @@ from memos.api.handlers.formatters_handler import (
 from memos.api.product_models import APISearchRequest, SearchResponse
 from memos.context.context import ContextThreadPoolExecutor
 from memos.log import get_logger
-from memos.mem_scheduler.schemas.general_schemas import FINE_STRATEGY, FineStrategy, SearchMode
-from memos.types import MOSSearchResult, UserContext
+from memos.types import FINE_STRATEGY, FineStrategy, MOSSearchResult, SearchMode, UserContext
 
 
 logger = get_logger(__name__)
@@ -212,10 +211,29 @@ class SearchHandler(BaseHandler):
         return formatted_memories
 
     def _deep_search(
-        self, search_req: APISearchRequest, user_context: UserContext, max_thinking_depth: int
+        self,
+        search_req: APISearchRequest,
+        user_context: UserContext,
     ) -> list:
-        logger.error("waiting to be implemented")
-        return []
+        target_session_id = search_req.session_id or "default_session"
+        search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
+
+        info = {
+            "user_id": search_req.user_id,
+            "session_id": target_session_id,
+            "chat_history": search_req.chat_history,
+        }
+
+        return self.searcher.deep_search(
+            query=search_req.query,
+            user_name=user_context.mem_cube_id,
+            top_k=search_req.top_k,
+            mode=SearchMode.FINE,
+            manual_close_internet=not search_req.internet_search,
+            moscube=search_req.moscube,
+            search_filter=search_filter,
+            info=info,
+        )
 
     def _fine_search(
         self,

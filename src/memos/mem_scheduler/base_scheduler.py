@@ -33,9 +33,7 @@ from memos.mem_scheduler.schemas.general_schemas import (
     DEFAULT_TOP_K,
     DEFAULT_USE_REDIS_QUEUE,
     STARTUP_BY_PROCESS,
-    MemCubeID,
     TreeTextMemory_SEARCH_METHOD,
-    UserID,
 )
 from memos.mem_scheduler.schemas.message_schemas import (
     ScheduleLogForWebItem,
@@ -56,6 +54,10 @@ from memos.memories.activation.vllmkv import VLLMKVCacheItem, VLLMKVCacheMemory
 from memos.memories.textual.tree import TextualMemoryItem, TreeTextMemory
 from memos.memories.textual.tree_text_memory.retrieve.searcher import Searcher
 from memos.templates.mem_scheduler_prompts import MEMORY_ASSEMBLY_TEMPLATE
+from memos.types import (
+    MemCubeID,
+    UserID,
+)
 
 
 if TYPE_CHECKING:

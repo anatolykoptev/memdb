@@ -17,8 +17,6 @@ from memos.mem_scheduler.schemas.general_schemas import (
     PREF_ADD_LABEL,
     QUERY_LABEL,
     WORKING_MEMORY_TYPE,
-    MemCubeID,
-    UserID,
 )
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.schemas.monitor_schemas import QueryMonitorItem
@@ -27,6 +25,10 @@ from memos.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_
 from memos.memories.textual.item import TextualMemoryItem
 from memos.memories.textual.preference import PreferenceTextMemory
 from memos.memories.textual.tree import TreeTextMemory
+from memos.types import (
+    MemCubeID,
+    UserID,
+)
 
 
 logger = get_logger(__name__)

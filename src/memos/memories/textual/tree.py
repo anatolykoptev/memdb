@@ -16,11 +16,13 @@ from memos.log import get_logger
 from memos.memories.textual.base import BaseTextMemory
 from memos.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
 from memos.memories.textual.tree_text_memory.organize.manager import MemoryManager
+from memos.memories.textual.tree_text_memory.retrieve.advanced_searcher import (
+    AdvancedSearcher as Searcher,
+)
 from memos.memories.textual.tree_text_memory.retrieve.bm25_util import EnhancedBM25
 from memos.memories.textual.tree_text_memory.retrieve.internet_retriever_factory import (
     InternetRetrieverFactory,
 )
-from memos.memories.textual.tree_text_memory.retrieve.searcher import Searcher
 from memos.reranker.factory import RerankerFactory
 from memos.types import MessageList
 
