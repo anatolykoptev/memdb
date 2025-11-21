@@ -129,9 +129,7 @@ class TreeTextMemory(BaseTextMemory):
         return self.memory_manager.get_current_memory_size(user_name=user_name)
 
     def get_searcher(
-        self,
-        manual_close_internet: bool = False,
-        moscube: bool = False,
+        self, manual_close_internet: bool = False, moscube: bool = False, process_llm=None
     ):
         if (self.internet_retriever is not None) and manual_close_internet:
             logger.warning(
@@ -144,6 +142,7 @@ class TreeTextMemory(BaseTextMemory):
                 self.reranker,
                 internet_retriever=None,
                 moscube=moscube,
+                process_llm=process_llm,
             )
         else:
             searcher = Searcher(
@@ -153,6 +152,7 @@ class TreeTextMemory(BaseTextMemory):
                 self.reranker,
                 internet_retriever=self.internet_retriever,
                 moscube=moscube,
+                process_llm=process_llm,
             )
         return searcher
 

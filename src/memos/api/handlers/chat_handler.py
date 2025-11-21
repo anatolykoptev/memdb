@@ -32,14 +32,13 @@ from memos.mem_os.utils.reference_utils import (
 from memos.mem_scheduler.schemas.general_schemas import (
     ANSWER_LABEL,
     QUERY_LABEL,
-    SearchMode,
 )
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.templates.mos_prompts import (
     FURTHER_SUGGESTION_PROMPT,
     get_memos_prompt,
 )
-from memos.types import MessageList
+from memos.types import MessageList, SearchMode
 
 
 class ChatHandler(BaseHandler):

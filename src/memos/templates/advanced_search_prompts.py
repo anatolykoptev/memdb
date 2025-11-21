@@ -1,4 +1,3 @@
-# Memory context assembly: recombine useful facts from memories to build a coherent context for answering
 MEMORY_SUMMARY_PROMPT = """
 # Memory Summary and Context Assembly
 
@@ -12,7 +11,11 @@ You are a precise context assembler. Given a user query and a set of retrieved m
 - Resolve all pronouns (e.g., "he", "it", "they") and vague terms (e.g., "this", "that", "some people") to explicit entities using memory content.
 - Merge overlapping or redundant facts. Preserve temporal, spatial, and relational details.
 - Each fact must be atomic, unambiguous, and verifiable.
-- Cite the source memory index for every fact using [mem:X] notation.
+- Preserve all key details: who, what, when, where, why — if present in memory.
+- Created a summarized facts for answering query at the first item, and separate logically coherent separate memories.
+- Begin the <memories> with a single, aggregated summary that directly answers the query using the most relevant facts.
+- The total number of facts in <memories> must not exceed {top_k}.
+- If additional context is relevant, try to weave it together logically—or chronologically—based on how the pieces connect.
 
 ### Processing Logic
 - Aggregate logically connected memories (e.g., events involving the same person, cause-effect chains, repeated entities).
@@ -33,6 +36,7 @@ Respond ONLY with the following XML-style tags. Do NOT include any other text, e
 A single, compact, fluent paragraph synthesizing the above facts into a coherent narrative directly relevant to the query. Use resolved entities and logical flow. No bullet points. No markdown. No commentary.
 </context>
 <memories>
+- Aggregated summary
 - Fact 1
 - Fact 2
 </memories>
@@ -183,9 +187,49 @@ summary of current memories
 Answer:
 """
 
+MEMORY_JUDGMENT_PROMPT = """
+# Memory Relevance Judgment
+
+## Role
+You are a precise memory evaluator. Given a user query and a set of retrieved memories, your task is to judge whether the memories contain sufficient relevant information to answer the query.
+
+## Instructions
+
+### Core Principles
+- Use ONLY facts from the provided memories. Do not invent, infer, guess, or hallucinate.
+- Resolve all pronouns (e.g., "he", "it", "they") and vague terms (e.g., "this", "that", "some people") to explicit entities using memory content.
+- Each fact must be atomic, unambiguous, and verifiable.
+- Preserve all key details: who, what, when, where, why — if present in memory.
+- Judge whether the memories directly support answering the query.
+- Focus on relevance: does this memory content actually help answer what was asked?
+
+### Processing Logic
+- Assess each memory's direct relevance to the query.
+- Judge whether the combination of memories provides sufficient information for a complete answer.
+- Exclude any memory that does not directly support answering the query.
+- Prioritize specificity: e.g., "Travis Tang moved to Singapore in 2021" > "He relocated abroad."
+
+## Input
+- Query: {query}
+- Current Memories:
+{memories}
+
+## Output Format (STRICT TAG-BASED)
+Respond ONLY with the following XML-style tags. Do NOT include any other text, explanations, or formatting.
+
+<reason>
+Brief explanation of why the memories are or are not sufficient for answering the query
+</reason>
+<can_answer>
+YES or NO - indicating whether the memories are sufficient to answer the query
+</can_answer>
+
+Answer:
+"""
 
 PROMPT_MAPPING = {
     "memory_summary": MEMORY_SUMMARY_PROMPT,
+    "memory_judgement": MEMORY_JUDGMENT_PROMPT,
     "stage1_expand_retrieve": STAGE1_EXPAND_RETRIEVE_PROMPT,
     "stage2_expand_retrieve": STAGE2_EXPAND_RETRIEVE_PROMPT,
     "stage3_expand_retrieve": STAGE3_EXPAND_RETRIEVE_PROMPT,

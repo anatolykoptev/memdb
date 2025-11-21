@@ -2,6 +2,8 @@ import time
 
 from typing import Any
 
+from flake8.exceptions import ExecutionError
+
 from memos.embedders.factory import OllamaEmbedder
 from memos.graph_dbs.factory import Neo4jGraphDB
 from memos.llms.factory import AzureLLM, OllamaLLM, OpenAILLM
@@ -47,7 +49,8 @@ class AdvancedSearcher(Searcher):
         self.stage_retrieve_top = 3
         self.process_llm = process_llm
         self.thinking_stages = 3
-        self.stage_retry_times = 2
+        self.max_retry_times = 2
+        self.deep_search_top_k_bar = 2
 
     def load_template(self, template_name: str) -> str:
         if template_name not in PROMPT_MAPPING:
@@ -68,36 +71,67 @@ class AdvancedSearcher(Searcher):
         previous_retrieval_phrases: list[str],
         text_memories: str,
         context: str | None = None,
-    ):
+    ) -> tuple[bool, str, str, list[str]]:
+        """Run a retrieval-expansion stage and parse structured LLM output.
+
+        Returns a tuple of:
+        - can_answer: whether current memories suffice to answer
+        - reason: brief reasoning or hypotheses
+        - context: synthesized context summary
+        - retrieval_phrases: list of phrases to retrieve next
+        """
+
+        # Format previous phrases as bullet list to align with prompt expectations
+        prev_phrases_text = (
+            "- " + "\n- ".join(previous_retrieval_phrases) if previous_retrieval_phrases else ""
+        )
+
         args = {
             "template_name": f"stage{stage_id}_expand_retrieve",
             "query": query,
-            "previous_retrieval_phrases": previous_retrieval_phrases,
+            "previous_retrieval_phrases": prev_phrases_text,
             "memories": text_memories,
         }
         if context is not None:
             args["context"] = context
         prompt = self.build_prompt(**args)
 
-        attempt = 0
-        while attempt <= max(0, self.stage_retry_times) + 1:
+        max_attempts = max(0, self.max_retry_times) + 1
+        for attempt in range(1, max_attempts + 1):
             try:
-                llm_response = self.process_llm.generate([{"role": "user", "content": prompt}])
+                llm_response = self.process_llm.generate(
+                    [{"role": "user", "content": prompt}]
+                ).strip()
                 result = parse_structured_output(content=llm_response)
-                return (
-                    result["can_answer"].lower() == "true",
-                    result["reason"],
-                    result["context"],
-                    result["retrival_phrases"],
-                )
+
+                # Parse booleans and fallbacks robustly
+                can_answer_str = str(result.get("can_answer", "")).strip().lower()
+                can_answer = can_answer_str in {"true", "yes", "y", "1"}
+
+                reason = result.get("reason", "")
+
+                context_out = str(result.get("context", ""))
+
+                phrases_val = result.get("retrieval_phrases", result.get("retrival_phrases", []))
+                if isinstance(phrases_val, list):
+                    retrieval_phrases = [str(p).strip() for p in phrases_val if str(p).strip()]
+                elif isinstance(phrases_val, str) and phrases_val.strip():
+                    retrieval_phrases = [p.strip() for p in phrases_val.splitlines() if p.strip()]
+                else:
+                    retrieval_phrases = []
+
+                return can_answer, reason, context_out, retrieval_phrases
 
             except Exception as e:
-                attempt += 1
-                time.sleep(1)
-                logger.debug(
-                    f"[stage_retrieve]🔁 retry {attempt}/{max(1, self.stage_retry_times) + 1} failed: {e}"
-                )
-        raise
+                if attempt < max_attempts:
+                    logger.debug(f"[stage_retrieve]🔁 retry {attempt}/{max_attempts} failed: {e!s}")
+                    time.sleep(1)
+                else:
+                    logger.error(
+                        f"[stage_retrieve]❌ all {max_attempts} attempts failed: {e!s}; \nprompt: {prompt}",
+                        exc_info=True,
+                    )
+                    raise ExecutionError(str(e)) from e
 
     def summarize_memories(self, query: str, context: str, text_memories: str, top_k: int):
         args = {
@@ -105,14 +139,89 @@ class AdvancedSearcher(Searcher):
             "query": query,
             "context": context,
             "memories": text_memories,
+            "top_k": top_k,
         }
 
         prompt = self.build_prompt(**args)
 
-        llm_response = self.process_llm.generate([{"role": "user", "content": prompt}])
-        result = parse_structured_output(content=llm_response)
+        max_attempts = max(0, self.max_retry_times) + 1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                llm_response = self.process_llm.generate([{"role": "user", "content": prompt}])
+                result = parse_structured_output(content=llm_response)
+                context, mem_list = result["context"], result["memories"]
+                if not isinstance(mem_list, list):
+                    logger.error(f"The result of summarize_memories is {result}")
+                return context, mem_list
+            except Exception as e:
+                if attempt < max_attempts:
+                    logger.debug(
+                        f"[summarize_memories]🔁 retry {attempt}/{max_attempts} failed: {e!s}"
+                    )
+                    time.sleep(1)
+                else:
+                    logger.error(
+                        f"[summarize_memories]❌ all {max_attempts} attempts failed: {e!s}; \nprompt: {prompt}",
+                        exc_info=True,
+                    )
+                    raise ExecutionError(str(e)) from e
 
-        return result["context"], result["memories"]
+    def judge_memories(self, query: str, text_memories: str):
+        args = {
+            "template_name": "memory_judgement",
+            "query": query,
+            "memories": text_memories,
+        }
+
+        prompt = self.build_prompt(**args)
+
+        max_attempts = max(0, self.max_retry_times) + 1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                llm_response = self.process_llm.generate([{"role": "user", "content": prompt}])
+                result = parse_structured_output(content=llm_response)
+                reason, can_answer = (
+                    result["reason"],
+                    result["can_answer"],
+                )
+
+                return reason, can_answer
+            except Exception as e:
+                if attempt < max_attempts:
+                    logger.debug(
+                        f"[summarize_and_eval]🔁 retry {attempt}/{max_attempts} failed: {e!s}"
+                    )
+                    time.sleep(1)
+                else:
+                    logger.error(
+                        f"[summarize_and_eval]❌ all {max_attempts} attempts failed: {e!s}; \nprompt: {prompt}",
+                        exc_info=True,
+                    )
+                    raise ExecutionError(str(e)) from e
+
+    def tree_memories_to_text_memories(self, memories: list[TextualMemoryItem]):
+        mem_list = []
+        source_documents = []
+        for mem in memories:
+            mem_list.append(mem.memory)
+            source_documents.extend([one.content for one in mem.metadata.sources])
+
+        mem_list = list(set(mem_list))
+        source_documents = list(set(source_documents))
+        return mem_list, source_documents
+
+    def get_final_memories(self, user_id: str, top_k: int, mem_list: list[str]):
+        enhanced_memories = []
+        for new_mem in mem_list:
+            enhanced_memories.append(
+                TextualMemoryItem(memory=new_mem, metadata=TextualMemoryMetadata(user_id=user_id))
+            )
+        if len(enhanced_memories) > top_k:
+            logger.info(
+                f"Result count {len(enhanced_memories)} exceeds requested top_k {top_k}, truncating to top {top_k} memories"
+            )
+        result_memories = enhanced_memories[:top_k]
+        return result_memories
 
     def deep_search(
         self,
@@ -135,89 +244,113 @@ class AdvancedSearcher(Searcher):
             info=info,
         )
 
-        if not memories:
+        if top_k < self.deep_search_top_k_bar:
             logger.warning("No memories found in initial search")
             return memories
 
         user_id = memories[0].metadata.user_id
         context = None
-        mem_list = [mem.memory for mem in memories]
-        for stage_id in range(self.thinking_stages):
-            current_stage_id = stage_id + 1
+
+        mem_list, source_documents = self.tree_memories_to_text_memories(memories=memories)
+        current_stage_id = 0
+        while current_stage_id <= self.thinking_stages:
             try:
+                if current_stage_id == self.thinking_stages:
+                    # eval to finish
+                    reason, can_answer = self.judge_memories(
+                        query=query,
+                        text_memories="- " + "\n- ".join(mem_list) + "\n",
+                    )
+                    if can_answer:
+                        result_memories = self.get_final_memories(
+                            user_id=user_id, top_k=top_k, mem_list=mem_list
+                        )
+                        logger.info(
+                            "Deep search completed successfully, returning %d memories",
+                            len(result_memories),
+                        )
+                        return result_memories
+                    else:
+                        logger.info(
+                            f"Stage {current_stage_id}: Cannot answer yet; "
+                            f"previous retrieval phrases have been tried: {previous_retrieval_phrases}; "
+                            f"reason: {reason}"
+                        )
+                        return memories
+
                 can_answer, reason, context, retrieval_phrases = self.stage_retrieve(
-                    stage_id=current_stage_id,
+                    stage_id=current_stage_id + 1,
                     query=query,
                     previous_retrieval_phrases=previous_retrieval_phrases,
                     context=context,
                     text_memories="- " + "\n- ".join(mem_list) + "\n",
                 )
-
-                logger.info(
-                    "Stage %d - Found %d new retrieval phrases",
-                    current_stage_id,
-                    len(retrieval_phrases),
-                )
-
-                # Search for additional memories based on retrieval phrases
-                for phrase in retrieval_phrases:
-                    additional_memories = self.search(
-                        query=phrase,
-                        user_name=user_name,
-                        top_k=self.stage_retrieve_top,
-                        mode=SearchMode.FAST,
-                        memory_type=memory_type,
-                        search_filter=search_filter,
-                        info=info,
-                    )
-                    logger.debug(
-                        "Found %d additional memories for phrase: '%s'",
-                        len(additional_memories),
-                        phrase[:30] + "..." if len(phrase) > 30 else phrase,
-                    )
-
-                    mem_list.extend([mem.memory for mem in additional_memories])
-
-                logger.info(
-                    "After stage %d, total memories in list: %d", current_stage_id, len(mem_list)
-                )
-
-                # Summarize memories
-                context, mem_list = self.summarize_memories(
-                    query=query,
-                    context=context,
-                    text_memories="- " + "\n- ".join(mem_list) + "\n",
-                    top_k=top_k,
-                )
-                logger.info("After summarization, memory list contains %d items", len(mem_list))
-
-                if can_answer:
+                if current_stage_id > 1 and can_answer:
                     logger.info(
-                        "Stage %d determined answer can be provided, creating enhanced memories",
-                        current_stage_id,
+                        f"Stage {current_stage_id}: determined answer can be provided, creating enhanced memories; reason: {reason}",
                     )
-                    enhanced_memories = []
-                    for new_mem in mem_list:
-                        enhanced_memories.append(
-                            TextualMemoryItem(
-                                memory=new_mem, metadata=TextualMemoryMetadata(user_id=user_id)
-                            )
+                    if current_stage_id == 0:
+                        return memories
+                    else:
+                        result_memories = self.get_final_memories(
+                            user_id=user_id, top_k=top_k, mem_list=mem_list
                         )
-                    result_memories = enhanced_memories[:top_k]
-                    logger.info(
-                        "Deep search completed successfully, returning %d memories",
-                        len(result_memories),
-                    )
-                    return result_memories
+                        logger.info(
+                            f"Deep search completed successfully, returning {len(result_memories)} memories"
+                        )
+                        return result_memories
                 else:
-                    logger.info(
-                        "Stage %d: Cannot answer yet, extending previous retrieval phrases",
-                        current_stage_id,
-                    )
                     previous_retrieval_phrases.extend(retrieval_phrases)
+                    logger.info(
+                        f"Stage {current_stage_id}: Cannot answer yet; "
+                        f"previous retrieval phrases have been tried: {previous_retrieval_phrases}; "
+                        f"reason: {reason}"
+                    )
+                    logger.info(
+                        "Stage %d - Found %d new retrieval phrases",
+                        current_stage_id,
+                        len(retrieval_phrases),
+                    )
+                    current_stage_id += 1
+                    # Search for additional memories based on retrieval phrases
+                    for phrase in retrieval_phrases:
+                        additional_memories = self.search(
+                            query=phrase,
+                            user_name=user_name,
+                            top_k=self.stage_retrieve_top,
+                            mode=SearchMode.FAST,
+                            memory_type=memory_type,
+                            search_filter=search_filter,
+                            info=info,
+                        )
+                        logger.info(
+                            "Found %d additional memories for phrase: '%s'",
+                            len(additional_memories),
+                            phrase[:30] + "..." if len(phrase) > 30 else phrase,
+                        )
+                        _mem_list, _source_documents = self.tree_memories_to_text_memories(
+                            memories=additional_memories
+                        )
+                        mem_list.extend(_mem_list)
+                    mem_list = list(set(mem_list))
+                    logger.info(
+                        "After stage %d, total memories in list: %d",
+                        current_stage_id,
+                        len(mem_list),
+                    )
+
+                    # Summarize memories
+                    context, mem_list = self.summarize_memories(
+                        query=query,
+                        context=context,
+                        text_memories="- " + "\n- ".join(mem_list) + "\n",
+                        top_k=top_k,
+                    )
+                    logger.info("After summarization, memory list contains %d items", len(mem_list))
+
             except Exception as e:
                 logger.error("Error in stage %d: %s", current_stage_id, str(e), exc_info=True)
                 # Continue to next stage instead of failing completely
                 continue
-
+        logger.error("Deep search failed, returning original memories")
         return memories

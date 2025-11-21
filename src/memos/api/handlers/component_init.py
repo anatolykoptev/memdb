@@ -215,6 +215,7 @@ def init_server() -> dict[str, Any]:
     searcher: Searcher = tree_mem.get_searcher(
         manual_close_internet=os.getenv("ENABLE_INTERNET", "true").lower() == "false",
         moscube=False,
+        process_llm=mem_reader.llm,
     )
     logger.debug("Searcher created")
 
@@ -235,6 +236,9 @@ def init_server() -> dict[str, Any]:
 
     # Initialize SchedulerAPIModule
     api_module = mem_scheduler.api_module
+
+    # TODO: must remove!
+    mem_scheduler.memos_message_queue.debug_mode_on()
 
     # Start scheduler if enabled
     if os.getenv("API_SCHEDULER_ON", "true").lower() == "true":

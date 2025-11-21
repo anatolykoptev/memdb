@@ -155,6 +155,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             self.searcher: Searcher = self.text_mem.get_searcher(
                 manual_close_internet=os.getenv("ENABLE_INTERNET", "true").lower() == "false",
                 moscube=False,
+                process_llm=self.process_llm,
             )
         else:
             self.searcher = searcher
@@ -303,6 +304,26 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             query_db_manager.sync_with_orm()
 
             query_history = query_db_manager.obj.get_queries_with_timesort()
+
+            original_count = len(original_memory)
+            # Filter out memories tagged with "mode:fast"
+            filtered_original_memory = []
+            for origin_mem in original_memory:
+                if "mode:fast" not in origin_mem.metadata.tags:
+                    filtered_original_memory.append(origin_mem)
+                else:
+                    logger.debug(
+                        f"Filtered out memory - ID: {getattr(origin_mem, 'id', 'unknown')}, Tags: {origin_mem.metadata.tags}"
+                    )
+            # Calculate statistics
+            filtered_count = original_count - len(filtered_original_memory)
+            remaining_count = len(filtered_original_memory)
+
+            logger.info(
+                f"Filtering complete. Removed {filtered_count} memories with tag 'mode:fast'. Remaining memories: {remaining_count}"
+            )
+            original_memory = filtered_original_memory
+
             memories_with_new_order, rerank_success_flag = (
                 self.retriever.process_and_rerank_memories(
                     queries=query_history,

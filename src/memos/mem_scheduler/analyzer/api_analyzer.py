@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 import requests
 
 from memos.log import get_logger
-from memos.mem_scheduler.schemas.general_schemas import SearchMode
+from memos.types import SearchMode
 
 
 logger = get_logger(__name__)
@@ -681,7 +681,7 @@ if __name__ == "__main__":
         print("Using direct test mode")
         try:
             direct_analyzer = DirectSearchMemoriesAnalyzer()
-            direct_analyzer.run_all_tests(mode=SearchMode.MIXTURE)
+            direct_analyzer.run_all_tests(mode=SearchMode.FINE)
         except Exception as e:
             print(f"Direct test mode failed: {e}")
             import traceback

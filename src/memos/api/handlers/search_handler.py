@@ -251,9 +251,7 @@ class SearchHandler(BaseHandler):
             List of enhanced search results
         """
         if FINE_STRATEGY == FineStrategy.DEEP_SEARCH:
-            return self._deep_search(
-                search_req=search_req, user_context=user_context, max_thinking_depth=3
-            )
+            return self._deep_search(search_req=search_req, user_context=user_context)
 
         target_session_id = search_req.session_id or "default_session"
         search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
