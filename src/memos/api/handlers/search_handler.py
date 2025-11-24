@@ -53,7 +53,6 @@ class SearchHandler(BaseHandler):
         results = cube_view.search_memories(search_req)
 
         self.logger.info(f"[AddHandler] Final add results count={len(results)}")
-
         return SearchResponse(
             message="Memory searched successfully",
             data=results,

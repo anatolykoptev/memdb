@@ -128,7 +128,6 @@ class SingleCubeView(MemCubeView):
         )
 
         self.logger.info(f"Search memories result: {memories_result}")
-
         return memories_result
 
     def _get_search_mode(self, mode: str) -> str:
@@ -170,7 +169,6 @@ class SingleCubeView(MemCubeView):
             else:
                 self.logger.error(f"Unsupported search mode: {search_mode}")
                 return []
-
             return text_memories
 
         except Exception as e:

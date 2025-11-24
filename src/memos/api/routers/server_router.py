@@ -86,7 +86,8 @@ def search_memories(search_req: APISearchRequest):
 
     This endpoint uses the class-based SearchHandler for better code organization.
     """
-    return search_handler.handle_search_memories(search_req)
+    search_results = search_handler.handle_search_memories(search_req)
+    return search_results
 
 
 # =============================================================================

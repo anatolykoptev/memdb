@@ -211,12 +211,12 @@ LOGGING_CONFIG = {
         },
     },
     "root": {  # Root logger handles all logs
-        "level": logging.DEBUG if settings.DEBUG else logging.WARNING,
+        "level": logging.DEBUG if settings.DEBUG else selected_log_level,
         "handlers": ["console", "file"],
     },
     "loggers": {
         "memos": {
-            "level": logging.DEBUG if settings.DEBUG else logging.WARNING,
+            "level": logging.DEBUG if settings.DEBUG else selected_log_level,
             "propagate": True,  # Let logs bubble up to root
         },
     },
