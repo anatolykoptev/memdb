@@ -86,7 +86,7 @@ class APIAnalyzerForScheduler:
             self._connection = None
 
     def search(
-        self, user_id: str, mem_cube_id: str, query: str, top: int = 50, use_requests: bool = True
+        self, user_id: str, mem_cube_id: str, query: str, top_k: int = 50, use_requests: bool = True
     ) -> dict[str, Any]:
         """
         Search for memories using the product/search API endpoint.
@@ -95,13 +95,13 @@ class APIAnalyzerForScheduler:
             user_id: User identifier
             mem_cube_id: Memory cube identifier
             query: Search query string
-            top: Number of top results to return
+            top_k: Number of top_k results to return
             use_requests: Whether to use requests library (True) or http.client (False)
 
         Returns:
             Dictionary containing the API response
         """
-        payload = {"user_id": user_id, "mem_cube_id": mem_cube_id, "query": query, "top": top}
+        payload = {"user_id": user_id, "mem_cube_id": mem_cube_id, "query": query, "top_k": top_k}
 
         try:
             if use_requests:
@@ -328,7 +328,7 @@ class APIAnalyzerForScheduler:
             user_id="test_user_id",
             mem_cube_id="test_mem_cube_id",
             query="What are some good places to celebrate New Year's Eve in Shanghai?",
-            top=50,
+            top_k=50,
         )
         print("Search result:", search_result)
 
@@ -339,7 +339,7 @@ class APIAnalyzerForScheduler:
                 user_id="test_user_id",
                 mem_cube_id="test_mem_cube_id",
                 query="What are some good places to celebrate New Year's Eve in Shanghai?",
-                top=50,
+                top_k=50,
             )
             print("Search result:", search_result)
         except Exception as e:
@@ -705,6 +705,6 @@ if __name__ == "__main__":
             user_id="test_user_id",
             mem_cube_id="test_mem_cube_id",
             query="What are some good places to celebrate New Year's Eve in Shanghai?",
-            top=50,
+            top_k=10,
         )
         print("Search result:", search_result)
