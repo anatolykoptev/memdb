@@ -47,7 +47,7 @@ class AdvancedSearcher(Searcher):
 
         self.stage_retrieve_top = 3
         self.process_llm = process_llm
-        self.thinking_stages = 1  # TODO: to increase thinking depth when the algorithm is reliable
+        self.thinking_stages = 0  # TODO: to increase thinking depth when the algorithm is reliable
         self.max_retry_times = 2
         self.deep_search_top_k_bar = 2
 
@@ -226,12 +226,10 @@ class AdvancedSearcher(Searcher):
     def recreate_enhancement(
         self,
         query: str,
-        memories: list[TextualMemoryItem],
+        text_memories: list[str],
         retries: int,
     ) -> list:
         attempt = 0
-        text_memories = [one.memory for one in memories]
-
         text_memories = "\n".join([f"- [{i}] {mem}" for i, mem in enumerate(text_memories)])
         prompt_name = "memory_recreate_enhancement"
         prompt = self.build_prompt(template_name=prompt_name, query=query, memories=text_memories)
@@ -305,19 +303,13 @@ class AdvancedSearcher(Searcher):
                         f"previous retrieval phrases have been tried: {previous_retrieval_phrases}; "
                         f"final can_answer: {can_answer}; reason: {reason}"
                     )
-                    if len(retrieved_memories_from_deep_search) == 0:
-                        memories = self.post_retrieve(
-                            retrieved_results=retrieved_memories,
-                            top_k=top_k,
-                            user_name=user_name,
-                            info=info,
-                        )
-                        return memories[:top_k]
-                    else:
-                        enhanced_memories = self.get_final_memories(
-                            user_id=user_id, top_k=top_k, mem_list=mem_list
-                        )
-                        return enhanced_memories
+                    mem_list = self.recreate_enhancement(
+                        query=query, text_memories=mem_list, retries=self.max_retry_times
+                    )
+                    enhanced_memories = self.get_final_memories(
+                        user_id=user_id, top_k=top_k, mem_list=mem_list
+                    )
+                    return enhanced_memories
 
                 can_answer, reason, context, retrieval_phrases = self.stage_retrieve(
                     stage_id=current_stage_id + 1,
@@ -330,19 +322,11 @@ class AdvancedSearcher(Searcher):
                     logger.info(
                         f"Stage {current_stage_id}: determined answer can be provided, creating enhanced memories; reason: {reason}",
                     )
-                    if len(retrieved_memories_from_deep_search) == 0:
-                        memories = self.post_retrieve(
-                            retrieved_results=retrieved_memories,
-                            top_k=top_k,
-                            user_name=user_name,
-                            info=info,
-                        )
-                        return memories[:top_k]
-                    else:
-                        enhanced_memories = self.get_final_memories(
-                            user_id=user_id, top_k=top_k, mem_list=mem_list
-                        )
-                        return enhanced_memories
+
+                    enhanced_memories = self.get_final_memories(
+                        user_id=user_id, top_k=top_k, mem_list=mem_list
+                    )
+                    return enhanced_memories
                 else:
                     previous_retrieval_phrases.extend(retrieval_phrases)
                     logger.info(
@@ -390,12 +374,9 @@ class AdvancedSearcher(Searcher):
                         len(mem_list),
                     )
 
-                    # Summarize memories
-                    context, mem_list = self.summarize_memories(
-                        query=query,
-                        context=context,
-                        text_memories="- " + "\n- ".join(mem_list) + "\n",
-                        top_k=top_k,
+                    # enhance memories
+                    mem_list = self.recreate_enhancement(
+                        query=query, text_memories=mem_list, retries=self.max_retry_times
                     )
                     logger.info("After summarization, memory list contains %d items", len(mem_list))
 

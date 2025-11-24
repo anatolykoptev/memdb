@@ -188,7 +188,7 @@ LOGGING_CONFIG = {
     },
     "handlers": {
         "console": {
-            "level": "DEBUG",
+            "level": selected_log_level,
             "class": "logging.StreamHandler",
             "stream": stdout,
             "formatter": "no_datetime",
@@ -211,12 +211,12 @@ LOGGING_CONFIG = {
         },
     },
     "root": {  # Root logger handles all logs
-        "level": logging.DEBUG if settings.DEBUG else selected_log_level,
+        "level": logging.DEBUG if settings.DEBUG else logging.INFO,
         "handlers": ["console", "file"],
     },
     "loggers": {
         "memos": {
-            "level": logging.DEBUG if settings.DEBUG else selected_log_level,
+            "level": logging.DEBUG if settings.DEBUG else logging.INFO,
             "propagate": True,  # Let logs bubble up to root
         },
     },
