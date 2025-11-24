@@ -13,8 +13,10 @@ from urllib.parse import urlparse
 
 import requests
 
+from memos.api.product_models import APIADDRequest, APISearchRequest
+from memos.api.routers.server_router import add_memories, search_memories
 from memos.log import get_logger
-from memos.types import SearchMode
+from memos.types import MessageDict, SearchMode, UserContext
 
 
 logger = get_logger(__name__)
@@ -353,28 +355,20 @@ class DirectSearchMemoriesAnalyzer:
     def __init__(self):
         """Initialize the analyzer"""
         # Import necessary modules
-        try:
-            from memos.api.product_models import APIADDRequest, APISearchRequest
-            from memos.api.routers.server_router import add_memories, search_memories
-            from memos.types import MessageDict, UserContext
+        self.APISearchRequest = APISearchRequest
+        self.APIADDRequest = APIADDRequest
+        self.search_memories = search_memories
+        self.add_memories = add_memories
+        self.UserContext = UserContext
+        self.MessageDict = MessageDict
 
-            self.APISearchRequest = APISearchRequest
-            self.APIADDRequest = APIADDRequest
-            self.search_memories = search_memories
-            self.add_memories = add_memories
-            self.UserContext = UserContext
-            self.MessageDict = MessageDict
+        # Initialize conversation history for continuous conversation support
+        self.conversation_history = []
+        self.current_session_id = None
+        self.current_user_id = None
+        self.current_mem_cube_id = None
 
-            # Initialize conversation history for continuous conversation support
-            self.conversation_history = []
-            self.current_session_id = None
-            self.current_user_id = None
-            self.current_mem_cube_id = None
-
-            logger.info("DirectSearchMemoriesAnalyzer initialized successfully")
-        except ImportError as e:
-            logger.error(f"Failed to import modules: {e}")
-            raise
+        logger.info("DirectSearchMemoriesAnalyzer initialized successfully")
 
     def start_conversation(self, user_id="test_user", mem_cube_id="test_cube", session_id=None):
         """

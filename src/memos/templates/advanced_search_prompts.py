@@ -228,10 +228,49 @@ YES or NO - indicating whether the memories are sufficient to answer the query
 Answer:
 """
 
+MEMORY_RECREATE_ENHANCEMENT_PROMPT = """
+You are a knowledgeable and precise AI assistant.
+
+# GOAL
+Transform raw memories into clean, query-relevant facts — preserving timestamps and resolving ambiguities without inference.
+
+# RULES & THINKING STEPS
+1. Keep ONLY what’s relevant to the user’s query. Delete irrelevant memories entirely.
+2. Preserve ALL explicit timestamps (e.g., “on October 6”, “daily”, “after injury”).
+3. Resolve all ambiguities using only memory content:
+   - Pronouns → full name: “she” → “Melanie”
+   - Vague nouns → specific detail: “home” → “her childhood home in Guangzhou”
+   - “the user” → identity from context (e.g., “Melanie” if travel/running memories)
+4. Never invent, assume, or extrapolate.
+5. Each output line must be a standalone, clear, factual statement.
+6. Output format: one line per fact, starting with "- ", no extra text.
+
+# OUTPUT FORMAT (STRICT)
+Return ONLY the following block, with **one enhanced memory per line**.
+Each line MUST start with "- " (dash + space).
+
+Wrap the final output inside:
+<answer>
+- enhanced memory 1
+- enhanced memory 2
+...
+</answer>
+
+## User Query
+{query}
+
+## Original Memories
+{memories}
+
+Final Output:
+"""
+
+
 PROMPT_MAPPING = {
     "memory_summary": MEMORY_SUMMARY_PROMPT,
     "memory_judgement": MEMORY_JUDGMENT_PROMPT,
     "stage1_expand_retrieve": STAGE1_EXPAND_RETRIEVE_PROMPT,
     "stage2_expand_retrieve": STAGE2_EXPAND_RETRIEVE_PROMPT,
     "stage3_expand_retrieve": STAGE3_EXPAND_RETRIEVE_PROMPT,
+    "memory_recreate_enhancement": MEMORY_RECREATE_ENHANCEMENT_PROMPT,
 }

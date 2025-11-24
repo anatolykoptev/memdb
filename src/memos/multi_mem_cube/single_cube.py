@@ -149,7 +149,7 @@ class SingleCubeView(MemCubeView):
         user_context: UserContext,
         search_mode: str,
     ) -> list[dict[str, Any]]:
-        """
+        """G
         Search text memories based on mode.
 
         Args:

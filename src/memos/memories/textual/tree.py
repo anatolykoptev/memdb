@@ -141,7 +141,6 @@ class TreeTextMemory(BaseTextMemory):
                 self.embedder,
                 self.reranker,
                 internet_retriever=None,
-                moscube=moscube,
                 process_llm=process_llm,
             )
         else:
@@ -151,7 +150,6 @@ class TreeTextMemory(BaseTextMemory):
                 self.embedder,
                 self.reranker,
                 internet_retriever=self.internet_retriever,
-                moscube=moscube,
                 process_llm=process_llm,
             )
         return searcher
