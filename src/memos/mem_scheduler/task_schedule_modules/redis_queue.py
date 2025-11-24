@@ -5,6 +5,7 @@ This module provides a Redis-based queue implementation that can replace
 the local memos_message_queue functionality in BaseScheduler.
 """
 
+import os
 import re
 import time
 
@@ -33,7 +34,9 @@ class SchedulerRedisQueue(RedisSchedulerModule):
 
     def __init__(
         self,
-        stream_key_prefix: str = "scheduler:messages:stream",
+        stream_key_prefix: str = os.getenv(
+            "MEMSCHEDULER_REDIS_STREAM_KEY_PREFIX", "scheduler:messages:stream"
+        ),
         consumer_group: str = "scheduler_group",
         consumer_name: str | None = "scheduler_consumer",
         max_len: int = 10000,
@@ -283,7 +286,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             logger.error(f"Failed to get Redis queue size: {e}")
             return 0
 
-    def get_stream_keys(self) -> list[str]:
+    def get_stream_keys(self, stream_key_prefix: str | None = None) -> list[str]:
         """
         List all Redis stream keys that match this queue's prefix.
 
@@ -293,8 +296,10 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         if not self._redis_conn:
             return []
 
+        if stream_key_prefix is None:
+            stream_key_prefix = self.stream_key_prefix
         # First, get all keys that might match (using Redis pattern matching)
-        redis_pattern = f"{self.stream_key_prefix}:*"
+        redis_pattern = f"{stream_key_prefix}:*"
         raw_keys = [
             key.decode("utf-8") if isinstance(key, bytes) else key
             for key in self._redis_conn.scan_iter(match=redis_pattern)
@@ -302,7 +307,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
 
         # Second, filter using Python regex to ensure exact prefix match
         # Escape special regex characters in the prefix, then add :.*
-        escaped_prefix = re.escape(self.stream_key_prefix)
+        escaped_prefix = re.escape(stream_key_prefix)
         regex_pattern = f"^{escaped_prefix}:"
         stream_keys = [key for key in raw_keys if re.match(regex_pattern, key)]
 

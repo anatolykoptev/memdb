@@ -2,6 +2,7 @@ import json
 import re
 
 from pathlib import Path
+from typing import Any
 
 from memos.dependency import require_python_package
 from memos.log import get_logger
@@ -446,3 +447,19 @@ def detect_lang(text):
         return "en"
     except Exception:
         return "en"
+
+
+def format_memory_item(memory_data: Any) -> dict[str, Any]:
+    memory = memory_data.model_dump()
+    memory_id = memory["id"]
+    ref_id = f"[{memory_id.split('-')[0]}]"
+
+    memory["ref_id"] = ref_id
+    memory["metadata"]["embedding"] = []
+    memory["metadata"]["sources"] = []
+    memory["metadata"]["usage"] = []
+    memory["metadata"]["ref_id"] = ref_id
+    memory["metadata"]["id"] = memory_id
+    memory["metadata"]["memory"] = memory["memory"]
+
+    return memory

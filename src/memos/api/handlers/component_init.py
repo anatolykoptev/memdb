@@ -237,9 +237,6 @@ def init_server() -> dict[str, Any]:
     # Initialize SchedulerAPIModule
     api_module = mem_scheduler.api_module
 
-    # TODO: must remove!
-    mem_scheduler.memos_message_queue.debug_mode_on()
-
     # Start scheduler if enabled
     if os.getenv("API_SCHEDULER_ON", "true").lower() == "true":
         mem_scheduler.start()

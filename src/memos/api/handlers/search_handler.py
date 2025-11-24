@@ -224,7 +224,7 @@ class SearchHandler(BaseHandler):
             "chat_history": search_req.chat_history,
         }
 
-        return self.searcher.deep_search(
+        enhanced_memories = self.searcher.deep_search(
             query=search_req.query,
             user_name=user_context.mem_cube_id,
             top_k=search_req.top_k,
@@ -234,12 +234,14 @@ class SearchHandler(BaseHandler):
             search_filter=search_filter,
             info=info,
         )
+        formatted_memories = [format_memory_item(data) for data in enhanced_memories]
+        return formatted_memories
 
     def _fine_search(
         self,
         search_req: APISearchRequest,
         user_context: UserContext,
-    ) -> list[str]:
+    ) -> list:
         """
         Fine-grained search with query enhancement.
 

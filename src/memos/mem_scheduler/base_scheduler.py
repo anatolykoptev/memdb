@@ -41,6 +41,7 @@ from memos.mem_scheduler.schemas.message_schemas import (
 )
 from memos.mem_scheduler.schemas.monitor_schemas import MemoryMonitorItem
 from memos.mem_scheduler.task_schedule_modules.dispatcher import SchedulerDispatcher
+from memos.mem_scheduler.task_schedule_modules.local_queue import SchedulerLocalQueue
 from memos.mem_scheduler.task_schedule_modules.redis_queue import SchedulerRedisQueue
 from memos.mem_scheduler.task_schedule_modules.task_queue import ScheduleTaskQueue
 from memos.mem_scheduler.utils.db_utils import get_utc_now
@@ -824,6 +825,45 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
 
         return result
 
+    @staticmethod
+    def init_task_status():
+        return {
+            "running": 0,
+            "remaining": 0,
+            "completed": 0,
+        }
+
+    def get_tasks_status(self):
+        task_status = self.init_task_status()
+        memos_message_queue = self.memos_message_queue.memos_message_queue
+        if isinstance(memos_message_queue, SchedulerRedisQueue):
+            stream_keys = memos_message_queue.get_stream_keys(
+                stream_key_prefix=memos_message_queue.stream_key_prefix
+            )
+            for stream_key in stream_keys:
+                if stream_key not in task_status:
+                    task_status[stream_key] = self.init_task_status()
+                # For Redis queue, prefer XINFO GROUPS to compute pending
+                groups_info = memos_message_queue.redis.xinfo_groups(stream_key)
+                if groups_info:
+                    for group in groups_info:
+                        if group.get("name") == memos_message_queue.consumer_group:
+                            task_status[stream_key]["running"] += int(group.get("pending", 0))
+                            task_status[stream_key]["remaining"] += int(group.get("remaining", 0))
+                            task_status["running"] += int(group.get("pending", 0))
+                            task_status["remaining"] += int(group.get("remaining", 0))
+                            break
+
+        elif isinstance(memos_message_queue, SchedulerLocalQueue):
+            running_task_count = self.dispatcher.get_running_task_count()
+            task_status["running"] = running_task_count
+            task_status["remaining"] = sum(memos_message_queue.qsize().values())
+        else:
+            logger.error(
+                f"type of self.memos_message_queue is {memos_message_queue}, which is not supported"
+            )
+            raise NotImplementedError()
+
     def mem_scheduler_wait(
         self, timeout: float = 180.0, poll: float = 0.1, log_every: float = 0.01
     ) -> bool:
@@ -831,18 +871,19 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         Uses EWMA throughput, detects leaked `unfinished_tasks`, and waits for dispatcher.
         """
         deadline = time.monotonic() + timeout
+        memos_message_queue = self.memos_message_queue.memos_message_queue
 
         # --- helpers (local, no external deps) ---
         def _unfinished() -> int:
             """Prefer `unfinished_tasks`; fallback to `qsize()`."""
             try:
-                u = getattr(self.memos_message_queue, "unfinished_tasks", None)
+                u = getattr(memos_message_queue, "unfinished_tasks", None)
                 if u is not None:
                     return int(u)
             except Exception:
                 pass
             try:
-                return int(self.memos_message_queue.qsize())
+                return int(memos_message_queue.qsize())
             except Exception:
                 return 0
 
@@ -876,7 +917,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             # 1) read counters
             curr_unfinished = _unfinished()
             try:
-                qsz = int(self.memos_message_queue.qsize())
+                qsz = int(memos_message_queue.qsize())
             except Exception:
                 qsz = -1
 
@@ -892,14 +933,14 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                 except Exception:
                     pass
 
-            if isinstance(self.memos_message_queue, SchedulerRedisQueue):
+            if isinstance(memos_message_queue, SchedulerRedisQueue):
                 # For Redis queue, prefer XINFO GROUPS to compute pending
-                groups_info = self.memos_message_queue.redis.xinfo_groups(
-                    self.memos_message_queue.stream_key_prefix
+                groups_info = memos_message_queue.redis.xinfo_groups(
+                    memos_message_queue.stream_key_prefix
                 )
                 if groups_info:
                     for group in groups_info:
-                        if group.get("name") == self.memos_message_queue.consumer_group:
+                        if group.get("name") == memos_message_queue.consumer_group:
                             pend = int(group.get("pending", pend))
                             break
             else:
@@ -975,18 +1016,19 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
 
     def _gather_queue_stats(self) -> dict:
         """Collect queue/dispatcher stats for reporting."""
+        memos_message_queue = self.memos_message_queue.memos_message_queue
         stats: dict[str, int | float | str] = {}
         stats["use_redis_queue"] = bool(self.use_redis_queue)
         # local queue metrics
         if not self.use_redis_queue:
             try:
-                stats["qsize"] = int(self.memos_message_queue.qsize())
+                stats["qsize"] = int(memos_message_queue.qsize())
             except Exception:
                 stats["qsize"] = -1
             # unfinished_tasks if available
             try:
                 stats["unfinished_tasks"] = int(
-                    getattr(self.memos_message_queue, "unfinished_tasks", 0) or 0
+                    getattr(memos_message_queue, "unfinished_tasks", 0) or 0
                 )
             except Exception:
                 stats["unfinished_tasks"] = -1
