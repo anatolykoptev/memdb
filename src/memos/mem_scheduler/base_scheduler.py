@@ -849,9 +849,11 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                     for group in groups_info:
                         if group.get("name") == memos_message_queue.consumer_group:
                             task_status[stream_key]["running"] += int(group.get("pending", 0))
-                            task_status[stream_key]["remaining"] += int(group.get("remaining", 0))
+                            task_status[stream_key]["remaining"] += memos_message_queue.qsize()[
+                                stream_key
+                            ]
                             task_status["running"] += int(group.get("pending", 0))
-                            task_status["remaining"] += int(group.get("remaining", 0))
+                            task_status["remaining"] += task_status[stream_key]["remaining"]
                             break
 
         elif isinstance(memos_message_queue, SchedulerLocalQueue):
@@ -863,6 +865,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                 f"type of self.memos_message_queue is {memos_message_queue}, which is not supported"
             )
             raise NotImplementedError()
+        return task_status
 
     def mem_scheduler_wait(
         self, timeout: float = 180.0, poll: float = 0.1, log_every: float = 0.01

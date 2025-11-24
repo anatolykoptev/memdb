@@ -1,3 +1,5 @@
+from time import sleep
+
 from memos.api.handlers.scheduler_handler import (
     handle_scheduler_status,
     handle_scheduler_wait,
@@ -25,10 +27,8 @@ def my_test_handler(messages: list[ScheduleMessageItem]):
     print(f"My test handler received {len(messages)} messages:")
     for msg in messages:
         print(f" my_test_handler - {msg.item_id}: {msg.content}")
-        user_status_running = handle_scheduler_status(
-            user_name=USER_MEM_CUBE, mem_scheduler=mem_scheduler, instance_id="api_w_scheduler"
-        )
-        print(f"[Monitor] Status for {USER_MEM_CUBE} after submit:", user_status_running)
+        user_status_running = mem_scheduler.get_tasks_status()
+        print("[Monitor] Status after submit:", user_status_running)
 
 
 # 2. Register the handler
@@ -57,13 +57,15 @@ messages_to_send = [
 for mes in messages_to_send:
     print(f"Submitting message {mes.item_id} to the scheduler...")
     mem_scheduler.memos_message_queue.submit_messages([mes])
+    sleep(1)
 
 # 5.1 Monitor status for specific mem_cube while running
 USER_MEM_CUBE = "test_mem_cube"
 
 # 6. Wait for messages to be processed (limited to 100 checks)
-print("Waiting for messages to be consumed (max 100 checks)...")
-mem_scheduler.mem_scheduler_wait()
+
+user_status_running = mem_scheduler.get_tasks_status()
+print(f"[Monitor] Status for {USER_MEM_CUBE} after submit:", user_status_running)
 
 # 6.1 Wait until idle for specific mem_cube via handler
 wait_result = handle_scheduler_wait(
