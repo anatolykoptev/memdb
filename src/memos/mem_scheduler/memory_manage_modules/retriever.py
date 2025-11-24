@@ -22,7 +22,7 @@ from memos.mem_scheduler.utils.filter_utils import (
 from memos.mem_scheduler.utils.misc_utils import extract_json_obj, extract_list_items_in_answer
 from memos.memories.textual.item import TextualMemoryMetadata
 from memos.memories.textual.tree import TextualMemoryItem, TreeTextMemory
-from memos.types import FINE_STRATEGY, FineStrategy
+from memos.types.general_types import FINE_STRATEGY, FineStrategy
 
 # Extract JSON response
 from .memory_filter import MemoryFilter

@@ -17,6 +17,29 @@ from memos.memories.activation.item import ActivationMemoryItem
 from memos.memories.parametric.item import ParametricMemoryItem
 from memos.memories.textual.item import TextualMemoryItem
 
+from .openai_chat_completion_types import (
+    ChatCompletionContentPartTextParam,
+    ChatCompletionMessageParam,
+    File,
+)
+
+
+__all__ = [
+    "FINE_STRATEGY",
+    "ChatHistory",
+    "FineStrategy",
+    "MOSSearchResult",
+    "MemCubeID",
+    "MessageDict",
+    "MessageList",
+    "MessageRole",
+    "MessagesType",
+    "Permission",
+    "PermissionDict",
+    "SearchMode",
+    "UserContext",
+    "UserID",
+]
 
 # ─── Message Types ──────────────────────────────────────────────────────────────
 
@@ -35,8 +58,16 @@ class MessageDict(TypedDict, total=False):
     message_id: str | None  # Optional unique identifier for the message
 
 
+RawMessageDict: TypeAlias = ChatCompletionContentPartTextParam | File
+
+
 # Message collections
-MessageList: TypeAlias = list[MessageDict]
+MessageList: TypeAlias = list[ChatCompletionMessageParam]
+RawMessageList: TypeAlias = list[RawMessageDict]
+
+
+# Messages Type
+MessagesType: TypeAlias = str | MessageList | RawMessageList
 
 
 # Chat history structure
@@ -74,6 +105,7 @@ class FineStrategy(str, Enum):
 
 # algorithm strategies
 DEFAULT_FINE_STRATEGY = FineStrategy.DEEP_SEARCH
+FINE_STRATEGY = DEFAULT_FINE_STRATEGY
 
 # Read fine strategy from environment variable `FINE_STRATEGY`.
 # If provided and valid, use it; otherwise fall back to default.
@@ -83,8 +115,6 @@ if _env_fine_strategy:
         FINE_STRATEGY = FineStrategy(_env_fine_strategy)
     except ValueError:
         FINE_STRATEGY = DEFAULT_FINE_STRATEGY
-else:
-    FINE_STRATEGY = DEFAULT_FINE_STRATEGY
 
 
 # ─── MemOS ────────────────────────────────────────────────────────────────────

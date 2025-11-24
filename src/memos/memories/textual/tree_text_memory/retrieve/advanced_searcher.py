@@ -3,8 +3,6 @@ import time
 
 from typing import Any
 
-from flake8.exceptions import ExecutionError
-
 from memos.embedders.factory import OllamaEmbedder
 from memos.graph_dbs.factory import Neo4jGraphDB
 from memos.llms.factory import AzureLLM, OllamaLLM, OpenAILLM
@@ -17,7 +15,7 @@ from memos.memories.textual.tree_text_memory.retrieve.retrieve_utils import (
 from memos.memories.textual.tree_text_memory.retrieve.searcher import Searcher
 from memos.reranker.base import BaseReranker
 from memos.templates.advanced_search_prompts import PROMPT_MAPPING
-from memos.types import SearchMode
+from memos.types.general_types import SearchMode
 
 
 logger = get_logger(__name__)
@@ -32,7 +30,6 @@ class AdvancedSearcher(Searcher):
         reranker: BaseReranker,
         bm25_retriever: EnhancedBM25 | None = None,
         internet_retriever: None = None,
-        moscube: bool = False,
         search_strategy: dict | None = None,
         manual_close_internet: bool = True,
         process_llm: Any | None = None,
@@ -44,7 +41,6 @@ class AdvancedSearcher(Searcher):
             reranker=reranker,
             bm25_retriever=bm25_retriever,
             internet_retriever=internet_retriever,
-            moscube=moscube,
             search_strategy=search_strategy,
             manual_close_internet=manual_close_internet,
         )
@@ -134,7 +130,7 @@ class AdvancedSearcher(Searcher):
                         f"[stage_retrieve]❌ all {max_attempts} attempts failed: {e!s}; \nprompt: {prompt}",
                         exc_info=True,
                     )
-                    raise ExecutionError(str(e)) from e
+                    raise e
 
     def summarize_memories(self, query: str, context: str, text_memories: str, top_k: int):
         args = {
@@ -167,7 +163,7 @@ class AdvancedSearcher(Searcher):
                         f"[summarize_memories]❌ all {max_attempts} attempts failed: {e!s}; \nprompt: {prompt}",
                         exc_info=True,
                     )
-                    raise ExecutionError(str(e)) from e
+                    raise e
 
     def judge_memories(self, query: str, text_memories: str):
         args = {
@@ -200,7 +196,7 @@ class AdvancedSearcher(Searcher):
                         f"[summarize_and_eval]❌ all {max_attempts} attempts failed: {e!s}; \nprompt: {prompt}",
                         exc_info=True,
                     )
-                    raise ExecutionError(str(e)) from e
+                    raise e
 
     def tree_memories_to_text_memories(self, memories: list[TextualMemoryItem]):
         mem_list = []

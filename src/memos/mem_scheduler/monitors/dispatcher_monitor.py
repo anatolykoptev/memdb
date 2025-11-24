@@ -135,6 +135,9 @@ class SchedulerDispatcherMonitor(BaseSchedulerModule):
                 pool_info=pool_info,
                 stuck_max_interval=4,
             )
+            if not is_healthy:
+                logger.info(f"Pool '{name}'. is_healthy: {is_healthy}. pool_info: {pool_info}")
+
             with self._pool_lock:
                 if is_healthy:
                     pool_info["failure_count"] = 0
