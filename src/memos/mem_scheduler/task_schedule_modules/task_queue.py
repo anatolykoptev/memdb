@@ -35,8 +35,9 @@ class ScheduleTaskQueue:
 
     def ack_message(
         self,
-        user_id,
-        mem_cube_id,
+        user_id: str,
+        mem_cube_id: str,
+        task_label: str,
         redis_message_id,
     ) -> None:
         if not isinstance(self.memos_message_queue, SchedulerRedisQueue):
@@ -46,6 +47,7 @@ class ScheduleTaskQueue:
         self.memos_message_queue.ack_message(
             user_id=user_id,
             mem_cube_id=mem_cube_id,
+            task_label=task_label,
             redis_message_id=redis_message_id,
         )
 
@@ -97,6 +99,8 @@ class ScheduleTaskQueue:
                         )
 
     def get_messages(self, batch_size: int) -> list[ScheduleMessageItem]:
+        if isinstance(self.memos_message_queue, SchedulerRedisQueue):
+            return self.memos_message_queue.get_messages(batch_size=batch_size)
         stream_keys = self.get_stream_keys()
 
         if len(stream_keys) == 0:

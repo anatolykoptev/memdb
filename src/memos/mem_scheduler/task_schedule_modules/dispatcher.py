@@ -157,6 +157,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         self.memos_message_queue.ack_message(
                             user_id=msg.user_id,
                             mem_cube_id=msg.mem_cube_id,
+                            task_label=msg.label,
                             redis_message_id=redis_message_id,
                         )
 

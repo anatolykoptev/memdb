@@ -9,11 +9,13 @@ import os
 import re
 import time
 
+from collections import deque
 from collections.abc import Callable
 from uuid import uuid4
 
 from memos.log import get_logger
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
+from memos.mem_scheduler.task_schedule_modules.orchestrator import SchedulerOrchestrator
 from memos.mem_scheduler.webservice_modules.redis_service import RedisSchedulerModule
 
 
@@ -84,13 +86,50 @@ class SchedulerRedisQueue(RedisSchedulerModule):
 
         self.seen_streams = set()
 
-        # Task Broker
-
         # Task Orchestrator
+        self.message_pack_cache = deque()
+        self.orchestrator = SchedulerOrchestrator(queue=self)
 
-    def get_stream_key(self, user_id: str, mem_cube_id: str) -> str:
-        stream_key = f"{self.stream_key_prefix}:{user_id}:{mem_cube_id}"
+    def get_stream_key(self, user_id: str, mem_cube_id: str, task_label: str) -> str:
+        stream_key = f"{self.stream_key_prefix}:{user_id}:{mem_cube_id}:{task_label}"
         return stream_key
+
+    def task_broker(
+        self,
+        consume_batch_size: int,
+    ) -> list[list[ScheduleMessageItem]]:
+        stream_keys = self.get_stream_keys(stream_key_prefix=self.stream_key_prefix)
+        if not stream_keys:
+            return []
+
+        stream_quotas = self.orchestrator.get_stream_quotas(
+            stream_keys=stream_keys, consume_batch_size=consume_batch_size
+        )
+        cache: list[ScheduleMessageItem] = []
+        for stream_key in stream_keys:
+            messages = self.get(
+                stream_key=stream_key,
+                block=False,
+                batch_size=stream_quotas[stream_key],
+            )
+            cache.extend(messages)
+
+        # pack messages
+        packed: list[list[ScheduleMessageItem]] = []
+        for i in range(0, len(cache), consume_batch_size):
+            packed.append(cache[i : i + consume_batch_size])
+        # reset cache using deque for efficient consumption
+        self.message_pack_cache = deque(packed)
+        # return list for compatibility with type hint
+        return list(self.message_pack_cache)
+
+    def get_messages(self, batch_size: int) -> list[ScheduleMessageItem]:
+        if not self.message_pack_cache:
+            self.task_broker(consume_batch_size=batch_size)
+        if self.message_pack_cache:
+            return self.message_pack_cache.popleft()
+        # No messages available
+        return []
 
     def _ensure_consumer_group(self, stream_key) -> None:
         """Ensure the consumer group exists for the stream."""
@@ -135,7 +174,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
 
         try:
             stream_key = self.get_stream_key(
-                user_id=message.user_id, mem_cube_id=message.mem_cube_id
+                user_id=message.user_id, mem_cube_id=message.mem_cube_id, task_label=message.label
             )
 
             if stream_key not in self.seen_streams:
@@ -158,8 +197,12 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             logger.error(f"Failed to add message to Redis queue: {e}")
             raise
 
-    def ack_message(self, user_id, mem_cube_id, redis_message_id) -> None:
-        stream_key = self.get_stream_key(user_id=user_id, mem_cube_id=mem_cube_id)
+    def ack_message(
+        self, user_id: str, mem_cube_id: str, task_label: str, redis_message_id
+    ) -> None:
+        stream_key = self.get_stream_key(
+            user_id=user_id, mem_cube_id=mem_cube_id, task_label=task_label
+        )
 
         self.redis.xack(stream_key, self.consumer_group, redis_message_id)
 
@@ -195,7 +238,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                     self.consumer_group,
                     self.consumer_name,
                     {stream_key: ">"},
-                    count=batch_size if not batch_size else 1,
+                    count=batch_size if batch_size is not None else None,
                     block=redis_timeout,
                 )
             except Exception as read_err:
@@ -210,7 +253,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                         self.consumer_group,
                         self.consumer_name,
                         {stream_key: ">"},
-                        count=batch_size if not batch_size else 1,
+                        count=batch_size if batch_size is not None else None,
                         block=redis_timeout,
                     )
                 else:
@@ -358,18 +401,22 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         which is complex. For now, this is a no-op.
         """
 
-    def clear(self) -> None:
+    def clear(self, stream_key=None) -> None:
         """Clear all messages from the queue."""
         if not self._is_connected or not self._redis_conn:
             return
 
         try:
-            stream_keys = self.get_stream_keys()
-
-            for stream_key in stream_keys:
-                # Delete the entire stream
+            if stream_key is not None:
                 self._redis_conn.delete(stream_key)
                 logger.info(f"Cleared Redis stream: {stream_key}")
+            else:
+                stream_keys = self.get_stream_keys()
+
+                for stream_key in stream_keys:
+                    # Delete the entire stream
+                    self._redis_conn.delete(stream_key)
+                    logger.info(f"Cleared Redis stream: {stream_key}")
 
         except Exception as e:
             logger.error(f"Failed to clear Redis queue: {e}")
