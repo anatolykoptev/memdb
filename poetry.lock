@@ -6423,4 +6423,4 @@ tree-mem = ["neo4j", "schedule"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<4.0"
-content-hash = "165753cc5f96ccdb604e07c28f83af492e1ee9b7ca22312964039bb1a6fe487f"
+content-hash = "8508256eeb2b554d4b50d4c4ec662a6f66a799d1b403953695db8cb3cf76f04a"
