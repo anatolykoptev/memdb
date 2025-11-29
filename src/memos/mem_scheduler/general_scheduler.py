@@ -367,17 +367,21 @@ class GeneralScheduler(BaseScheduler):
                             if kb_log_content:
                                 event = self.create_event_log(
                                     label="knowledgeBaseUpdate",
-                                    log_content=f"Knowledge Base Memory Update: {len(kb_log_content)} changes.",
+                                    # 1. 移除 log_content 参数
+                                    # 2. 补充 memory_type
+                                    from_memory_type=USER_INPUT_TYPE,
+                                    to_memory_type=LONG_TERM_MEMORY_TYPE,
                                     user_id=msg.user_id,
                                     mem_cube_id=msg.mem_cube_id,
                                     mem_cube=self.current_mem_cube,
                                     memcube_log_content=kb_log_content,
-                                    metadata=None,  # Per design doc for KB logs
+                                    metadata=None,
                                     memory_len=len(kb_log_content),
                                     memcube_name=self._map_memcube_name(msg.mem_cube_id),
                                 )
+                                # 3. 后置赋值 log_content
+                                event.log_content = f"Knowledge Base Memory Update: {len(kb_log_content)} changes."
                                 event.task_id = msg.task_id
-                                logger.info(f"Submitting KB log from 'add' flow. Event: {event.to_json(indent=2)}")
                                 self._submit_web_logs([event])
                         else:
                             # Existing: Playground/Default Logging
@@ -634,7 +638,8 @@ class GeneralScheduler(BaseScheduler):
                         if kb_log_content:
                             event = self.create_event_log(
                                 label="knowledgeBaseUpdate",
-                                log_content=f"Knowledge Base Memory Update: {len(kb_log_content)} changes.",
+                                from_memory_type=USER_INPUT_TYPE,
+                                to_memory_type=LONG_TERM_MEMORY_TYPE,
                                 user_id=user_id,
                                 mem_cube_id=mem_cube_id,
                                 mem_cube=self.current_mem_cube,
@@ -643,8 +648,8 @@ class GeneralScheduler(BaseScheduler):
                                 memory_len=len(kb_log_content),
                                 memcube_name=self._map_memcube_name(mem_cube_id),
                             )
+                            event.log_content = f"Knowledge Base Memory Update: {len(kb_log_content)} changes."
                             event.task_id = task_id
-                            logger.info(f"Submitting KB log from 'mem_read' flow. Event: {event.to_json(indent=2)}")
                             self._submit_web_logs([event])
                     else:
                         # Existing: Playground/Default Logging
@@ -744,7 +749,8 @@ class GeneralScheduler(BaseScheduler):
                         ]
                     event = self.create_event_log(
                         label="knowledgeBaseUpdate",
-                        log_content=f"Knowledge Base Memory Update failed: {exc!s}",
+                        from_memory_type=USER_INPUT_TYPE,
+                        to_memory_type=LONG_TERM_MEMORY_TYPE,
                         user_id=user_id,
                         mem_cube_id=mem_cube_id,
                         mem_cube=self.current_mem_cube,
@@ -753,6 +759,7 @@ class GeneralScheduler(BaseScheduler):
                         memory_len=len(kb_log_content),
                         memcube_name=self._map_memcube_name(mem_cube_id),
                     )
+                    event.log_content = f"Knowledge Base Memory Update failed: {exc!s}"
                     event.task_id = task_id
                     event.status = "failed"
                     self._submit_web_logs([event])
