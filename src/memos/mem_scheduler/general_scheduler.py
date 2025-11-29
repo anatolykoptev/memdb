@@ -636,6 +636,7 @@ class GeneralScheduler(BaseScheduler):
                                 }
                             )
                         if kb_log_content:
+                            logger.info("DIAGNOSTIC: Preparing to create event log for KB update in _process_memories_with_reader.")
                             event = self.create_event_log(
                                 label="knowledgeBaseUpdate",
                                 from_memory_type=USER_INPUT_TYPE,
