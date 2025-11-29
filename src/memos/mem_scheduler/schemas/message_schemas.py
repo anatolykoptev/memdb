@@ -98,6 +98,7 @@ class ScheduleMessageItem(BaseModel, DictConversionMixin):
             content=data["content"],
             timestamp=datetime.fromisoformat(data["timestamp"]),
             user_name=data.get("user_name"),
+            task_id=data.get("task_id"),
         )
 
 
