@@ -56,7 +56,9 @@ class SingleCubeView(MemCubeView):
         but scoped to a single cube_id.
         """
         sync_mode = add_req.async_mode or self._get_sync_mode()
-        self.logger.info(f"[DIAGNOSTIC] single_cube.add_memories called for cube_id: {self.cube_id}. sync_mode: {sync_mode}. Request: {add_req.model_dump_json(indent=2)}")
+        self.logger.info(
+            f"[DIAGNOSTIC] single_cube.add_memories called for cube_id: {self.cube_id}. sync_mode: {sync_mode}. Request: {add_req.model_dump_json(indent=2)}"
+        )
         user_context = UserContext(
             user_id=add_req.user_id,
             mem_cube_id=self.cube_id,

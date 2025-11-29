@@ -380,7 +380,9 @@ class GeneralScheduler(BaseScheduler):
                                     memcube_name=self._map_memcube_name(msg.mem_cube_id),
                                 )
                                 # 3. 后置赋值 log_content
-                                event.log_content = f"Knowledge Base Memory Update: {len(kb_log_content)} changes."
+                                event.log_content = (
+                                    f"Knowledge Base Memory Update: {len(kb_log_content)} changes."
+                                )
                                 event.task_id = msg.task_id
                                 self._submit_web_logs([event])
                         else:
@@ -475,7 +477,9 @@ class GeneralScheduler(BaseScheduler):
             logger.error(f"Error: {e}", exc_info=True)
 
     def _mem_read_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
-        logger.info(f"[DIAGNOSTIC] general_scheduler._mem_read_message_consumer called. Received messages: {[msg.model_dump_json(indent=2) for msg in messages]}")
+        logger.info(
+            f"[DIAGNOSTIC] general_scheduler._mem_read_message_consumer called. Received messages: {[msg.model_dump_json(indent=2) for msg in messages]}"
+        )
         logger.info(f"Messages {messages} assigned to {MEM_READ_LABEL} handler.")
 
         def process_message(message: ScheduleMessageItem):
@@ -540,7 +544,9 @@ class GeneralScheduler(BaseScheduler):
         task_id: str | None = None,
         info: dict | None = None,
     ) -> None:
-        logger.info(f"[DIAGNOSTIC] general_scheduler._process_memories_with_reader called. mem_ids: {mem_ids}, user_id: {user_id}, mem_cube_id: {mem_cube_id}, task_id: {task_id}")
+        logger.info(
+            f"[DIAGNOSTIC] general_scheduler._process_memories_with_reader called. mem_ids: {mem_ids}, user_id: {user_id}, mem_cube_id: {mem_cube_id}, task_id: {task_id}"
+        )
         """
         Process memories using mem_reader for enhanced memory processing.
 
@@ -638,7 +644,9 @@ class GeneralScheduler(BaseScheduler):
                                 }
                             )
                         if kb_log_content:
-                            logger.info(f"[DIAGNOSTIC] general_scheduler._process_memories_with_reader: Creating event log for KB update. Label: knowledgeBaseUpdate, user_id: {user_id}, mem_cube_id: {mem_cube_id}, task_id: {task_id}. KB content: {json.dumps(kb_log_content, indent=2)}")
+                            logger.info(
+                                f"[DIAGNOSTIC] general_scheduler._process_memories_with_reader: Creating event log for KB update. Label: knowledgeBaseUpdate, user_id: {user_id}, mem_cube_id: {mem_cube_id}, task_id: {task_id}. KB content: {json.dumps(kb_log_content, indent=2)}"
+                            )
                             event = self.create_event_log(
                                 label="knowledgeBaseUpdate",
                                 from_memory_type=USER_INPUT_TYPE,
@@ -651,7 +659,9 @@ class GeneralScheduler(BaseScheduler):
                                 memory_len=len(kb_log_content),
                                 memcube_name=self._map_memcube_name(mem_cube_id),
                             )
-                            event.log_content = f"Knowledge Base Memory Update: {len(kb_log_content)} changes."
+                            event.log_content = (
+                                f"Knowledge Base Memory Update: {len(kb_log_content)} changes."
+                            )
                             event.task_id = task_id
                             self._submit_web_logs([event])
                     else:
