@@ -271,16 +271,37 @@ class RabbitMQSchedulerModule(BaseSchedulerModule):
         """
         import pika
 
+        exchange_name = self.rabbitmq_exchange_name
+        routing_key = self.rabbit_queue_name
+
+        kb_exchange_name = None
+        kb_routing_key = None
+
         if message.get("label") == "knowledgeBaseUpdate":
-            logger.info("Preparing to publish KB Update message to RabbitMQ.")
-            logger.info(f"  - Exchange Name: {self.rabbitmq_exchange_name}")
-            logger.info(f"  - Exchange Type (configured): {self.rabbitmq_exchange_type}")
-            logger.info(f"  - Routing Key: {self.rabbit_queue_name}")
             logger.info(
-                f"  - ENV[MEMSCHEDULER_RABBITMQ_EXCHANGE_NAME]: {os.getenv('MEMSCHEDULER_RABBITMQ_EXCHANGE_NAME')}"
+                f"[DIAGNOSTIC] Publishing KB Update message. "
+                f"ENV_EXCHANGE_USED: {kb_exchange_name is not None}, "
+                f"ENV_ROUTING_KEY_USED: {kb_routing_key is not None}. "
+                f"Current configured values: Exchange: {exchange_name}, Routing Key: {routing_key}."
+            )
+            kb_exchange_name = os.getenv(
+                "MEMSCHEDULER_RABBITMQ_KNOWLEDGE_BASE_UPDATE_EXCHANGE_NAME"
+            )
+            kb_routing_key = os.getenv("MEMSCHEDULER_RABBITMQ_KNOWLEDGE_BASE_UPDATE_ROUTING_KEY")
+
+            if kb_exchange_name:
+                exchange_name = kb_exchange_name
+            if kb_routing_key:
+                routing_key = kb_routing_key
+
+            logger.info(f"  - Exchange Name: {exchange_name}")
+            logger.info(f"  - Exchange Type (configured): {self.rabbitmq_exchange_type}")
+            logger.info(f"  - Routing Key: {routing_key}")
+            logger.info(
+                f"  - ENV[MEMSCHEDULER_RABBITMQ_KNOWLEDGE_BASE_UPDATE_EXCHANGE_NAME]: {kb_exchange_name}"
             )
             logger.info(
-                f"  - ENV[MEMSCHEDULER_RABBITMQ_EXCHANGE_TYPE]: {os.getenv('MEMSCHEDULER_RABBITMQ_EXCHANGE_TYPE')}"
+                f"  - ENV[MEMSCHEDULER_RABBITMQ_KNOWLEDGE_BASE_UPDATE_ROUTING_KEY]: {kb_routing_key}"
             )
             logger.info(f"  - Message Content: {json.dumps(message, indent=2)}")
 
@@ -290,12 +311,12 @@ class RabbitMQSchedulerModule(BaseSchedulerModule):
                 return False
 
             logger.info(
-                f"[DIAGNOSTIC] rabbitmq_service.rabbitmq_publish_message: Attempting to publish message. Exchange: {self.rabbitmq_exchange_name}, Routing Key: {self.rabbit_queue_name}, Message Content: {json.dumps(message, indent=2)}"
+                f"[DIAGNOSTIC] rabbitmq_service.rabbitmq_publish_message: Attempting to publish message. Exchange: {exchange_name}, Routing Key: {routing_key}, Message Content: {json.dumps(message, indent=2)}"
             )
             try:
                 self.rabbitmq_channel.basic_publish(
-                    exchange=self.rabbitmq_exchange_name,
-                    routing_key=self.rabbit_queue_name,
+                    exchange=exchange_name,
+                    routing_key=routing_key,
                     body=json.dumps(message),
                     properties=pika.BasicProperties(
                         delivery_mode=2,  # Persistent
