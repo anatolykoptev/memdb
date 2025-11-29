@@ -288,6 +288,7 @@ class RabbitMQSchedulerModule(BaseSchedulerModule):
                 logger.error("Cannot publish - no active connection")
                 return False
 
+            logger.info(f"[DIAGNOSTIC] rabbitmq_service.rabbitmq_publish_message: Attempting to publish message. Exchange: {self.rabbitmq_exchange_name}, Routing Key: {self.rabbit_queue_name}, Message Content: {json.dumps(message, indent=2)}")
             try:
                 self.rabbitmq_channel.basic_publish(
                     exchange=self.rabbitmq_exchange_name,

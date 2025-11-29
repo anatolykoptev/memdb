@@ -475,6 +475,7 @@ class GeneralScheduler(BaseScheduler):
             logger.error(f"Error: {e}", exc_info=True)
 
     def _mem_read_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
+        logger.info(f"[DIAGNOSTIC] general_scheduler._mem_read_message_consumer called. Received messages: {[msg.model_dump_json(indent=2) for msg in messages]}")
         logger.info(f"Messages {messages} assigned to {MEM_READ_LABEL} handler.")
 
         def process_message(message: ScheduleMessageItem):
@@ -539,6 +540,7 @@ class GeneralScheduler(BaseScheduler):
         task_id: str | None = None,
         info: dict | None = None,
     ) -> None:
+        logger.info(f"[DIAGNOSTIC] general_scheduler._process_memories_with_reader called. mem_ids: {mem_ids}, user_id: {user_id}, mem_cube_id: {mem_cube_id}, task_id: {task_id}")
         """
         Process memories using mem_reader for enhanced memory processing.
 
@@ -636,7 +638,7 @@ class GeneralScheduler(BaseScheduler):
                                 }
                             )
                         if kb_log_content:
-                            logger.info("DIAGNOSTIC: Preparing to create event log for KB update in _process_memories_with_reader.")
+                            logger.info(f"[DIAGNOSTIC] general_scheduler._process_memories_with_reader: Creating event log for KB update. Label: knowledgeBaseUpdate, user_id: {user_id}, mem_cube_id: {mem_cube_id}, task_id: {task_id}. KB content: {json.dumps(kb_log_content, indent=2)}")
                             event = self.create_event_log(
                                 label="knowledgeBaseUpdate",
                                 from_memory_type=USER_INPUT_TYPE,
