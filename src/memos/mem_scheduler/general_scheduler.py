@@ -377,6 +377,7 @@ class GeneralScheduler(BaseScheduler):
                                     memcube_name=self._map_memcube_name(msg.mem_cube_id),
                                 )
                                 event.task_id = msg.task_id
+                                logger.info(f"Submitting KB log from 'add' flow. Event: {event.to_json(indent=2)}")
                                 self._submit_web_logs([event])
                         else:
                             # Existing: Playground/Default Logging
@@ -643,6 +644,7 @@ class GeneralScheduler(BaseScheduler):
                                 memcube_name=self._map_memcube_name(mem_cube_id),
                             )
                             event.task_id = task_id
+                            logger.info(f"Submitting KB log from 'mem_read' flow. Event: {event.to_json(indent=2)}")
                             self._submit_web_logs([event])
                     else:
                         # Existing: Playground/Default Logging

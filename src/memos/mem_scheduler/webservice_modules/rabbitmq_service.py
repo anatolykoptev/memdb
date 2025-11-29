@@ -1,10 +1,10 @@
 import json
+import os
 import ssl
 import threading
 import time
 
 from pathlib import Path
-
 from memos.configs.mem_scheduler import AuthConfig, RabbitMQConfig
 from memos.context.context import ContextThread
 from memos.dependency import require_python_package
@@ -269,6 +269,19 @@ class RabbitMQSchedulerModule(BaseSchedulerModule):
         Publish a message to RabbitMQ.
         """
         import pika
+
+        if message.get("label") == "knowledgeBaseUpdate":
+            logger.info("Preparing to publish KB Update message to RabbitMQ.")
+            logger.info(f"  - Exchange Name: {self.rabbitmq_exchange_name}")
+            logger.info(f"  - Exchange Type (configured): {self.rabbitmq_exchange_type}")
+            logger.info(f"  - Routing Key: {self.rabbit_queue_name}")
+            logger.info(
+                f"  - ENV[MEMSCHEDULER_RABBITMQ_EXCHANGE_NAME]: {os.getenv('MEMSCHEDULER_RABBITMQ_EXCHANGE_NAME')}"
+            )
+            logger.info(
+                f"  - ENV[MEMSCHEDULER_RABBITMQ_EXCHANGE_TYPE]: {os.getenv('MEMSCHEDULER_RABBITMQ_EXCHANGE_TYPE')}"
+            )
+            logger.info(f"  - Message Content: {json.dumps(message, indent=2)}")
 
         with self._rabbitmq_lock:
             if not self.is_rabbitmq_connected():
