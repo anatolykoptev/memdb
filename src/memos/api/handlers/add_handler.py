@@ -46,7 +46,7 @@ class AddHandler(BaseHandler):
             MemoryResponse with added memory information
         """
         self.logger.info(
-            f"[DIAGNOSTIC] server_router -> add_handler.handle_add_memories called (Modified at 2025-11-29 16:21). Full request: {add_req.model_dump_json(indent=2)}"
+            f"[DIAGNOSTIC] server_router -> add_handler.handle_add_memories called (Modified at 2025-11-29 16:46). Full request: {add_req.model_dump_json(indent=2)}"
         )
 
         if add_req.info:
