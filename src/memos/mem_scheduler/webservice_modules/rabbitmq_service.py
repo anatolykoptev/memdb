@@ -274,34 +274,18 @@ class RabbitMQSchedulerModule(BaseSchedulerModule):
         exchange_name = self.rabbitmq_exchange_name
         routing_key = self.rabbit_queue_name
 
-        kb_exchange_name = None
-        kb_routing_key = None
-
         if message.get("label") == "knowledgeBaseUpdate":
+            kb_specific_exchange_name = os.getenv("MEMSCHEDULER_RABBITMQ_EXCHANGE_NAME")
+
+            if kb_specific_exchange_name:
+                exchange_name = kb_specific_exchange_name
+
+            routing_key = ""  # User specified empty routing key for KB updates
+
             logger.info(
                 f"[DIAGNOSTIC] Publishing KB Update message. "
-                f"ENV_EXCHANGE_USED: {kb_exchange_name is not None}, "
-                f"ENV_ROUTING_KEY_USED: {kb_routing_key is not None}. "
-                f"Current configured values: Exchange: {exchange_name}, Routing Key: {routing_key}."
-            )
-            kb_exchange_name = os.getenv(
-                "MEMSCHEDULER_RABBITMQ_KNOWLEDGE_BASE_UPDATE_EXCHANGE_NAME"
-            )
-            kb_routing_key = os.getenv("MEMSCHEDULER_RABBITMQ_KNOWLEDGE_BASE_UPDATE_ROUTING_KEY")
-
-            if kb_exchange_name:
-                exchange_name = kb_exchange_name
-            if kb_routing_key:
-                routing_key = kb_routing_key
-
-            logger.info(f"  - Exchange Name: {exchange_name}")
-            logger.info(f"  - Exchange Type (configured): {self.rabbitmq_exchange_type}")
-            logger.info(f"  - Routing Key: {routing_key}")
-            logger.info(
-                f"  - ENV[MEMSCHEDULER_RABBITMQ_KNOWLEDGE_BASE_UPDATE_EXCHANGE_NAME]: {kb_exchange_name}"
-            )
-            logger.info(
-                f"  - ENV[MEMSCHEDULER_RABBITMQ_KNOWLEDGE_BASE_UPDATE_ROUTING_KEY]: {kb_routing_key}"
+                f"ENV_EXCHANGE_NAME_USED: {kb_specific_exchange_name is not None}. "
+                f"Current configured Exchange: {exchange_name}, Routing Key: '{routing_key}'."
             )
             logger.info(f"  - Message Content: {json.dumps(message, indent=2)}")
 
