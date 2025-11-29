@@ -84,7 +84,7 @@ class ScheduleMessageItem(BaseModel, DictConversionMixin):
             "content": self.content,
             "timestamp": self.timestamp.isoformat(),
             "user_name": self.user_name,
-            "task_id": self.task_id,
+            "task_id": self.task_id if self.task_id is not None else "",
         }
 
     @classmethod
