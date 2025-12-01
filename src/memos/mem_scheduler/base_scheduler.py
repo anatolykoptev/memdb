@@ -235,11 +235,6 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             self._cleanup_on_init_failure()
             raise
 
-        # start queue monitor if enabled and a bot is set later
-
-    def debug_mode_on(self, debug_stream_prefix="debug_mode"):
-        self.memos_message_queue.debug_mode_on(debug_stream_prefix=debug_stream_prefix)
-
     def _cleanup_on_init_failure(self):
         """Clean up resources if initialization fails."""
         try:
@@ -728,7 +723,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             except Exception as e:
                 # Don't log error for "No messages available in Redis queue" as it's expected
                 if "No messages available in Redis queue" not in str(e):
-                    logger.error(f"Unexpected error in message consumer: {e!s}")
+                    logger.error(f"Unexpected error in message consumer: {e!s}", exc_info=True)
                 time.sleep(self._consume_interval)  # Prevent tight error loops
 
     def _monitor_loop(self):

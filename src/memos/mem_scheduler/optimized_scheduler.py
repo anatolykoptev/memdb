@@ -199,8 +199,21 @@ class OptimizedScheduler(GeneralScheduler):
             )
             memories = merged_memories[: search_req.top_k]
 
+            can_answer = self.retriever.evaluate_memory_answer_ability(
+                query=search_req.query, memory_texts=[one.memory for one in memories]
+            )
+
+            if can_answer:
+                logger.info("History memories can answer the query.")
+
+            else:
+                logger.info("Submitted memory history async task.")
+                # Enhance with query
+                memories, _ = self.retriever.enhance_memories_with_query(
+                    query_history=[search_req.query],
+                    memories=memories,
+                )
             formatted_memories = [format_textual_memory_item(item) for item in memories]
-            logger.info("Submitted memory history async task.")
             self.submit_memory_history_async_task(
                 search_req=search_req,
                 user_context=user_context,
@@ -209,7 +222,6 @@ class OptimizedScheduler(GeneralScheduler):
                     "formatted_memories": formatted_memories,
                 },
             )
-
             return formatted_memories
 
     def update_search_memories_to_redis(

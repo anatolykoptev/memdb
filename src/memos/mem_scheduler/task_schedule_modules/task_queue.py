@@ -51,11 +51,6 @@ class ScheduleTaskQueue:
             redis_message_id=redis_message_id,
         )
 
-    def debug_mode_on(self, debug_stream_prefix="debug_mode"):
-        self.memos_message_queue.stream_key_prefix = (
-            f"{debug_stream_prefix}:{self.memos_message_queue.stream_key_prefix}"
-        )
-
     def get_stream_keys(self) -> list[str]:
         if isinstance(self.memos_message_queue, SchedulerRedisQueue):
             stream_keys = self.memos_message_queue.get_stream_keys()
@@ -67,6 +62,11 @@ class ScheduleTaskQueue:
         """Submit messages to the message queue (either local queue or Redis)."""
         if isinstance(messages, ScheduleMessageItem):
             messages = [messages]
+
+        for msg in messages:
+            msg.stream_key = self.memos_message_queue.get_stream_key(
+                user_id=msg.user_id, mem_cube_id=msg.mem_cube_id, task_label=msg.label
+            )
 
         if len(messages) < 1:
             logger.error("Submit empty")

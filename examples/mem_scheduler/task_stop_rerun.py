@@ -16,7 +16,6 @@ print(f"Queue maxsize: {getattr(mem_scheduler.memos_message_queue, 'maxsize', 'N
 print("=====================================\n")
 
 queue = mem_scheduler.memos_message_queue
-queue.debug_mode_on(debug_stream_prefix="task_stop_rerun")
 
 
 # Define a handler function
@@ -29,7 +28,6 @@ def my_test_handler(messages: list[ScheduleMessageItem]):
         try:
             print(f"writing {file_path}...")
             file_path.write_text(f"Task {task_id} processed.\n")
-            sleep(5)
         except Exception as e:
             print(f"Failed to write {file_path}: {e}")
 
@@ -71,7 +69,7 @@ else:
     submit_tasks()
 
 # 6. Wait until tmp has 100 files or timeout
-poll_interval = 1
+poll_interval = 0.01
 expected = 100
 tmp_dir = Path("tmp")
 while mem_scheduler.get_tasks_status()["remaining"] != 0:

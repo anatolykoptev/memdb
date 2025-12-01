@@ -165,21 +165,7 @@ class TaskScheduleMonitor:
     def _get_redis_tasks_status(self) -> dict:
         task_status = self.init_task_status()
 
-        try:
-            stream_keys = self.queue.get_stream_keys(stream_key_prefix=self.queue.stream_key_prefix)
-        except Exception as e:
-            logger.warning(f"Failed to get stream keys: {e}")
-            stream_keys = []
-
-        if not stream_keys:
-            # Still include totals from qsize if available
-            try:
-                qsize_dict = self.queue.qsize()
-                if isinstance(qsize_dict, dict):
-                    task_status["remaining"] = int(qsize_dict.get("total_size", 0))
-            except Exception:
-                pass
-            return task_status
+        stream_keys = self.queue.get_stream_keys(stream_key_prefix=self.queue.stream_key_prefix)
 
         # Parallel path: use asyncio.to_thread for blocking redis calls
         if self.get_status_parallel:
@@ -187,37 +173,39 @@ class TaskScheduleMonitor:
                 import asyncio
 
                 async def _collect_async() -> dict:
-                    qsize_task = asyncio.to_thread(self.queue.qsize)
+                    # Collect xlen and group info in parallel for each stream
+                    xlen_tasks = [
+                        asyncio.to_thread(self.queue.redis.xlen, stream_key)
+                        for stream_key in stream_keys
+                    ]
                     groups_tasks = [
                         asyncio.to_thread(self.queue.redis.xinfo_groups, stream_key)
                         for stream_key in stream_keys
                     ]
-                    gathered = await asyncio.gather(
-                        qsize_task, *groups_tasks, return_exceptions=True
-                    )
-                    qsize_result = gathered[0] if gathered else {}
-                    groups_results = gathered[1:]
+                    xlen_results = await asyncio.gather(*xlen_tasks, return_exceptions=True)
+                    groups_results = await asyncio.gather(*groups_tasks, return_exceptions=True)
 
                     local = self.init_task_status()
                     for idx, stream_key in enumerate(stream_keys):
                         local[stream_key] = self.init_task_status()
                         groups_info = groups_results[idx] if idx < len(groups_results) else None
+                        xlen_val = xlen_results[idx] if idx < len(xlen_results) else 0
+                        if isinstance(xlen_val, Exception):
+                            xlen_val = 0
                         if isinstance(groups_info, Exception):
                             continue
+                        pending = 0
                         if groups_info:
                             for group in groups_info:
                                 if group.get("name") == self.queue.consumer_group:
                                     pending = int(group.get("pending", 0))
-                                    remaining = (
-                                        int(qsize_result.get(stream_key, 0))
-                                        if isinstance(qsize_result, dict)
-                                        else 0
-                                    )
-                                    local[stream_key]["running"] += pending
-                                    local[stream_key]["remaining"] += remaining
-                                    local["running"] += pending
-                                    local["remaining"] += remaining
                                     break
+                        # Remaining = total messages (xlen) - pending for our group
+                        remaining = max(0, int(xlen_val or 0))
+                        local[stream_key]["running"] += pending
+                        local[stream_key]["remaining"] += remaining
+                        local["running"] += pending
+                        local["remaining"] += remaining
                     return local
 
                 try:
@@ -233,26 +221,21 @@ class TaskScheduleMonitor:
                 logger.debug(f"Parallel status collection failed, fallback to sequential: {e}")
 
         # Sequential fallback
-        try:
-            qsize_dict = self.queue.qsize()
-        except Exception:
-            qsize_dict = {}
-
         for stream_key in stream_keys:
             task_status[stream_key] = self.init_task_status()
             try:
                 groups_info = self.queue.redis.xinfo_groups(stream_key)
             except Exception:
                 groups_info = None
+            try:
+                xlen_val = int(self.queue.redis.xlen(stream_key))
+            except Exception:
+                xlen_val = 0
             if groups_info:
                 for group in groups_info:
                     if group.get("name") == self.queue.consumer_group:
                         pending = int(group.get("pending", 0))
-                        remaining = (
-                            int(qsize_dict.get(stream_key, 0))
-                            if isinstance(qsize_dict, dict)
-                            else 0
-                        )
+                        remaining = max(0, xlen_val)
                         task_status[stream_key]["running"] += pending
                         task_status[stream_key]["remaining"] += remaining
                         task_status["running"] += pending

@@ -54,7 +54,6 @@ def run_fair_redis_schedule(batch_size: int = 3):
     queue = mem_scheduler.memos_message_queue
 
     # Isolate and clear queue
-    queue.debug_mode_on(debug_stream_prefix="fair_redis_schedule")
     queue.clear()
 
     # Define multiple streams: (user_id, mem_cube_id, task_label)
