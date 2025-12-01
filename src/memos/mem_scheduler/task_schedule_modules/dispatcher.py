@@ -43,7 +43,6 @@ class SchedulerDispatcher(BaseSchedulerModule):
         self,
         max_workers: int = 30,
         memos_message_queue: ScheduleTaskQueue | None = None,
-        use_redis_queue: bool | None = None,
         enable_parallel_dispatch: bool = True,
         config=None,
         status_tracker: TaskStatusTracker | None = None,
@@ -56,8 +55,12 @@ class SchedulerDispatcher(BaseSchedulerModule):
         # Main dispatcher thread pool
         self.max_workers = max_workers
 
-        self.memos_message_queue = memos_message_queue.memos_message_queue
-        self.use_redis_queue = use_redis_queue
+        # Accept either a ScheduleTaskQueue wrapper or a concrete queue instance
+        self.memos_message_queue = (
+            memos_message_queue.memos_message_queue
+            if hasattr(memos_message_queue, "memos_message_queue")
+            else memos_message_queue
+        )
 
         # Get multi-task timeout from config
         self.multi_task_running_timeout = (
