@@ -14,6 +14,9 @@ from memos.mem_scheduler.general_modules.task_threads import ThreadManager
 from memos.mem_scheduler.schemas.general_schemas import DEFAULT_STOP_WAIT
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.schemas.task_schemas import RunningTaskItem
+from memos.mem_scheduler.task_schedule_modules.local_queue import SchedulerLocalQueue
+from memos.mem_scheduler.task_schedule_modules.redis_queue import SchedulerRedisQueue
+from memos.mem_scheduler.task_schedule_modules.task_queue import ScheduleTaskQueue
 from memos.mem_scheduler.utils.metrics import MetricsRegistry
 from memos.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
 
@@ -37,7 +40,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
     def __init__(
         self,
         max_workers: int = 30,
-        memos_message_queue: Any | None = None,
+        memos_message_queue: ScheduleTaskQueue | None = None,
         use_redis_queue: bool | None = None,
         enable_parallel_dispatch: bool = True,
         config=None,
@@ -48,7 +51,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
         # Main dispatcher thread pool
         self.max_workers = max_workers
 
-        self.memos_message_queue = memos_message_queue
+        self.memos_message_queue = memos_message_queue.memos_message_queue
         self.use_redis_queue = use_redis_queue
 
         # Get multi-task timeout from config
@@ -142,6 +145,11 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         label=m.label, mem_cube_id=m.mem_cube_id, wait_sec=wait_sec, now=now
                     )
 
+                # Add to running tasks
+                if isinstance(self.memos_message_queue, SchedulerLocalQueue):
+                    with self._task_lock:
+                        self._running_tasks[task_item.item_id] = task_item
+
                 # Execute the original handler
                 result = handler(messages)
 
@@ -150,7 +158,10 @@ class SchedulerDispatcher(BaseSchedulerModule):
                     self.metrics.on_done(label=m.label, mem_cube_id=m.mem_cube_id, now=time.time())
 
                 # acknowledge redis messages
-                if self.use_redis_queue and self.memos_message_queue is not None:
+                if (
+                    isinstance(self.memos_message_queue, SchedulerRedisQueue)
+                    and self.memos_message_queue is not None
+                ):
                     for msg in messages:
                         redis_message_id = msg.redis_message_id
                         # Acknowledge message processing
@@ -162,13 +173,14 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         )
 
                 # Mark task as completed and remove from tracking
-                with self._task_lock:
-                    if task_item.item_id in self._running_tasks:
-                        task_item.mark_completed(result)
-                        del self._running_tasks[task_item.item_id]
-                        self._completed_tasks.append(task_item)
-                        if len(self._completed_tasks) > self.completed_tasks_max_show_size:
-                            self._completed_tasks.pop(0)
+                if isinstance(self.memos_message_queue, SchedulerLocalQueue):
+                    with self._task_lock:
+                        if task_item.item_id in self._running_tasks:
+                            task_item.mark_completed(result)
+                            del self._running_tasks[task_item.item_id]
+                            self._completed_tasks.append(task_item)
+                            if len(self._completed_tasks) > self.completed_tasks_max_show_size:
+                                self._completed_tasks.pop(0)
                 logger.info(f"Task completed: {task_item.get_execution_info()}")
                 return result
 
@@ -177,12 +189,13 @@ class SchedulerDispatcher(BaseSchedulerModule):
                 for m in messages:
                     self.metrics.on_done(label=m.label, mem_cube_id=m.mem_cube_id, now=time.time())
                 # Mark task as failed and remove from tracking
-                with self._task_lock:
-                    if task_item.item_id in self._running_tasks:
-                        task_item.mark_failed(str(e))
-                        del self._running_tasks[task_item.item_id]
-                        if len(self._completed_tasks) > self.completed_tasks_max_show_size:
-                            self._completed_tasks.pop(0)
+                if isinstance(self.memos_message_queue, SchedulerLocalQueue):
+                    with self._task_lock:
+                        if task_item.item_id in self._running_tasks:
+                            task_item.mark_failed(str(e))
+                            del self._running_tasks[task_item.item_id]
+                            if len(self._completed_tasks) > self.completed_tasks_max_show_size:
+                                self._completed_tasks.pop(0)
                 logger.error(f"Task failed: {task_item.get_execution_info()}, Error: {e}")
                 raise
 
@@ -370,10 +383,6 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         task_name=f"{label}_handler",
                         messages=msgs,
                     )
-
-                    # Add to running tasks
-                    with self._task_lock:
-                        self._running_tasks[task_item.item_id] = task_item
 
                     # Create wrapped handler for task tracking
                     wrapped_handler = self._create_task_wrapper(handler, task_item)

@@ -104,7 +104,7 @@ class FineStrategy(str, Enum):
 
 
 # algorithm strategies
-DEFAULT_FINE_STRATEGY = FineStrategy.DEEP_SEARCH
+DEFAULT_FINE_STRATEGY = FineStrategy.RECREATE
 FINE_STRATEGY = DEFAULT_FINE_STRATEGY
 
 # Read fine strategy from environment variable `FINE_STRATEGY`.

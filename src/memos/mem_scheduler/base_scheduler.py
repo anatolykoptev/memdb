@@ -1,3 +1,4 @@
+import contextlib
 import multiprocessing
 import os
 import threading
@@ -217,8 +218,8 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
 
         # start queue monitor if enabled and a bot is set later
 
-    def debug_mode_on(self):
-        self.memos_message_queue.debug_mode_on()
+    def debug_mode_on(self, debug_stream_prefix="debug_mode"):
+        self.memos_message_queue.debug_mode_on(debug_stream_prefix=debug_stream_prefix)
 
     def _cleanup_on_init_failure(self):
         """Clean up resources if initialization fails."""
@@ -899,12 +900,68 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                 if groups_info:
                     for group in groups_info:
                         if group.get("name") == memos_message_queue.consumer_group:
-                            task_status[stream_key]["running"] += int(group.get("pending", 0))
-                            task_status[stream_key]["remaining"] += memos_message_queue.qsize()[
-                                stream_key
-                            ]
-                            task_status["running"] += int(group.get("pending", 0))
-                            task_status["remaining"] += task_status[stream_key]["remaining"]
+                            pending_count = int(group.get("pending", 0))
+                            last_delivered_id = group.get("last-delivered-id") or group.get(
+                                "last_delivered_id"
+                            )
+
+                            # Opportunistically delete acked messages left in the stream
+                            # Acked = (entries with id <= last_delivered_id) minus current pending IDs
+                            if (
+                                getattr(memos_message_queue, "auto_delete_acked", False)
+                                and last_delivered_id
+                            ):
+                                with contextlib.suppress(Exception):
+                                    pending_ids: set[str] = set()
+                                    if pending_count > 0:
+                                        # Fetch IDs currently pending in the group
+                                        pending_entries = memos_message_queue.redis.xpending(
+                                            stream_key,
+                                            memos_message_queue.consumer_group,
+                                            "-",
+                                            "+",
+                                            pending_count,
+                                        )
+                                        for p in pending_entries or []:
+                                            # redis-py returns dicts with 'message_id' or tuples [id, consumer, ...]
+                                            pid = (
+                                                p.get("message_id") if isinstance(p, dict) else p[0]
+                                            )
+                                            if pid:
+                                                pending_ids.add(pid)
+
+                                    # Entries up to last delivered id
+                                    entries_upto_last = memos_message_queue.redis.xrange(
+                                        stream_key, "-", last_delivered_id
+                                    )
+                                    for entry_id, _ in entries_upto_last or []:
+                                        if entry_id not in pending_ids:
+                                            with contextlib.suppress(Exception):
+                                                memos_message_queue.redis.xdel(stream_key, entry_id)
+
+                            # Compute remaining as: pending (delivered but not acked) + undelivered
+                            undelivered_count = 0
+                            try:
+                                if last_delivered_id:
+                                    undelivered_entries = memos_message_queue.redis.xrange(
+                                        stream_key, last_delivered_id, "+"
+                                    )
+                                    undelivered_count = len(undelivered_entries or [])
+                                    # Exclude the last_delivered_id itself if present at the start
+                                    if (
+                                        undelivered_count > 0
+                                        and undelivered_entries[0][0] == last_delivered_id
+                                    ):
+                                        undelivered_count -= 1
+                            except Exception:
+                                undelivered_count = 0
+
+                            task_status[stream_key]["running"] += pending_count
+                            task_status[stream_key]["remaining"] += (
+                                pending_count + undelivered_count
+                            )
+                            task_status["running"] += pending_count
+                            task_status["remaining"] += pending_count + undelivered_count
                             break
 
         elif isinstance(memos_message_queue, SchedulerLocalQueue):

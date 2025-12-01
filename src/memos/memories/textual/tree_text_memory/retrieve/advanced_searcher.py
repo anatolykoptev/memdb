@@ -49,7 +49,6 @@ class AdvancedSearcher(Searcher):
         self.process_llm = process_llm
         self.thinking_stages = 3
         self.max_retry_times = 2
-        self.deep_search_top_k_bar = 2
 
     def load_template(self, template_name: str) -> str:
         if template_name not in PROMPT_MAPPING:
@@ -250,7 +249,7 @@ class AdvancedSearcher(Searcher):
             user_name=user_name,
             info=info,
         )
-        if top_k < self.deep_search_top_k_bar or len(memories) == 0:
+        if len(memories) == 0:
             logger.warning("Requirements not met; returning memories as-is.")
             return memories
 
@@ -280,7 +279,7 @@ class AdvancedSearcher(Searcher):
                         )
                     else:
                         enhanced_memories = memories
-                    return enhanced_memories
+                    return enhanced_memories[:top_k]
 
                 can_answer, reason, retrieval_phrases = self.stage_retrieve(
                     stage_id=current_stage_id + 1,
@@ -298,7 +297,7 @@ class AdvancedSearcher(Searcher):
                         )
                     else:
                         enhanced_memories = memories
-                    return enhanced_memories
+                    return enhanced_memories[:top_k]
                 else:
                     previous_retrieval_phrases.extend(retrieval_phrases)
                     logger.info(

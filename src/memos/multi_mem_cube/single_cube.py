@@ -127,7 +127,7 @@ class SingleCubeView(MemCubeView):
             search_req.include_preference,
         )
 
-        self.logger.info(f"Search memories result: {memories_result}")
+        self.logger.info(f"Search {len(memories_result)} memories.")
         return memories_result
 
     def _get_search_mode(self, mode: str) -> str:
@@ -217,6 +217,7 @@ class SingleCubeView(MemCubeView):
         Returns:
             List of enhanced search results
         """
+        logger.info(f"Strategy of _fine_search is {FINE_STRATEGY}")
         if FINE_STRATEGY == FineStrategy.DEEP_SEARCH:
             return self._deep_search(search_req=search_req, user_context=user_context)
 
@@ -261,7 +262,7 @@ class SingleCubeView(MemCubeView):
             )
             missing_info_hint, trigger = self.mem_scheduler.retriever.recall_for_missing_memories(
                 query=search_req.query,
-                memories=raw_memories,
+                memories=[mem.memory for mem in enhanced_memories],
             )
             retrieval_size = len(raw_memories) - len(enhanced_memories)
             logger.info(f"Retrieval size: {retrieval_size}")
@@ -507,7 +508,7 @@ class SingleCubeView(MemCubeView):
 
             return [
                 {
-                    "memory": memory.memory,
+                    "memory": memory.metadata.preference,
                     "memory_id": memory_id,
                     "memory_type": memory.metadata.preference_type,
                 }

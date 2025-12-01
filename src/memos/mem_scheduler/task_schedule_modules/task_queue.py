@@ -51,9 +51,9 @@ class ScheduleTaskQueue:
             redis_message_id=redis_message_id,
         )
 
-    def debug_mode_on(self):
+    def debug_mode_on(self, debug_stream_prefix="debug_mode"):
         self.memos_message_queue.stream_key_prefix = (
-            f"debug_mode:{self.memos_message_queue.stream_key_prefix}"
+            f"{debug_stream_prefix}:{self.memos_message_queue.stream_key_prefix}"
         )
 
     def get_stream_keys(self) -> list[str]:
