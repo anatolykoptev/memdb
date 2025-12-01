@@ -46,6 +46,11 @@ class ScheduleMessageItem(BaseModel, DictConversionMixin):
         default="",
         description="user name / display name (optional)",
     )
+    info: dict | None = Field(default=None, description="user custom info")
+    task_id: str | None = Field(
+        default=None,
+        description="Optional business-level task ID. Multiple items can share the same task_id.",
+    )
 
     # Pydantic V2 model configuration
     model_config = ConfigDict(
@@ -79,6 +84,7 @@ class ScheduleMessageItem(BaseModel, DictConversionMixin):
             "content": self.content,
             "timestamp": self.timestamp.isoformat(),
             "user_name": self.user_name,
+            "task_id": self.task_id if self.task_id is not None else "",
         }
 
     @classmethod
@@ -92,6 +98,7 @@ class ScheduleMessageItem(BaseModel, DictConversionMixin):
             content=data["content"],
             timestamp=datetime.fromisoformat(data["timestamp"]),
             user_name=data.get("user_name"),
+            task_id=data.get("task_id"),
         )
 
 
@@ -113,13 +120,14 @@ class ScheduleLogForWebItem(BaseModel, DictConversionMixin):
     item_id: str = Field(
         description="Unique identifier for the log entry", default_factory=lambda: str(uuid4())
     )
+    task_id: str | None = Field(default=None, description="Identifier for the parent task")
     user_id: str = Field(..., description="Identifier for the user associated with the log")
     mem_cube_id: str = Field(
         ..., description="Identifier for the memcube associated with this log entry"
     )
     label: str = Field(..., description="Label categorizing the type of log")
-    from_memory_type: str = Field(..., description="Source memory type")
-    to_memory_type: str = Field(..., description="Destination memory type")
+    from_memory_type: str | None = Field(None, description="Source memory type")
+    to_memory_type: str | None = Field(None, description="Destination memory type")
     log_content: str = Field(..., description="Detailed content of the log entry")
     current_memory_sizes: MemorySizes = Field(
         default_factory=lambda: dict(DEFAULT_MEMORY_SIZES),
@@ -141,6 +149,9 @@ class ScheduleLogForWebItem(BaseModel, DictConversionMixin):
     )
     memcube_name: str | None = Field(default=None, description="Display name for memcube")
     memory_len: int | None = Field(default=None, description="Count of items involved in the event")
+    status: str | None = Field(
+        default=None, description="Completion status of the task (e.g., 'completed', 'failed')"
+    )
 
     def debug_info(self) -> dict[str, Any]:
         """Return structured debug information for logging purposes."""

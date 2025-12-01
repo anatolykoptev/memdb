@@ -35,22 +35,30 @@ logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from memos.api.product_models import APIADDRequest, APISearchRequest
+    from memos.mem_cube.navie import NaiveMemCube
+    from memos.mem_reader.simple_struct import SimpleStructMemReader
+    from memos.mem_scheduler.optimized_scheduler import OptimizedScheduler
 
 
 @dataclass
 class SingleCubeView(MemCubeView):
     cube_id: str
-    naive_mem_cube: Any
-    mem_reader: Any
-    mem_scheduler: Any
+    naive_mem_cube: NaiveMemCube
+    mem_reader: SimpleStructMemReader
+    mem_scheduler: OptimizedScheduler
     logger: Any
     searcher: Any
+    deepsearch_agent: Any | None = None
 
     def add_memories(self, add_req: APIADDRequest) -> list[dict[str, Any]]:
         """
         This is basically your current handle_add_memories logic,
         but scoped to a single cube_id.
         """
+        sync_mode = add_req.async_mode or self._get_sync_mode()
+        self.logger.info(
+            f"[DIAGNOSTIC] single_cube.add_memories called for cube_id: {self.cube_id}. sync_mode: {sync_mode}. Request: {add_req.model_dump_json(indent=2)}"
+        )
         user_context = UserContext(
             user_id=add_req.user_id,
             mem_cube_id=self.cube_id,
@@ -127,6 +135,7 @@ class SingleCubeView(MemCubeView):
             search_req.include_preference,
         )
 
+        self.logger.info(f"Search memories result: {memories_result}")
         self.logger.info(f"Search {len(memories_result)} memories.")
         return memories_result
 
@@ -148,13 +157,13 @@ class SingleCubeView(MemCubeView):
         user_context: UserContext,
         search_mode: str,
     ) -> list[dict[str, Any]]:
-        """G
+        """
         Search text memories based on mode.
 
         Args:
             search_req: Search request
             user_context: User context
-            search_mode: Search mode (FAST, FINE, or MIXTURE)
+            search_mode: Search mode (fast, fine, or mixture)
 
         Returns:
             List of formatted memory items
@@ -202,6 +211,15 @@ class SingleCubeView(MemCubeView):
         formatted_memories = [format_memory_item(data) for data in enhanced_memories]
         return formatted_memories
 
+    def _agentic_search(
+        self, search_req: APISearchRequest, user_context: UserContext, max_thinking_depth: int
+    ) -> list:
+        deepsearch_results = self.deepsearch_agent.run(
+            search_req.query, user_id=user_context.mem_cube_id
+        )
+        formatted_memories = [format_memory_item(data) for data in deepsearch_results]
+        return formatted_memories
+
     def _fine_search(
         self,
         search_req: APISearchRequest,
@@ -217,9 +235,11 @@ class SingleCubeView(MemCubeView):
         Returns:
             List of enhanced search results
         """
-        logger.info(f"Strategy of _fine_search is {FINE_STRATEGY}")
+        logger.info(f"Fine strategy: {FINE_STRATEGY}")
         if FINE_STRATEGY == FineStrategy.DEEP_SEARCH:
             return self._deep_search(search_req=search_req, user_context=user_context)
+        elif FINE_STRATEGY == FineStrategy.AGENTIC_SEARCH:
+            return self._agentic_search(search_req=search_req, user_context=user_context)
 
         target_session_id = search_req.session_id or "default_session"
         search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
@@ -416,6 +436,7 @@ class SingleCubeView(MemCubeView):
             try:
                 message_item_read = ScheduleMessageItem(
                     user_id=add_req.user_id,
+                    task_id=add_req.task_id,
                     session_id=target_session_id,
                     mem_cube_id=self.cube_id,
                     mem_cube=self.naive_mem_cube,
@@ -423,8 +444,9 @@ class SingleCubeView(MemCubeView):
                     content=json.dumps(mem_ids),
                     timestamp=datetime.utcnow(),
                     user_name=self.cube_id,
+                    info=add_req.info,
                 )
-                self.mem_scheduler.memos_message_queue.submit_messages(messages=[message_item_read])
+                self.mem_scheduler.submit_messages(messages=[message_item_read])
                 self.logger.info(
                     f"[SingleCubeView] cube={self.cube_id} Submitted async MEM_READ: {json.dumps(mem_ids)}"
                 )
@@ -436,6 +458,7 @@ class SingleCubeView(MemCubeView):
         else:
             message_item_add = ScheduleMessageItem(
                 user_id=add_req.user_id,
+                task_id=add_req.task_id,
                 session_id=target_session_id,
                 mem_cube_id=self.cube_id,
                 mem_cube=self.naive_mem_cube,
@@ -444,7 +467,7 @@ class SingleCubeView(MemCubeView):
                 timestamp=datetime.utcnow(),
                 user_name=self.cube_id,
             )
-            self.mem_scheduler.memos_message_queue.submit_messages(messages=[message_item_add])
+            self.mem_scheduler.submit_messages(messages=[message_item_add])
 
     def _process_pref_mem(
         self,
@@ -481,8 +504,11 @@ class SingleCubeView(MemCubeView):
                     label=PREF_ADD_LABEL,
                     content=json.dumps(messages_list),
                     timestamp=datetime.utcnow(),
+                    info=add_req.info,
+                    user_name=self.cube_id,
+                    task_id=add_req.task_id,
                 )
-                self.mem_scheduler.memos_message_queue.submit_messages(messages=[message_item_pref])
+                self.mem_scheduler.submit_messages(messages=[message_item_pref])
                 self.logger.info(f"[SingleCubeView] cube={self.cube_id} Submitted PREF_ADD async")
             except Exception as e:
                 self.logger.error(
@@ -495,6 +521,7 @@ class SingleCubeView(MemCubeView):
                 [add_req.messages],
                 type="chat",
                 info={
+                    **(add_req.info or {}),
                     "user_id": add_req.user_id,
                     "session_id": target_session_id,
                     "mem_cube_id": self.cube_id,
@@ -536,9 +563,21 @@ class SingleCubeView(MemCubeView):
         """
         target_session_id = add_req.session_id or "default_session"
 
+        # Decide extraction mode:
+        # - async: always fast (ignore add_req.mode)
+        # - sync: use add_req.mode == "fast" to switch to fast pipeline, otherwise fine
+        if sync_mode == "async":
+            extract_mode = "fast"
+        else:  # sync
+            extract_mode = "fast" if add_req.mode == "fast" else "fine"
+
         self.logger.info(
-            f"[SingleCubeView] cube={user_context.mem_cube_id} "
-            f"Processing text memory with mode: {sync_mode}"
+            "[SingleCubeView] cube=%s Processing text memory "
+            "with sync_mode=%s, extract_mode=%s, add_mode=%s",
+            user_context.mem_cube_id,
+            sync_mode,
+            extract_mode,
+            add_req.mode,
         )
 
         # Extract memories
@@ -546,10 +585,12 @@ class SingleCubeView(MemCubeView):
             [add_req.messages],
             type="chat",
             info={
+                **(add_req.info or {}),
+                "custom_tags": add_req.custom_tags,
                 "user_id": add_req.user_id,
                 "session_id": target_session_id,
             },
-            mode="fast" if sync_mode == "async" else "fine",
+            mode=extract_mode,
         )
         flattened_local = [mm for m in memories_local for mm in m]
         self.logger.info(f"Memory extraction completed for user {add_req.user_id}")

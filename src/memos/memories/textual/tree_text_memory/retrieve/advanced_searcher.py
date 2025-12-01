@@ -49,6 +49,7 @@ class AdvancedSearcher(Searcher):
         self.process_llm = process_llm
         self.thinking_stages = 3
         self.max_retry_times = 2
+        self.deep_search_top_k_bar = 2
 
     def load_template(self, template_name: str) -> str:
         if template_name not in PROMPT_MAPPING:

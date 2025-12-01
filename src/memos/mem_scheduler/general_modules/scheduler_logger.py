@@ -49,7 +49,7 @@ class SchedulerLoggerModule(BaseSchedulerModule):
         mem_cube: GeneralMemCube,
     ) -> ScheduleLogForWebItem:
         text_mem_base: TreeTextMemory = mem_cube.text_mem
-        current_memory_sizes = text_mem_base.get_current_memory_size()
+        current_memory_sizes = text_mem_base.get_current_memory_size(user_name=mem_cube_id)
         current_memory_sizes = {
             "long_term_memory_size": current_memory_sizes.get("LongTermMemory", 0),
             "user_memory_size": current_memory_sizes.get("UserMemory", 0),
@@ -113,9 +113,10 @@ class SchedulerLoggerModule(BaseSchedulerModule):
         metadata: list[dict],
         memory_len: int,
         memcube_name: str | None = None,
+        log_content: str | None = None,
     ) -> ScheduleLogForWebItem:
         item = self.create_autofilled_log_item(
-            log_content="",
+            log_content=log_content or "",
             label=label,
             from_memory_type=from_memory_type,
             to_memory_type=to_memory_type,
