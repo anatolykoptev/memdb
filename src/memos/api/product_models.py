@@ -1,7 +1,7 @@
 import os
 import uuid
 
-from typing import Generic, Literal, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -224,6 +224,15 @@ class APIChatCompleteRequest(BaseRequest):
     )
 
 
+class DeleteMemoryRequest(BaseRequest):
+    """Request model for deleting memories."""
+
+    writable_cube_ids: list[str] = Field(..., description="Writable cube IDs")
+    memory_ids: list[str] | None = Field(None, description="Memory IDs")
+    file_ids: list[str] | None = Field(None, description="File IDs")
+    filter: dict[str, Any] | None = Field(None, description="Filter for the memory")
+
+
 class SuggestionRequest(BaseRequest):
     """Request model for getting suggestion queries."""
 
@@ -313,3 +322,7 @@ class MemOSAddResponse(BaseModel):
     def success(self) -> bool:
         """Convenient access to success status."""
         return self.data.success
+
+
+class DeleteMemoryResponse(BaseResponse[dict]):
+    """Response model for deleting memories."""

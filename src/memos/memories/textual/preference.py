@@ -260,7 +260,9 @@ class PreferenceTextMemory(BaseTextMemory):
         Args:
             memory_ids (list[str]): List of memory IDs to delete.
         """
-        raise NotImplementedError
+        collection_list = self.vector_db.config.collection_name
+        for collection_name in collection_list:
+            self.vector_db.delete(collection_name, memory_ids)
 
     def delete_with_collection_name(self, collection_name: str, memory_ids: list[str]) -> None:
         """Delete memories by their IDs and collection name.

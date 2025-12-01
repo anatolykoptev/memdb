@@ -27,6 +27,8 @@ from memos.api.product_models import (
     APIChatCompleteRequest,
     APISearchRequest,
     ChatRequest,
+    DeleteMemoryRequest,
+    DeleteMemoryResponse,
     GetMemoryRequest,
     MemoryResponse,
     SearchResponse,
@@ -219,3 +221,12 @@ def get_all_memories(memory_req: GetMemoryRequest):
             memory_type=memory_req.memory_type or "text_mem",
             naive_mem_cube=naive_mem_cube,
         )
+
+
+@router.post(
+    "/delete_memory", summary="Delete memories for user", response_model=DeleteMemoryResponse
+)
+def delete_memories(memory_req: DeleteMemoryRequest):
+    return handlers.memory_handler.handle_delete_memories(
+        delete_mem_req=memory_req, naive_mem_cube=naive_mem_cube
+    )
