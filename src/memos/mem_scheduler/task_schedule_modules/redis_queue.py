@@ -7,12 +7,14 @@ the local memos_message_queue functionality in BaseScheduler.
 
 import os
 import re
+import threading
 import time
 
 from collections import deque
 from collections.abc import Callable
 from uuid import uuid4
 
+from memos.context.context import ContextThread
 from memos.log import get_logger
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.task_schedule_modules.orchestrator import SchedulerOrchestrator
@@ -81,6 +83,11 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         # Task tracking for mem_scheduler_wait compatibility
         self._unfinished_tasks = 0
 
+        # Broker flush threshold and async refill control
+        self.task_broker_flush_bar = 10
+        self._refill_lock = threading.Lock()
+        self._refill_thread: ContextThread | None = None
+
         logger.info(
             f"[REDIS_QUEUE] Initialized with stream_prefix='{self.stream_key_prefix}', "
             f"consumer_group='{self.consumer_group}', consumer_name='{self.consumer_name}'"
@@ -124,14 +131,37 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         packed: list[list[ScheduleMessageItem]] = []
         for i in range(0, len(cache), consume_batch_size):
             packed.append(cache[i : i + consume_batch_size])
-        # reset cache using deque for efficient consumption
-        self.message_pack_cache = deque(packed)
-        # return list for compatibility with type hint
-        return list(self.message_pack_cache)
+        # return packed list without overwriting existing cache
+        return packed
+
+    def _async_refill_cache(self, batch_size: int) -> None:
+        """Background thread to refill message cache without blocking get_messages."""
+        try:
+            logger.debug(f"Starting async cache refill with batch_size={batch_size}")
+            new_packs = self.task_broker(consume_batch_size=batch_size)
+            logger.debug(f"task_broker returned {len(new_packs)} packs")
+            with self._refill_lock:
+                for pack in new_packs:
+                    if pack:  # Only add non-empty packs
+                        self.message_pack_cache.append(pack)
+                        logger.debug(f"Added pack with {len(pack)} messages to cache")
+            logger.debug(f"Cache refill complete, cache size now: {len(self.message_pack_cache)}")
+        except Exception as e:
+            logger.warning(f"Async cache refill failed: {e}", exc_info=True)
 
     def get_messages(self, batch_size: int) -> list[ScheduleMessageItem]:
-        if not self.message_pack_cache:
-            self.task_broker(consume_batch_size=batch_size)
+        # Trigger async refill if below threshold (non-blocking)
+        if len(self.message_pack_cache) < self.task_broker_flush_bar and (
+            self._refill_thread is None or not self._refill_thread.is_alive()
+        ):
+            logger.debug(
+                f"Triggering async cache refill: cache size {len(self.message_pack_cache)} < {self.task_broker_flush_bar}"
+            )
+            self._refill_thread = ContextThread(
+                target=self._async_refill_cache, args=(batch_size,), name="redis-cache-refill"
+            )
+            self._refill_thread.start()
+
         if self.message_pack_cache:
             return self.message_pack_cache.popleft()
         # No messages available
@@ -369,12 +399,15 @@ class SchedulerRedisQueue(RedisSchedulerModule):
 
     def size(self) -> int:
         """
-        Get the current size of the Redis queue (alias for qsize).
+        Get the current size of the Redis queue (total message count from qsize dict).
 
         Returns:
-            Number of messages in the queue
+            Total number of messages across all streams
         """
-        return self.qsize()
+        qsize_result = self.qsize()
+        if isinstance(qsize_result, dict):
+            return qsize_result.get("total_size", 0)
+        return int(qsize_result) if qsize_result else 0
 
     def empty(self) -> bool:
         """
@@ -383,7 +416,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         Returns:
             True if the queue is empty, False otherwise
         """
-        return self.qsize() == 0
+        return self.size() == 0
 
     def full(self) -> bool:
         """
@@ -397,7 +430,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         """
         if self.maxsize <= 0:
             return False
-        return self.qsize() >= self.maxsize
+        return self.size() >= self.maxsize
 
     def join(self) -> None:
         """

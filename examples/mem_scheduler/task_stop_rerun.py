@@ -76,8 +76,9 @@ expected = 100
 tmp_dir = Path("tmp")
 while mem_scheduler.get_tasks_status()["remaining"] != 0:
     count = len(list(tmp_dir.glob("*.txt"))) if tmp_dir.exists() else 0
-    user_status_running = mem_scheduler.get_tasks_status()
-    print(f"[Monitor] user_status_running: {user_status_running}; Files in tmp: {count}/{expected}")
+    tasks_status = mem_scheduler.get_tasks_status()
+    mem_scheduler.print_tasks_status(tasks_status=tasks_status)
+    print(f"[Monitor] Files in tmp: {count}/{expected}")
     sleep(poll_interval)
 print(f"[Result] Final files in tmp: {len(list(tmp_dir.glob('*.txt')))})")
 
