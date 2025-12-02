@@ -209,13 +209,12 @@ class TaskScheduleMonitor:
                     return local
 
                 try:
-                    loop = asyncio.get_running_loop()
-                    if loop.is_running():
-                        raise RuntimeError("event loop running")
+                    asyncio.get_running_loop()
+                    loop_running = True
                 except RuntimeError:
-                    loop = None
+                    loop_running = False
 
-                if loop is None:
+                if not loop_running:
                     return asyncio.run(_collect_async())
             except Exception as e:
                 logger.debug(f"Parallel status collection failed, fallback to sequential: {e}")

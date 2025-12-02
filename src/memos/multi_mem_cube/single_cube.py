@@ -375,8 +375,8 @@ class SingleCubeView(MemCubeView):
         """
         if os.getenv("ENABLE_PREFERENCE_MEMORY", "false").lower() != "true":
             return []
-        print(f"search_req.filter for preference memory: {search_req.filter}")
-        print(f"type of pref_mem: {type(self.naive_mem_cube.pref_mem)}")
+        logger.info(f"search_req.filter for preference memory: {search_req.filter}")
+        logger.info(f"type of pref_mem: {type(self.naive_mem_cube.pref_mem)}")
         try:
             results = self.naive_mem_cube.pref_mem.search(
                 query=search_req.query,

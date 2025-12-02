@@ -93,8 +93,6 @@ class SchedulerDispatcher(BaseSchedulerModule):
         # Task tracking for monitoring
         self._running_tasks: dict[str, RunningTaskItem] = {}
         self._task_lock = threading.Lock()
-        self._completed_tasks = []
-        self.completed_tasks_max_show_size = 10
 
         # Configure shutdown wait behavior from config or default
         self.stop_wait = (
@@ -128,6 +126,10 @@ class SchedulerDispatcher(BaseSchedulerModule):
                 self.status_tracker.task_started(
                     task_id=task_item.item_id, user_id=task_item.user_id
                 )
+            # Record task as running for monitoring (LocalQueue only)
+            if isinstance(self.memos_message_queue, SchedulerLocalQueue):
+                with self._task_lock:
+                    self._running_tasks[task_item.item_id] = task_item
             try:
                 # --- mark start: record queuing time(now - enqueue_ts)---
                 now = time.time()
@@ -179,14 +181,12 @@ class SchedulerDispatcher(BaseSchedulerModule):
                             redis_message_id=redis_message_id,
                         )
 
-                # Mark task as completed and remove from tracking
-                with self._task_lock:
-                    if task_item.item_id in self._running_tasks:
-                        task_item.mark_completed(result)
-                        del self._running_tasks[task_item.item_id]
-                        self._completed_tasks.append(task_item)
-                        if len(self._completed_tasks) > self.completed_tasks_max_show_size:
-                            self._completed_tasks.pop(0)
+                # Mark task as completed and remove from tracking (LocalQueue only)
+                if isinstance(self.memos_message_queue, SchedulerLocalQueue):
+                    with self._task_lock:
+                        if task_item.item_id in self._running_tasks:
+                            task_item.mark_completed(result)
+                            del self._running_tasks[task_item.item_id]
                 logger.info(f"Task completed: {task_item.get_execution_info()}")
                 return result
 
@@ -197,13 +197,12 @@ class SchedulerDispatcher(BaseSchedulerModule):
                     self.status_tracker.task_failed(
                         task_id=task_item.item_id, user_id=task_item.user_id, error_message=str(e)
                     )
-                # Mark task as failed and remove from tracking
-                with self._task_lock:
-                    if task_item.item_id in self._running_tasks:
-                        task_item.mark_failed(str(e))
-                        del self._running_tasks[task_item.item_id]
-                        if len(self._completed_tasks) > self.completed_tasks_max_show_size:
-                            self._completed_tasks.pop(0)
+                # Mark task as failed and remove from tracking (LocalQueue only)
+                if isinstance(self.memos_message_queue, SchedulerLocalQueue):
+                    with self._task_lock:
+                        if task_item.item_id in self._running_tasks:
+                            task_item.mark_failed(str(e))
+                            del self._running_tasks[task_item.item_id]
                 logger.error(f"Task failed: {task_item.get_execution_info()}, Error: {e}")
 
                 raise
@@ -238,10 +237,20 @@ class SchedulerDispatcher(BaseSchedulerModule):
                 lambda task: task.user_id == "user123" and task.status == "running"
             )
         """
-        with self._task_lock:
+        # Use lock only for LocalQueue; otherwise read without lock
+        if isinstance(self.memos_message_queue, SchedulerLocalQueue):
+            with self._task_lock:
+                if filter_func is None:
+                    return self._running_tasks.copy()
+
+                return {
+                    task_id: task_item
+                    for task_id, task_item in self._running_tasks.items()
+                    if filter_func(task_item)
+                }
+        else:
             if filter_func is None:
                 return self._running_tasks.copy()
-
             return {
                 task_id: task_item
                 for task_id, task_item in self._running_tasks.items()
@@ -255,7 +264,11 @@ class SchedulerDispatcher(BaseSchedulerModule):
         Returns:
             Number of running tasks
         """
-        with self._task_lock:
+        # Use lock only for LocalQueue; otherwise read without lock
+        if isinstance(self.memos_message_queue, SchedulerLocalQueue):
+            with self._task_lock:
+                return len(self._running_tasks)
+        else:
             return len(self._running_tasks)
 
     def register_handler(self, label: str, handler: Callable[[list[ScheduleMessageItem]], None]):
@@ -392,10 +405,6 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         task_name=f"{label}_handler",
                         messages=msgs,
                     )
-
-                    # Track running task for status/monitoring
-                    with self._task_lock:
-                        self._running_tasks[task_item.item_id] = task_item
 
                     # Create wrapped handler for task tracking
                     wrapped_handler = self._create_task_wrapper(handler, task_item)

@@ -61,7 +61,9 @@ class SchedulerLocalQueue(RedisSchedulerModule):
             queue.Full: If the queue is full and block=False or timeout expires.
             Exception: Any underlying error during queue.put() operation.
         """
-        stream_key = self.get_stream_key(user_id=message.user_id, mem_cube_id=message.mem_cube_id)
+        stream_key = self.get_stream_key(
+            user_id=message.user_id, mem_cube_id=message.mem_cube_id, task_label=message.task_label
+        )
 
         message.stream_key = stream_key
 
