@@ -70,6 +70,16 @@ class RabbitMQSchedulerModule(BaseSchedulerModule):
         Establish connection to RabbitMQ using pika.
         """
         try:
+            # Skip remote initialization in CI/pytest unless explicitly enabled
+            enable_env = os.getenv("MEMOS_ENABLE_RABBITMQ", "").lower() == "true"
+            in_ci = os.getenv("CI", "").lower() == "true"
+            in_pytest = os.getenv("PYTEST_CURRENT_TEST") is not None
+            if (in_ci or in_pytest) and not enable_env:
+                logger.info(
+                    "Skipping RabbitMQ initialization in CI/test environment. Set MEMOS_ENABLE_RABBITMQ=true to enable."
+                )
+                return
+
             from pika.adapters.select_connection import SelectConnection
 
             if config is None:

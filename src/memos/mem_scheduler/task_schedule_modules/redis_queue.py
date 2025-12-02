@@ -249,8 +249,25 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         stream_key = self.get_stream_key(
             user_id=user_id, mem_cube_id=mem_cube_id, task_label=task_label
         )
+        # No-op if not connected or message doesn't come from Redis
+        if not self._redis_conn:
+            logger.debug(
+                f"Skip ack: Redis not connected for stream '{stream_key}', msg_id='{redis_message_id}'"
+            )
+            return
+        if not redis_message_id:
+            logger.debug(
+                f"Skip ack: Empty redis_message_id for stream '{stream_key}', user_id='{user_id}', label='{task_label}'"
+            )
+            return
 
-        self.redis.xack(stream_key, self.consumer_group, redis_message_id)
+        try:
+            self._redis_conn.xack(stream_key, self.consumer_group, redis_message_id)
+        except Exception as e:
+            logger.warning(
+                f"xack failed for stream '{stream_key}', msg_id='{redis_message_id}': {e}"
+            )
+            return
 
         # Optionally delete the message from the stream to keep it clean
         if self.auto_delete_acked:
