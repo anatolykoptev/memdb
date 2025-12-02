@@ -16,7 +16,6 @@ from memos.mem_scheduler.schemas.general_schemas import (
 )
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.schemas.task_schemas import RunningTaskItem
-from memos.mem_scheduler.task_schedule_modules.local_queue import SchedulerLocalQueue
 from memos.mem_scheduler.task_schedule_modules.redis_queue import SchedulerRedisQueue
 from memos.mem_scheduler.task_schedule_modules.task_queue import ScheduleTaskQueue
 from memos.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
@@ -126,10 +125,6 @@ class SchedulerDispatcher(BaseSchedulerModule):
                 self.status_tracker.task_started(
                     task_id=task_item.item_id, user_id=task_item.user_id
                 )
-            # Record task as running for monitoring (LocalQueue only)
-            if isinstance(self.memos_message_queue, SchedulerLocalQueue):
-                with self._task_lock:
-                    self._running_tasks[task_item.item_id] = task_item
             try:
                 # --- mark start: record queuing time(now - enqueue_ts)---
                 now = time.time()
@@ -181,12 +176,11 @@ class SchedulerDispatcher(BaseSchedulerModule):
                             redis_message_id=redis_message_id,
                         )
 
-                # Mark task as completed and remove from tracking (LocalQueue only)
-                if isinstance(self.memos_message_queue, SchedulerLocalQueue):
-                    with self._task_lock:
-                        if task_item.item_id in self._running_tasks:
-                            task_item.mark_completed(result)
-                            del self._running_tasks[task_item.item_id]
+                # Mark task as completed and remove from tracking
+                with self._task_lock:
+                    if task_item.item_id in self._running_tasks:
+                        task_item.mark_completed(result)
+                        del self._running_tasks[task_item.item_id]
                 logger.info(f"Task completed: {task_item.get_execution_info()}")
                 return result
 
@@ -197,12 +191,11 @@ class SchedulerDispatcher(BaseSchedulerModule):
                     self.status_tracker.task_failed(
                         task_id=task_item.item_id, user_id=task_item.user_id, error_message=str(e)
                     )
-                # Mark task as failed and remove from tracking (LocalQueue only)
-                if isinstance(self.memos_message_queue, SchedulerLocalQueue):
-                    with self._task_lock:
-                        if task_item.item_id in self._running_tasks:
-                            task_item.mark_failed(str(e))
-                            del self._running_tasks[task_item.item_id]
+                # Mark task as failed and remove from tracking
+                with self._task_lock:
+                    if task_item.item_id in self._running_tasks:
+                        task_item.mark_failed(str(e))
+                        del self._running_tasks[task_item.item_id]
                 logger.error(f"Task failed: {task_item.get_execution_info()}, Error: {e}")
 
                 raise
@@ -237,20 +230,10 @@ class SchedulerDispatcher(BaseSchedulerModule):
                 lambda task: task.user_id == "user123" and task.status == "running"
             )
         """
-        # Use lock only for LocalQueue; otherwise read without lock
-        if isinstance(self.memos_message_queue, SchedulerLocalQueue):
-            with self._task_lock:
-                if filter_func is None:
-                    return self._running_tasks.copy()
-
-                return {
-                    task_id: task_item
-                    for task_id, task_item in self._running_tasks.items()
-                    if filter_func(task_item)
-                }
-        else:
+        with self._task_lock:
             if filter_func is None:
                 return self._running_tasks.copy()
+
             return {
                 task_id: task_item
                 for task_id, task_item in self._running_tasks.items()
@@ -264,11 +247,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
         Returns:
             Number of running tasks
         """
-        # Use lock only for LocalQueue; otherwise read without lock
-        if isinstance(self.memos_message_queue, SchedulerLocalQueue):
-            with self._task_lock:
-                return len(self._running_tasks)
-        else:
+        with self._task_lock:
             return len(self._running_tasks)
 
     def register_handler(self, label: str, handler: Callable[[list[ScheduleMessageItem]], None]):
@@ -352,7 +331,8 @@ class SchedulerDispatcher(BaseSchedulerModule):
         except Exception:
             running = 0
         try:
-            inflight = len(self._futures)
+            with self._task_lock:
+                inflight = len(self._futures)
         except Exception:
             inflight = 0
         try:
@@ -365,7 +345,8 @@ class SchedulerDispatcher(BaseSchedulerModule):
         logger.debug(f"Using _default_message_handler to deal with messages: {messages}")
 
     def _handle_future_result(self, future):
-        self._futures.remove(future)
+        with self._task_lock:
+            self._futures.discard(future)
         try:
             future.result()  # this will throw exception
         except Exception as e:
@@ -406,18 +387,26 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         messages=msgs,
                     )
 
+                    # Uniformly register the task before execution
+                    with self._task_lock:
+                        self._running_tasks[task_item.item_id] = task_item
+
                     # Create wrapped handler for task tracking
                     wrapped_handler = self._create_task_wrapper(handler, task_item)
 
                     # dispatch to different handler
                     logger.debug(f"Task started: {task_item.get_execution_info()}")
                     if self.enable_parallel_dispatch and self.dispatcher_executor is not None:
-                        # Capture variables in lambda to avoid loop variable issues
-                        _ = self.dispatcher_executor.submit(wrapped_handler, msgs)
+                        # Submit and track the future
+                        future = self.dispatcher_executor.submit(wrapped_handler, msgs)
+                        with self._task_lock:
+                            self._futures.add(future)
+                        future.add_done_callback(self._handle_future_result)
                         logger.info(
                             f"Dispatch {len(msgs)} message(s) to {label} handler for user {user_id} and mem_cube {mem_cube_id}."
                         )
                     else:
+                        # For synchronous execution, the wrapper will run and remove the task upon completion
                         wrapped_handler(msgs)
 
     def join(self, timeout: float | None = None) -> bool:
