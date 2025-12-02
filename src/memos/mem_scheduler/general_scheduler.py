@@ -290,6 +290,7 @@ class GeneralScheduler(BaseScheduler):
         # Prepare data for both logging paths, fetching original content for updates
         prepared_add_items = []
         prepared_update_items_with_original = []
+        missing_ids: list[str] = []
 
         for memory_id in userinput_memory_ids:
             try:
@@ -339,66 +340,46 @@ class GeneralScheduler(BaseScheduler):
                     prepared_add_items.append(mem_item)
 
             except Exception:
+                missing_ids.append(memory_id)
                 logger.warning(
                     f"This MemoryItem {memory_id} has already been deleted or an error occurred during preparation.",
                     stack_info=True,
                 )
+
+        if missing_ids:
+            content_preview = (
+                msg.content[:200] + "..."
+                if isinstance(msg.content, str) and len(msg.content) > 200
+                else msg.content
+            )
+            logger.warning(
+                "Missing TextualMemoryItem(s) during add log preparation. "
+                "memory_ids=%s user_id=%s mem_cube_id=%s task_id=%s item_id=%s redis_msg_id=%s label=%s stream_key=%s content_preview=%s",
+                missing_ids,
+                msg.user_id,
+                msg.mem_cube_id,
+                msg.task_id,
+                msg.item_id,
+                getattr(msg, "redis_message_id", ""),
+                msg.label,
+                getattr(msg, "stream_key", ""),
+                content_preview,
+            )
+
+        if not prepared_add_items and not prepared_update_items_with_original:
+            logger.warning(
+                "No add/update items prepared; skipping addMemory/knowledgeBaseUpdate logs. "
+                "user_id=%s mem_cube_id=%s task_id=%s item_id=%s redis_msg_id=%s label=%s stream_key=%s missing_ids=%s",
+                msg.user_id,
+                msg.mem_cube_id,
+                msg.task_id,
+                msg.item_id,
+                getattr(msg, "redis_message_id", ""),
+                msg.label,
+                getattr(msg, "stream_key", ""),
+                missing_ids,
+            )
         return prepared_add_items, prepared_update_items_with_original
-
-    def send_add_log_messages_to_cloud_env(
-        self, msg: ScheduleMessageItem, prepared_add_items, prepared_update_items_with_original
-    ):
-        # New: Knowledge Base Logging (Cloud Service)
-        kb_log_content = []
-        for item in prepared_add_items:
-            kb_log_content.append(
-                {
-                    "log_source": "KNOWLEDGE_BASE_LOG",
-                    "trigger_source": msg.info.get("trigger_source", "Messages")
-                    if msg.info
-                    else "Messages",  # Assuming msg.info is available and contains trigger_source
-                    "operation": "ADD",
-                    "memory_id": item.id,
-                    "content": item.memory,
-                    "original_content": None,
-                    "source_doc_id": getattr(item.metadata, "source_doc_id", None),
-                }
-            )
-        for item_data in prepared_update_items_with_original:
-            new_item = item_data["new_item"]
-            kb_log_content.append(
-                {
-                    "log_source": "KNOWLEDGE_BASE_LOG",
-                    "trigger_source": msg.info.get("trigger_source", "Messages")
-                    if msg.info
-                    else "Messages",
-                    "operation": "UPDATE",
-                    "memory_id": new_item.id,
-                    "content": new_item.memory,
-                    "original_content": item_data["original_content"],  # Now correctly fetched
-                    "source_doc_id": getattr(new_item.metadata, "source_doc_id", None),
-                }
-            )
-
-        if kb_log_content:
-            event = self.create_event_log(
-                label="knowledgeBaseUpdate",
-                # 1) Remove log_content parameter
-                # 2) Add memory_type
-                from_memory_type=USER_INPUT_TYPE,
-                to_memory_type=LONG_TERM_MEMORY_TYPE,
-                user_id=msg.user_id,
-                mem_cube_id=msg.mem_cube_id,
-                mem_cube=self.current_mem_cube,
-                memcube_log_content=kb_log_content,
-                metadata=None,
-                memory_len=len(kb_log_content),
-                memcube_name=self._map_memcube_name(msg.mem_cube_id),
-            )
-            # 3) Assign log_content afterwards
-            event.log_content = f"Knowledge Base Memory Update: {len(kb_log_content)} changes."
-            event.task_id = msg.task_id
-            self._submit_web_logs([event], additional_log_info="send_add_log_messages_to_cloud_env")
 
     def send_add_log_messages_to_local_env(
         self, msg: ScheduleMessageItem, prepared_add_items, prepared_update_items_with_original
@@ -482,6 +463,42 @@ class GeneralScheduler(BaseScheduler):
         logger.info(f"send_add_log_messages_to_local_env: {len(events)}")
         if events:
             self._submit_web_logs(events, additional_log_info="send_add_log_messages_to_cloud_env")
+
+    def _add_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
+        logger.info(f"Messages {messages} assigned to {ADD_LABEL} handler.")
+        # Process the query in a session turn
+        grouped_messages = group_messages_by_user_and_mem_cube(messages=messages)
+
+        self.validate_schedule_messages(messages=messages, label=ADD_LABEL)
+        try:
+            for user_id in grouped_messages:
+                for mem_cube_id in grouped_messages[user_id]:
+                    batch = grouped_messages[user_id][mem_cube_id]
+                    if not batch:
+                        continue
+
+                    # Process each message in the batch
+                    for msg in batch:
+                        prepared_add_items, prepared_update_items_with_original = (
+                            self.log_add_messages(msg=msg)
+                        )
+                        # Conditional Logging: Knowledge Base (Cloud Service) vs. Playground/Default
+                        is_cloud_env = (
+                            os.getenv("MEMSCHEDULER_RABBITMQ_EXCHANGE_NAME")
+                            == "memos-memory-change"
+                        )
+
+                        if is_cloud_env:
+                            self.send_add_log_messages_to_cloud_env(
+                                msg, prepared_add_items, prepared_update_items_with_original
+                            )
+                        else:
+                            self.send_add_log_messages_to_local_env(
+                                msg, prepared_add_items, prepared_update_items_with_original
+                            )
+
+        except Exception as e:
+            logger.error(f"Error: {e}", exc_info=True)
 
     def _mem_feedback_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
         try:
