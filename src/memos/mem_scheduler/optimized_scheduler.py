@@ -166,63 +166,33 @@ class OptimizedScheduler(GeneralScheduler):
             turns=self.history_memory_turns,
         )
         logger.info(f"Found {len(history_memories)} history memories.")
-        if not history_memories:
-            # Post retrieve
-            raw_memories = self.searcher.post_retrieve(
-                retrieved_results=raw_retrieved_memories,
-                top_k=search_req.top_k,
-                user_name=user_context.mem_cube_id,
-                info=info,
-            )
 
-            # Enhance with query
-            enhanced_memories, _ = self.retriever.enhance_memories_with_query(
-                query_history=[search_req.query],
-                memories=raw_memories,
-            )
-            formatted_memories = [format_textual_memory_item(item) for item in enhanced_memories]
-            return formatted_memories
-        else:
-            # if history memories can directly answer
-            sorted_history_memories = self.reranker.rerank(
-                query=search_req.query,  # Use search_req.query instead of undefined query
-                graph_results=history_memories,  # Pass TextualMemoryItem objects directly
-                top_k=search_req.top_k,  # Use search_req.top_k instead of undefined top_k
-                search_filter=search_filter,
-            )
-            logger.info(f"Reranked {len(sorted_history_memories)} history memories.")
-            merged_memories = self.searcher.post_retrieve(
-                retrieved_results=raw_retrieved_memories + sorted_history_memories,
-                top_k=search_req.top_k,
-                user_name=user_context.mem_cube_id,
-                info=info,
-            )
-            memories = merged_memories[: search_req.top_k]
+        # if history memories can directly answer
+        sorted_history_memories = self.reranker.rerank(
+            query=search_req.query,  # Use search_req.query instead of undefined query
+            graph_results=history_memories,  # Pass TextualMemoryItem objects directly
+            top_k=search_req.top_k,  # Use search_req.top_k instead of undefined top_k
+            search_filter=search_filter,
+        )
+        logger.info(f"Reranked {len(sorted_history_memories)} history memories.")
+        merged_memories = self.searcher.post_retrieve(
+            retrieved_results=raw_retrieved_memories + sorted_history_memories,
+            top_k=search_req.top_k,
+            user_name=user_context.mem_cube_id,
+            info=info,
+        )
+        memories = merged_memories[: search_req.top_k]
 
-            can_answer = self.retriever.evaluate_memory_answer_ability(
-                query=search_req.query, memory_texts=[one.memory for one in memories]
-            )
-
-            if can_answer:
-                logger.info("History memories can answer the query.")
-
-            else:
-                logger.info("Submitted memory history async task.")
-                # Enhance with query
-                memories, _ = self.retriever.enhance_memories_with_query(
-                    query_history=[search_req.query],
-                    memories=memories,
-                )
-            formatted_memories = [format_textual_memory_item(item) for item in memories]
-            self.submit_memory_history_async_task(
-                search_req=search_req,
-                user_context=user_context,
-                memories_to_store={
-                    "memories": [one.to_dict() for one in memories],
-                    "formatted_memories": formatted_memories,
-                },
-            )
-            return formatted_memories
+        formatted_memories = [format_textual_memory_item(item) for item in memories]
+        self.submit_memory_history_async_task(
+            search_req=search_req,
+            user_context=user_context,
+            memories_to_store={
+                "memories": [one.to_dict() for one in memories],
+                "formatted_memories": formatted_memories,
+            },
+        )
+        return formatted_memories
 
     def update_search_memories_to_redis(
         self,

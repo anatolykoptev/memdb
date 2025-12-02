@@ -48,6 +48,10 @@ class SchedulerLoggerModule(BaseSchedulerModule):
         mem_cube_id: str,
         mem_cube: GeneralMemCube,
     ) -> ScheduleLogForWebItem:
+        if mem_cube is None:
+            logger.error(
+                "mem_cube is None — this should not happen in production!", stack_info=True
+            )
         text_mem_base: TreeTextMemory = mem_cube.text_mem
         current_memory_sizes = text_mem_base.get_current_memory_size(user_name=mem_cube_id)
         current_memory_sizes = {
