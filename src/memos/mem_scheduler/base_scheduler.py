@@ -16,6 +16,7 @@ from memos.llms.base import BaseLLM
 from memos.log import get_logger
 from memos.mem_cube.base import BaseMemCube
 from memos.mem_cube.general import GeneralMemCube
+from memos.mem_scheduler.general_modules.init_components_for_scheduler import init_components
 from memos.mem_scheduler.general_modules.misc import AutoDroppingQueue as Queue
 from memos.mem_scheduler.general_modules.scheduler_logger import SchedulerLoggerModule
 from memos.mem_scheduler.memory_manage_modules.retriever import SchedulerRetriever
@@ -154,7 +155,8 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         self._context_lock = threading.Lock()
         self.current_user_id: UserID | str | None = None
         self.current_mem_cube_id: MemCubeID | str | None = None
-        self.current_mem_cube: BaseMemCube | None = None
+        self.components = init_components()
+        self.current_mem_cube: BaseMemCube | None = self.components["naive_mem_cube"]
         self._mem_cubes: dict[str, BaseMemCube] = {}
         self.auth_config_path: str | Path | None = self.config.get("auth_config_path", None)
         self.auth_config = None

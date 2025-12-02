@@ -1,32 +1,27 @@
+import json
 import os
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from memos.api.config import APIConfig
-from memos.api.handlers.config_builders import (
-    build_chat_llm_config,
-    build_embedder_config,
-    build_graph_db_config,
-    build_internet_retriever_config,
-    build_llm_config,
-    build_mem_reader_config,
-    build_pref_adder_config,
-    build_pref_extractor_config,
-    build_pref_retriever_config,
-    build_reranker_config,
-    build_vec_db_config,
-)
-from memos.configs.mem_scheduler import SchedulerConfigFactory
+from memos.configs.embedder import EmbedderConfigFactory
+from memos.configs.graph_db import GraphDBConfigFactory
+from memos.configs.internet_retriever import InternetRetrieverConfigFactory
+from memos.configs.llm import LLMConfigFactory
+from memos.configs.mem_reader import MemReaderConfigFactory
+from memos.configs.reranker import RerankerConfigFactory
+from memos.configs.vec_db import VectorDBConfigFactory
 from memos.embedders.factory import EmbedderFactory
 from memos.graph_dbs.factory import GraphStoreFactory
 from memos.llms.factory import LLMFactory
 from memos.log import get_logger
 from memos.mem_cube.navie import NaiveMemCube
-from memos.mem_feedback.simple_feedback import SimpleMemFeedback
-from memos.mem_os.product_server import MOSServer
 from memos.mem_reader.factory import MemReaderFactory
-from memos.mem_scheduler.orm_modules.base_model import BaseDBManager
-from memos.mem_scheduler.scheduler_factory import SchedulerFactory
+from memos.memories.textual.prefer_text_memory.config import (
+    AdderConfigFactory,
+    ExtractorConfigFactory,
+    RetrieverConfigFactory,
+)
 from memos.memories.textual.prefer_text_memory.factory import (
     AdderFactory,
     ExtractorFactory,
@@ -35,23 +30,169 @@ from memos.memories.textual.prefer_text_memory.factory import (
 from memos.memories.textual.simple_preference import SimplePreferenceTextMemory
 from memos.memories.textual.simple_tree import SimpleTreeTextMemory
 from memos.memories.textual.tree_text_memory.organize.manager import MemoryManager
-from memos.memories.textual.tree_text_memory.retrieve.retrieve_utils import FastTokenizer
-
-
-if TYPE_CHECKING:
-    from memos.memories.textual.tree import TreeTextMemory
-from memos.mem_agent.deepsearch_agent import DeepSearchMemAgent
 from memos.memories.textual.tree_text_memory.retrieve.internet_retriever_factory import (
     InternetRetrieverFactory,
 )
+from memos.memories.textual.tree_text_memory.retrieve.retrieve_utils import FastTokenizer
 from memos.reranker.factory import RerankerFactory
 from memos.vec_dbs.factory import VecDBFactory
 
 
-if TYPE_CHECKING:
-    from memos.mem_scheduler.optimized_scheduler import OptimizedScheduler
-    from memos.memories.textual.tree_text_memory.retrieve.searcher import Searcher
 logger = get_logger(__name__)
+
+
+def build_graph_db_config(user_id: str = "default") -> dict[str, Any]:
+    """
+    Build graph database configuration.
+
+    Args:
+        user_id: User ID for configuration context (default: "default")
+
+    Returns:
+        Validated graph database configuration dictionary
+    """
+    graph_db_backend_map = {
+        "neo4j-community": APIConfig.get_neo4j_community_config(user_id=user_id),
+        "neo4j": APIConfig.get_neo4j_config(user_id=user_id),
+        "nebular": APIConfig.get_nebular_config(user_id=user_id),
+        "polardb": APIConfig.get_polardb_config(user_id=user_id),
+    }
+
+    graph_db_backend = os.getenv("NEO4J_BACKEND", "nebular").lower()
+    return GraphDBConfigFactory.model_validate(
+        {
+            "backend": graph_db_backend,
+            "config": graph_db_backend_map[graph_db_backend],
+        }
+    )
+
+
+def build_vec_db_config() -> dict[str, Any]:
+    """
+    Build vector database configuration.
+
+    Returns:
+        Validated vector database configuration dictionary
+    """
+    return VectorDBConfigFactory.model_validate(
+        {
+            "backend": "milvus",
+            "config": APIConfig.get_milvus_config(),
+        }
+    )
+
+
+def build_llm_config() -> dict[str, Any]:
+    """
+    Build LLM configuration.
+
+    Returns:
+        Validated LLM configuration dictionary
+    """
+    return LLMConfigFactory.model_validate(
+        {
+            "backend": "openai",
+            "config": APIConfig.get_openai_config(),
+        }
+    )
+
+
+def build_chat_llm_config() -> list[dict[str, Any]]:
+    """
+    Build chat LLM configuration.
+
+    Returns:
+        Validated chat LLM configuration dictionary
+    """
+    configs = json.loads(os.getenv("CHAT_MODEL_LIST"))
+    return [
+        {
+            "config_class": LLMConfigFactory.model_validate(
+                {
+                    "backend": cfg.get("backend", "openai"),
+                    "config": (
+                        {k: v for k, v in cfg.items() if k not in ["backend", "support_models"]}
+                    )
+                    if cfg
+                    else APIConfig.get_openai_config(),
+                }
+            ),
+            "support_models": cfg.get("support_models", None),
+        }
+        for cfg in configs
+    ]
+
+
+def build_embedder_config() -> dict[str, Any]:
+    """
+    Build embedder configuration.
+
+    Returns:
+        Validated embedder configuration dictionary
+    """
+    return EmbedderConfigFactory.model_validate(APIConfig.get_embedder_config())
+
+
+def build_mem_reader_config() -> dict[str, Any]:
+    """
+    Build memory reader configuration.
+
+    Returns:
+        Validated memory reader configuration dictionary
+    """
+    return MemReaderConfigFactory.model_validate(
+        APIConfig.get_product_default_config()["mem_reader"]
+    )
+
+
+def build_reranker_config() -> dict[str, Any]:
+    """
+    Build reranker configuration.
+
+    Returns:
+        Validated reranker configuration dictionary
+    """
+    return RerankerConfigFactory.model_validate(APIConfig.get_reranker_config())
+
+
+def build_internet_retriever_config() -> dict[str, Any]:
+    """
+    Build internet retriever configuration.
+
+    Returns:
+        Validated internet retriever configuration dictionary
+    """
+    return InternetRetrieverConfigFactory.model_validate(APIConfig.get_internet_config())
+
+
+def build_pref_extractor_config() -> dict[str, Any]:
+    """
+    Build preference memory extractor configuration.
+
+    Returns:
+        Validated extractor configuration dictionary
+    """
+    return ExtractorConfigFactory.model_validate({"backend": "naive", "config": {}})
+
+
+def build_pref_adder_config() -> dict[str, Any]:
+    """
+    Build preference memory adder configuration.
+
+    Returns:
+        Validated adder configuration dictionary
+    """
+    return AdderConfigFactory.model_validate({"backend": "naive", "config": {}})
+
+
+def build_pref_retriever_config() -> dict[str, Any]:
+    """
+    Build preference memory retriever configuration.
+
+    Returns:
+        Validated retriever configuration dictionary
+    """
+    return RetrieverConfigFactory.model_validate({"backend": "naive", "config": {}})
 
 
 def _get_default_memory_size(cube_config: Any) -> dict[str, int]:
@@ -106,24 +247,7 @@ def _init_chat_llms(chat_llm_configs: list[dict]) -> dict[str, Any]:
     return model_name_instrance_maping
 
 
-def init_server() -> dict[str, Any]:
-    """
-    Initialize all server components and configurations.
-
-    This function orchestrates the creation and initialization of all components
-    required by the MemOS server, including:
-    - Database connections (graph DB, vector DB)
-    - Language models and embedders
-    - Memory systems (text, preference)
-    - Scheduler and related modules
-
-    Returns:
-        A dictionary containing all initialized components with descriptive keys.
-        This approach allows easy addition of new components without breaking
-        existing code that uses the components.
-    """
-    logger.info("Initializing MemOS server components...")
-
+def init_components() -> dict[str, Any]:
     # Initialize Redis client first as it is a core dependency for features like scheduler status tracking
     try:
         from memos.mem_scheduler.orm_modules.api_redis_model import APIRedisDBManager
@@ -142,13 +266,9 @@ def init_server() -> dict[str, Any]:
     # Get default cube configuration
     default_cube_config = APIConfig.get_default_cube_config()
 
-    # Get online bot setting
-    dingding_enabled = APIConfig.is_dingding_bot_enabled()
-
     # Build component configurations
     graph_db_config = build_graph_db_config()
     llm_config = build_llm_config()
-    chat_llm_config = build_chat_llm_config()
     embedder_config = build_embedder_config()
     mem_reader_config = build_mem_reader_config()
     reranker_config = build_reranker_config()
@@ -168,7 +288,6 @@ def init_server() -> dict[str, Any]:
         else None
     )
     llm = LLMFactory.from_config(llm_config)
-    chat_llms = _init_chat_llms(chat_llm_config)
     embedder = EmbedderFactory.from_config(embedder_config)
     mem_reader = MemReaderFactory.from_config(mem_reader_config)
     reranker = RerankerFactory.from_config(reranker_config)
@@ -177,7 +296,6 @@ def init_server() -> dict[str, Any]:
     )
 
     # Initialize chat llms
-
     logger.debug("Core components instantiated")
 
     # Initialize memory manager
@@ -260,17 +378,6 @@ def init_server() -> dict[str, Any]:
         else None
     )
 
-    logger.debug("Preference memory initialized")
-
-    # Initialize MOS Server
-    mos_server = MOSServer(
-        mem_reader=mem_reader,
-        llm=llm,
-        online_bot=False,
-    )
-
-    logger.debug("MOS server initialized")
-
     # Create MemCube with pre-initialized memory instances
     naive_mem_cube = NaiveMemCube(
         text_mem=text_mem,
@@ -278,91 +385,7 @@ def init_server() -> dict[str, Any]:
         act_mem=None,
         para_mem=None,
     )
-
-    logger.debug("MemCube created")
-
-    tree_mem: TreeTextMemory = naive_mem_cube.text_mem
-    searcher: Searcher = tree_mem.get_searcher(
-        manual_close_internet=os.getenv("ENABLE_INTERNET", "true").lower() == "false",
-        moscube=False,
-        process_llm=mem_reader.llm,
-    )
-    logger.debug("Searcher created")
-
-    # Initialize feedback server
-    feedback_server = SimpleMemFeedback(
-        llm=llm,
-        embedder=embedder,
-        graph_store=graph_db,
-        memory_manager=memory_manager,
-        mem_reader=mem_reader,
-        searcher=searcher,
-    )
-
-    # Initialize Scheduler
-    scheduler_config_dict = APIConfig.get_scheduler_config()
-    scheduler_config = SchedulerConfigFactory(
-        backend="optimized_scheduler", config=scheduler_config_dict
-    )
-    mem_scheduler: OptimizedScheduler = SchedulerFactory.from_config(scheduler_config)
-    mem_scheduler.initialize_modules(
-        chat_llm=llm,
-        process_llm=mem_reader.llm,
-        db_engine=BaseDBManager.create_default_sqlite_engine(),
-        mem_reader=mem_reader,
-        redis_client=redis_client,
-    )
-    mem_scheduler.init_mem_cube(
-        mem_cube=naive_mem_cube, searcher=searcher, feedback_server=feedback_server
-    )
-    logger.debug("Scheduler initialized")
-
-    # Initialize SchedulerAPIModule
-    api_module = mem_scheduler.api_module
-
-    # Start scheduler if enabled
-    if os.getenv("API_SCHEDULER_ON", "true").lower() == "true":
-        mem_scheduler.start()
-        logger.info("Scheduler started")
-
-    logger.info("MemOS server components initialized successfully")
-
-    # Initialize online bot if enabled
-    online_bot = None
-    if dingding_enabled:
-        from memos.memos_tools.notification_service import get_online_bot_function
-
-        online_bot = get_online_bot_function() if dingding_enabled else None
-        logger.info("DingDing bot is enabled")
-
-    deepsearch_agent = DeepSearchMemAgent(
-        llm=llm,
-        memory_retriever=tree_mem,
-    )
     # Return all components as a dictionary for easy access and extension
     return {
-        "graph_db": graph_db,
-        "mem_reader": mem_reader,
-        "llm": llm,
-        "chat_llms": chat_llms,
-        "embedder": embedder,
-        "reranker": reranker,
-        "internet_retriever": internet_retriever,
-        "memory_manager": memory_manager,
-        "default_cube_config": default_cube_config,
-        "mos_server": mos_server,
-        "mem_scheduler": mem_scheduler,
         "naive_mem_cube": naive_mem_cube,
-        "searcher": searcher,
-        "api_module": api_module,
-        "vector_db": vector_db,
-        "pref_extractor": pref_extractor,
-        "pref_adder": pref_adder,
-        "pref_retriever": pref_retriever,
-        "text_mem": text_mem,
-        "pref_mem": pref_mem,
-        "online_bot": online_bot,
-        "feedback_server": feedback_server,
-        "redis_client": redis_client,
-        "deepsearch_agent": deepsearch_agent,
     }
