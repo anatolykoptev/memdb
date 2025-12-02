@@ -302,6 +302,10 @@ class GeneralScheduler(BaseScheduler):
 
             except Exception:
                 missing_ids.append(memory_id)
+                logger.warning(
+                    f"This MemoryItem {memory_id} has already been deleted or an error occurred during preparation.",
+                    stack_info=True,
+                )
 
         if missing_ids:
             content_preview = (
