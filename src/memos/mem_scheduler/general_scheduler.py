@@ -487,6 +487,12 @@ class GeneralScheduler(BaseScheduler):
                 user_id = message.user_id
                 mem_cube_id = message.mem_cube_id
                 mem_cube = self.current_mem_cube
+                if mem_cube is None:
+                    logger.warning(
+                        f"mem_cube is None for user_id={user_id}, mem_cube_id={mem_cube_id}, skipping processing"
+                    )
+                    return
+
                 content = message.content
                 user_name = message.user_name
                 info = message.info or {}
@@ -785,6 +791,11 @@ class GeneralScheduler(BaseScheduler):
                 user_id = message.user_id
                 mem_cube_id = message.mem_cube_id
                 mem_cube = self.current_mem_cube
+                if mem_cube is None:
+                    logger.warning(
+                        f"mem_cube is None for user_id={user_id}, mem_cube_id={mem_cube_id}, skipping processing"
+                    )
+                    return
                 content = message.content
                 user_name = message.user_name
 
@@ -1010,6 +1021,11 @@ class GeneralScheduler(BaseScheduler):
         def process_message(message: ScheduleMessageItem):
             try:
                 mem_cube = self.current_mem_cube
+                if mem_cube is None:
+                    logger.warning(
+                        f"mem_cube is None for user_id={message.user_id}, mem_cube_id={message.mem_cube_id}, skipping processing"
+                    )
+                    return
 
                 user_id = message.user_id
                 session_id = message.session_id
