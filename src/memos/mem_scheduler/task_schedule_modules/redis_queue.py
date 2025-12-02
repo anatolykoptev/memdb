@@ -5,6 +5,7 @@ This module provides a Redis-based queue implementation that can replace
 the local memos_message_queue functionality in BaseScheduler.
 """
 
+import contextlib
 import os
 import re
 import threading
@@ -104,6 +105,13 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         self.message_pack_cache = deque()
         self.orchestrator = SchedulerOrchestrator(queue=self)
 
+        # Prefetch pending messages into cache at initialization
+        if self._is_connected:
+            try:
+                self._prefetch_pending_cache(consume_batch_size=1)
+            except Exception as e:
+                logger.warning(f"Prefetch pending during init failed: {e}")
+
     def get_stream_key(self, user_id: str, mem_cube_id: str, task_label: str) -> str:
         stream_key = f"{self.stream_key_prefix}:{user_id}:{mem_cube_id}:{task_label}"
         return stream_key
@@ -149,6 +157,83 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             logger.debug(f"Cache refill complete, cache size now: {len(self.message_pack_cache)}")
         except Exception as e:
             logger.warning(f"Async cache refill failed: {e}", exc_info=True)
+
+    def _prefetch_pending_cache(self, consume_batch_size: int | None = None) -> None:
+        """
+        Prefetch pending messages for this consumer across all streams and
+        populate self.message_pack_cache with packed batches.
+
+        This is executed during initialization so that subsequent get_messages
+        can serve pending tasks from the local cache without reading pending
+        on demand in get().
+        """
+        if not self._redis_conn:
+            return
+
+        if consume_batch_size is None or consume_batch_size <= 0:
+            consume_batch_size = self.task_broker_flush_bar
+
+        try:
+            stream_keys = self.get_stream_keys(stream_key_prefix=self.stream_key_prefix)
+            if not stream_keys:
+                return
+
+            pending_collected: list[ScheduleMessageItem] = []
+
+            for stream_key in stream_keys:
+                # Ensure consumer group exists
+                with contextlib.suppress(Exception):
+                    self._ensure_consumer_group(stream_key=stream_key)
+
+                # Read pending messages for THIS consumer, non-blocking
+                messages_for_stream: list[tuple[str, list[tuple[str, dict]]]] = []
+                try:
+                    messages_for_stream = self._redis_conn.xreadgroup(
+                        self.consumer_group,
+                        self.consumer_name,
+                        {stream_key: "0"},
+                        count=None,
+                        block=None,
+                    )
+                except Exception as read_err:
+                    err_msg = str(read_err).lower()
+                    if "nogroup" in err_msg or "no such key" in err_msg:
+                        # Create missing group/stream and retry once
+                        try:
+                            self._ensure_consumer_group(stream_key=stream_key)
+                            messages_for_stream = self._redis_conn.xreadgroup(
+                                self.consumer_group,
+                                self.consumer_name,
+                                {stream_key: "0"},
+                                count=None,
+                                block=None,
+                            )
+                        except Exception:
+                            messages_for_stream = []
+                    else:
+                        messages_for_stream = []
+
+                # Convert and collect
+                for _s, stream_messages in messages_for_stream or []:
+                    for message_id, fields in stream_messages:
+                        try:
+                            message = ScheduleMessageItem.from_dict(fields)
+                            message.redis_message_id = message_id
+                            pending_collected.append(message)
+                        except Exception as e:
+                            logger.error(f"Failed to parse pending message {message_id}: {e}")
+
+            # Pack into cache
+            if pending_collected:
+                for i in range(0, len(pending_collected), consume_batch_size):
+                    pack = pending_collected[i : i + consume_batch_size]
+                    if pack:
+                        self.message_pack_cache.append(pack)
+                logger.info(
+                    f"Prefetched {len(pending_collected)} pending messages into cache across {len(stream_keys)} streams"
+                )
+        except Exception as e:
+            logger.warning(f"Prefetch pending cache failed: {e}")
 
     def get_messages(self, batch_size: int) -> list[ScheduleMessageItem]:
         if self.message_pack_cache:
@@ -296,7 +381,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                 redis_timeout = None  # Non-blocking
 
             # Read messages from the consumer group
-            # 1) Read remaining/new messages first (not yet delivered to any consumer)
+            # Only read new messages (not yet delivered to any consumer)
             new_messages: list[tuple[str, list[tuple[str, dict]]]] = []
             try:
                 new_messages = self._redis_conn.xreadgroup(
@@ -323,56 +408,8 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                     )
                 else:
                     raise
-
-            # 2) If needed, read pending messages for THIS consumer only
-            pending_messages: list[tuple[str, list[tuple[str, dict]]]] = []
-            need_pending_count = None
-            if batch_size is None:
-                # No batch_size: prefer returning a single new message; if none, fetch one pending
-                if not new_messages:
-                    need_pending_count = 1
-            else:
-                # With batch_size: fill from pending if new insufficient
-                new_count = sum(len(sm) for _s, sm in new_messages) if new_messages else 0
-                need_pending = max(0, batch_size - new_count)
-                need_pending_count = need_pending if need_pending > 0 else 0
-
-            if need_pending_count:
-                try:
-                    pending_messages = self._redis_conn.xreadgroup(
-                        self.consumer_group,
-                        self.consumer_name,
-                        {stream_key: "0"},  # read only this consumer's pending
-                        count=need_pending_count,
-                        block=None,  # do not block when checking pending
-                    )
-                except Exception as read_err:
-                    # Handle missing group/stream by creating and retrying once
-                    err_msg = str(read_err).lower()
-                    if "nogroup" in err_msg or "no such key" in err_msg:
-                        logger.warning(
-                            f"Consumer group or stream missing for '{stream_key}/{self.consumer_group}'. Attempting to create and retry (pending)."
-                        )
-                        self._ensure_consumer_group(stream_key=stream_key)
-                        try:
-                            pending_messages = self._redis_conn.xreadgroup(
-                                self.consumer_group,
-                                self.consumer_name,
-                                {stream_key: "0"},
-                                count=need_pending_count,
-                                block=None,
-                            )
-                        except Exception:
-                            pending_messages = []
-                    else:
-                        pending_messages = []
-
-            # Combine: new first, then pending
-            messages = []
-            if new_messages:
-                messages.extend(new_messages)
-            if pending_messages:
-                messages.extend(pending_messages)
+            # Only process the new messages
+            messages = new_messages if new_messages else []
 
             result_messages = []
 

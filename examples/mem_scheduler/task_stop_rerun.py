@@ -28,6 +28,7 @@ def my_test_handler(messages: list[ScheduleMessageItem]):
         try:
             print(f"writing {file_path}...")
             file_path.write_text(f"Task {task_id} processed.\n")
+            sleep(1)
         except Exception as e:
             print(f"Failed to write {file_path}: {e}")
 

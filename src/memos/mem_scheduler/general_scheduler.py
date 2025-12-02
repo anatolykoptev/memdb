@@ -153,6 +153,45 @@ class GeneralScheduler(BaseScheduler):
                 mem_cube=self.current_mem_cube,
             )
 
+    def _add_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
+        logger.info(f"Messages {messages} assigned to {ADD_LABEL} handler.")
+        # Process the query in a session turn
+        grouped_messages = group_messages_by_user_and_mem_cube(messages=messages)
+
+        self.validate_schedule_messages(messages=messages, label=ADD_LABEL)
+        try:
+            for user_id in grouped_messages:
+                for mem_cube_id in grouped_messages[user_id]:
+                    batch = grouped_messages[user_id][mem_cube_id]
+                    if not batch:
+                        continue
+
+                    # Process each message in the batch
+                    for msg in batch:
+                        prepared_add_items, prepared_update_items_with_original = (
+                            self.log_add_messages(msg=msg)
+                        )
+                        logger.info(
+                            f"prepared_add_items: {prepared_add_items};\n prepared_update_items_with_original: {prepared_update_items_with_original}"
+                        )
+                        # Conditional Logging: Knowledge Base (Cloud Service) vs. Playground/Default
+                        is_cloud_env = (
+                            os.getenv("MEMSCHEDULER_RABBITMQ_EXCHANGE_NAME")
+                            == "memos-memory-change"
+                        )
+
+                        if is_cloud_env:
+                            self.send_add_log_messages_to_cloud_env(
+                                msg, prepared_add_items, prepared_update_items_with_original
+                            )
+                        else:
+                            self.send_add_log_messages_to_local_env(
+                                msg, prepared_add_items, prepared_update_items_with_original
+                            )
+
+        except Exception as e:
+            logger.error(f"Error: {e}", exc_info=True)
+
     def _query_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
         """
         Process and handle query trigger messages from the queue.
@@ -304,7 +343,7 @@ class GeneralScheduler(BaseScheduler):
                     f"This MemoryItem {memory_id} has already been deleted or an error occurred during preparation.",
                     stack_info=True,
                 )
-            return prepared_add_items, prepared_update_items_with_original
+        return prepared_add_items, prepared_update_items_with_original
 
     def send_add_log_messages_to_cloud_env(
         self, msg: ScheduleMessageItem, prepared_add_items, prepared_update_items_with_original
@@ -444,42 +483,6 @@ class GeneralScheduler(BaseScheduler):
         if events:
             self._submit_web_logs(events, additional_log_info="send_add_log_messages_to_cloud_env")
 
-    def _add_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
-        logger.info(f"Messages {messages} assigned to {ADD_LABEL} handler.")
-        # Process the query in a session turn
-        grouped_messages = group_messages_by_user_and_mem_cube(messages=messages)
-
-        self.validate_schedule_messages(messages=messages, label=ADD_LABEL)
-        try:
-            for user_id in grouped_messages:
-                for mem_cube_id in grouped_messages[user_id]:
-                    batch = grouped_messages[user_id][mem_cube_id]
-                    if not batch:
-                        continue
-
-                    # Process each message in the batch
-                    for msg in batch:
-                        prepared_add_items, prepared_update_items_with_original = (
-                            self.log_add_messages(msg=msg)
-                        )
-                        # Conditional Logging: Knowledge Base (Cloud Service) vs. Playground/Default
-                        is_cloud_env = (
-                            os.getenv("MEMSCHEDULER_RABBITMQ_EXCHANGE_NAME")
-                            == "memos-memory-change"
-                        )
-
-                        if is_cloud_env:
-                            self.send_add_log_messages_to_cloud_env(
-                                msg, prepared_add_items, prepared_update_items_with_original
-                            )
-                        else:
-                            self.send_add_log_messages_to_local_env(
-                                msg, prepared_add_items, prepared_update_items_with_original
-                            )
-
-        except Exception as e:
-            logger.error(f"Error: {e}", exc_info=True)
-
     def _mem_feedback_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
         try:
             message = messages[0]
@@ -551,7 +554,8 @@ class GeneralScheduler(BaseScheduler):
                 mem_cube = self.current_mem_cube
                 if mem_cube is None:
                     logger.warning(
-                        f"mem_cube is None for user_id={user_id}, mem_cube_id={mem_cube_id}, skipping processing"
+                        f"mem_cube is None for user_id={user_id}, mem_cube_id={mem_cube_id}, skipping processing",
+                        stack_info=True,
                     )
                     return
 
@@ -591,7 +595,7 @@ class GeneralScheduler(BaseScheduler):
                 )
 
             except Exception as e:
-                logger.error(f"Error processing mem_read message: {e}", exc_info=True)
+                logger.error(f"Error processing mem_read message: {e}", stack_info=True)
 
         with ContextThreadPoolExecutor(max_workers=min(8, len(messages))) as executor:
             futures = [executor.submit(process_message, msg) for msg in messages]
@@ -599,7 +603,7 @@ class GeneralScheduler(BaseScheduler):
                 try:
                     future.result()
                 except Exception as e:
-                    logger.error(f"Thread task failed: {e}", exc_info=True)
+                    logger.error(f"Thread task failed: {e}", stack_info=True)
 
     def _process_memories_with_reader(
         self,
