@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, model_validator
 
 # Import message types from core types module
 from memos.log import get_logger
-from memos.types import PermissionDict, SearchMode
+from memos.types import MessageDict, MessageList, MessagesType, PermissionDict, SearchMode
 
 
 logger = get_logger(__name__)
@@ -626,6 +626,38 @@ class APIADDRequest(BaseRequest):
             self.info.setdefault("source", self.source)
 
         return self
+
+
+class APIFeedbackRequest(BaseRequest):
+    """Request model for processing feedback info."""
+
+    user_id: str = Field(..., description="User ID")
+    session_id: str | None = Field(
+        "default_session", description="Session ID for soft-filtering memories"
+    )
+    task_id: str | None = Field(None, description="Task ID for monitering async tasks")
+    history: list[MessageDict] | None = Field(..., description="Chat history")
+    retrieved_memory_ids: list[str] | None = Field(
+        None, description="Retrieved memory ids at last turn"
+    )
+    feedback_content: str | None = Field(..., description="Feedback content to process")
+    feedback_time: str | None = Field(None, description="Feedback time")
+    # ==== Multi-cube writing ====
+    writable_cube_ids: list[str] | None = Field(
+        None, description="List of cube IDs user can write for multi-cube add"
+    )
+    async_mode: Literal["sync", "async"] = Field(
+        "async", description="feedback mode: sync or async"
+    )
+    corrected_answer: bool = Field(False, description="Whether need return corrected answer")
+    # ==== Backward compatibility ====
+    mem_cube_id: str | None = Field(
+        None,
+        description=(
+            "(Deprecated) Single cube ID to search in. "
+            "Prefer `readable_cube_ids` for multi-cube search."
+        ),
+    )
 
 
 class APIChatCompleteRequest(BaseRequest):
