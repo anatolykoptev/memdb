@@ -180,14 +180,13 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         )
 
                 # Mark task as completed and remove from tracking
-                if isinstance(self.memos_message_queue, SchedulerLocalQueue):
-                    with self._task_lock:
-                        if task_item.item_id in self._running_tasks:
-                            task_item.mark_completed(result)
-                            del self._running_tasks[task_item.item_id]
-                            self._completed_tasks.append(task_item)
-                            if len(self._completed_tasks) > self.completed_tasks_max_show_size:
-                                self._completed_tasks.pop(0)
+                with self._task_lock:
+                    if task_item.item_id in self._running_tasks:
+                        task_item.mark_completed(result)
+                        del self._running_tasks[task_item.item_id]
+                        self._completed_tasks.append(task_item)
+                        if len(self._completed_tasks) > self.completed_tasks_max_show_size:
+                            self._completed_tasks.pop(0)
                 logger.info(f"Task completed: {task_item.get_execution_info()}")
                 return result
 
@@ -199,13 +198,12 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         task_id=task_item.item_id, user_id=task_item.user_id, error_message=str(e)
                     )
                 # Mark task as failed and remove from tracking
-                if isinstance(self.memos_message_queue, SchedulerLocalQueue):
-                    with self._task_lock:
-                        if task_item.item_id in self._running_tasks:
-                            task_item.mark_failed(str(e))
-                            del self._running_tasks[task_item.item_id]
-                            if len(self._completed_tasks) > self.completed_tasks_max_show_size:
-                                self._completed_tasks.pop(0)
+                with self._task_lock:
+                    if task_item.item_id in self._running_tasks:
+                        task_item.mark_failed(str(e))
+                        del self._running_tasks[task_item.item_id]
+                        if len(self._completed_tasks) > self.completed_tasks_max_show_size:
+                            self._completed_tasks.pop(0)
                 logger.error(f"Task failed: {task_item.get_execution_info()}, Error: {e}")
 
                 raise
@@ -394,6 +392,10 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         task_name=f"{label}_handler",
                         messages=msgs,
                     )
+
+                    # Track running task for status/monitoring
+                    with self._task_lock:
+                        self._running_tasks[task_item.item_id] = task_item
 
                     # Create wrapped handler for task tracking
                     wrapped_handler = self._create_task_wrapper(handler, task_item)
