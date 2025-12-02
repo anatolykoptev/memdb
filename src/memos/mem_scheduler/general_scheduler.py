@@ -304,7 +304,7 @@ class GeneralScheduler(BaseScheduler):
                     f"This MemoryItem {memory_id} has already been deleted or an error occurred during preparation.",
                     stack_info=True,
                 )
-            return prepared_add_items, prepared_update_items_with_original
+        return prepared_add_items, prepared_update_items_with_original
 
     def send_add_log_messages_to_cloud_env(
         self, msg: ScheduleMessageItem, prepared_add_items, prepared_update_items_with_original
