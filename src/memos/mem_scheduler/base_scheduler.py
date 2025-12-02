@@ -163,6 +163,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         self,
         mem_cube: BaseMemCube,
         searcher: Searcher | None = None,
+        feedback_server: Searcher | None = None,
     ):
         self.mem_cube = mem_cube
         self.text_mem: TreeTextMemory = self.mem_cube.text_mem
@@ -175,6 +176,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             )
         else:
             self.searcher = searcher
+        self.feedback_server = feedback_server
 
     def initialize_modules(
         self,

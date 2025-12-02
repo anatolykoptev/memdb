@@ -138,7 +138,8 @@ class OptimizedScheduler(GeneralScheduler):
         target_session_id = search_req.session_id
         if not target_session_id:
             target_session_id = "default_session"
-        search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
+        search_priority = {"session_id": search_req.session_id} if search_req.session_id else None
+        search_filter = search_req.filter
 
         # Rerank Memories - reranker expects TextualMemoryItem objects
 
@@ -156,6 +157,7 @@ class OptimizedScheduler(GeneralScheduler):
             manual_close_internet=not search_req.internet_search,
             moscube=search_req.moscube,
             search_filter=search_filter,
+            search_priority=search_priority,
             info=info,
         )
 

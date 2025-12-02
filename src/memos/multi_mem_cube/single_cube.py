@@ -16,6 +16,7 @@ from memos.context.context import ContextThreadPoolExecutor
 from memos.log import get_logger
 from memos.mem_scheduler.schemas.general_schemas import (
     ADD_LABEL,
+    MEM_FEEDBACK_LABEL,
     MEM_READ_LABEL,
     PREF_ADD_LABEL,
 )
@@ -34,7 +35,7 @@ logger = get_logger(__name__)
 
 
 if TYPE_CHECKING:
-    from memos.api.product_models import APIADDRequest, APISearchRequest
+    from memos.api.product_models import APIADDRequest, APIFeedbackRequest, APISearchRequest
     from memos.mem_cube.navie import NaiveMemCube
     from memos.mem_reader.simple_struct import SimpleStructMemReader
     from memos.mem_scheduler.optimized_scheduler import OptimizedScheduler
@@ -48,6 +49,7 @@ class SingleCubeView(MemCubeView):
     mem_scheduler: OptimizedScheduler
     logger: Any
     searcher: Any
+    feedback_server: Any | None = None
     deepsearch_agent: Any | None = None
 
     def add_memories(self, add_req: APIADDRequest) -> list[dict[str, Any]]:
@@ -138,6 +140,47 @@ class SingleCubeView(MemCubeView):
         self.logger.info(f"Search memories result: {memories_result}")
         self.logger.info(f"Search {len(memories_result)} memories.")
         return memories_result
+
+    def feedback_memories(self, feedback_req: APIFeedbackRequest) -> dict[str, Any]:
+        target_session_id = feedback_req.session_id or "default_session"
+        if feedback_req.async_mode == "async":
+            try:
+                feedback_req_str = json.dumps(feedback_req.model_dump())
+                message_item_feedback = ScheduleMessageItem(
+                    user_id=feedback_req.user_id,
+                    task_id=feedback_req.task_id,
+                    session_id=target_session_id,
+                    mem_cube_id=self.cube_id,
+                    mem_cube=self.naive_mem_cube,
+                    label=MEM_FEEDBACK_LABEL,
+                    content=feedback_req_str,
+                    timestamp=datetime.utcnow(),
+                )
+                self.mem_scheduler.memos_message_queue.submit_messages(
+                    messages=[message_item_feedback]
+                )
+                self.logger.info(f"[SingleCubeView] cube={self.cube_id} Submitted FEEDBACK async")
+            except Exception as e:
+                self.logger.error(
+                    f"[SingleCubeView] cube={self.cube_id} Failed to submit FEEDBACK: {e}",
+                    exc_info=True,
+                )
+            return []
+        else:
+            feedback_result = self.feedback_server.process_feedback(
+                user_id=feedback_req.user_id,
+                user_name=self.cube_id,
+                session_id=feedback_req.session_id,
+                chat_history=feedback_req.history,
+                retrieved_memory_ids=feedback_req.retrieved_memory_ids,
+                feedback_content=feedback_req.feedback_content,
+                feedback_time=feedback_req.feedback_time,
+                async_mode=feedback_req.async_mode,
+                corrected_answer=feedback_req.corrected_answer,
+                task_id=feedback_req.task_id,
+            )
+            self.logger.info(f"Feedback memories result: {feedback_result}")
+        return feedback_result
 
     def _get_search_mode(self, mode: str) -> str:
         """
@@ -242,7 +285,8 @@ class SingleCubeView(MemCubeView):
             return self._agentic_search(search_req=search_req, user_context=user_context)
 
         target_session_id = search_req.session_id or "default_session"
-        search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
+        search_priority = {"session_id": search_req.session_id} if search_req.session_id else None
+        search_filter = search_req.filter
 
         info = {
             "user_id": search_req.user_id,
@@ -259,6 +303,7 @@ class SingleCubeView(MemCubeView):
             manual_close_internet=not search_req.internet_search,
             moscube=search_req.moscube,
             search_filter=search_filter,
+            search_priority=search_priority,
             info=info,
         )
 
@@ -294,6 +339,7 @@ class SingleCubeView(MemCubeView):
                     top_k=retrieval_size,
                     mode=SearchMode.FAST,
                     memory_type="All",
+                    search_priority=search_priority,
                     search_filter=search_filter,
                     info=info,
                 )
@@ -329,7 +375,8 @@ class SingleCubeView(MemCubeView):
         """
         if os.getenv("ENABLE_PREFERENCE_MEMORY", "false").lower() != "true":
             return []
-
+        print(f"search_req.filter for preference memory: {search_req.filter}")
+        print(f"type of pref_mem: {type(self.naive_mem_cube.pref_mem)}")
         try:
             results = self.naive_mem_cube.pref_mem.search(
                 query=search_req.query,
@@ -339,6 +386,7 @@ class SingleCubeView(MemCubeView):
                     "session_id": search_req.session_id,
                     "chat_history": search_req.chat_history,
                 },
+                search_filter=search_req.filter,
             )
             return [format_memory_item(data) for data in results]
         except Exception as e:
@@ -361,7 +409,9 @@ class SingleCubeView(MemCubeView):
             List of search results
         """
         target_session_id = search_req.session_id or "default_session"
-        search_filter = {"session_id": search_req.session_id} if search_req.session_id else None
+        search_priority = {"session_id": search_req.session_id} if search_req.session_id else None
+        search_filter = search_req.filter or None
+        plugin = bool(search_req.source is not None and search_req.source == "plugin")
 
         search_results = self.naive_mem_cube.text_mem.search(
             query=search_req.query,
@@ -370,11 +420,13 @@ class SingleCubeView(MemCubeView):
             mode=SearchMode.FAST,
             manual_close_internet=not search_req.internet_search,
             search_filter=search_filter,
+            search_priority=search_priority,
             info={
                 "user_id": search_req.user_id,
                 "session_id": target_session_id,
                 "chat_history": search_req.chat_history,
             },
+            plugin=plugin,
         )
 
         formatted_memories = [format_memory_item(data) for data in search_results]
