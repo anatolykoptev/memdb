@@ -344,8 +344,8 @@ class GeneralScheduler(BaseScheduler):
         if kb_log_content:
             event = self.create_event_log(
                 label="knowledgeBaseUpdate",
-                # 1. 移除 log_content 参数
-                # 2. 补充 memory_type
+                # 1) Remove log_content parameter
+                # 2) Add memory_type
                 from_memory_type=USER_INPUT_TYPE,
                 to_memory_type=LONG_TERM_MEMORY_TYPE,
                 user_id=msg.user_id,
@@ -356,7 +356,7 @@ class GeneralScheduler(BaseScheduler):
                 memory_len=len(kb_log_content),
                 memcube_name=self._map_memcube_name(msg.mem_cube_id),
             )
-            # 3. 后置赋值 log_content
+            # 3) Assign log_content afterwards
             event.log_content = f"Knowledge Base Memory Update: {len(kb_log_content)} changes."
             event.task_id = msg.task_id
             self._submit_web_logs([event], additional_log_info="send_add_log_messages_to_cloud_env")
