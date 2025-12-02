@@ -251,6 +251,7 @@ class GeneralScheduler(BaseScheduler):
         # Prepare data for both logging paths, fetching original content for updates
         prepared_add_items = []
         prepared_update_items_with_original = []
+        missing_ids: list[str] = []
 
         for memory_id in userinput_memory_ids:
             try:
@@ -300,10 +301,39 @@ class GeneralScheduler(BaseScheduler):
                     prepared_add_items.append(mem_item)
 
             except Exception:
-                logger.warning(
-                    f"This MemoryItem {memory_id} has already been deleted or an error occurred during preparation.",
-                    stack_info=True,
-                )
+                missing_ids.append(memory_id)
+
+        if missing_ids:
+            content_preview = (
+                msg.content[:200] + "..." if isinstance(msg.content, str) and len(msg.content) > 200 else msg.content
+            )
+            logger.warning(
+                "Missing TextualMemoryItem(s) during add log preparation. "
+                "memory_ids=%s user_id=%s mem_cube_id=%s task_id=%s item_id=%s redis_msg_id=%s label=%s stream_key=%s content_preview=%s",
+                missing_ids,
+                msg.user_id,
+                msg.mem_cube_id,
+                msg.task_id,
+                msg.item_id,
+                getattr(msg, "redis_message_id", ""),
+                msg.label,
+                getattr(msg, "stream_key", ""),
+                content_preview,
+            )
+
+        if not prepared_add_items and not prepared_update_items_with_original:
+            logger.warning(
+                "No add/update items prepared; skipping addMemory/knowledgeBaseUpdate logs. "
+                "user_id=%s mem_cube_id=%s task_id=%s item_id=%s redis_msg_id=%s label=%s stream_key=%s missing_ids=%s",
+                msg.user_id,
+                msg.mem_cube_id,
+                msg.task_id,
+                msg.item_id,
+                getattr(msg, "redis_message_id", ""),
+                msg.label,
+                getattr(msg, "stream_key", ""),
+                missing_ids,
+            )
         return prepared_add_items, prepared_update_items_with_original
 
     def send_add_log_messages_to_cloud_env(
