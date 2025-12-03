@@ -175,6 +175,8 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         searcher: Searcher | None = None,
         feedback_server: Searcher | None = None,
     ):
+        if mem_cube is None:
+            logger.error("mem_cube is None, cannot initialize", stack_info=True)
         self.mem_cube = mem_cube
         self.text_mem: TreeTextMemory = self.mem_cube.text_mem
         self.reranker: HTTPBGEReranker = self.text_mem.reranker
@@ -258,6 +260,15 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
     @property
     def mem_cube(self) -> BaseMemCube:
         """The memory cube associated with this MemChat."""
+        if self.current_mem_cube is None:
+            logger.error("mem_cube is None when accessed", stack_info=True)
+        try:
+            self.components = init_components()
+            self.current_mem_cube: BaseMemCube = self.components["naive_mem_cube"]
+        except Exception:
+            logger.info(
+                "No environment available to initialize mem cube. Using fallback naive_mem_cube."
+            )
         return self.current_mem_cube
 
     @mem_cube.setter
