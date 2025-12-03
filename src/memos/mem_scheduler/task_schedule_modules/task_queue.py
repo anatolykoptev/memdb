@@ -11,6 +11,7 @@ from memos.context.context import get_current_trace_id
 from memos.mem_scheduler.task_schedule_modules.local_queue import SchedulerLocalQueue
 from memos.mem_scheduler.task_schedule_modules.redis_queue import SchedulerRedisQueue
 from memos.mem_scheduler.utils.db_utils import get_utc_now
+from memos.mem_scheduler.utils.monitor_event_utils import emit_monitor_event, to_iso
 from memos.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
 
 
@@ -77,6 +78,8 @@ class ScheduleTaskQueue:
         if len(messages) < 1:
             logger.error("Submit empty")
         elif len(messages) == 1:
+            enqueue_ts = to_iso(getattr(messages[0], "timestamp", None))
+            emit_monitor_event("enqueue", messages[0], {"enqueue_ts": enqueue_ts})
             self.memos_message_queue.put(messages[0])
         else:
             user_cube_groups = group_messages_by_user_and_mem_cube(messages)
@@ -99,6 +102,8 @@ class ScheduleTaskQueue:
                             )
                             continue
 
+                        enqueue_ts = to_iso(getattr(message, "timestamp", None))
+                        emit_monitor_event("enqueue", message, {"enqueue_ts": enqueue_ts})
                         self.memos_message_queue.put(message)
                         logger.info(
                             f"Submitted message to local queue: {message.label} - {message.content}"

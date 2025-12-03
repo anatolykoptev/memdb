@@ -4,7 +4,7 @@ import threading
 import time
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
@@ -49,6 +49,7 @@ from memos.mem_scheduler.utils.db_utils import get_utc_now
 from memos.mem_scheduler.utils.filter_utils import (
     transform_name_to_key,
 )
+from memos.mem_scheduler.utils.monitor_event_utils import emit_monitor_event, to_iso
 from memos.mem_scheduler.utils.status_tracker import TaskStatusTracker
 from memos.mem_scheduler.webservice_modules.rabbitmq_service import RabbitMQSchedulerModule
 from memos.mem_scheduler.webservice_modules.redis_service import RedisSchedulerModule
@@ -768,7 +769,33 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                 messages = self.memos_message_queue.get_messages(batch_size=self.consume_batch)
 
                 if messages:
+                    now = time.time()
                     for msg in messages:
+                        enqueue_ts_obj = getattr(msg, "timestamp", None)
+                        enqueue_epoch = None
+                        if isinstance(enqueue_ts_obj, (int, float)):
+                            enqueue_epoch = float(enqueue_ts_obj)
+                        elif hasattr(enqueue_ts_obj, "timestamp"):
+                            dt = enqueue_ts_obj
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            enqueue_epoch = dt.timestamp()
+
+                        queue_wait_ms = None
+                        if enqueue_epoch is not None:
+                            queue_wait_ms = max(0.0, now - enqueue_epoch) * 1000
+
+                        setattr(msg, "dequeue_ts", now)
+                        emit_monitor_event(
+                            "dequeue",
+                            msg,
+                            {
+                                "enqueue_ts": to_iso(enqueue_ts_obj),
+                                "dequeue_ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+                                "queue_wait_ms": queue_wait_ms,
+                            },
+                        )
+
                         self.metrics.task_dequeued(user_id=msg.user_id, task_type=msg.label)
                     try:
                         import contextlib

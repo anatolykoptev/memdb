@@ -24,6 +24,7 @@ from memos.mem_scheduler.schemas.task_schemas import RunningTaskItem
 from memos.mem_scheduler.task_schedule_modules.redis_queue import SchedulerRedisQueue
 from memos.mem_scheduler.task_schedule_modules.task_queue import ScheduleTaskQueue
 from memos.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
+from memos.mem_scheduler.utils.monitor_event_utils import emit_monitor_event, to_iso
 from memos.mem_scheduler.utils.status_tracker import TaskStatusTracker
 
 
@@ -126,6 +127,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
 
         def wrapped_handler(messages: list[ScheduleMessageItem]):
             start_time = time.time()
+            start_iso = datetime.fromtimestamp(start_time, tz=timezone.utc).isoformat()
             if self.status_tracker:
                 self.status_tracker.task_started(
                     task_id=task_item.item_id, user_id=task_item.user_id
@@ -164,17 +166,49 @@ class SchedulerDispatcher(BaseSchedulerModule):
                 wait_sec = max(0.0, now - enq_epoch)
                 self.metrics.observe_task_wait_duration(wait_sec, m.user_id, m.label)
 
+                dequeue_ts = getattr(first_msg, "dequeue_ts", None)
+                start_delay_ms = None
+                if isinstance(dequeue_ts, (int, float)):
+                    start_delay_ms = max(0.0, start_time - dequeue_ts) * 1000
+
+                emit_monitor_event(
+                    "start",
+                    first_msg,
+                    {
+                        "start_ts": start_iso,
+                        "start_delay_ms": start_delay_ms,
+                        "enqueue_ts": to_iso(enq_ts),
+                        "dequeue_ts": to_iso(
+                            datetime.fromtimestamp(dequeue_ts, tz=timezone.utc)
+                            if isinstance(dequeue_ts, (int, float))
+                            else None
+                        ),
+                    },
+                )
+
                 # Execute the original handler
                 result = handler(messages)
 
                 # --- mark done ---
-                duration = time.time() - start_time
+                finish_time = time.time()
+                duration = finish_time - start_time
                 self.metrics.observe_task_duration(duration, m.user_id, m.label)
                 if self.status_tracker:
                     self.status_tracker.task_completed(
                         task_id=task_item.item_id, user_id=task_item.user_id
                     )
                 self.metrics.task_completed(user_id=m.user_id, task_type=m.label)
+
+                emit_monitor_event(
+                    "finish",
+                    first_msg,
+                    {
+                        "status": "ok",
+                        "start_ts": start_iso,
+                        "finish_ts": datetime.fromtimestamp(finish_time, tz=timezone.utc).isoformat(),
+                        "exec_duration_ms": duration * 1000,
+                    },
+                )
                 # Redis ack is handled in finally to cover failure cases
 
                 # Mark task as completed and remove from tracking
@@ -187,11 +221,24 @@ class SchedulerDispatcher(BaseSchedulerModule):
 
             except Exception as e:
                 m = messages[0]
+                finish_time = time.time()
                 self.metrics.task_failed(m.user_id, m.label, type(e).__name__)
                 if self.status_tracker:
                     self.status_tracker.task_failed(
                         task_id=task_item.item_id, user_id=task_item.user_id, error_message=str(e)
                     )
+                emit_monitor_event(
+                    "finish",
+                    m,
+                    {
+                        "status": "fail",
+                        "start_ts": start_iso,
+                        "finish_ts": datetime.fromtimestamp(finish_time, tz=timezone.utc).isoformat(),
+                        "exec_duration_ms": (finish_time - start_time) * 1000,
+                        "error_type": type(e).__name__,
+                        "error_msg": str(e),
+                    },
+                )
                 # Mark task as failed and remove from tracking
                 with self._task_lock:
                     if task_item.item_id in self._running_tasks:
