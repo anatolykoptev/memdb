@@ -5,14 +5,14 @@ This module provides a Redis-based queue implementation that can replace
 the local memos_message_queue functionality in BaseScheduler.
 """
 
+from memos.context.context import get_current_trace_id
 from memos.log import get_logger
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
-from memos.context.context import get_current_trace_id
 from memos.mem_scheduler.task_schedule_modules.local_queue import SchedulerLocalQueue
 from memos.mem_scheduler.task_schedule_modules.redis_queue import SchedulerRedisQueue
 from memos.mem_scheduler.utils.db_utils import get_utc_now
-from memos.mem_scheduler.utils.monitor_event_utils import emit_monitor_event, to_iso
 from memos.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
+from memos.mem_scheduler.utils.monitor_event_utils import emit_monitor_event, to_iso
 
 
 logger = get_logger(__name__)

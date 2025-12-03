@@ -773,7 +773,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                     for msg in messages:
                         enqueue_ts_obj = getattr(msg, "timestamp", None)
                         enqueue_epoch = None
-                        if isinstance(enqueue_ts_obj, (int, float)):
+                        if isinstance(enqueue_ts_obj, int | float):
                             enqueue_epoch = float(enqueue_ts_obj)
                         elif hasattr(enqueue_ts_obj, "timestamp"):
                             dt = enqueue_ts_obj
@@ -785,13 +785,15 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                         if enqueue_epoch is not None:
                             queue_wait_ms = max(0.0, now - enqueue_epoch) * 1000
 
-                        setattr(msg, "dequeue_ts", now)
+                        msg.dequeue_ts = now
                         emit_monitor_event(
                             "dequeue",
                             msg,
                             {
                                 "enqueue_ts": to_iso(enqueue_ts_obj),
-                                "dequeue_ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+                                "dequeue_ts": datetime.fromtimestamp(
+                                    now, tz=timezone.utc
+                                ).isoformat(),
                                 "queue_wait_ms": queue_wait_ms,
                             },
                         )

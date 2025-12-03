@@ -4,7 +4,7 @@ import time
 
 from collections import defaultdict
 from collections.abc import Callable
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from memos.context.context import (
@@ -168,7 +168,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
 
                 dequeue_ts = getattr(first_msg, "dequeue_ts", None)
                 start_delay_ms = None
-                if isinstance(dequeue_ts, (int, float)):
+                if isinstance(dequeue_ts, int | float):
                     start_delay_ms = max(0.0, start_time - dequeue_ts) * 1000
 
                 emit_monitor_event(
@@ -180,7 +180,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         "enqueue_ts": to_iso(enq_ts),
                         "dequeue_ts": to_iso(
                             datetime.fromtimestamp(dequeue_ts, tz=timezone.utc)
-                            if isinstance(dequeue_ts, (int, float))
+                            if isinstance(dequeue_ts, int | float)
                             else None
                         ),
                     },
@@ -205,7 +205,9 @@ class SchedulerDispatcher(BaseSchedulerModule):
                     {
                         "status": "ok",
                         "start_ts": start_iso,
-                        "finish_ts": datetime.fromtimestamp(finish_time, tz=timezone.utc).isoformat(),
+                        "finish_ts": datetime.fromtimestamp(
+                            finish_time, tz=timezone.utc
+                        ).isoformat(),
                         "exec_duration_ms": duration * 1000,
                     },
                 )
@@ -233,7 +235,9 @@ class SchedulerDispatcher(BaseSchedulerModule):
                     {
                         "status": "fail",
                         "start_ts": start_iso,
-                        "finish_ts": datetime.fromtimestamp(finish_time, tz=timezone.utc).isoformat(),
+                        "finish_ts": datetime.fromtimestamp(
+                            finish_time, tz=timezone.utc
+                        ).isoformat(),
                         "exec_duration_ms": (finish_time - start_time) * 1000,
                         "error_type": type(e).__name__,
                         "error_msg": str(e),
