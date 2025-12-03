@@ -262,13 +262,13 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         """The memory cube associated with this MemChat."""
         if self.current_mem_cube is None:
             logger.error("mem_cube is None when accessed", stack_info=True)
-        try:
-            self.components = init_components()
-            self.current_mem_cube: BaseMemCube = self.components["naive_mem_cube"]
-        except Exception:
-            logger.info(
-                "No environment available to initialize mem cube. Using fallback naive_mem_cube."
-            )
+            try:
+                self.components = init_components()
+                self.current_mem_cube: BaseMemCube = self.components["naive_mem_cube"]
+            except Exception:
+                logger.info(
+                    "No environment available to initialize mem cube. Using fallback naive_mem_cube."
+                )
         return self.current_mem_cube
 
     @mem_cube.setter
