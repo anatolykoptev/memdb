@@ -1318,54 +1318,6 @@ class GeneralScheduler(BaseScheduler):
                     f"Successfully processed and add preferences for user_id={user_id}, mem_cube_id={mem_cube_id}, pref_ids={pref_ids}"
                 )
 
-                # Create and submit log for web display
-                # Only send logs if RabbitMQ is configured with direct exchange (cloud service scenario)
-                is_cloud_env = (
-                    os.getenv("MEMSCHEDULER_RABBITMQ_EXCHANGE_NAME") == "memos-memory-change"
-                )
-                if pref_ids and is_cloud_env:
-                    pref_content = []
-                    pref_meta = []
-                    for i, pref_mem_item in enumerate(pref_memories):
-                        if i < len(pref_ids):
-                            pref_content.append(
-                                {
-                                    "content": pref_mem_item.memory,
-                                    "ref_id": pref_ids[i],
-                                }
-                            )
-                            pref_meta.append(
-                                {
-                                    "ref_id": pref_ids[i],
-                                    "id": pref_ids[i],
-                                    "memory": pref_mem_item.memory,
-                                    "memory_type": getattr(
-                                        pref_mem_item.metadata, "memory_type", "preference"
-                                    ),
-                                }
-                            )
-
-                    event = self.create_event_log(
-                        label="addMemory",
-                        from_memory_type=USER_INPUT_TYPE,
-                        to_memory_type=LONG_TERM_MEMORY_TYPE,
-                        user_id=user_id,
-                        mem_cube_id=mem_cube_id,
-                        mem_cube=mem_cube,
-                        memcube_log_content=pref_content,
-                        metadata=pref_meta,
-                        memory_len=len(pref_content),
-                        memcube_name=self._map_memcube_name(mem_cube_id),
-                    )
-                    event.task_id = message.task_id
-                    self._submit_web_logs([event])
-                else:
-                    logger.info(
-                        "Skipping web log for pref_add. pref_ids_count=%s is_cloud_env=%s",
-                        len(pref_ids) if pref_ids else 0,
-                        is_cloud_env,
-                    )
-
             except Exception as e:
                 logger.error(f"Error processing pref_add message: {e}", exc_info=True)
 
