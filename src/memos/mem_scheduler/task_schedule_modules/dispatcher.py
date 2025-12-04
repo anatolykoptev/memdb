@@ -171,7 +171,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
 
                 dequeue_ts = getattr(first_msg, "_dequeue_ts", None)
                 start_delay_ms = None
-                if isinstance(dequeue_ts, (int, float)):
+                if isinstance(dequeue_ts, int | float):
                     start_delay_ms = max(0.0, start_time - dequeue_ts) * 1000
 
                 emit_monitor_event(
@@ -183,7 +183,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
                         "enqueue_ts": to_iso(enq_ts),
                         "dequeue_ts": to_iso(
                             datetime.fromtimestamp(dequeue_ts, tz=timezone.utc)
-                            if isinstance(dequeue_ts, (int, float))
+                            if isinstance(dequeue_ts, int | float)
                             else None
                         ),
                     },
