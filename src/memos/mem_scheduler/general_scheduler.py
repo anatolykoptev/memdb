@@ -126,7 +126,7 @@ class GeneralScheduler(BaseScheduler):
             top_k=self.top_k,
         )
         logger.info(
-            f"Processed {len(queries)} queries {queries} and retrieved {len(new_candidates)} new candidate memories for user_id={user_id}"
+            f"[long_memory_update_process] Processed {len(queries)} queries {queries} and retrieved {len(new_candidates)} new candidate memories for user_id={user_id}"
         )
 
         # rerank
@@ -137,12 +137,22 @@ class GeneralScheduler(BaseScheduler):
             original_memory=cur_working_memory,
             new_memory=new_candidates,
         )
-        logger.info(
-            f"Final working memory size: {len(new_order_working_memory)} memories for user_id={user_id}"
+        logger.debug(
+            f"[long_memory_update_process] Final working memory size: {len(new_order_working_memory)} memories for user_id={user_id}"
+        )
+
+        old_memory_texts = [mem.memory for mem in cur_working_memory]
+        new_memory_texts = [mem.memory for mem in new_order_working_memory]
+
+        logger.debug(
+            f"[long_memory_update_process] For user_id='{user_id}', mem_cube_id='{mem_cube_id}': "
+            f"Scheduler replaced working memory based on query history {queries}. "
+            f"Old working memory ({len(old_memory_texts)} items): {old_memory_texts}. "
+            f"New working memory ({len(new_memory_texts)} items): {new_memory_texts}."
         )
 
         # update activation memories
-        logger.info(
+        logger.debug(
             f"Activation memory update {'enabled' if self.enable_activation_memory else 'disabled'} "
             f"(interval: {self.monitor.act_mem_update_interval}s)"
         )
@@ -373,9 +383,8 @@ class GeneralScheduler(BaseScheduler):
 
             except Exception:
                 missing_ids.append(memory_id)
-                logger.warning(
-                    f"This MemoryItem {memory_id} has already been deleted or an error occurred during preparation.",
-                    stack_info=True,
+                logger.debug(
+                    f"This MemoryItem {memory_id} has already been deleted or an error occurred during preparation."
                 )
 
         if missing_ids:
@@ -1264,7 +1273,7 @@ class GeneralScheduler(BaseScheduler):
             return
 
         logger.info(
-            f"Processing {len(queries)} queries for user_id={user_id}, mem_cube_id={mem_cube_id}"
+            f"[process_session_turn] Processing {len(queries)} queries for user_id={user_id}, mem_cube_id={mem_cube_id}"
         )
 
         cur_working_memory: list[TextualMemoryItem] = text_mem_base.get_working_memory()
@@ -1282,18 +1291,18 @@ class GeneralScheduler(BaseScheduler):
 
         if (not intent_result["trigger_retrieval"]) and (not time_trigger_flag):
             logger.info(
-                f"Query schedule not triggered for user_id={user_id}, mem_cube_id={mem_cube_id}. Intent_result: {intent_result}"
+                f"[process_session_turn] Query schedule not triggered for user_id={user_id}, mem_cube_id={mem_cube_id}. Intent_result: {intent_result}"
             )
             return
         elif (not intent_result["trigger_retrieval"]) and time_trigger_flag:
             logger.info(
-                f"Query schedule forced to trigger due to time ticker for user_id={user_id}, mem_cube_id={mem_cube_id}"
+                f"[process_session_turn] Query schedule forced to trigger due to time ticker for user_id={user_id}, mem_cube_id={mem_cube_id}"
             )
             intent_result["trigger_retrieval"] = True
             intent_result["missing_evidences"] = queries
         else:
             logger.info(
-                f"Query schedule triggered for user_id={user_id}, mem_cube_id={mem_cube_id}. "
+                f"[process_session_turn] Query schedule triggered for user_id={user_id}, mem_cube_id={mem_cube_id}. "
                 f"Missing evidences: {intent_result['missing_evidences']}"
             )
 
@@ -1303,7 +1312,7 @@ class GeneralScheduler(BaseScheduler):
         new_candidates = []
         for item in missing_evidences:
             logger.info(
-                f"Searching for missing evidence: '{item}' with top_k={k_per_evidence} for user_id={user_id}"
+                f"[process_session_turn] Searching for missing evidence: '{item}' with top_k={k_per_evidence} for user_id={user_id}"
             )
             info = {
                 "user_id": user_id,
@@ -1318,7 +1327,7 @@ class GeneralScheduler(BaseScheduler):
                 info=info,
             )
             logger.info(
-                f"Search results for missing evidence '{item}': {[one.memory for one in results]}"
+                f"[process_session_turn] Search results for missing evidence '{item}': {[one.memory for one in results]}"
             )
             new_candidates.extend(results)
         return cur_working_memory, new_candidates

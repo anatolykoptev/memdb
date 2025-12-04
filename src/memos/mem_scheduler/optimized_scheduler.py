@@ -299,7 +299,7 @@ class OptimizedScheduler(GeneralScheduler):
 
             # Apply combined filtering (unrelated + redundant)
             logger.info(
-                f"Applying combined unrelated and redundant memory filtering to {len(memories_with_new_order)} memories"
+                f"[optimized replace_working_memory] Applying combined unrelated and redundant memory filtering to {len(memories_with_new_order)} memories"
             )
             filtered_memories, filtering_success_flag = (
                 self.retriever.filter_unrelated_and_redundant_memories(
@@ -310,20 +310,20 @@ class OptimizedScheduler(GeneralScheduler):
 
             if filtering_success_flag:
                 logger.info(
-                    f"Combined filtering completed successfully. "
+                    f"[optimized replace_working_memory] Combined filtering completed successfully. "
                     f"Filtered from {len(memories_with_new_order)} to {len(filtered_memories)} memories"
                 )
                 memories_with_new_order = filtered_memories
             else:
                 logger.warning(
-                    "Combined filtering failed - keeping memories as fallback. "
+                    "[optimized replace_working_memory] Combined filtering failed - keeping memories as fallback. "
                     f"Count: {len(memories_with_new_order)}"
                 )
 
             # Update working memory monitors
             query_keywords = query_db_manager.obj.get_keywords_collections()
             logger.info(
-                f"Processing {len(memories_with_new_order)} memories with {len(query_keywords)} query keywords"
+                f"[optimized replace_working_memory] Processing {len(memories_with_new_order)} memories with {len(query_keywords)} query keywords"
             )
             new_working_memory_monitors = self.transform_working_memories_to_monitors(
                 query_keywords=query_keywords,
@@ -334,7 +334,9 @@ class OptimizedScheduler(GeneralScheduler):
                 for one in new_working_memory_monitors:
                     one.sorting_score = 0
 
-            logger.info(f"update {len(new_working_memory_monitors)} working_memory_monitors")
+            logger.info(
+                f"[optimized replace_working_memory] update {len(new_working_memory_monitors)} working_memory_monitors"
+            )
             self.monitor.update_working_memory_monitors(
                 new_working_memory_monitors=new_working_memory_monitors,
                 user_id=user_id,
@@ -352,7 +354,7 @@ class OptimizedScheduler(GeneralScheduler):
             new_working_memories = [mem_monitor.tree_memory_item for mem_monitor in mem_monitors]
 
             logger.info(
-                f"The working memory has been replaced with {len(memories_with_new_order)} new memories."
+                f"[optimized replace_working_memory] The working memory has been replaced with {len(memories_with_new_order)} new memories."
             )
             self.log_working_memory_replacement(
                 original_memory=original_memory,
