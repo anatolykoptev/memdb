@@ -562,42 +562,6 @@ class GeneralScheduler(BaseScheduler):
             event.task_id = msg.task_id
             self._submit_web_logs([event])
 
-    def _add_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
-        logger.info(f"Messages {messages} assigned to {ADD_TASK_LABEL} handler.")
-        # Process the query in a session turn
-        grouped_messages = group_messages_by_user_and_mem_cube(messages=messages)
-
-        self.validate_schedule_messages(messages=messages, label=ADD_TASK_LABEL)
-        try:
-            for user_id in grouped_messages:
-                for mem_cube_id in grouped_messages[user_id]:
-                    batch = grouped_messages[user_id][mem_cube_id]
-                    if not batch:
-                        continue
-
-                    # Process each message in the batch
-                    for msg in batch:
-                        prepared_add_items, prepared_update_items_with_original = (
-                            self.log_add_messages(msg=msg)
-                        )
-                        # Conditional Logging: Knowledge Base (Cloud Service) vs. Playground/Default
-                        is_cloud_env = (
-                            os.getenv("MEMSCHEDULER_RABBITMQ_EXCHANGE_NAME")
-                            == "memos-memory-change"
-                        )
-
-                        if is_cloud_env:
-                            self.send_add_log_messages_to_cloud_env(
-                                msg, prepared_add_items, prepared_update_items_with_original
-                            )
-                        else:
-                            self.send_add_log_messages_to_local_env(
-                                msg, prepared_add_items, prepared_update_items_with_original
-                            )
-
-        except Exception as e:
-            logger.error(f"Error: {e}", exc_info=True)
-
     def _mem_feedback_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
         try:
             if not messages:

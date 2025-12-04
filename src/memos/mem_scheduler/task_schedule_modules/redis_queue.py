@@ -491,7 +491,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
     def full(self) -> bool:
         if self.max_len is None:
             return False
-        return self.size() >= self.maxsize
+        return self.size() >= self.max_len
 
     def join(self) -> None:
         """
