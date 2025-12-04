@@ -14,13 +14,13 @@ from memos.api.handlers.formatters_handler import (
 )
 from memos.context.context import ContextThreadPoolExecutor
 from memos.log import get_logger
-from memos.mem_scheduler.schemas.general_schemas import (
-    ADD_LABEL,
-    MEM_FEEDBACK_LABEL,
-    MEM_READ_LABEL,
-    PREF_ADD_LABEL,
-)
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
+from memos.mem_scheduler.schemas.task_schemas import (
+    ADD_TASK_LABEL,
+    MEM_FEEDBACK_TASK_LABEL,
+    MEM_READ_TASK_LABEL,
+    PREF_ADD_TASK_LABEL,
+)
 from memos.multi_mem_cube.views import MemCubeView
 from memos.types.general_types import (
     FINE_STRATEGY,
@@ -152,7 +152,7 @@ class SingleCubeView(MemCubeView):
                     session_id=target_session_id,
                     mem_cube_id=self.cube_id,
                     mem_cube=self.naive_mem_cube,
-                    label=MEM_FEEDBACK_LABEL,
+                    label=MEM_FEEDBACK_TASK_LABEL,
                     content=feedback_req_str,
                     timestamp=datetime.utcnow(),
                 )
@@ -492,7 +492,7 @@ class SingleCubeView(MemCubeView):
                     session_id=target_session_id,
                     mem_cube_id=self.cube_id,
                     mem_cube=self.naive_mem_cube,
-                    label=MEM_READ_LABEL,
+                    label=MEM_READ_TASK_LABEL,
                     content=json.dumps(mem_ids),
                     timestamp=datetime.utcnow(),
                     user_name=self.cube_id,
@@ -514,7 +514,7 @@ class SingleCubeView(MemCubeView):
                 session_id=target_session_id,
                 mem_cube_id=self.cube_id,
                 mem_cube=self.naive_mem_cube,
-                label=ADD_LABEL,
+                label=ADD_TASK_LABEL,
                 content=json.dumps(mem_ids),
                 timestamp=datetime.utcnow(),
                 user_name=self.cube_id,
@@ -553,7 +553,7 @@ class SingleCubeView(MemCubeView):
                     session_id=target_session_id,
                     mem_cube_id=self.cube_id,
                     mem_cube=self.naive_mem_cube,
-                    label=PREF_ADD_LABEL,
+                    label=PREF_ADD_TASK_LABEL,
                     content=json.dumps(messages_list),
                     timestamp=datetime.utcnow(),
                     info=add_req.info,

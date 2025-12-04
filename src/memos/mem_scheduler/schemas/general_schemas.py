@@ -6,17 +6,6 @@ from pathlib import Path
 FILE_PATH = Path(__file__).absolute()
 BASE_DIR = FILE_PATH.parent.parent.parent.parent.parent
 
-QUERY_LABEL = "query"
-ANSWER_LABEL = "answer"
-ADD_LABEL = "add"
-MEM_READ_LABEL = "mem_read"
-MEM_ORGANIZE_LABEL = "mem_organize"
-MEM_UPDATE_LABEL = "mem_update"
-MEM_ARCHIVE_LABEL = "mem_archive"
-API_MIX_SEARCH_LABEL = "api_mix_search"
-PREF_ADD_LABEL = "pref_add"
-MEM_FEEDBACK_LABEL = "mem_feedback"
-
 TreeTextMemory_SEARCH_METHOD = "tree_text_memory_search"
 TreeTextMemory_FINE_SEARCH_METHOD = "tree_text_memory_fine_search"
 TextMemory_SEARCH_METHOD = "text_memory_search"
@@ -66,7 +55,7 @@ DEFAULT_WEIGHT_VECTOR_FOR_RANKING = [0.9, 0.05, 0.05]
 DEFAULT_MAX_WEB_LOG_QUEUE_SIZE = 50
 
 # task queue
-DEFAULT_STREAM_KEY_PREFIX = "scheduler:messages:stream:v1.5"
+DEFAULT_STREAM_KEY_PREFIX = "scheduler:messages:stream:v1.6"
 exchange_name = os.getenv("MEMSCHEDULER_RABBITMQ_EXCHANGE_NAME", None)
 if exchange_name is not None:
     DEFAULT_STREAM_KEY_PREFIX += f":{exchange_name}"

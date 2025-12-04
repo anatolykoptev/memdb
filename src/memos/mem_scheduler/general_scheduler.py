@@ -9,21 +9,22 @@ from memos.context.context import ContextThreadPoolExecutor
 from memos.log import get_logger
 from memos.mem_cube.general import GeneralMemCube
 from memos.mem_scheduler.base_scheduler import BaseScheduler
-from memos.mem_scheduler.schemas.general_schemas import (
-    ADD_LABEL,
-    ANSWER_LABEL,
-    DEFAULT_MAX_QUERY_KEY_WORDS,
-    LONG_TERM_MEMORY_TYPE,
-    MEM_FEEDBACK_LABEL,
-    MEM_ORGANIZE_LABEL,
-    MEM_READ_LABEL,
-    NOT_APPLICABLE_TYPE,
-    PREF_ADD_LABEL,
-    QUERY_LABEL,
-    USER_INPUT_TYPE,
-)
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.schemas.monitor_schemas import QueryMonitorItem
+from memos.mem_scheduler.schemas.task_schemas import (
+    ADD_TASK_LABEL,
+    ANSWER_TASK_LABEL,
+    DEFAULT_MAX_QUERY_KEY_WORDS,
+    LONG_TERM_MEMORY_TYPE,
+    MEM_FEEDBACK_TASK_LABEL,
+    MEM_ORGANIZE_TASK_LABEL,
+    MEM_READ_TASK_LABEL,
+    MEM_UPDATE_TASK_LABEL,
+    NOT_APPLICABLE_TYPE,
+    PREF_ADD_TASK_LABEL,
+    QUERY_TASK_LABEL,
+    USER_INPUT_TYPE,
+)
 from memos.mem_scheduler.utils.filter_utils import (
     is_all_chinese,
     is_all_english,
@@ -51,13 +52,14 @@ class GeneralScheduler(BaseScheduler):
 
         # register handlers
         handlers = {
-            QUERY_LABEL: self._query_message_consumer,
-            ANSWER_LABEL: self._answer_message_consumer,
-            ADD_LABEL: self._add_message_consumer,
-            MEM_READ_LABEL: self._mem_read_message_consumer,
-            MEM_ORGANIZE_LABEL: self._mem_reorganize_message_consumer,
-            PREF_ADD_LABEL: self._pref_add_message_consumer,
-            MEM_FEEDBACK_LABEL: self._mem_feedback_message_consumer,
+            QUERY_TASK_LABEL: self._query_message_consumer,
+            ANSWER_TASK_LABEL: self._answer_message_consumer,
+            MEM_UPDATE_TASK_LABEL: self._memory_update_consumer,
+            ADD_TASK_LABEL: self._add_message_consumer,
+            MEM_READ_TASK_LABEL: self._mem_read_message_consumer,
+            MEM_ORGANIZE_TASK_LABEL: self._mem_reorganize_message_consumer,
+            PREF_ADD_TASK_LABEL: self._pref_add_message_consumer,
+            MEM_FEEDBACK_TASK_LABEL: self._mem_feedback_message_consumer,
         }
         self.dispatcher.register_handlers(handlers)
 
@@ -147,18 +149,18 @@ class GeneralScheduler(BaseScheduler):
         if self.enable_activation_memory:
             self.update_activation_memory_periodically(
                 interval_seconds=self.monitor.act_mem_update_interval,
-                label=QUERY_LABEL,
+                label=QUERY_TASK_LABEL,
                 user_id=user_id,
                 mem_cube_id=mem_cube_id,
                 mem_cube=self.current_mem_cube,
             )
 
     def _add_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
-        logger.info(f"Messages {messages} assigned to {ADD_LABEL} handler.")
+        logger.info(f"Messages {messages} assigned to {ADD_TASK_LABEL} handler.")
         # Process the query in a session turn
         grouped_messages = group_messages_by_user_and_mem_cube(messages=messages)
 
-        self.validate_schedule_messages(messages=messages, label=ADD_LABEL)
+        self.validate_schedule_messages(messages=messages, label=ADD_TASK_LABEL)
         try:
             for user_id in grouped_messages:
                 for mem_cube_id in grouped_messages[user_id]:
@@ -192,6 +194,23 @@ class GeneralScheduler(BaseScheduler):
         except Exception as e:
             logger.error(f"Error: {e}", exc_info=True)
 
+    def _memory_update_consumer(self, messages: list[ScheduleMessageItem]) -> None:
+        logger.info(f"Messages {messages} assigned to {MEM_UPDATE_TASK_LABEL} handler.")
+
+        grouped_messages = group_messages_by_user_and_mem_cube(messages=messages)
+
+        self.validate_schedule_messages(messages=messages, label=MEM_UPDATE_TASK_LABEL)
+
+        for user_id in grouped_messages:
+            for mem_cube_id in grouped_messages[user_id]:
+                batch = grouped_messages[user_id][mem_cube_id]
+                if not batch:
+                    continue
+                # Process the whole batch once; no need to iterate per message
+                self.long_memory_update_process(
+                    user_id=user_id, mem_cube_id=mem_cube_id, messages=batch
+                )
+
     def _query_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
         """
         Process and handle query trigger messages from the queue.
@@ -199,19 +218,21 @@ class GeneralScheduler(BaseScheduler):
         Args:
             messages: List of query messages to process
         """
-        logger.info(f"Messages {messages} assigned to {QUERY_LABEL} handler.")
+        logger.info(f"Messages {messages} assigned to {QUERY_TASK_LABEL} handler.")
 
         grouped_messages = group_messages_by_user_and_mem_cube(messages=messages)
 
-        self.validate_schedule_messages(messages=messages, label=QUERY_LABEL)
+        self.validate_schedule_messages(messages=messages, label=QUERY_TASK_LABEL)
 
+        mem_update_messages = []
         for user_id in grouped_messages:
             for mem_cube_id in grouped_messages[user_id]:
                 batch = grouped_messages[user_id][mem_cube_id]
                 if not batch:
                     continue
-                try:
-                    for msg in batch:
+
+                for msg in batch:
+                    try:
                         event = self.create_event_log(
                             label="addMessage",
                             from_memory_type=USER_INPUT_TYPE,
@@ -232,11 +253,22 @@ class GeneralScheduler(BaseScheduler):
                         )
                         event.task_id = msg.task_id
                         self._submit_web_logs([event])
-                except Exception:
-                    logger.exception("Failed to record addMessage log for query")
-                self.long_memory_update_process(
-                    user_id=user_id, mem_cube_id=mem_cube_id, messages=batch
-                )
+                    except Exception:
+                        logger.exception("Failed to record addMessage log for query")
+                    # Re-submit the message with label changed to mem_update
+                    update_msg = ScheduleMessageItem(
+                        user_id=msg.user_id,
+                        mem_cube_id=msg.mem_cube_id,
+                        label=MEM_UPDATE_TASK_LABEL,
+                        content=msg.content,
+                        session_id=msg.session_id,
+                        user_name=msg.user_name,
+                        info=msg.info,
+                        task_id=msg.task_id,
+                    )
+                    mem_update_messages.append(update_msg)
+
+        self.submit_messages(messages=mem_update_messages)
 
     def _answer_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
         """
@@ -245,10 +277,10 @@ class GeneralScheduler(BaseScheduler):
         Args:
           messages: List of answer messages to process
         """
-        logger.info(f"Messages {messages} assigned to {ANSWER_LABEL} handler.")
+        logger.info(f"Messages {messages} assigned to {ANSWER_TASK_LABEL} handler.")
         grouped_messages = group_messages_by_user_and_mem_cube(messages=messages)
 
-        self.validate_schedule_messages(messages=messages, label=ANSWER_LABEL)
+        self.validate_schedule_messages(messages=messages, label=ANSWER_TASK_LABEL)
 
         for user_id in grouped_messages:
             for mem_cube_id in grouped_messages[user_id]:
@@ -465,11 +497,11 @@ class GeneralScheduler(BaseScheduler):
             self._submit_web_logs(events, additional_log_info="send_add_log_messages_to_cloud_env")
 
     def _add_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
-        logger.info(f"Messages {messages} assigned to {ADD_LABEL} handler.")
+        logger.info(f"Messages {messages} assigned to {ADD_TASK_LABEL} handler.")
         # Process the query in a session turn
         grouped_messages = group_messages_by_user_and_mem_cube(messages=messages)
 
-        self.validate_schedule_messages(messages=messages, label=ADD_LABEL)
+        self.validate_schedule_messages(messages=messages, label=ADD_TASK_LABEL)
         try:
             for user_id in grouped_messages:
                 for mem_cube_id in grouped_messages[user_id]:
@@ -562,7 +594,7 @@ class GeneralScheduler(BaseScheduler):
         logger.info(
             f"[DIAGNOSTIC] general_scheduler._mem_read_message_consumer called. Received messages: {[msg.model_dump_json(indent=2) for msg in messages]}"
         )
-        logger.info(f"Messages {messages} assigned to {MEM_READ_LABEL} handler.")
+        logger.info(f"Messages {messages} assigned to {MEM_READ_TASK_LABEL} handler.")
 
         def process_message(message: ScheduleMessageItem):
             try:
@@ -867,7 +899,7 @@ class GeneralScheduler(BaseScheduler):
                     self._submit_web_logs([event])
 
     def _mem_reorganize_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
-        logger.info(f"Messages {messages} assigned to {MEM_ORGANIZE_LABEL} handler.")
+        logger.info(f"Messages {messages} assigned to {MEM_ORGANIZE_TASK_LABEL} handler.")
 
         def process_message(message: ScheduleMessageItem):
             try:
@@ -1099,7 +1131,7 @@ class GeneralScheduler(BaseScheduler):
             )
 
     def _pref_add_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
-        logger.info(f"Messages {messages} assigned to {PREF_ADD_LABEL} handler.")
+        logger.info(f"Messages {messages} assigned to {PREF_ADD_TASK_LABEL} handler.")
 
         def process_message(message: ScheduleMessageItem):
             try:

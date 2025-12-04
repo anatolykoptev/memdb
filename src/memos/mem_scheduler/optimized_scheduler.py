@@ -11,10 +11,10 @@ from memos.mem_cube.general import GeneralMemCube
 from memos.mem_cube.navie import NaiveMemCube
 from memos.mem_scheduler.general_modules.api_misc import SchedulerAPIModule
 from memos.mem_scheduler.general_scheduler import GeneralScheduler
-from memos.mem_scheduler.schemas.general_schemas import (
-    API_MIX_SEARCH_LABEL,
-)
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
+from memos.mem_scheduler.schemas.task_schemas import (
+    API_MIX_SEARCH_TASK_LABEL,
+)
 from memos.mem_scheduler.utils.api_utils import format_textual_memory_item
 from memos.mem_scheduler.utils.db_utils import get_utc_now
 from memos.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
@@ -49,7 +49,7 @@ class OptimizedScheduler(GeneralScheduler):
         )
         self.register_handlers(
             {
-                API_MIX_SEARCH_LABEL: self._api_mix_search_message_consumer,
+                API_MIX_SEARCH_TASK_LABEL: self._api_mix_search_message_consumer,
             }
         )
         self.searcher = None
@@ -83,7 +83,7 @@ class OptimizedScheduler(GeneralScheduler):
             item_id=async_task_id,
             user_id=search_req.user_id,
             mem_cube_id=user_context.mem_cube_id,
-            label=API_MIX_SEARCH_LABEL,
+            label=API_MIX_SEARCH_TASK_LABEL,
             content=json.dumps(message_content),
             timestamp=get_utc_now(),
         )
@@ -255,12 +255,12 @@ class OptimizedScheduler(GeneralScheduler):
         Args:
             messages: List of query messages to process
         """
-        logger.info(f"Messages {messages} assigned to {API_MIX_SEARCH_LABEL} handler.")
+        logger.info(f"Messages {messages} assigned to {API_MIX_SEARCH_TASK_LABEL} handler.")
 
         # Process the query in a session turn
         grouped_messages = group_messages_by_user_and_mem_cube(messages)
 
-        self.validate_schedule_messages(messages=messages, label=API_MIX_SEARCH_LABEL)
+        self.validate_schedule_messages(messages=messages, label=API_MIX_SEARCH_TASK_LABEL)
 
         for user_id in grouped_messages:
             for mem_cube_id in grouped_messages[user_id]:
