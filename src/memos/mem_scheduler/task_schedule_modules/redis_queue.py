@@ -12,13 +12,11 @@ import time
 
 from collections import deque
 from collections.abc import Callable
-from datetime import datetime, timezone
 from uuid import uuid4
 
 from memos.context.context import ContextThread
 from memos.log import get_logger
 from memos.mem_scheduler.schemas.general_schemas import (
-    DEFAULT_INIT_IDLE_CLEANUP_THRESHOLD_SEC,
     DEFAULT_PENDING_CLAIM_MIN_IDLE_MS,
     DEFAULT_STREAM_KEY_PREFIX,
     DEFAULT_STREAM_KEYS_REFRESH_INTERVAL_SEC,
@@ -120,125 +118,13 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                 self._refresh_stream_keys()
             except Exception as e:
                 logger.debug(f"Initial stream keys refresh failed: {e}")
-            # Cleanup idle messages once during initialization
-            try:
-                self.cleanup_idle_messages_on_init(
-                    idle_threshold_seconds=DEFAULT_INIT_IDLE_CLEANUP_THRESHOLD_SEC
-                )
-            except Exception as e:
-                logger.debug(f"Initial idle messages cleanup skipped/failed: {e}")
+
             # Then start background refresher
             self._start_stream_keys_refresh_thread()
 
     def get_stream_key(self, user_id: str, mem_cube_id: str, task_label: str) -> str:
         stream_key = f"{self.stream_key_prefix}:{user_id}:{mem_cube_id}:{task_label}"
         return stream_key
-
-    def cleanup_idle_messages_on_init(self, idle_threshold_seconds: float = 60.0) -> None:
-        """
-        During initialization, clean up messages across Redis streams that exceed the idle threshold.
-        - Iterate all `stream_key`s and read entries via `XRANGE('-', '+')`.
-        - If a message's `timestamp` is older than `idle_threshold_seconds` (default: 1 minute),
-          determine its ack status via `XPENDING` for the configured consumer group:
-            * If acked (not in PEL): delete the message from the stream.
-            * If not acked (in PEL): convert it to `ScheduleMessageItem` and append to
-              `message_pack_cache` as part of a single cleanup pack.
-
-        Note: runs only when a Redis connection is established. All unacked qualifying messages are
-        appended as a single pack to the cache; acked ones are removed to keep streams tidy.
-        """
-        if not self._is_connected or not self._redis_conn:
-            return
-
-        try:
-            with self._stream_keys_lock:
-                stream_keys_snapshot = list(self._stream_keys_cache)
-
-            if not stream_keys_snapshot:
-                return
-
-            now_epoch = time.time()
-            cleanup_pack: list[ScheduleMessageItem] = []
-            total_deleted = 0
-
-            for sk in stream_keys_snapshot:
-                try:
-                    entries = self._redis_conn.xrange(sk, min="-", max="+")
-                except Exception as read_err:
-                    logger.warning(f"Failed to read stream {sk}, skipping cleanup: {read_err}")
-                    continue
-
-                for message_id, fields in entries:
-                    try:
-                        ts_str = fields.get("timestamp")
-                        if not ts_str:
-                            # Skip entries without a timestamp
-                            continue
-
-                        try:
-                            dt = datetime.fromisoformat(ts_str)
-                        except Exception:
-                            # Skip entries with invalid timestamp
-                            continue
-
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        enqueue_epoch = dt.timestamp()
-                        idle_seconds = now_epoch - enqueue_epoch
-
-                        if idle_seconds >= idle_threshold_seconds:
-                            # Check ack status via XPENDING; if in PEL, it's not acked.
-                            is_pending = False
-                            try:
-                                pending_detail = self._redis_conn.xpending(
-                                    sk,
-                                    self.consumer_group,
-                                    start=message_id,
-                                    end=message_id,
-                                    count=1,
-                                )
-                                # redis-py returns a list of pending entries when start/end/count provided
-                                is_pending = bool(pending_detail)
-                            except Exception as pend_err:
-                                logger.debug(
-                                    f"XPENDING check failed for {message_id} @ {sk}: {pend_err}"
-                                )
-
-                            if is_pending:
-                                # Not acked: move to cache for processing (do not delete here)
-                                try:
-                                    msg = ScheduleMessageItem.from_dict(fields)
-                                except Exception as parse_err:
-                                    logger.debug(
-                                        f"Failed to parse message {message_id}, skipping: {parse_err}"
-                                    )
-                                    continue
-                                msg.redis_message_id = message_id
-                                msg.stream_key = sk
-                                cleanup_pack.append(msg)
-                            else:
-                                # Acked or never delivered (not in PEL): delete to keep stream tidy
-                                try:
-                                    self._redis_conn.xdel(sk, message_id)
-                                    total_deleted += 1
-                                except Exception as del_err:
-                                    logger.warning(
-                                        f"Failed to delete expired message {message_id} @ {sk}: {del_err}"
-                                    )
-                    except Exception as one_err:
-                        logger.debug(
-                            f"Failed to process messages for stream {sk}, skipping: {one_err}"
-                        )
-
-            if cleanup_pack:
-                self.message_pack_cache.append(cleanup_pack)
-                logger.info(
-                    "Initialization cleanup complete: queued "
-                    f"{len(cleanup_pack)} unacked expired messages to cache, and deleted "
-                    f"{total_deleted} acked/undelivered expired messages from streams"
-                )
-        except Exception as e:
-            logger.warning(f"Initialization idle messages cleanup failed: {e}", exc_info=True)
 
     # --- Stream keys refresh background thread ---
     def _refresh_stream_keys(self, stream_key_prefix: str | None = None) -> list[str]:
