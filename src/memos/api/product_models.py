@@ -865,3 +865,15 @@ class StatusResponse(BaseResponse[list[StatusResponseItem]]):
     """Response model for scheduler status operations."""
 
     message: str = "Memory get status successfully"
+
+
+class TaskQueueResponse(BaseResponse[dict]):
+    user_id: str = Field(..., description="The ID of the task")
+    user_name: str = Field(..., description="The ID of the task")
+    mem_cube_id: str = Field(..., description="The ID of the task")
+    stream_key: str = Field(..., description="The ID of the task")
+    users_count: int = Field(..., description="The ID of the task")
+    pending_tasks_count: int = Field(..., description="The ID of the task")
+    remaining_tasks_count: int = Field(..., description="The ID of the task")
+    pending_tasks_detail: list[str] = Field(..., description="The ID of the task")
+    remaining_tasks_detail: list[str] = Field(..., description="The ID of the task")

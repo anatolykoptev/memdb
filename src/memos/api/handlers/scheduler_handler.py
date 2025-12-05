@@ -15,8 +15,9 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 # Imports for new implementation
-from memos.api.product_models import StatusResponse, StatusResponseItem
+from memos.api.product_models import StatusResponse, StatusResponseItem, TaskQueueResponse
 from memos.log import get_logger
+from memos.mem_scheduler.optimized_scheduler import OptimizedScheduler
 from memos.mem_scheduler.utils.status_tracker import TaskStatusTracker
 
 
@@ -79,6 +80,21 @@ def handle_scheduler_status(
         raise
     except Exception as err:
         logger.error(f"Failed to get scheduler status for user {user_id}: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Failed to get scheduler status") from err
+
+
+def handle_task_queue_status(
+    user_id: str, mem_scheduler: OptimizedScheduler, task_id: str | None = None
+) -> TaskQueueResponse:
+    try:
+        pass
+    except HTTPException:
+        # Re-raise HTTPException directly to preserve its status code (e.g., 404)
+        raise
+    except Exception as err:
+        logger.error(
+            f"Failed to get task queue status for user {user_id}: {traceback.format_exc()}"
+        )
         raise HTTPException(status_code=500, detail="Failed to get scheduler status") from err
 
 

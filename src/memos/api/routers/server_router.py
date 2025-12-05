@@ -129,6 +129,23 @@ def scheduler_status(
     )
 
 
+@router.get(  # Changed from post to get
+    "/scheduler/task_queu_status",
+    summary="Get scheduler running status",
+    response_model=StatusResponse,
+)
+def scheduler_task_queue_status(
+    user_id: str = Query(..., description="User ID"),
+    task_id: str | None = Query(None, description="Optional Task ID to query a specific task"),
+):
+    """Get scheduler running status."""
+    return handlers.scheduler_handler.handle_scheduler_status(
+        user_id=user_id,
+        task_id=task_id,
+        status_tracker=status_tracker,
+    )
+
+
 @router.post("/scheduler/wait", summary="Wait until scheduler is idle for a specific user")
 def scheduler_wait(
     user_name: str,

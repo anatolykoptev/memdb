@@ -20,7 +20,7 @@ from memos.mem_scheduler.schemas.general_schemas import (
     DEFAULT_STOP_WAIT,
 )
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
-from memos.mem_scheduler.schemas.task_schemas import RunningTaskItem, TaskPriorityLevel
+from memos.mem_scheduler.schemas.task_schemas import RunningTaskItem
 from memos.mem_scheduler.task_schedule_modules.orchestrator import SchedulerOrchestrator
 from memos.mem_scheduler.task_schedule_modules.redis_queue import SchedulerRedisQueue
 from memos.mem_scheduler.task_schedule_modules.task_queue import ScheduleTaskQueue
@@ -473,9 +473,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
 
                     # If priority is LEVEL_1, force synchronous execution regardless of thread pool availability
                     use_thread_pool = (
-                        self.enable_parallel_dispatch
-                        and self.dispatcher_executor is not None
-                        and task_priority != TaskPriorityLevel.LEVEL_1
+                        self.enable_parallel_dispatch and self.dispatcher_executor is not None
                     )
 
                     if use_thread_pool:

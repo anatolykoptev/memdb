@@ -12,6 +12,7 @@ import time
 
 from collections import deque
 from collections.abc import Callable
+from contextlib import suppress
 from uuid import uuid4
 
 from memos.context.context import ContextThread
@@ -86,6 +87,25 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         self._refill_lock = threading.Lock()
         self._refill_thread: ContextThread | None = None
 
+        # Pending requeue daemon configuration
+        try:
+            self._pending_requeue_interval_sec = float(
+                os.getenv("MEMSCHEDULER_PENDING_REQUEUE_INTERVAL_SEC", "30")
+            )
+        except Exception:
+            self._pending_requeue_interval_sec = 30.0
+        try:
+            self._pending_requeue_idle_ms = int(
+                os.getenv(
+                    "MEMSCHEDULER_PENDING_REQUEUE_IDLE_MS",
+                    str(DEFAULT_PENDING_CLAIM_MIN_IDLE_MS),
+                )
+            )
+        except Exception:
+            self._pending_requeue_idle_ms = DEFAULT_PENDING_CLAIM_MIN_IDLE_MS
+        self._pending_requeue_thread: ContextThread | None = None
+        self._pending_requeue_stop_event = threading.Event()
+
         logger.info(
             f"[REDIS_QUEUE] Initialized with stream_prefix='{self.stream_key_prefix}', "
             f"consumer_group='{self.consumer_group}', consumer_name='{self.consumer_name}'"
@@ -94,6 +114,8 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         # Auto-initialize Redis connection
         if self.auto_initialize_redis():
             self._is_connected = True
+            # Start pending requeue daemon if connection is ready
+            self._start_pending_requeue_daemon()
 
         self.seen_streams = set()
 
@@ -320,65 +342,10 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                 else:
                     raise
 
-            # 2) If needed, read pending messages for THIS consumer only
-            pending_messages: list[tuple[str, list[tuple[str, dict]]]] = []
-            need_pending_count = None
-            if batch_size is None:
-                # No batch_size: prefer returning a single new message; if none, fetch one pending
-                if not new_messages:
-                    need_pending_count = 1
-            else:
-                # With batch_size: fill from pending if new insufficient
-                new_count = sum(len(sm) for _s, sm in new_messages) if new_messages else 0
-                need_pending = max(0, batch_size - new_count)
-                need_pending_count = need_pending if need_pending > 0 else 0
-
-            if need_pending_count:
-                # Claim only pending messages whose idle time exceeds configured threshold
-                try:
-                    # Ensure group exists before claiming
-                    self._ensure_consumer_group(stream_key=stream_key)
-                    # XAUTOCLAIM returns (next_start_id, [(id, fields), ...])
-                    next_id, claimed = self._redis_conn.xautoclaim(
-                        name=stream_key,
-                        groupname=self.consumer_group,
-                        consumername=self.consumer_name,
-                        min_idle_time=DEFAULT_PENDING_CLAIM_MIN_IDLE_MS,
-                        start_id="0-0",
-                        count=need_pending_count,
-                        justid=False,
-                    )
-                    pending_messages = [(stream_key, claimed)] if claimed else []
-                except Exception as read_err:
-                    # Handle missing group/stream by creating and retrying once
-                    err_msg = str(read_err).lower()
-                    if "nogroup" in err_msg or "no such key" in err_msg:
-                        logger.warning(
-                            f"Consumer group or stream missing for '{stream_key}/{self.consumer_group}'. Attempting to create and retry (xautoclaim)."
-                        )
-                        try:
-                            self._ensure_consumer_group(stream_key=stream_key)
-                            next_id, claimed = self._redis_conn.xautoclaim(
-                                name=stream_key,
-                                groupname=self.consumer_group,
-                                consumername=self.consumer_name,
-                                min_idle_time=DEFAULT_PENDING_CLAIM_MIN_IDLE_MS,
-                                start_id="0-0",
-                                count=need_pending_count,
-                                justid=False,
-                            )
-                            pending_messages = [(stream_key, claimed)] if claimed else []
-                        except Exception:
-                            pending_messages = []
-                    else:
-                        pending_messages = []
-
-            # Combine: new first, then pending
+            # Only return new messages; do not fetch pending here
             messages = []
             if new_messages:
                 messages.extend(new_messages)
-            if pending_messages:
-                messages.extend(pending_messages)
 
             result_messages = []
 
@@ -439,6 +406,93 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         except Exception as e:
             logger.error(f"Failed to get Redis queue size: {e}")
             return {}
+
+    def _release_stale_pending_for_stream(self, stream_key: str, max_per_iter: int = 100) -> None:
+        """
+        Scan and release pending messages that exceed idle threshold for a stream.
+
+        Strategy:
+        - Use XAUTOCLAIM to fetch idle pending entries with fields.
+        - Immediately XACK to remove from pending, optionally XDEL to tidy the stream.
+        - Re-add the original fields via XADD to requeue.
+        """
+        if not self._redis_conn:
+            return
+        try:
+            self._ensure_consumer_group(stream_key=stream_key)
+        except Exception:
+            return
+
+        try:
+            # XAUTOCLAIM returns (next_start_id, [(id, fields), ...])
+            next_id, claimed = self._redis_conn.xautoclaim(
+                name=stream_key,
+                groupname=self.consumer_group,
+                consumername=self.consumer_name,
+                min_idle_time=self._pending_requeue_idle_ms,
+                start_id="0-0",
+                count=max_per_iter,
+                justid=False,
+            )
+        except Exception as e:
+            logger.debug(f"xautoclaim failed on {stream_key}: {e}")
+            return
+
+        if not claimed:
+            return
+
+        for message_id, fields in claimed:
+            try:
+                # Ack to remove from pending; optionally delete from stream
+                with suppress(Exception):
+                    self._redis_conn.xack(stream_key, self.consumer_group, message_id)
+                if self.auto_delete_acked:
+                    with suppress(Exception):
+                        self._redis_conn.xdel(stream_key, message_id)
+                # Re-add to stream to release back to the queue
+                self._redis_conn.xadd(stream_key, fields, maxlen=self.max_len, approximate=True)
+                logger.info(f"Requeued stale pending message {message_id} back to {stream_key}")
+            except Exception as e:
+                logger.warning(f"Failed to requeue stale pending {message_id} on {stream_key}: {e}")
+
+    def _pending_requeue_daemon(self) -> None:
+        """Background daemon to periodically release stale pending messages."""
+        logger.info(
+            f"Starting pending requeue daemon: interval={self._pending_requeue_interval_sec}s, idle_ms={self._pending_requeue_idle_ms}"
+        )
+        while not self._pending_requeue_stop_event.is_set():
+            try:
+                stream_keys = self.get_stream_keys()
+                for stream_key in stream_keys:
+                    self._release_stale_pending_for_stream(stream_key)
+            except Exception as e:
+                logger.debug(f"Pending requeue daemon iteration failed: {e}")
+            # Sleep until next iteration or stop
+            self._pending_requeue_stop_event.wait(self._pending_requeue_interval_sec)
+        logger.info("Pending requeue daemon stopped.")
+
+    def _start_pending_requeue_daemon(self) -> None:
+        if self._pending_requeue_thread and self._pending_requeue_thread.is_alive():
+            return
+        # Reset stop event
+        self._pending_requeue_stop_event.clear()
+        self._pending_requeue_thread = ContextThread(
+            target=self._pending_requeue_daemon,
+            name="redis-pending-requeue",
+            daemon=True,
+        )
+        try:
+            self._pending_requeue_thread.start()
+        except Exception as e:
+            logger.debug(f"Failed to start pending requeue daemon: {e}")
+
+    def _stop_pending_requeue_daemon(self) -> None:
+        try:
+            self._pending_requeue_stop_event.set()
+            if self._pending_requeue_thread and self._pending_requeue_thread.is_alive():
+                self._pending_requeue_thread.join(timeout=2.0)
+        except Exception:
+            pass
 
     def get_stream_keys(self, stream_key_prefix: str | None = None) -> list[str]:
         """
@@ -578,6 +632,8 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                 self._redis_conn.ping()
                 self._is_connected = True
                 logger.debug("Redis connection established successfully")
+                # Ensure pending requeue daemon is running
+                self._start_pending_requeue_daemon()
             except Exception as e:
                 logger.error(f"Failed to connect to Redis: {e}")
                 self._is_connected = False
@@ -588,6 +644,8 @@ class SchedulerRedisQueue(RedisSchedulerModule):
     def disconnect(self) -> None:
         """Disconnect from Redis and clean up resources."""
         self._is_connected = False
+        # Stop requeue daemon
+        self._stop_pending_requeue_daemon()
         if self._is_listening:
             self.stop_listening()
         logger.debug("Disconnected from Redis")
