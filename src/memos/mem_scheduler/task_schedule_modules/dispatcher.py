@@ -262,7 +262,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
                 ):
                     try:
                         for msg in messages:
-                            redis_message_id = getattr(msg, "redis_message_id", "")
+                            redis_message_id = msg.redis_message_id
                             self.memos_message_queue.ack_message(
                                 user_id=msg.user_id,
                                 mem_cube_id=msg.mem_cube_id,

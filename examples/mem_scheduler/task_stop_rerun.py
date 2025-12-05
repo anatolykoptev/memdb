@@ -28,6 +28,7 @@ def my_test_handler(messages: list[ScheduleMessageItem]):
         try:
             print(f"writing {file_path}...")
             file_path.write_text(f"Task {task_id} processed.\n")
+            sleep(5)
         except Exception as e:
             print(f"Failed to write {file_path}: {e}")
 
@@ -69,10 +70,15 @@ else:
     submit_tasks()
 
 # 6. Wait until tmp has 100 files or timeout
-poll_interval = 0.01
+poll_interval = 1
 expected = 100
 tmp_dir = Path("tmp")
-while mem_scheduler.get_tasks_status()["remaining"] != 0:
+tasks_status = mem_scheduler.get_tasks_status()
+mem_scheduler.print_tasks_status(tasks_status=tasks_status)
+while (
+    mem_scheduler.get_tasks_status()["remaining"] != 0
+    or mem_scheduler.get_tasks_status()["running"] != 0
+):
     count = len(list(tmp_dir.glob("*.txt"))) if tmp_dir.exists() else 0
     tasks_status = mem_scheduler.get_tasks_status()
     mem_scheduler.print_tasks_status(tasks_status=tasks_status)

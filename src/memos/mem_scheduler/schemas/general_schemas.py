@@ -64,3 +64,17 @@ if exchange_name is not None:
 # Only claim pending messages whose idle time exceeds this threshold.
 # Unit: milliseconds. Default: 10 minute.
 DEFAULT_PENDING_CLAIM_MIN_IDLE_MS = 600_000
+
+# scheduler daemon defaults
+# Interval in seconds for periodically releasing stale pending messages
+DEFAULT_PENDING_REQUEUE_INTERVAL_SEC = 30.0
+
+# Interval in seconds for refreshing cached Redis stream keys
+DEFAULT_STREAM_KEYS_REFRESH_INTERVAL_SEC = 30.0
+
+# Interval in seconds for batching and cleaning up deletions (xdel)
+DEFAULT_DELETE_CLEANUP_INTERVAL_SEC = 30.0
+
+# Initialization cleanup defaults
+# Idle threshold in seconds for moving expired messages to cache on init
+DEFAULT_INIT_IDLE_CLEANUP_THRESHOLD_SEC = 60.0

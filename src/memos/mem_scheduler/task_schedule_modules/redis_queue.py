@@ -12,14 +12,16 @@ import time
 
 from collections import deque
 from collections.abc import Callable
-from contextlib import suppress
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from memos.context.context import ContextThread
 from memos.log import get_logger
 from memos.mem_scheduler.schemas.general_schemas import (
+    DEFAULT_INIT_IDLE_CLEANUP_THRESHOLD_SEC,
     DEFAULT_PENDING_CLAIM_MIN_IDLE_MS,
     DEFAULT_STREAM_KEY_PREFIX,
+    DEFAULT_STREAM_KEYS_REFRESH_INTERVAL_SEC,
 )
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.task_schedule_modules.orchestrator import SchedulerOrchestrator
@@ -68,7 +70,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         # Stream configuration
         self.stream_key_prefix = stream_key_prefix
         self.consumer_group = consumer_group
-        self.consumer_name = consumer_name or f"consumer_{uuid4().hex[:8]}"
+        self.consumer_name = f"{consumer_name}_{uuid4().hex[:8]}"
         self.max_len = max_len
         self.auto_delete_acked = auto_delete_acked  # Whether to delete acknowledged messages
 
@@ -87,25 +89,6 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         self._refill_lock = threading.Lock()
         self._refill_thread: ContextThread | None = None
 
-        # Pending requeue daemon configuration
-        try:
-            self._pending_requeue_interval_sec = float(
-                os.getenv("MEMSCHEDULER_PENDING_REQUEUE_INTERVAL_SEC", "30")
-            )
-        except Exception:
-            self._pending_requeue_interval_sec = 30.0
-        try:
-            self._pending_requeue_idle_ms = int(
-                os.getenv(
-                    "MEMSCHEDULER_PENDING_REQUEUE_IDLE_MS",
-                    str(DEFAULT_PENDING_CLAIM_MIN_IDLE_MS),
-                )
-            )
-        except Exception:
-            self._pending_requeue_idle_ms = DEFAULT_PENDING_CLAIM_MIN_IDLE_MS
-        self._pending_requeue_thread: ContextThread | None = None
-        self._pending_requeue_stop_event = threading.Event()
-
         logger.info(
             f"[REDIS_QUEUE] Initialized with stream_prefix='{self.stream_key_prefix}', "
             f"consumer_group='{self.consumer_group}', consumer_name='{self.consumer_name}'"
@@ -114,8 +97,6 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         # Auto-initialize Redis connection
         if self.auto_initialize_redis():
             self._is_connected = True
-            # Start pending requeue daemon if connection is ready
-            self._start_pending_requeue_daemon()
 
         self.seen_streams = set()
 
@@ -124,9 +105,203 @@ class SchedulerRedisQueue(RedisSchedulerModule):
 
         self.orchestrator = SchedulerOrchestrator() if orchestrator is None else orchestrator
 
+        # Cached stream keys and refresh control
+        self._stream_keys_cache: list[str] = []
+        self._stream_keys_last_refresh: float = 0.0
+        self._stream_keys_refresh_interval_sec: float = DEFAULT_STREAM_KEYS_REFRESH_INTERVAL_SEC
+        self._stream_keys_lock = threading.Lock()
+        self._stream_keys_refresh_thread: ContextThread | None = None
+        self._stream_keys_refresh_stop_event = threading.Event()
+
+        # Start background stream keys refresher if connected
+        if self._is_connected:
+            # Refresh once synchronously to seed cache at init
+            try:
+                self._refresh_stream_keys()
+            except Exception as e:
+                logger.debug(f"Initial stream keys refresh failed: {e}")
+            # Cleanup idle messages once during initialization
+            try:
+                self.cleanup_idle_messages_on_init(
+                    idle_threshold_seconds=DEFAULT_INIT_IDLE_CLEANUP_THRESHOLD_SEC
+                )
+            except Exception as e:
+                logger.debug(f"Initial idle messages cleanup skipped/failed: {e}")
+            # Then start background refresher
+            self._start_stream_keys_refresh_thread()
+
     def get_stream_key(self, user_id: str, mem_cube_id: str, task_label: str) -> str:
         stream_key = f"{self.stream_key_prefix}:{user_id}:{mem_cube_id}:{task_label}"
         return stream_key
+
+    def cleanup_idle_messages_on_init(self, idle_threshold_seconds: float = 60.0) -> None:
+        """
+        During initialization, clean up messages across Redis streams that exceed the idle threshold.
+        - Iterate all `stream_key`s and read entries via `XRANGE('-', '+')`.
+        - If a message's `timestamp` is older than `idle_threshold_seconds` (default: 1 minute),
+          determine its ack status via `XPENDING` for the configured consumer group:
+            * If acked (not in PEL): delete the message from the stream.
+            * If not acked (in PEL): convert it to `ScheduleMessageItem` and append to
+              `message_pack_cache` as part of a single cleanup pack.
+
+        Note: runs only when a Redis connection is established. All unacked qualifying messages are
+        appended as a single pack to the cache; acked ones are removed to keep streams tidy.
+        """
+        if not self._is_connected or not self._redis_conn:
+            return
+
+        try:
+            with self._stream_keys_lock:
+                stream_keys_snapshot = list(self._stream_keys_cache)
+
+            if not stream_keys_snapshot:
+                return
+
+            now_epoch = time.time()
+            cleanup_pack: list[ScheduleMessageItem] = []
+            total_deleted = 0
+
+            for sk in stream_keys_snapshot:
+                try:
+                    entries = self._redis_conn.xrange(sk, min="-", max="+")
+                except Exception as read_err:
+                    logger.warning(f"Failed to read stream {sk}, skipping cleanup: {read_err}")
+                    continue
+
+                for message_id, fields in entries:
+                    try:
+                        ts_str = fields.get("timestamp")
+                        if not ts_str:
+                            # Skip entries without a timestamp
+                            continue
+
+                        try:
+                            dt = datetime.fromisoformat(ts_str)
+                        except Exception:
+                            # Skip entries with invalid timestamp
+                            continue
+
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        enqueue_epoch = dt.timestamp()
+                        idle_seconds = now_epoch - enqueue_epoch
+
+                        if idle_seconds >= idle_threshold_seconds:
+                            # Check ack status via XPENDING; if in PEL, it's not acked.
+                            is_pending = False
+                            try:
+                                pending_detail = self._redis_conn.xpending(
+                                    sk,
+                                    self.consumer_group,
+                                    start=message_id,
+                                    end=message_id,
+                                    count=1,
+                                )
+                                # redis-py returns a list of pending entries when start/end/count provided
+                                is_pending = bool(pending_detail)
+                            except Exception as pend_err:
+                                logger.debug(
+                                    f"XPENDING check failed for {message_id} @ {sk}: {pend_err}"
+                                )
+
+                            if is_pending:
+                                # Not acked: move to cache for processing (do not delete here)
+                                try:
+                                    msg = ScheduleMessageItem.from_dict(fields)
+                                except Exception as parse_err:
+                                    logger.debug(
+                                        f"Failed to parse message {message_id}, skipping: {parse_err}"
+                                    )
+                                    continue
+                                msg.redis_message_id = message_id
+                                msg.stream_key = sk
+                                cleanup_pack.append(msg)
+                            else:
+                                # Acked or never delivered (not in PEL): delete to keep stream tidy
+                                try:
+                                    self._redis_conn.xdel(sk, message_id)
+                                    total_deleted += 1
+                                except Exception as del_err:
+                                    logger.warning(
+                                        f"Failed to delete expired message {message_id} @ {sk}: {del_err}"
+                                    )
+                    except Exception as one_err:
+                        logger.debug(
+                            f"Failed to process messages for stream {sk}, skipping: {one_err}"
+                        )
+
+            if cleanup_pack:
+                self.message_pack_cache.append(cleanup_pack)
+                logger.info(
+                    "Initialization cleanup complete: queued "
+                    f"{len(cleanup_pack)} unacked expired messages to cache, and deleted "
+                    f"{total_deleted} acked/undelivered expired messages from streams"
+                )
+        except Exception as e:
+            logger.warning(f"Initialization idle messages cleanup failed: {e}", exc_info=True)
+
+    # --- Stream keys refresh background thread ---
+    def _refresh_stream_keys(self, stream_key_prefix: str | None = None) -> list[str]:
+        """Scan Redis and refresh cached stream keys for the queue prefix."""
+        if not self._redis_conn:
+            return []
+
+        if stream_key_prefix is None:
+            stream_key_prefix = self.stream_key_prefix
+
+        try:
+            redis_pattern = f"{stream_key_prefix}:*"
+            raw_keys_iter = self._redis_conn.scan_iter(match=redis_pattern)
+            raw_keys = list(raw_keys_iter)
+
+            escaped_prefix = re.escape(stream_key_prefix)
+            regex_pattern = f"^{escaped_prefix}:"
+            stream_keys = [key for key in raw_keys if re.match(regex_pattern, key)]
+
+            if stream_key_prefix == self.stream_key_prefix:
+                with self._stream_keys_lock:
+                    self._stream_keys_cache = stream_keys
+                    self._stream_keys_last_refresh = time.time()
+            return stream_keys
+        except Exception as e:
+            logger.warning(f"Failed to refresh stream keys: {e}")
+            return []
+
+    def _stream_keys_refresh_loop(self) -> None:
+        """Background loop to periodically refresh Redis stream keys cache."""
+        # Seed cache immediately
+        self._refresh_stream_keys()
+        logger.debug(
+            f"Stream keys refresher started with interval={self._stream_keys_refresh_interval_sec}s"
+        )
+        while not self._stream_keys_refresh_stop_event.is_set():
+            try:
+                self._refresh_stream_keys()
+            except Exception as e:
+                logger.warning(f"Stream keys refresh iteration failed: {e}")
+            # Wait with ability to be interrupted
+            self._stream_keys_refresh_stop_event.wait(self._stream_keys_refresh_interval_sec)
+
+        logger.debug("Stream keys refresher stopped")
+
+    def _start_stream_keys_refresh_thread(self) -> None:
+        if self._stream_keys_refresh_thread and self._stream_keys_refresh_thread.is_alive():
+            return
+        self._stream_keys_refresh_stop_event.clear()
+        self._stream_keys_refresh_thread = ContextThread(
+            target=self._stream_keys_refresh_loop,
+            name="redis-stream-keys-refresher",
+            daemon=True,
+        )
+        self._stream_keys_refresh_thread.start()
+
+    def _stop_stream_keys_refresh_thread(self) -> None:
+        try:
+            self._stream_keys_refresh_stop_event.set()
+            if self._stream_keys_refresh_thread and self._stream_keys_refresh_thread.is_alive():
+                self._stream_keys_refresh_thread.join(timeout=2.0)
+        except Exception as e:
+            logger.debug(f"Stopping stream keys refresh thread encountered: {e}")
 
     def task_broker(
         self,
@@ -243,6 +418,12 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                 self.seen_streams.add(stream_key)
                 self._ensure_consumer_group(stream_key=stream_key)
 
+            # Update stream keys cache with newly observed stream key
+            with self._stream_keys_lock:
+                if stream_key not in self._stream_keys_cache:
+                    self._stream_keys_cache.append(stream_key)
+                    self._stream_keys_last_refresh = time.time()
+
             message.stream_key = stream_key
 
             # Convert message to dictionary for Redis storage
@@ -342,13 +523,64 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                 else:
                     raise
 
-            # Only return new messages; do not fetch pending here
+            # 2) If needed, read pending messages for THIS consumer only
+            pending_messages: list[tuple[str, list[tuple[str, dict]]]] = []
+            need_pending_count = None
+            if batch_size is None:
+                # No batch_size: prefer returning a single new message; if none, fetch one pending
+                if not new_messages:
+                    need_pending_count = 1
+            else:
+                # With batch_size: fill from pending if new insufficient
+                new_count = sum(len(sm) for _s, sm in new_messages) if new_messages else 0
+                need_pending = max(0, batch_size - new_count)
+                need_pending_count = need_pending if need_pending > 0 else 0
+
+            if need_pending_count:
+                # Claim only pending messages whose idle time exceeds configured threshold
+                try:
+                    # Ensure group exists before claiming
+                    self._ensure_consumer_group(stream_key=stream_key)
+                    # XAUTOCLAIM returns (next_start_id, [(id, fields), ...])
+                    next_id, claimed = self._redis_conn.xautoclaim(
+                        name=stream_key,
+                        groupname=self.consumer_group,
+                        consumername=self.consumer_name,
+                        min_idle_time=DEFAULT_PENDING_CLAIM_MIN_IDLE_MS,
+                        start_id="0-0",
+                        count=need_pending_count,
+                        justid=False,
+                    )
+                    pending_messages = [(stream_key, claimed)] if claimed else []
+                except Exception as read_err:
+                    # Handle missing group/stream by creating and retrying once
+                    err_msg = str(read_err).lower()
+                    if "nogroup" in err_msg or "no such key" in err_msg:
+                        logger.warning(
+                            f"Consumer group or stream missing for '{stream_key}/{self.consumer_group}'. Attempting to create and retry (xautoclaim)."
+                        )
+                        self._ensure_consumer_group(stream_key=stream_key)
+                        next_id, claimed = self._redis_conn.xautoclaim(
+                            name=stream_key,
+                            groupname=self.consumer_group,
+                            consumername=self.consumer_name,
+                            min_idle_time=DEFAULT_PENDING_CLAIM_MIN_IDLE_MS,
+                            start_id="0-0",
+                            count=need_pending_count,
+                            justid=False,
+                        )
+                        pending_messages = [(stream_key, claimed)] if claimed else []
+                    else:
+                        pending_messages = []
+
+            # Combine: new first, then pending
             messages = []
             if new_messages:
                 messages.extend(new_messages)
+            if pending_messages:
+                messages.extend(pending_messages)
 
             result_messages = []
-
             for _stream, stream_messages in messages:
                 for message_id, fields in stream_messages:
                     try:
@@ -359,7 +591,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                         result_messages.append(message)
 
                     except Exception as e:
-                        logger.error(f"Failed to parse message {message_id}: {e}")
+                        logger.error(f"Failed to parse message {message_id}: {e}", stack_info=True)
 
             # Always return a list for consistency
             if not result_messages:
@@ -404,124 +636,34 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             return qsize_stats
 
         except Exception as e:
-            logger.error(f"Failed to get Redis queue size: {e}")
+            logger.error(f"Failed to get Redis queue size: {e}", stack_info=True)
             return {}
-
-    def _release_stale_pending_for_stream(self, stream_key: str, max_per_iter: int = 100) -> None:
-        """
-        Scan and release pending messages that exceed idle threshold for a stream.
-
-        Strategy:
-        - Use XAUTOCLAIM to fetch idle pending entries with fields.
-        - Immediately XACK to remove from pending, optionally XDEL to tidy the stream.
-        - Re-add the original fields via XADD to requeue.
-        """
-        if not self._redis_conn:
-            return
-        try:
-            self._ensure_consumer_group(stream_key=stream_key)
-        except Exception:
-            return
-
-        try:
-            # XAUTOCLAIM returns (next_start_id, [(id, fields), ...])
-            next_id, claimed = self._redis_conn.xautoclaim(
-                name=stream_key,
-                groupname=self.consumer_group,
-                consumername=self.consumer_name,
-                min_idle_time=self._pending_requeue_idle_ms,
-                start_id="0-0",
-                count=max_per_iter,
-                justid=False,
-            )
-        except Exception as e:
-            logger.debug(f"xautoclaim failed on {stream_key}: {e}")
-            return
-
-        if not claimed:
-            return
-
-        for message_id, fields in claimed:
-            try:
-                # Ack to remove from pending; optionally delete from stream
-                with suppress(Exception):
-                    self._redis_conn.xack(stream_key, self.consumer_group, message_id)
-                if self.auto_delete_acked:
-                    with suppress(Exception):
-                        self._redis_conn.xdel(stream_key, message_id)
-                # Re-add to stream to release back to the queue
-                self._redis_conn.xadd(stream_key, fields, maxlen=self.max_len, approximate=True)
-                logger.info(f"Requeued stale pending message {message_id} back to {stream_key}")
-            except Exception as e:
-                logger.warning(f"Failed to requeue stale pending {message_id} on {stream_key}: {e}")
-
-    def _pending_requeue_daemon(self) -> None:
-        """Background daemon to periodically release stale pending messages."""
-        logger.info(
-            f"Starting pending requeue daemon: interval={self._pending_requeue_interval_sec}s, idle_ms={self._pending_requeue_idle_ms}"
-        )
-        while not self._pending_requeue_stop_event.is_set():
-            try:
-                stream_keys = self.get_stream_keys()
-                for stream_key in stream_keys:
-                    self._release_stale_pending_for_stream(stream_key)
-            except Exception as e:
-                logger.debug(f"Pending requeue daemon iteration failed: {e}")
-            # Sleep until next iteration or stop
-            self._pending_requeue_stop_event.wait(self._pending_requeue_interval_sec)
-        logger.info("Pending requeue daemon stopped.")
-
-    def _start_pending_requeue_daemon(self) -> None:
-        if self._pending_requeue_thread and self._pending_requeue_thread.is_alive():
-            return
-        # Reset stop event
-        self._pending_requeue_stop_event.clear()
-        self._pending_requeue_thread = ContextThread(
-            target=self._pending_requeue_daemon,
-            name="redis-pending-requeue",
-            daemon=True,
-        )
-        try:
-            self._pending_requeue_thread.start()
-        except Exception as e:
-            logger.debug(f"Failed to start pending requeue daemon: {e}")
-
-    def _stop_pending_requeue_daemon(self) -> None:
-        try:
-            self._pending_requeue_stop_event.set()
-            if self._pending_requeue_thread and self._pending_requeue_thread.is_alive():
-                self._pending_requeue_thread.join(timeout=2.0)
-        except Exception:
-            pass
 
     def get_stream_keys(self, stream_key_prefix: str | None = None) -> list[str]:
         """
-        List all Redis stream keys that match this queue's prefix.
+        Return cached Redis stream keys maintained by background refresher.
 
-        Only returns actual Redis Stream keys, excluding auxiliary keys
-        (e.g., any lock or string/hash keys). This avoids WRONGTYPE errors
-        when issuing stream commands on non-stream keys.
+        The cache is updated periodically by a background thread and also
+        appended immediately on new stream creation via `put`.
 
-        Returns:
-            A list of stream keys like `"{prefix}:{user_id}:{mem_cube_id}:{task_label}"`.
+        Before returning, validate that all cached keys match the given
+        `stream_key_prefix` (or the queue's configured prefix if None).
+        If any key does not match, log an error.
         """
-        if not self._redis_conn:
-            return []
+        effective_prefix = stream_key_prefix or self.stream_key_prefix
+        with self._stream_keys_lock:
+            cache_snapshot = list(self._stream_keys_cache)
 
-        if stream_key_prefix is None:
-            stream_key_prefix = self.stream_key_prefix
-        # First, get all keys that might match (using Redis pattern matching)
-        redis_pattern = f"{stream_key_prefix}:*"
-        raw_keys_iter = self._redis_conn.scan_iter(match=redis_pattern)
-        raw_keys = list(raw_keys_iter)
-
-        # Second, filter using Python regex to ensure exact prefix match
-        # Escape special regex characters in the prefix, then add :.*
-        escaped_prefix = re.escape(stream_key_prefix)
+        # Validate that cached keys conform to the expected prefix
+        escaped_prefix = re.escape(effective_prefix)
         regex_pattern = f"^{escaped_prefix}:"
-        stream_keys = [key for key in raw_keys if re.match(regex_pattern, key)]
+        for key in cache_snapshot:
+            if not re.match(regex_pattern, key):
+                logger.error(
+                    f"[REDIS_QUEUE] Cached stream key '{key}' does not match prefix '{effective_prefix}:'"
+                )
 
-        return stream_keys
+        return cache_snapshot
 
     def size(self) -> int:
         """
@@ -632,8 +774,8 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                 self._redis_conn.ping()
                 self._is_connected = True
                 logger.debug("Redis connection established successfully")
-                # Ensure pending requeue daemon is running
-                self._start_pending_requeue_daemon()
+                # Start stream keys refresher when connected
+                self._start_stream_keys_refresh_thread()
             except Exception as e:
                 logger.error(f"Failed to connect to Redis: {e}")
                 self._is_connected = False
@@ -644,8 +786,8 @@ class SchedulerRedisQueue(RedisSchedulerModule):
     def disconnect(self) -> None:
         """Disconnect from Redis and clean up resources."""
         self._is_connected = False
-        # Stop requeue daemon
-        self._stop_pending_requeue_daemon()
+        # Stop background refresher
+        self._stop_stream_keys_refresh_thread()
         if self._is_listening:
             self.stop_listening()
         logger.debug("Disconnected from Redis")
@@ -662,6 +804,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
 
     def __del__(self):
         """Cleanup when object is destroyed."""
+        self._stop_stream_keys_refresh_thread()
         if self._is_connected:
             self.disconnect()
 
