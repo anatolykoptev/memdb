@@ -29,6 +29,7 @@ from memos.api.product_models import (
     APIChatCompleteRequest,
     APIFeedbackRequest,
     APISearchRequest,
+    ChatPlaygroundRequest,
     ChatRequest,
     DeleteMemoryRequest,
     DeleteMemoryResponse,
@@ -217,7 +218,7 @@ def chat_stream(chat_req: ChatRequest):
 
 
 @router.post("/chat/stream/playground", summary="Chat with MemOS playground")
-def chat_stream_playground(chat_req: ChatRequest):
+def chat_stream_playground(chat_req: ChatPlaygroundRequest):
     """
     Chat with MemOS for a specific user. Returns SSE stream.
 
