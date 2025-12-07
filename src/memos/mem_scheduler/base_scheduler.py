@@ -708,6 +708,38 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                     "enqueue", m, {"enqueue_ts": to_iso(getattr(m, "timestamp", None))}
                 )
 
+            # simulate dequeue for immediately dispatched messages so monitor logs stay complete
+            for m in immediate_msgs:
+                try:
+                    now = time.time()
+                    enqueue_ts_obj = getattr(m, "timestamp", None)
+                    enqueue_epoch = None
+                    if isinstance(enqueue_ts_obj, int | float):
+                        enqueue_epoch = float(enqueue_ts_obj)
+                    elif hasattr(enqueue_ts_obj, "timestamp"):
+                        dt = enqueue_ts_obj
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        enqueue_epoch = dt.timestamp()
+
+                    queue_wait_ms = None
+                    if enqueue_epoch is not None:
+                        queue_wait_ms = max(0.0, now - enqueue_epoch) * 1000
+
+                    object.__setattr__(m, "_dequeue_ts", now)
+                    emit_monitor_event(
+                        "dequeue",
+                        m,
+                        {
+                            "enqueue_ts": to_iso(enqueue_ts_obj),
+                            "dequeue_ts": datetime.fromtimestamp(now, tz=timezone.utc).isoformat(),
+                            "queue_wait_ms": queue_wait_ms,
+                        },
+                    )
+                    self.metrics.task_dequeued(user_id=m.user_id, task_type=m.label)
+                except Exception:
+                    logger.debug("Failed to emit dequeue for immediate task", exc_info=True)
+
             user_cube_groups = group_messages_by_user_and_mem_cube(immediate_msgs)
             for user_id, cube_groups in user_cube_groups.items():
                 for mem_cube_id, user_cube_msgs in cube_groups.items():
