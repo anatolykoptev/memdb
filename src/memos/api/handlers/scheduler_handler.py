@@ -254,8 +254,18 @@ def handle_task_queue_status(
         if queue is None:
             raise HTTPException(status_code=503, detail="Scheduler queue is not available")
 
-        # Only support Redis-backed queue for now
+        # Only support Redis-backed queue for now; try lazy init if not connected
         redis_conn = getattr(queue, "_redis_conn", None)
+        if redis_conn is None:
+            try:
+                if hasattr(queue, "auto_initialize_redis"):
+                    queue.auto_initialize_redis()
+                    redis_conn = getattr(queue, "_redis_conn", None)
+                if redis_conn and hasattr(queue, "connect"):
+                    queue.connect()
+            except Exception:
+                redis_conn = None
+
         if redis_conn is None:
             raise HTTPException(status_code=503, detail="Scheduler queue not connected to Redis")
 
