@@ -58,6 +58,8 @@ def submit_tasks():
 TEST_HANDLER_LABEL = "test_handler"
 mem_scheduler.register_handlers({TEST_HANDLER_LABEL: my_test_handler})
 
+# 10s to restart
+mem_scheduler.orchestrator.tasks_min_idle_ms[TEST_HANDLER_LABEL] = 10_000
 
 tmp_dir = Path("./tmp")
 tmp_dir.mkdir(exist_ok=True)

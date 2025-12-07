@@ -16,12 +16,11 @@ from uuid import uuid4
 
 from memos.context.context import ContextThread
 from memos.log import get_logger
-from memos.mem_scheduler.schemas.general_schemas import (
-    DEFAULT_PENDING_CLAIM_MIN_IDLE_MS,
+from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
+from memos.mem_scheduler.schemas.task_schemas import (
     DEFAULT_STREAM_KEY_PREFIX,
     DEFAULT_STREAM_KEYS_REFRESH_INTERVAL_SEC,
 )
-from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.task_schedule_modules.orchestrator import SchedulerOrchestrator
 from memos.mem_scheduler.webservice_modules.redis_service import RedisSchedulerModule
 
@@ -352,10 +351,8 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             logger.warning(
                 f"xack failed for stream '{stream_key}', msg_id='{redis_message_id}': {e}"
             )
-            return
-
-        # Optionally delete the message from the stream to keep it clean
         if self.auto_delete_acked:
+            # Optionally delete the message from the stream to keep it clean
             try:
                 self._redis_conn.xdel(stream_key, redis_message_id)
                 logger.info(f"Successfully delete acknowledged message {redis_message_id}")
@@ -422,6 +419,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                 need_pending = max(0, batch_size - new_count)
                 need_pending_count = need_pending if need_pending > 0 else 0
 
+            task_label = stream_key.rsplit(":", 1)[1]
             if need_pending_count:
                 # Claim only pending messages whose idle time exceeds configured threshold
                 try:
@@ -432,7 +430,8 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                         name=stream_key,
                         groupname=self.consumer_group,
                         consumername=self.consumer_name,
-                        min_idle_time=DEFAULT_PENDING_CLAIM_MIN_IDLE_MS,
+                        # Derive task_label from stream_key suffix: {prefix}:{user_id}:{mem_cube_id}:{task_label}
+                        min_idle_time=self.orchestrator.get_task_idle_min(task_label=task_label),
                         start_id="0-0",
                         count=need_pending_count,
                         justid=False,
@@ -450,7 +449,9 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                             name=stream_key,
                             groupname=self.consumer_group,
                             consumername=self.consumer_name,
-                            min_idle_time=DEFAULT_PENDING_CLAIM_MIN_IDLE_MS,
+                            min_idle_time=self.orchestrator.get_task_idle_min(
+                                task_label=task_label
+                            ),
                             start_id="0-0",
                             count=need_pending_count,
                             justid=False,
