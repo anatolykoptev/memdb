@@ -362,6 +362,7 @@ class SimpleStructMemReader(BaseMemReader, ABC):
                         chat_read_nodes.append(node)
                     except Exception as e:
                         logger.error(f"[ChatFine] parse error: {e}")
+            return chat_read_nodes
 
     def _process_transfer_chat_data(
         self, raw_node: TextualMemoryItem, custom_tags: list[str] | None = None
