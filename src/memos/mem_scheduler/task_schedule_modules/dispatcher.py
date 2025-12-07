@@ -132,9 +132,10 @@ class SchedulerDispatcher(BaseSchedulerModule):
             start_time = time.time()
             start_iso = datetime.fromtimestamp(start_time, tz=timezone.utc).isoformat()
             if self.status_tracker:
-                self.status_tracker.task_started(
-                    task_id=task_item.item_id, user_id=task_item.user_id
-                )
+                for msg in messages:
+                    self.status_tracker.task_started(
+                        task_id=msg.item_id, user_id=msg.user_id
+                    )
             try:
                 first_msg = messages[0]
                 trace_id = getattr(first_msg, "trace_id", None) or generate_trace_id()
@@ -197,9 +198,10 @@ class SchedulerDispatcher(BaseSchedulerModule):
                 duration = finish_time - start_time
                 self.metrics.observe_task_duration(duration, m.user_id, m.label)
                 if self.status_tracker:
-                    self.status_tracker.task_completed(
-                        task_id=task_item.item_id, user_id=task_item.user_id
-                    )
+                    for msg in messages:
+                        self.status_tracker.task_completed(
+                            task_id=msg.item_id, user_id=msg.user_id
+                        )
                 self.metrics.task_completed(user_id=m.user_id, task_type=m.label)
 
                 emit_monitor_event(
@@ -229,9 +231,10 @@ class SchedulerDispatcher(BaseSchedulerModule):
                 finish_time = time.time()
                 self.metrics.task_failed(m.user_id, m.label, type(e).__name__)
                 if self.status_tracker:
-                    self.status_tracker.task_failed(
-                        task_id=task_item.item_id, user_id=task_item.user_id, error_message=str(e)
-                    )
+                    for msg in messages:
+                        self.status_tracker.task_failed(
+                            task_id=msg.item_id, user_id=msg.user_id, error_message=str(e)
+                        )
                 emit_monitor_event(
                     "finish",
                     m,
