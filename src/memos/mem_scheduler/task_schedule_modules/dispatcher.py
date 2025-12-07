@@ -133,9 +133,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
             start_iso = datetime.fromtimestamp(start_time, tz=timezone.utc).isoformat()
             if self.status_tracker:
                 for msg in messages:
-                    self.status_tracker.task_started(
-                        task_id=msg.item_id, user_id=msg.user_id
-                    )
+                    self.status_tracker.task_started(task_id=msg.item_id, user_id=msg.user_id)
             try:
                 first_msg = messages[0]
                 trace_id = getattr(first_msg, "trace_id", None) or generate_trace_id()
@@ -199,9 +197,7 @@ class SchedulerDispatcher(BaseSchedulerModule):
                 self.metrics.observe_task_duration(duration, m.user_id, m.label)
                 if self.status_tracker:
                     for msg in messages:
-                        self.status_tracker.task_completed(
-                            task_id=msg.item_id, user_id=msg.user_id
-                        )
+                        self.status_tracker.task_completed(task_id=msg.item_id, user_id=msg.user_id)
                 self.metrics.task_completed(user_id=m.user_id, task_type=m.label)
 
                 emit_monitor_event(
