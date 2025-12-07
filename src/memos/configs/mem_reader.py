@@ -61,6 +61,8 @@ class MultiModalStructMemReaderConfig(BaseMemReaderConfig):
 class StrategyStructMemReaderConfig(BaseMemReaderConfig):
     """StrategyStruct MemReader configuration class."""
 
+    model_config = ConfigDict(extra="allow", strict=True)
+
 
 class MemReaderConfigFactory(BaseConfig):
     """Factory class for creating MemReader configurations."""
