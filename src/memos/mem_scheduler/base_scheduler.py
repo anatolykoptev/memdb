@@ -714,7 +714,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                     now = time.time()
                     enqueue_ts_obj = getattr(m, "timestamp", None)
                     enqueue_epoch = None
-                    if isinstance(enqueue_ts_obj, (int, float)):
+                    if isinstance(enqueue_ts_obj, int | float):
                         enqueue_epoch = float(enqueue_ts_obj)
                     elif hasattr(enqueue_ts_obj, "timestamp"):
                         dt = enqueue_ts_obj
