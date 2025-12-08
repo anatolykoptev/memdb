@@ -328,7 +328,12 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             raise
 
     def ack_message(
-        self, user_id: str, mem_cube_id: str, task_label: str, redis_message_id
+        self,
+        user_id: str,
+        mem_cube_id: str,
+        task_label: str,
+        redis_message_id,
+        message: ScheduleMessageItem | None,
     ) -> None:
         stream_key = self.get_stream_key(
             user_id=user_id, mem_cube_id=mem_cube_id, task_label=task_label
@@ -347,6 +352,12 @@ class SchedulerRedisQueue(RedisSchedulerModule):
 
         try:
             self._redis_conn.xack(stream_key, self.consumer_group, redis_message_id)
+
+            if message:
+                self.status_tracker.task_completed(task_id=message.item_id, user_id=message.user_id)
+                logger.info(
+                    f"Message {message.item_id} | {message.label} | {message.content} has been acknowledged."
+                )
         except Exception as e:
             logger.warning(
                 f"xack failed for stream '{stream_key}', msg_id='{redis_message_id}': {e}"
