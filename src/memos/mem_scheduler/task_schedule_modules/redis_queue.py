@@ -22,7 +22,9 @@ from memos.mem_scheduler.schemas.task_schemas import (
     DEFAULT_STREAM_KEYS_REFRESH_INTERVAL_SEC,
 )
 from memos.mem_scheduler.task_schedule_modules.orchestrator import SchedulerOrchestrator
+from memos.mem_scheduler.utils.status_tracker import TaskStatusTracker
 from memos.mem_scheduler.webservice_modules.redis_service import RedisSchedulerModule
+from memos.utils import timed_with_status
 
 
 logger = get_logger(__name__)
@@ -51,6 +53,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         consumer_name: str | None = "scheduler_consumer",
         max_len: int | None = None,
         auto_delete_acked: bool = True,  # Whether to automatically delete acknowledged messages
+        status_tracker: TaskStatusTracker | None = None,
     ):
         """
         Initialize the Redis queue.
@@ -70,6 +73,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         self.consumer_name = f"{consumer_name}_{uuid4().hex[:8]}"
         self.max_len = max_len
         self.auto_delete_acked = auto_delete_acked  # Whether to delete acknowledged messages
+        self.status_tracker = status_tracker
 
         # Consumer state
         self._is_listening = False
@@ -188,6 +192,15 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         except Exception as e:
             logger.debug(f"Stopping stream keys refresh thread encountered: {e}")
 
+    @timed_with_status(
+        log_prefix="task_broker_for_redis",
+        log_extra_args={
+            "redis_stream": os.getenv(
+                "MEMSCHEDULER_REDIS_STREAM_KEY_PREFIX",
+                DEFAULT_STREAM_KEY_PREFIX,
+            )
+        },
+    )
     def task_broker(
         self,
         consume_batch_size: int,
@@ -352,12 +365,6 @@ class SchedulerRedisQueue(RedisSchedulerModule):
 
         try:
             self._redis_conn.xack(stream_key, self.consumer_group, redis_message_id)
-
-            if message:
-                self.status_tracker.task_completed(task_id=message.item_id, user_id=message.user_id)
-                logger.info(
-                    f"Message {message.item_id} | {message.label} | {message.content} has been acknowledged."
-                )
         except Exception as e:
             logger.warning(
                 f"xack failed for stream '{stream_key}', msg_id='{redis_message_id}': {e}"
