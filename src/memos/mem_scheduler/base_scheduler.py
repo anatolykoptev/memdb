@@ -224,7 +224,8 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                 if self.dispatcher:
                     self.dispatcher.status_tracker = self.status_tracker
                 if self.memos_message_queue:
-                    self.memos_message_queue.status_tracker = self.status_tracker
+                    # Use the setter to propagate to the inner queue (e.g. SchedulerRedisQueue)
+                    self.memos_message_queue.set_status_tracker(self.status_tracker)
             # initialize submodules
             self.chat_llm = chat_llm
             self.process_llm = process_llm
@@ -312,7 +313,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
 
         # Initialize current_mem_cube if not set yet and mem_cubes are available
         try:
-            if self.current_mem_cube is None and self._mem_cubes:
+            if self.mem_cube is None and self._mem_cubes:
                 selected_cube: BaseMemCube | None = None
 
                 # Prefer the cube matching current_mem_cube_id if provided
