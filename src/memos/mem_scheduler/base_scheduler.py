@@ -148,7 +148,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         self.monitor: SchedulerGeneralMonitor | None = None
         self.dispatcher_monitor: SchedulerDispatcherMonitor | None = None
         self.mem_reader = None  # Will be set by MOSCore
-        self.status_tracker: TaskStatusTracker | None = None
+        self._status_tracker: TaskStatusTracker | None = None
         self.metrics = metrics
         self._monitor_thread = None
         self.memos_message_queue = ScheduleTaskQueue(
@@ -156,14 +156,14 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
             maxsize=self.max_internal_message_queue_size,
             disabled_handlers=self.disabled_handlers,
             orchestrator=self.orchestrator,
-            status_tracker=self.status_tracker,
+            status_tracker=self._status_tracker,
         )
         self.dispatcher = SchedulerDispatcher(
             config=self.config,
             memos_message_queue=self.memos_message_queue,
             max_workers=self.thread_pool_max_workers,
             enable_parallel_dispatch=self.enable_parallel_dispatch,
-            status_tracker=self.status_tracker,
+            status_tracker=self._status_tracker,
             metrics=self.metrics,
             submit_web_logs=self._submit_web_logs,
             orchestrator=self.orchestrator,
@@ -292,6 +292,38 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                     "No environment available to initialize mem cube. Using fallback naive_mem_cube."
                 )
         return self.current_mem_cube
+
+    @property
+    def status_tracker(self) -> TaskStatusTracker | None:
+        """Lazy-initialized TaskStatusTracker.
+
+        If the tracker is None, attempt to initialize from the Redis client
+        available via RedisSchedulerModule. This mirrors the lazy pattern used
+        by `mem_cube` so downstream modules can safely access the tracker.
+        """
+        if self._status_tracker is None:
+            try:
+                self._status_tracker = TaskStatusTracker(self.redis)
+                # Propagate to submodules when created lazily
+                if self.dispatcher:
+                    self.dispatcher.status_tracker = self._status_tracker
+                if self.memos_message_queue:
+                    self.memos_message_queue.set_status_tracker(self._status_tracker)
+            except Exception as e:
+                logger.warning(f"Failed to lazily initialize status_tracker: {e}", exc_info=True)
+        return self._status_tracker
+
+    @status_tracker.setter
+    def status_tracker(self, value: TaskStatusTracker | None) -> None:
+        """Setter that also propagates tracker to dependent modules."""
+        self._status_tracker = value
+        try:
+            if self.dispatcher:
+                self.dispatcher.status_tracker = value
+            if self.memos_message_queue and value is not None:
+                self.memos_message_queue.set_status_tracker(value)
+        except Exception as e:
+            logger.warning(f"Failed to propagate status_tracker: {e}", exc_info=True)
 
     @property
     def feedback_server(self) -> SimpleMemFeedback:
