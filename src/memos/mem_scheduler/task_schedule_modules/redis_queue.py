@@ -18,8 +18,10 @@ from memos.context.context import ContextThread
 from memos.log import get_logger
 from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 from memos.mem_scheduler.schemas.task_schemas import (
+    DEFAULT_STREAM_INACTIVITY_DELETE_SECONDS,
     DEFAULT_STREAM_KEY_PREFIX,
     DEFAULT_STREAM_KEYS_REFRESH_INTERVAL_SEC,
+    DEFAULT_STREAM_RECENT_ACTIVE_SECONDS,
 )
 from memos.mem_scheduler.task_schedule_modules.orchestrator import SchedulerOrchestrator
 from memos.mem_scheduler.utils.status_tracker import TaskStatusTracker
@@ -69,6 +71,8 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         super().__init__()
         # Stream configuration
         self.stream_key_prefix = stream_key_prefix
+        # Precompile regex for prefix filtering to reduce repeated compilation overhead
+        self.stream_prefix_regex_pattern = re.compile(f"^{re.escape(self.stream_key_prefix)}:")
         self.consumer_group = consumer_group
         self.consumer_name = f"{consumer_name}_{uuid4().hex[:8]}"
         self.max_len = max_len
@@ -130,8 +134,28 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         return stream_key
 
     # --- Stream keys refresh background thread ---
+    @timed_with_status(
+        log_prefix="_refresh_stream_keys",
+        log_extra_args={
+            "redis_stream": os.getenv(
+                "MEMSCHEDULER_REDIS_STREAM_KEY_PREFIX",
+                DEFAULT_STREAM_KEY_PREFIX,
+            )
+        },
+    )
     def _refresh_stream_keys(self, stream_key_prefix: str | None = None) -> list[str]:
-        """Scan Redis and refresh cached stream keys for the queue prefix."""
+        """Scan once and keep only streams with recent messages.
+
+        Uses a pipelined `XREVRANGE COUNT 1` per candidate stream to fetch
+        the last entry ID with minimal overhead. A stream is considered
+        "active" if its last message time is within
+        `DEFAULT_STREAM_RECENT_ACTIVE_SECONDS` of the current time. No
+        per-stream last-ID state is stored.
+
+        Additionally, streams whose last message time is older than
+        `DEFAULT_STREAM_INACTIVITY_DELETE_SECONDS` will be deleted to keep
+        Redis tidy. This removal is logged.
+        """
         if not self._redis_conn:
             return []
 
@@ -139,19 +163,30 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             stream_key_prefix = self.stream_key_prefix
 
         try:
-            redis_pattern = f"{stream_key_prefix}:*"
-            raw_keys_iter = self._redis_conn.scan_iter(match=redis_pattern)
-            raw_keys = list(raw_keys_iter)
-
-            escaped_prefix = re.escape(stream_key_prefix)
-            regex_pattern = f"^{escaped_prefix}:"
-            stream_keys = [key for key in raw_keys if re.match(regex_pattern, key)]
-
-            if stream_key_prefix == self.stream_key_prefix:
-                with self._stream_keys_lock:
-                    self._stream_keys_cache = stream_keys
-                    self._stream_keys_last_refresh = time.time()
-            return stream_keys
+            candidate_keys = self._scan_candidate_stream_keys(stream_key_prefix)
+            last_entries_results = self._pipeline_last_entries(candidate_keys)
+            now_sec = time.time()
+            keys_to_delete = self._collect_inactive_keys(
+                candidate_keys=candidate_keys,
+                last_entries_results=last_entries_results,
+                inactivity_seconds=DEFAULT_STREAM_INACTIVITY_DELETE_SECONDS,
+                now_sec=now_sec,
+            )
+            active_stream_keys = self._filter_active_keys(
+                candidate_keys=candidate_keys,
+                last_entries_results=last_entries_results,
+                recent_seconds=DEFAULT_STREAM_RECENT_ACTIVE_SECONDS,
+                now_sec=now_sec,
+            )
+            deleted_count = self._delete_streams(keys_to_delete)
+            self._update_stream_cache_with_log(
+                stream_key_prefix=stream_key_prefix,
+                candidate_keys=candidate_keys,
+                active_stream_keys=active_stream_keys,
+                deleted_count=deleted_count,
+                active_threshold_sec=DEFAULT_STREAM_RECENT_ACTIVE_SECONDS,
+            )
+            return active_stream_keys
         except Exception as e:
             logger.warning(f"Failed to refresh stream keys: {e}")
             return []
@@ -193,7 +228,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             logger.debug(f"Stopping stream keys refresh thread encountered: {e}")
 
     @timed_with_status(
-        log_prefix="task_broker_for_redis",
+        log_prefix="task_broker",
         log_extra_args={
             "redis_stream": os.getenv(
                 "MEMSCHEDULER_REDIS_STREAM_KEY_PREFIX",
@@ -387,136 +422,159 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         if not self._redis_conn:
             raise ConnectionError("Not connected to Redis. Redis connection not available.")
 
-        try:
-            # Calculate timeout for Redis
-            redis_timeout = None
-            if block and timeout is not None:
-                redis_timeout = int(timeout * 1000)
-            elif not block:
-                redis_timeout = None  # Non-blocking
+        redis_timeout = self._compute_redis_timeout(block=block, timeout=timeout)
 
-            # Read messages from the consumer group
-            # 1) Read remaining/new messages first (not yet delivered to any consumer)
-            new_messages: list[tuple[str, list[tuple[str, dict]]]] = []
-            try:
-                new_messages = self._redis_conn.xreadgroup(
+        # Step 1: read new messages first
+        new_messages = self._read_new_messages(
+            stream_key=stream_key, batch_size=batch_size, redis_timeout=redis_timeout
+        )
+
+        # Step 2: determine how many pending messages we need
+        need_pending_count = self._compute_pending_need(
+            new_messages=new_messages, batch_size=batch_size
+        )
+
+        # Step 3: claim eligible pending messages
+        pending_messages: list[tuple[str, list[tuple[str, dict]]]] = []
+        if need_pending_count:
+            task_label = stream_key.rsplit(":", 1)[1]
+            pending_messages = self._claim_pending_messages(
+                stream_key=stream_key,
+                need_pending_count=need_pending_count,
+                task_label=task_label,
+            )
+
+        # Step 4: assemble and convert to ScheduleMessageItem
+        messages = []
+        if new_messages:
+            messages.extend(new_messages)
+        if pending_messages:
+            messages.extend(pending_messages)
+
+        result_messages = self._convert_messages(messages)
+
+        if not result_messages:
+            if not block:
+                return []
+            else:
+                from queue import Empty
+
+                raise Empty("No messages available in Redis queue")
+
+        return result_messages
+
+    def _compute_redis_timeout(self, block: bool, timeout: float | None) -> int | None:
+        """Compute Redis block timeout in milliseconds for xreadgroup."""
+        if block and timeout is not None:
+            return int(timeout * 1000)
+        return None
+
+    def _read_new_messages(
+        self, stream_key: str, batch_size: int | None, redis_timeout: int | None
+    ) -> list[tuple[str, list[tuple[str, dict]]]]:
+        """Read new messages for the consumer group, handling missing group/stream."""
+        try:
+            return self._redis_conn.xreadgroup(
+                self.consumer_group,
+                self.consumer_name,
+                {stream_key: ">"},
+                count=batch_size,
+                block=redis_timeout,
+            )
+        except Exception as read_err:
+            err_msg = str(read_err).lower()
+            if "nogroup" in err_msg or "no such key" in err_msg:
+                logger.warning(
+                    f"Consumer group or stream missing for '{stream_key}/{self.consumer_group}'. Attempting to create and retry (new)."
+                )
+                self._ensure_consumer_group(stream_key=stream_key)
+                return self._redis_conn.xreadgroup(
                     self.consumer_group,
                     self.consumer_name,
                     {stream_key: ">"},
                     count=batch_size,
                     block=redis_timeout,
                 )
-            except Exception as read_err:
-                # Handle missing group/stream by creating and retrying once
-                err_msg = str(read_err).lower()
-                if "nogroup" in err_msg or "no such key" in err_msg:
-                    logger.warning(
-                        f"Consumer group or stream missing for '{stream_key}/{self.consumer_group}'. Attempting to create and retry (new)."
-                    )
-                    self._ensure_consumer_group(stream_key=stream_key)
-                    new_messages = self._redis_conn.xreadgroup(
-                        self.consumer_group,
-                        self.consumer_name,
-                        {stream_key: ">"},
-                        count=batch_size,
-                        block=redis_timeout,
-                    )
-                else:
-                    raise
-
-            # 2) If needed, read pending messages for THIS consumer only
-            pending_messages: list[tuple[str, list[tuple[str, dict]]]] = []
-            need_pending_count = None
-            if batch_size is None:
-                # No batch_size: prefer returning a single new message; if none, fetch one pending
-                if not new_messages:
-                    need_pending_count = 1
-            else:
-                # With batch_size: fill from pending if new insufficient
-                new_count = sum(len(sm) for _s, sm in new_messages) if new_messages else 0
-                need_pending = max(0, batch_size - new_count)
-                need_pending_count = need_pending if need_pending > 0 else 0
-
-            task_label = stream_key.rsplit(":", 1)[1]
-            if need_pending_count:
-                # Claim only pending messages whose idle time exceeds configured threshold
-                try:
-                    # Ensure group exists before claiming
-                    self._ensure_consumer_group(stream_key=stream_key)
-                    # XAUTOCLAIM returns (next_start_id, [(id, fields), ...])
-                    next_id, claimed = self._redis_conn.xautoclaim(
-                        name=stream_key,
-                        groupname=self.consumer_group,
-                        consumername=self.consumer_name,
-                        # Derive task_label from stream_key suffix: {prefix}:{user_id}:{mem_cube_id}:{task_label}
-                        min_idle_time=self.orchestrator.get_task_idle_min(task_label=task_label),
-                        start_id="0-0",
-                        count=need_pending_count,
-                        justid=False,
-                    )
-                    pending_messages = [(stream_key, claimed)] if claimed else []
-                except Exception as read_err:
-                    # Handle missing group/stream by creating and retrying once
-                    err_msg = str(read_err).lower()
-                    if "nogroup" in err_msg or "no such key" in err_msg:
-                        logger.warning(
-                            f"Consumer group or stream missing for '{stream_key}/{self.consumer_group}'. Attempting to create and retry (xautoclaim)."
-                        )
-                        self._ensure_consumer_group(stream_key=stream_key)
-                        next_id, claimed = self._redis_conn.xautoclaim(
-                            name=stream_key,
-                            groupname=self.consumer_group,
-                            consumername=self.consumer_name,
-                            min_idle_time=self.orchestrator.get_task_idle_min(
-                                task_label=task_label
-                            ),
-                            start_id="0-0",
-                            count=need_pending_count,
-                            justid=False,
-                        )
-                        pending_messages = [(stream_key, claimed)] if claimed else []
-                    else:
-                        pending_messages = []
-
-            # Combine: new first, then pending
-            messages = []
-            if new_messages:
-                messages.extend(new_messages)
-            if pending_messages:
-                messages.extend(pending_messages)
-
-            result_messages = []
-            for _stream, stream_messages in messages:
-                for message_id, fields in stream_messages:
-                    try:
-                        # Convert Redis message back to SchedulerMessageItem
-                        message = ScheduleMessageItem.from_dict(fields)
-                        # Preserve stream key and redis message id for monitoring/ack
-                        message.stream_key = _stream
-                        message.redis_message_id = message_id
-
-                        result_messages.append(message)
-
-                    except Exception as e:
-                        logger.error(f"Failed to parse message {message_id}: {e}", stack_info=True)
-
-            # Always return a list for consistency
-            if not result_messages:
-                if not block:
-                    return []  # Return empty list for non-blocking calls
-                else:
-                    # If no messages were found, raise Empty exception
-                    from queue import Empty
-
-                    raise Empty("No messages available in Redis queue")
-
-            return result_messages
-
-        except Exception as e:
-            if "Empty" in str(type(e).__name__):
-                raise
-            logger.error(f"Failed to get message from Redis queue: {e}")
+            logger.error(f"{read_err}", stack_info=True)
             raise
+
+    def _compute_pending_need(
+        self, new_messages: list[tuple[str, list[tuple[str, dict]]]] | None, batch_size: int | None
+    ) -> int:
+        """Compute how many pending messages are needed to fill the batch."""
+        if batch_size is None:
+            return 1 if not new_messages else 0
+        new_count = sum(len(sm) for _s, sm in new_messages) if new_messages else 0
+        need_pending = max(0, batch_size - new_count)
+        return need_pending if need_pending > 0 else 0
+
+    def _claim_pending_messages(
+        self, stream_key: str, need_pending_count: int, task_label: str
+    ) -> list[tuple[str, list[tuple[str, dict]]]]:
+        """Claim pending messages exceeding idle threshold, with group existence handling."""
+        try:
+            claimed_result = self._redis_conn.xautoclaim(
+                name=stream_key,
+                groupname=self.consumer_group,
+                consumername=self.consumer_name,
+                min_idle_time=self.orchestrator.get_task_idle_min(task_label=task_label),
+                start_id="0-0",
+                count=need_pending_count,
+                justid=False,
+            )
+            if len(claimed_result) == 2:
+                next_id, claimed = claimed_result
+                deleted_ids = []
+            elif len(claimed_result) == 3:
+                next_id, claimed, deleted_ids = claimed_result
+            else:
+                raise ValueError(f"Unexpected xautoclaim response length: {len(claimed_result)}")
+
+            return [(stream_key, claimed)] if claimed else []
+        except Exception as read_err:
+            err_msg = str(read_err).lower()
+            if "nogroup" in err_msg or "no such key" in err_msg:
+                logger.warning(
+                    f"Consumer group or stream missing for '{stream_key}/{self.consumer_group}'. Attempting to create and retry (xautoclaim)."
+                )
+                self._ensure_consumer_group(stream_key=stream_key)
+                claimed_result = self._redis_conn.xautoclaim(
+                    name=stream_key,
+                    groupname=self.consumer_group,
+                    consumername=self.consumer_name,
+                    min_idle_time=self.orchestrator.get_task_idle_min(task_label=task_label),
+                    start_id="0-0",
+                    count=need_pending_count,
+                    justid=False,
+                )
+                if len(claimed_result) == 2:
+                    next_id, claimed = claimed_result
+                    deleted_ids = []
+                elif len(claimed_result) == 3:
+                    next_id, claimed, deleted_ids = claimed_result
+                else:
+                    raise ValueError(
+                        f"Unexpected xautoclaim response length: {len(claimed_result)}"
+                    ) from read_err
+
+                return [(stream_key, claimed)] if claimed else []
+            return []
+
+    def _convert_messages(
+        self, messages: list[tuple[str, list[tuple[str, dict]]]]
+    ) -> list[ScheduleMessageItem]:
+        """Convert raw Redis messages into ScheduleMessageItem with metadata."""
+        result: list[ScheduleMessageItem] = []
+        for _stream, stream_messages in messages or []:
+            for message_id, fields in stream_messages:
+                try:
+                    message = ScheduleMessageItem.from_dict(fields)
+                    message.stream_key = _stream
+                    message.redis_message_id = message_id
+                    result.append(message)
+                except Exception as e:
+                    logger.error(f"Failed to parse message {message_id}: {e}", stack_info=True)
+        return result
 
     def qsize(self) -> dict:
         """
@@ -718,3 +776,116 @@ class SchedulerRedisQueue(RedisSchedulerModule):
     @property
     def unfinished_tasks(self) -> int:
         return self.qsize()
+
+    def _scan_candidate_stream_keys(self, stream_key_prefix: str) -> list[str]:
+        """Return stream keys matching the given prefix via SCAN, using precompiled regex when possible."""
+        redis_pattern = f"{stream_key_prefix}:*"
+        raw_keys_iter = self._redis_conn.scan_iter(match=redis_pattern)
+        raw_keys = list(raw_keys_iter)
+        # Use precompiled pattern when scanning the configured prefix; otherwise compile a per-call pattern
+        if stream_key_prefix == self.stream_key_prefix:
+            pattern = self.stream_prefix_regex_pattern
+        else:
+            pattern = re.compile(f"^{re.escape(stream_key_prefix)}:")
+        return [key for key in raw_keys if pattern.match(key)]
+
+    def _pipeline_last_entries(self, candidate_keys: list[str]) -> list[list[tuple[str, dict]]]:
+        """Fetch last entries for keys using pipelined XREVRANGE COUNT 1."""
+        if not candidate_keys:
+            return []
+        try:
+            pipe = self._redis_conn.pipeline(transaction=False)
+            for key in candidate_keys:
+                pipe.xrevrange(key, count=1)
+            return pipe.execute()
+        except Exception:
+            return []
+
+    def _parse_last_ms_from_entries(self, entries: list[tuple[str, dict]]) -> int | None:
+        """Parse millisecond timestamp from the last entry ID."""
+        if not entries:
+            return None
+        try:
+            last_id = entries[0][0]
+            return int(str(last_id).split("-")[0])
+        except Exception:
+            return None
+
+    def _collect_inactive_keys(
+        self,
+        candidate_keys: list[str],
+        last_entries_results: list[list[tuple[str, dict]]],
+        inactivity_seconds: float,
+        now_sec: float | None = None,
+    ) -> list[str]:
+        """Collect keys whose last entry time is older than inactivity threshold."""
+        keys_to_delete: list[str] = []
+        now = time.time() if now_sec is None else now_sec
+        for key, entries in zip(candidate_keys, last_entries_results or [], strict=False):
+            last_ms = self._parse_last_ms_from_entries(entries)
+            if last_ms is None:
+                continue
+            if (now - (last_ms / 1000.0)) > inactivity_seconds:
+                keys_to_delete.append(key)
+        return keys_to_delete
+
+    def _filter_active_keys(
+        self,
+        candidate_keys: list[str],
+        last_entries_results: list[list[tuple[str, dict]]],
+        recent_seconds: float,
+        now_sec: float | None = None,
+    ) -> list[str]:
+        """Return keys whose last entry time is within the recent window."""
+        active: list[str] = []
+        now = time.time() if now_sec is None else now_sec
+        for key, entries in zip(candidate_keys, last_entries_results or [], strict=False):
+            last_ms = self._parse_last_ms_from_entries(entries)
+            if last_ms is None:
+                continue
+            # Active if last message is no older than recent_seconds
+            if (now - (last_ms / 1000.0)) <= recent_seconds:
+                active.append(key)
+        return active
+
+    def _delete_streams(self, keys_to_delete: list[str]) -> int:
+        """Delete the given stream keys in batch, return deleted count."""
+        if not keys_to_delete:
+            return 0
+        deleted_count = 0
+        try:
+            del_pipe = self._redis_conn.pipeline(transaction=False)
+            for key in keys_to_delete:
+                del_pipe.delete(key)
+            del_pipe.execute()
+            deleted_count = len(keys_to_delete)
+        except Exception:
+            for key in keys_to_delete:
+                try:
+                    self._redis_conn.delete(key)
+                    deleted_count += 1
+                except Exception:
+                    pass
+        return deleted_count
+
+    def _update_stream_cache_with_log(
+        self,
+        stream_key_prefix: str,
+        candidate_keys: list[str],
+        active_stream_keys: list[str],
+        deleted_count: int,
+        active_threshold_sec: float,
+    ) -> None:
+        """Update cache and emit an info log summarizing refresh statistics."""
+        if stream_key_prefix != self.stream_key_prefix:
+            return
+        with self._stream_keys_lock:
+            self._stream_keys_cache = active_stream_keys
+            self._stream_keys_last_refresh = time.time()
+            cache_count = len(self._stream_keys_cache)
+        logger.info(
+            f"[REDIS_QUEUE] Stream keys refresh: prefix='{stream_key_prefix}', "
+            f"total={len(candidate_keys)}, active={len(active_stream_keys)}, cached={cache_count}, "
+            f"active_threshold_sec={int(active_threshold_sec)}, deleted={deleted_count}, "
+            f"inactive_threshold_sec={int(DEFAULT_STREAM_INACTIVITY_DELETE_SECONDS)}"
+        )
