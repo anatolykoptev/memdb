@@ -157,7 +157,11 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             stream_key_prefix = self.stream_key_prefix
 
         try:
-            candidate_keys = self._scan_candidate_stream_keys(stream_key_prefix)
+            candidate_keys = self._scan_candidate_stream_keys(
+                stream_key_prefix=stream_key_prefix,
+                max_keys=max_keys,
+                time_limit_sec=time_limit_sec,
+            )
             last_entries_results = self._pipeline_last_entries(candidate_keys)
             now_sec = time.time()
             keys_to_delete = self._collect_inactive_keys(
@@ -762,17 +766,45 @@ class SchedulerRedisQueue(RedisSchedulerModule):
     def unfinished_tasks(self) -> int:
         return self.qsize()
 
-    def _scan_candidate_stream_keys(self, stream_key_prefix: str) -> list[str]:
-        """Return stream keys matching the given prefix via SCAN, using precompiled regex when possible."""
+    def _scan_candidate_stream_keys(
+        self,
+        stream_key_prefix: str,
+        max_keys: int | None = None,
+        time_limit_sec: float | None = None,
+        count_hint: int = 200,
+    ) -> list[str]:
+        """Return stream keys matching the given prefix via SCAN with optional limits.
+
+        Uses a cursor-based SCAN to collect keys matching the prefix, honoring
+        optional `max_keys` and `time_limit_sec` constraints. Filters results
+        with a precompiled regex when scanning the configured prefix.
+        """
         redis_pattern = f"{stream_key_prefix}:*"
-        raw_keys_iter = self._redis_conn.scan_iter(match=redis_pattern)
-        raw_keys = list(raw_keys_iter)
-        # Use precompiled pattern when scanning the configured prefix; otherwise compile a per-call pattern
+        collected = []
+        cursor = 0
+        start_ts = time.time() if time_limit_sec else None
+        while True:
+            if (
+                start_ts is not None
+                and time_limit_sec is not None
+                and (time.time() - start_ts) > time_limit_sec
+            ):
+                break
+            cursor, keys = self._redis_conn.scan(
+                cursor=cursor, match=redis_pattern, count=count_hint
+            )
+            collected.extend(keys)
+            if max_keys is not None and len(collected) >= max_keys:
+                break
+            if cursor == 0 or cursor == "0":
+                break
+
         if stream_key_prefix == self.stream_key_prefix:
             pattern = self.stream_prefix_regex_pattern
         else:
-            pattern = re.compile(f"^{re.escape(stream_key_prefix)}:")
-        return [key for key in raw_keys if pattern.match(key)]
+            escaped_prefix = re.escape(stream_key_prefix)
+            pattern = re.compile(f"^{escaped_prefix}:")
+        return [key for key in collected if pattern.match(key)]
 
     def _pipeline_last_entries(self, candidate_keys: list[str]) -> list[list[tuple[str, dict]]]:
         """Fetch last entries for keys using pipelined XREVRANGE COUNT 1."""
