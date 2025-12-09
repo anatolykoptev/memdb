@@ -120,16 +120,22 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         self._stream_keys_lock = threading.Lock()
         self._stream_keys_refresh_thread: ContextThread | None = None
         self._stream_keys_refresh_stop_event = threading.Event()
+        self._initial_scan_max_keys = int(
+            os.getenv("MEMSCHEDULER_REDIS_INITIAL_SCAN_MAX_KEYS", "1000") or 1000
+        )
+        self._initial_scan_time_limit_sec = float(
+            os.getenv("MEMSCHEDULER_REDIS_INITIAL_SCAN_TIME_LIMIT_SEC", "1.0") or 1.0
+        )
 
         # Start background stream keys refresher if connected
         if self._is_connected:
-            # Refresh once synchronously to seed cache at init
             try:
-                self._refresh_stream_keys()
+                self._refresh_stream_keys(
+                    max_keys=self._initial_scan_max_keys,
+                    time_limit_sec=self._initial_scan_time_limit_sec,
+                )
             except Exception as e:
                 logger.debug(f"Initial stream keys refresh failed: {e}")
-
-            # Then start background refresher
             self._start_stream_keys_refresh_thread()
 
     def get_stream_key(self, user_id: str, mem_cube_id: str, task_label: str) -> str:
@@ -137,19 +143,13 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         return stream_key
 
     # --- Stream keys refresh background thread ---
-    def _refresh_stream_keys(self, stream_key_prefix: str | None = None) -> list[str]:
-        """Scan once and keep only streams with recent messages.
-
-        Uses a pipelined `XREVRANGE COUNT 1` per candidate stream to fetch
-        the last entry ID with minimal overhead. A stream is considered
-        "active" if its last message time is within
-        `DEFAULT_STREAM_RECENT_ACTIVE_SECONDS` of the current time. No
-        per-stream last-ID state is stored.
-
-        Additionally, streams whose last message time is older than
-        `DEFAULT_STREAM_INACTIVITY_DELETE_SECONDS` will be deleted to keep
-        Redis tidy. This removal is logged.
-        """
+    def _refresh_stream_keys(
+        self,
+        stream_key_prefix: str | None = None,
+        max_keys: int | None = None,
+        time_limit_sec: float | None = None,
+    ) -> list[str]:
+        """Scan Redis and refresh cached stream keys for the queue prefix."""
         if not self._redis_conn:
             return []
 
