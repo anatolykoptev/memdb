@@ -313,7 +313,7 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
 
         # Initialize current_mem_cube if not set yet and mem_cubes are available
         try:
-            if self.mem_cube is None and self._mem_cubes:
+            if self.current_mem_cube is None and self._mem_cubes:
                 selected_cube: BaseMemCube | None = None
 
                 # Prefer the cube matching current_mem_cube_id if provided

@@ -26,7 +26,6 @@ from memos.mem_scheduler.schemas.task_schemas import (
 from memos.mem_scheduler.task_schedule_modules.orchestrator import SchedulerOrchestrator
 from memos.mem_scheduler.utils.status_tracker import TaskStatusTracker
 from memos.mem_scheduler.webservice_modules.redis_service import RedisSchedulerModule
-from memos.utils import timed_with_status
 
 
 logger = get_logger(__name__)
@@ -94,6 +93,10 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         self._refill_lock = threading.Lock()
         self._refill_thread: ContextThread | None = None
 
+        # Track empty streams first-seen time to avoid zombie keys
+        self._empty_stream_seen_times: dict[str, float] = {}
+        self._empty_stream_seen_lock = threading.Lock()
+
         logger.info(
             f"[REDIS_QUEUE] Initialized with stream_prefix='{self.stream_key_prefix}', "
             f"consumer_group='{self.consumer_group}', consumer_name='{self.consumer_name}'"
@@ -134,15 +137,6 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         return stream_key
 
     # --- Stream keys refresh background thread ---
-    @timed_with_status(
-        log_prefix="_refresh_stream_keys",
-        log_extra_args={
-            "redis_stream": os.getenv(
-                "MEMSCHEDULER_REDIS_STREAM_KEY_PREFIX",
-                DEFAULT_STREAM_KEY_PREFIX,
-            )
-        },
-    )
     def _refresh_stream_keys(self, stream_key_prefix: str | None = None) -> list[str]:
         """Scan once and keep only streams with recent messages.
 
@@ -227,15 +221,6 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         except Exception as e:
             logger.debug(f"Stopping stream keys refresh thread encountered: {e}")
 
-    @timed_with_status(
-        log_prefix="task_broker",
-        log_extra_args={
-            "redis_stream": os.getenv(
-                "MEMSCHEDULER_REDIS_STREAM_KEY_PREFIX",
-                DEFAULT_STREAM_KEY_PREFIX,
-            )
-        },
-    )
     def task_broker(
         self,
         consume_batch_size: int,
@@ -824,7 +809,20 @@ class SchedulerRedisQueue(RedisSchedulerModule):
         for key, entries in zip(candidate_keys, last_entries_results or [], strict=False):
             last_ms = self._parse_last_ms_from_entries(entries)
             if last_ms is None:
+                # Empty stream (no entries). Track first-seen time and delete if past threshold
+                with self._empty_stream_seen_lock:
+                    first_seen = self._empty_stream_seen_times.get(key)
+                    if first_seen is None:
+                        # Record when we first observed this empty stream
+                        self._empty_stream_seen_times[key] = now
+                    else:
+                        if (now - first_seen) > inactivity_seconds:
+                            keys_to_delete.append(key)
                 continue
+            # Stream has entries; clear any empty-tracking state
+            with self._empty_stream_seen_lock:
+                if key in self._empty_stream_seen_times:
+                    self._empty_stream_seen_times.pop(key, None)
             if (now - (last_ms / 1000.0)) > inactivity_seconds:
                 keys_to_delete.append(key)
         return keys_to_delete
@@ -843,6 +841,10 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             last_ms = self._parse_last_ms_from_entries(entries)
             if last_ms is None:
                 continue
+            # Stream has entries; clear any empty-tracking state
+            with self._empty_stream_seen_lock:
+                if key in self._empty_stream_seen_times:
+                    self._empty_stream_seen_times.pop(key, None)
             # Active if last message is no older than recent_seconds
             if (now - (last_ms / 1000.0)) <= recent_seconds:
                 active.append(key)
@@ -859,11 +861,17 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                 del_pipe.delete(key)
             del_pipe.execute()
             deleted_count = len(keys_to_delete)
+            # Clean up empty-tracking state for deleted keys
+            with self._empty_stream_seen_lock:
+                for key in keys_to_delete:
+                    self._empty_stream_seen_times.pop(key, None)
         except Exception:
             for key in keys_to_delete:
                 try:
                     self._redis_conn.delete(key)
                     deleted_count += 1
+                    with self._empty_stream_seen_lock:
+                        self._empty_stream_seen_times.pop(key, None)
                 except Exception:
                     pass
         return deleted_count

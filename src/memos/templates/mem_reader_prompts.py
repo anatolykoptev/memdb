@@ -447,7 +447,7 @@ Return a JSON object where:
 - The number of output entries MUST exactly match the number of input memories.
 
 # DECISION GUIDE
-- Contradicted? → rewrite to match user message, "delete"=false, "rewritten"=original memory.
+- Contradicted? → rewrite to match user message, "delete"=false, "rewritten"=corrected memory content.
 - Hallucinated (specific fact not in user messages)? → "delete"=true, "rewritten"=dehallucinated rewritten memory.
 - Consistent or non-factual (opinion, emotion)? → keep as-is, "delete"=false.
 

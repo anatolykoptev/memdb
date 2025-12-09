@@ -504,18 +504,40 @@ class SimpleStructMemReader(BaseMemReader, ABC):
             raw = self.llm.generate([{"role": "user", "content": prompt}])
             success, parsed = self._parse_hallucination_filter_response(raw)
             logger.info(f"Hallucination filter parsed successfully: {success}")
-            new_mem_list = []
             if success:
                 logger.info(f"Hallucination filter result: {parsed}")
+                total = len(memory_list)
+                keep_flags = [True] * total
                 for mem_idx, content in parsed.items():
-                    logger.info(
-                        f"[filter_hallucination_in_memories] delete_flag is {content['delete']} for memory: "
-                        f"{memory_list[mem_idx]}; and rewritten memory: {content['rewritten']}"
-                    )
-                    if not content["delete"]:
-                        memory_list[mem_idx].memory = content["rewritten"]
-                        new_mem_list.append(memory_list[mem_idx])
+                    # Validate index bounds
+                    if not isinstance(mem_idx, int) or mem_idx < 0 or mem_idx >= total:
+                        logger.warning(
+                            f"[filter_hallucination_in_memories] Ignoring out-of-range index: {mem_idx}"
+                        )
+                        continue
 
+                    delete_flag = content.get("delete", False)
+                    rewritten = content.get("rewritten", "")
+
+                    logger.info(
+                        f"[filter_hallucination_in_memories] index={mem_idx}, delete={delete_flag}, rewritten='{rewritten[:100]}'"
+                    )
+
+                    if delete_flag is True:
+                        # Mark for deletion
+                        keep_flags[mem_idx] = False
+                    else:
+                        # Apply rewrite if provided (safe-by-default: keep item when not mentioned or delete=False)
+                        try:
+                            if isinstance(rewritten, str):
+                                memory_list[mem_idx].memory = rewritten
+                        except Exception as e:
+                            logger.warning(
+                                f"[filter_hallucination_in_memories] Failed to apply rewrite for index {mem_idx}: {e}"
+                            )
+
+                # Build result, preserving original order; keep items not mentioned by LLM by default
+                new_mem_list = [memory_list[i] for i in range(total) if keep_flags[i]]
                 return new_mem_list
             else:
                 logger.warning("Hallucination filter parsing failed or returned empty result.")

@@ -109,8 +109,8 @@ class GeneralScheduler(BaseScheduler):
 
             query_db_manager = self.monitor.query_monitors[user_id][mem_cube_id]
             query_db_manager.obj.put(item=item)
-            # Sync with database after adding new item
-            query_db_manager.sync_with_orm()
+        # Sync with database after adding new item
+        query_db_manager.sync_with_orm()
         logger.debug(
             f"Queries in monitor for user_id={user_id}, mem_cube_id={mem_cube_id}: {query_db_manager.obj.get_queries_with_timesort()}"
         )
