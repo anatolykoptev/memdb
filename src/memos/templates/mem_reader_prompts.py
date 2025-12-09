@@ -442,14 +442,17 @@ Memory list (to validate, in indexed JSON format):
 # OUTPUT FORMAT
 Return a JSON object where:
 - Keys are the same stringified indices as in the input memory list (e.g., "0", "1").
-- Each value is: {{"delete": boolean, "rewritten": string}}
+- Each value is: {{"delete": boolean, "rewritten": string, "reason": string}}
 - If "delete" is true, "rewritten" must be an empty string.
+- "reason" must briefly explain the decision (delete or rewrite) based on user messages.
 - The number of output entries MUST exactly match the number of input memories.
 
 # DECISION GUIDE
 - Contradicted? → rewrite to match user message, "delete"=false, "rewritten"=corrected memory content.
 - Hallucinated (specific fact not in user messages)? → "delete"=true, "rewritten"=dehallucinated rewritten memory.
 - Consistent or non-factual (opinion, emotion)? → keep as-is, "delete"=false.
+
+Additionally, include a concise "reason" for each item explaining your decision.
 
 Final Output:
 """

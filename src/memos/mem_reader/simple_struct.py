@@ -454,7 +454,7 @@ class SimpleStructMemReader(BaseMemReader, ABC):
     @staticmethod
     def _parse_hallucination_filter_response(text: str) -> tuple[bool, dict[int, dict]]:
         """Parse index-keyed JSON from hallucination filter response.
-        Expected shape: { "0": {"if_delete": bool, "rewritten memory content": str}, ... }
+        Expected shape: { "0": {"delete": bool, "rewritten": str, "reason": str}, ... }
         Returns (success, parsed_dict) with int keys.
         """
         try:
@@ -479,8 +479,13 @@ class SimpleStructMemReader(BaseMemReader, ABC):
                 continue
             delete_flag = v.get("delete")
             rewritten = v.get("rewritten", "")
-            if isinstance(delete_flag, bool) and isinstance(rewritten, str):
-                result[idx] = {"delete": delete_flag, "rewritten": rewritten}
+            reason = v.get("reason", "")
+            if (
+                isinstance(delete_flag, bool)
+                and isinstance(rewritten, str)
+                and isinstance(reason, str)
+            ):
+                result[idx] = {"delete": delete_flag, "rewritten": rewritten, "reason": reason}
 
         return (len(result) > 0), result
 
@@ -503,7 +508,9 @@ class SimpleStructMemReader(BaseMemReader, ABC):
         try:
             raw = self.llm.generate([{"role": "user", "content": prompt}])
             success, parsed = self._parse_hallucination_filter_response(raw)
-            logger.info(f"Hallucination filter parsed successfully: {success}")
+            logger.info(
+                f"[filter_hallucination_in_memories] Hallucination filter parsed successfully: {success}"
+            )
             if success:
                 logger.info(f"Hallucination filter result: {parsed}")
                 total = len(memory_list)
@@ -517,13 +524,14 @@ class SimpleStructMemReader(BaseMemReader, ABC):
                         continue
 
                     delete_flag = content.get("delete", False)
-                    rewritten = content.get("rewritten", "")
+                    rewritten = content.get("rewritten", None)
+                    reason = content.get("reason", "")
 
                     logger.info(
-                        f"[filter_hallucination_in_memories] index={mem_idx}, delete={delete_flag}, rewritten='{rewritten[:100]}'"
+                        f"[filter_hallucination_in_memories] index={mem_idx}, delete={delete_flag}, rewritten='{(rewritten or '')[:100]}', reason='{reason[:120]}'"
                     )
 
-                    if delete_flag is True:
+                    if delete_flag is True and rewritten is not None:
                         # Mark for deletion
                         keep_flags[mem_idx] = False
                     else:
