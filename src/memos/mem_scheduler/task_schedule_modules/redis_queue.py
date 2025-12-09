@@ -127,6 +127,11 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             os.getenv("MEMSCHEDULER_REDIS_INITIAL_SCAN_TIME_LIMIT_SEC", "1.0") or 1.0
         )
 
+        # Pipeline chunk size for XREVRANGE pipelined calls
+        self._pipeline_chunk_size = int(
+            os.getenv("MEMSCHEDULER_REDIS_PIPELINE_CHUNK_SIZE", "200") or 200
+        )
+
         # Start background stream keys refresher if connected
         if self._is_connected:
             try:
@@ -162,16 +167,35 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                 max_keys=max_keys,
                 time_limit_sec=time_limit_sec,
             )
-            last_entries_results = self._pipeline_last_entries(candidate_keys)
+            chunked_results = self._pipeline_last_entries(candidate_keys)
+            # Only process successful chunks to maintain 1:1 key-result mapping
+            processed_keys: list[str] = []
+            last_entries_results: list[list[tuple[str, dict]]] = []
+
+            total_key_count = 0
+            for chunk_keys, chunk_res, success in chunked_results:
+                if success:
+                    processed_keys.extend(chunk_keys)
+                    last_entries_results.extend(chunk_res)
+                    total_key_count += len(chunk_keys)
+
+            # Abort refresh if any chunk failed, indicated by processed count mismatch
+            if len(candidate_keys) != total_key_count:
+                logger.error(
+                    f"[REDIS_QUEUE] Last entries processed mismatch: "
+                    f"candidates={len(candidate_keys)}, processed={len(processed_keys)}; aborting refresh"
+                )
+                return []
+
             now_sec = time.time()
             keys_to_delete = self._collect_inactive_keys(
-                candidate_keys=candidate_keys,
+                candidate_keys=processed_keys,
                 last_entries_results=last_entries_results,
                 inactivity_seconds=DEFAULT_STREAM_INACTIVITY_DELETE_SECONDS,
                 now_sec=now_sec,
             )
             active_stream_keys = self._filter_active_keys(
-                candidate_keys=candidate_keys,
+                candidate_keys=processed_keys,
                 last_entries_results=last_entries_results,
                 recent_seconds=DEFAULT_STREAM_RECENT_ACTIVE_SECONDS,
                 now_sec=now_sec,
@@ -179,7 +203,7 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             deleted_count = self._delete_streams(keys_to_delete)
             self._update_stream_cache_with_log(
                 stream_key_prefix=stream_key_prefix,
-                candidate_keys=candidate_keys,
+                candidate_keys=processed_keys,
                 active_stream_keys=active_stream_keys,
                 deleted_count=deleted_count,
                 active_threshold_sec=DEFAULT_STREAM_RECENT_ACTIVE_SECONDS,
@@ -806,17 +830,37 @@ class SchedulerRedisQueue(RedisSchedulerModule):
             pattern = re.compile(f"^{escaped_prefix}:")
         return [key for key in collected if pattern.match(key)]
 
-    def _pipeline_last_entries(self, candidate_keys: list[str]) -> list[list[tuple[str, dict]]]:
-        """Fetch last entries for keys using pipelined XREVRANGE COUNT 1."""
+    def _pipeline_last_entries(
+        self, candidate_keys: list[str]
+    ) -> list[tuple[list[str], list[list[tuple[str, dict]]], bool]]:
+        """Fetch last entries for keys using pipelined XREVRANGE COUNT 1, per-chunk success.
+
+        Returns a list of tuples: (chunk_keys, chunk_results, success_bool).
+        Only successful chunks should be processed by the caller to preserve
+        a 1:1 mapping between keys and results.
+        """
         if not candidate_keys:
             return []
-        try:
-            pipe = self._redis_conn.pipeline(transaction=False)
-            for key in candidate_keys:
-                pipe.xrevrange(key, count=1)
-            return pipe.execute()
-        except Exception:
-            return []
+
+        results_chunks: list[tuple[list[str], list[list[tuple[str, dict]]], bool]] = []
+        chunk_size = max(1, int(self._pipeline_chunk_size))
+
+        for start in range(0, len(candidate_keys), chunk_size):
+            chunk_keys = candidate_keys[start : start + chunk_size]
+            try:
+                pipe = self._redis_conn.pipeline(transaction=False)
+                for key in chunk_keys:
+                    pipe.xrevrange(key, count=1)
+                chunk_res = pipe.execute()
+                results_chunks.append((chunk_keys, chunk_res, True))
+            except Exception as e:
+                logger.warning(
+                    f"[REDIS_QUEUE] Pipeline execute failed for last entries chunk: "
+                    f"offset={start}, size={len(chunk_keys)}, error={e}"
+                )
+                results_chunks.append((chunk_keys, [], False))
+
+        return results_chunks
 
     def _parse_last_ms_from_entries(self, entries: list[tuple[str, dict]]) -> int | None:
         """Parse millisecond timestamp from the last entry ID."""

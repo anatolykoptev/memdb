@@ -89,4 +89,5 @@ print(f"[Result] Final files in tmp: {len(list(tmp_dir.glob('*.txt')))})")
 
 # 7. Stop the scheduler
 print("Stopping the scheduler...")
+sleep(5)
 mem_scheduler.stop()
