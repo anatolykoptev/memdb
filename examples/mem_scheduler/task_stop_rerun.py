@@ -25,7 +25,6 @@ def my_test_handler(messages: list[ScheduleMessageItem]):
         task_id = str(msg.item_id)
         file_path = tmp_dir / f"{task_id}.txt"
         try:
-            sleep(5)
             file_path.write_text(f"Task {task_id} processed.\n")
             print(f"writing {file_path} done")
         except Exception as e:
