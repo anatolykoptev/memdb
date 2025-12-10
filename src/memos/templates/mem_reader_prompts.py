@@ -423,34 +423,40 @@ SIMPLE_STRUCT_HALLUCINATION_FILTER_PROMPT = """
 You are a strict memory validator.
 
 # TASK
-Validate each memory entry against the user's current messages (ground truth).
-Memories that hallucinate unsupported facts or contradict the user must be corrected or marked for deletion.
+Review each memory object against the messages (ground truth).
+Correct memories that hallucinate unsupported facts or conflict with user-stated facts.
 
 # RULES
 - Use ONLY facts explicitly stated in the user messages.
 - Do NOT invent, assume, or retain unsupported specifics.
+- Memory content MUST NOT conflict with the user's factual messages.
+- If a memory includes assistant inference (not explicitly stated facts), you MUST clearly mark these parts in the rewritten content as inference, not facts.
 - Preserve the original language of each memory when rewriting.
+- Preserve timestamps and identifiers: keep any explicit time info in the content; do not drop metadata timestamps (e.g., created_at, updated_at, sources.chat_time) if present in the input.
+- Resolve ambiguous references: replace pronouns (e.g., "she", "they", "it") and vague terms (e.g., "the book", "that event") with explicit entity names or descriptors using ONLY information from the current memories.
+- Canonicalize entities: use full names, known roles, or unambiguous identifiers when available.
+- Normalize temporal expressions: convert relative times (e.g., "yesterday", "last weekend") to absolute dates or date ranges ONLY if the current memories provide sufficient context; otherwise retain the original phrasing.
 - Output ONLY a JSON object with no extra text.
 
 # INPUTS
-User messages (ground truth):
-{user_messages_inline}
+messages (ground truth):
+{messages_inline}
 
-Memory list (to validate, in indexed JSON format):
+Extracted memory list to validate (indexed JSON objects with text and metadata):
 {memories_inline}
 
 # OUTPUT FORMAT
 Return a JSON object where:
 - Keys are the same stringified indices as in the input memory list (e.g., "0", "1").
-- Each value is: {{"delete": boolean, "rewritten": string, "reason": string}}
-- If "delete" is true, "rewritten" must be an empty string.
-- "reason" must briefly explain the decision (delete or rewrite) based on user messages.
+- Each value is: {{"need_rewrite": boolean, "rewritten": string, "reason": string}}
+- If "need_rewrite" is false, set "rewritten" to an empty string.
+- "reason" must briefly explain the decision (e.g., contradiction fixed; inference labeled; consistent).
 - The number of output entries MUST exactly match the number of input memories.
 
 # DECISION GUIDE
-- Contradicted? → rewrite to match user message, "delete"=false, "rewritten"=corrected memory content.
-- Hallucinated (specific fact not in user messages)? → "delete"=true, "rewritten"=dehallucinated rewritten memory.
-- Consistent or non-factual (opinion, emotion)? → keep as-is, "delete"=false.
+- Contradicted by messages → need_rewrite=true; rewritten=corrected content (facts aligned with messages).
+- Contains unsupported specifics (hallucination) → need_rewrite=true; remove unsupported specifics; label any remaining assumptions as inference.
+- Consistent or non-factual (opinion/emotion) → need_rewrite=false; rewritten="".
 
 Additionally, include a concise "reason" for each item explaining your decision.
 
