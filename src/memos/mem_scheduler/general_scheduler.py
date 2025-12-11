@@ -1434,7 +1434,7 @@ class GeneralScheduler(BaseScheduler):
 
             logger.info(
                 f"[process_session_turn] Search results for missing evidence '{item}': "
-                f"{'\n- ' + '\n- '.join([f'{one.id}: {one.memory}' for one in results])}"
+                + ("\n- " + "\n- ".join([f"{one.id}: {one.memory}" for one in results]))
             )
             new_candidates.extend(results)
         return cur_working_memory, new_candidates
