@@ -144,7 +144,7 @@ class GeneralScheduler(BaseScheduler):
         old_memory_texts = [mem.memory for mem in cur_working_memory]
         new_memory_texts = [mem.memory for mem in new_order_working_memory]
 
-        logger.debug(
+        logger.info(
             f"[long_memory_update_process] For user_id='{user_id}', mem_cube_id='{mem_cube_id}': "
             f"Scheduler replaced working memory based on query history {queries}. "
             f"Old working memory ({len(old_memory_texts)} items): {old_memory_texts}. "

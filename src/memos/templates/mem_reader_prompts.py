@@ -424,19 +424,16 @@ You are a strict memory validator.
 
 # TASK
 Review each memory object against the messages (ground truth).
-Correct memories that hallucinate unsupported facts or conflict with user-stated facts.
+Do NOT alter the original memory content. Instead, append a concise reference-resolution explanation after the original content.
+If any part of the memory originates from assistant inference (i.e., not explicitly stated by the user), explicitly note this after the explanation.
 
-# RULES
-- Use ONLY facts explicitly stated in the user messages.
-- Do NOT invent, assume, or retain unsupported specifics.
-- Memory content MUST NOT conflict with the user's factual messages.
-- If a memory includes assistant inference (not explicitly stated facts), you MUST clearly mark these parts in the rewritten content as inference, not facts.
-- Preserve the original language of each memory when rewriting.
-- Preserve timestamps and identifiers: keep any explicit time info in the content; do not drop metadata timestamps (e.g., created_at, updated_at, sources.chat_time) if present in the input.
-- Resolve ambiguous references: replace pronouns (e.g., "she", "they", "it") and vague terms (e.g., "the book", "that event") with explicit entity names or descriptors using ONLY information from the current memories.
-- Canonicalize entities: use full names, known roles, or unambiguous identifiers when available.
-- Normalize temporal expressions: convert relative times (e.g., "yesterday", "last weekend") to absolute dates or date ranges ONLY if the current memories provide sufficient context; otherwise retain the original phrasing.
-- Output ONLY a JSON object with no extra text.
+# RULENOTES (strictly enforced)
+- NEVER change, delete, or paraphrase the original memory text.
+- ALWAYS preserve the original language, structure, and factual phrasing of the memory.
+- After the original text, add exactly one sentence starting with "[Ref] " that resolves ambiguous references (e.g., pronouns like 'she', 'it', or vague terms like 'the dog') using only information explicitly present in the user messages or prior memories.
+- If the memory contains content that was inferred by the assistant (not directly stated by the user), append an additional sentence starting with "[Source:] Inference by assistant." after the [Ref:] sentence.
+- Do NOT add any other commentary, formatting, or metadata beyond this.
+- Keep all original timestamps and identifiers intact in the memory object; this rule applies only to the 'text' field.
 
 # INPUTS
 messages (ground truth):
@@ -449,16 +446,19 @@ Extracted memory list to validate (indexed JSON objects with text and metadata):
 Return a JSON object where:
 - Keys are the same stringified indices as in the input memory list (e.g., "0", "1").
 - Each value is: {{"need_rewrite": boolean, "rewritten": string, "reason": string}}
-- If "need_rewrite" is false, set "rewritten" to an empty string.
-- "reason" must briefly explain the decision (e.g., contradiction fixed; inference labeled; consistent).
-- The number of output entries MUST exactly match the number of input memories.
+- Set "need_rewrite" to true ONLY if the memory contains ambiguous references or assistant inference requiring clarification.
+- If "need_rewrite" is true, "rewritten" = <original memory text> + " [Ref] <combined explanation>."
+- If "need_rewrite" is false (i.e., memory is fully explicit and user-stated), "rewritten" is an empty string.
+- "reason" must be brief: e.g., "resolved ambiguous reference with inference", "explicit user statement, no rewrite needed".
 
-# DECISION GUIDE
-- Contradicted by messages → need_rewrite=true; rewritten=corrected content (facts aligned with messages).
-- Contains unsupported specifics (hallucination) → need_rewrite=true; remove unsupported specifics; label any remaining assumptions as inference.
-- Consistent or non-factual (opinion/emotion) → need_rewrite=false; rewritten="".
+# EXAMPLE
+Input memory text: "She loves painting."
+User messages include: "Caroline loves painting."
+→ Rewritten: "She loves painting. [Ref] 'She' refers to Caroline."
 
-Additionally, include a concise "reason" for each item explaining your decision.
+Input memory text: "The user is a developer."
+User never stated this, but assistant inferred from context.
+→ Rewritten: "The user is a developer. [Ref] 'The user' refers to the person interacting with the assistant; this statement is assistant inference."
 
 Final Output:
 """
