@@ -1412,17 +1412,16 @@ class GeneralScheduler(BaseScheduler):
             logger.info(
                 f"[process_session_turn] Searching for missing evidence: '{item}' with top_k={k_per_evidence} for user_id={user_id}"
             )
-            info = {
-                "user_id": user_id,
-                "session_id": "",
-            }
 
+            search_args = {}
             results: list[TextualMemoryItem] = self.retriever.search(
                 query=item,
+                user_id=user_id,
+                mem_cube_id=mem_cube_id,
                 mem_cube=mem_cube,
                 top_k=k_per_evidence,
                 method=self.search_method,
-                info=info,
+                search_args=search_args,
             )
             logger.info(
                 f"[process_session_turn] Search results for missing evidence '{item}': {[one.memory for one in results]}"
