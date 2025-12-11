@@ -115,12 +115,13 @@ hot plaintext memories can be distilled into parametric knowledge, and stable co
 - When using facts from memories, add citations at the END of the sentence with `[i:memId]`.
 - `i` is the order in the "Memories" section below (starting at 1). `memId` is the given short memory ID.
 - Multiple citations must be concatenated directly, e.g., `[1:sed23s], [
-2:1k3sdg], [3:ghi789]`. Do NOT use commas inside brackets. Do not use wrong format like `[def456]`.
+2:1k3sdg], [3:ghi789]`. Do NOT use commas inside brackets. Do not use wrong format like `[def456]`, `[1]` etc.
 - Cite only relevant memories; keep citations minimal but sufficient.
 - Do not use a connected format like [1:abc123,2:def456].
 - Brackets MUST be English half-width square brackets `[]`, NEVER use Chinese full-width brackets `【】` or any other symbols.
 - **When a sentence draws on an assistant/other-party memory**, mark the role in the sentence (“The assistant suggests…”) and add the corresponding citation at the end per this rule; e.g., “The assistant suggests choosing a midi dress and visiting COS in Guomao. [1:abc123]”
 - For preferences, do not mention the source in the response, do not appear `[Explicit preference]`, `[Implicit preference]`, `(Explicit preference)` or `(Implicit preference)` in the response
+- In the thinking mode (think), also strictly use the citation format `[i:memId]`,`i` is the order in the "Memories" section below (starting at 1). `memId` is the given short memory ID. The same as the response format.
 
 # Current Date: {date}
 
@@ -157,6 +158,7 @@ MEMOS_PRODUCT_ENHANCE_PROMPT = """
 - **NEVER** mention internal mechanisms like "retrieved memories", "database", "AI views", "memory system", or similar technical terms in your responses to users
 - For preferences, do not mention the source in the response, do not appear `[Explicit preference]`, `[Implicit preference]`, `(Explicit preference)` or `(Implicit preference)` in the response
 - The last part of the response should not contain `(Note: ...)` or `(According to ...)` etc.
+- In the thinking mode (think), also strictly use the citation format `[i:memId]`,`i` is the order in the "Memories" section below (starting at 1). `memId` is the given short memory ID. The same as the response format.
 
 ## Key Principles
 - Reference only relevant memories to avoid information overload
@@ -168,6 +170,9 @@ MEMOS_PRODUCT_ENHANCE_PROMPT = """
 - **PersonalMemory[P]**: User-specific memories and information stored from previous interactions
 - **OuterMemory[O]**: External information retrieved from the internet and other sources
 - Some user queries may be related to OuterMemory[O] content that is NOT about the user's personal information. Do not use such OuterMemory[O] to answer questions about the user themselves.
+
+##warning
+- In thinking information (think), do not appear the reference number and id etc. in the response, otherwise it will cause reference error.
 """
 
 MEMOS_PRODUCT_BASE_PROMPT_ZH = """
@@ -222,12 +227,13 @@ MemOS基于**多维记忆系统**构建，包括：
 - 使用记忆中的事实时，在句尾添加引用格式`[i:memId]`。
 - `i`是下面"记忆"部分中的顺序（从1开始）。`memId`是给定的短记忆ID。
 - 多个引用必须直接连接，例如，`[1:sed23s], [
-2:1k3sdg], [3:ghi789]`。不要在方括号内使用逗号。不要使用错误格式如`[def456]`。
+2:1k3sdg], [3:ghi789]`。不要在方括号内使用逗号。不要使用错误格式如`[def456]`, `[1]`等。
 - 只引用相关记忆；保持引用最少但充分。
 - 不要使用连接格式如[1:abc123,2:def456]。
 - 方括号必须是英文半角方括号`[]`，绝不使用中文全角括号`【】`或任何其他符号。
 - **当句子引用助手/其他方记忆时**，在句子中标注角色（"助手建议…"）并根据此规则在句尾添加相应引用；例如，"助手建议选择中长裙并访问国贸的COS。[1:abc123]"
 - 对于偏好，不要在回答中标注来源，不要出现`[显式偏好]`或`[隐式偏好]`或`(显式偏好)`或`(隐式偏好)`的字样
+- 在思考模式下(think),也需要严格采用引用格式`[i:memId]`,`i`是下面"记忆"部分中的顺序（从1开始）。`memId`是给定的短记忆ID。与回答要求一致
 
 # 当前日期：{date}
 
@@ -264,6 +270,7 @@ MEMOS_PRODUCT_ENHANCE_PROMPT_ZH = """
 - **绝不**在对用户的回复中提及内部机制，如"检索的记忆"、"数据库"、"AI观点"、"记忆系统"或类似技术术语
 - 对于偏好，不要在回答中标注来源，不要出现`[显式偏好]`或`[隐式偏好]`或`(显式偏好)`或`(隐式偏好)`的字样
 - 回复内容的结尾不要出现`(注: ...)`或`(根据...)`等解释
+- 在思考模式下(think),也需要严格采用引用格式`[i:memId]`,`i`是下面"记忆"部分中的顺序（从1开始）。`memId`是给定的短记忆ID。与回答要求一致
 
 ## 核心原则
 - 仅引用相关记忆以避免信息过载
@@ -275,6 +282,9 @@ MEMOS_PRODUCT_ENHANCE_PROMPT_ZH = """
 - **个人记忆[P]**：来自先前交互的用户特定记忆和信息
 - **外部记忆[O]**：从互联网和其他来源检索的外部信息
 - 某些用户查询可能与外部记忆[O]内容相关，但这些内容并非关于用户的个人信息。不要使用此类外部记忆[O]来回答关于用户自身的问题。
+
+##警告
+- 思考内容(think)里面输出不准出现引用的序号以及id等标记，否则会导致引用错误
 """
 
 
