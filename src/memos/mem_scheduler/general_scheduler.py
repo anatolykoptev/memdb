@@ -126,8 +126,10 @@ class GeneralScheduler(BaseScheduler):
             top_k=self.top_k,
         )
         logger.info(
+            # Build the candidate preview string outside the f-string to avoid backslashes in expression
             f"[long_memory_update_process] Processed {len(queries)} queries {queries} and retrieved {len(new_candidates)} "
-            f"new candidate memories for user_id={user_id}: {'\n- ' + '\n- '.join([f'{one.id}: {one.memory}' for one in new_candidates])}"
+            f"new candidate memories for user_id={user_id}: "
+            + ("\n- " + "\n- ".join([f"{one.id}: {one.memory}" for one in new_candidates]))
         )
 
         # rerank
