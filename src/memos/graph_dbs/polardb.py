@@ -2179,8 +2179,9 @@ class PolarDBGraphDB(BaseGraphDB):
 
             # Format value
             if isinstance(value, str):
-                # Escape single quotes in string values
-                escaped_str = value.replace("'", "''")
+                # Escape single quotes using backslash when inside $$ dollar-quoted strings
+                # In $$ delimiters, Cypher string literals can use \' to escape single quotes
+                escaped_str = value.replace("'", "\\'")
                 escaped_value = f"'{escaped_str}'"
             elif isinstance(value, list):
                 # Handle list values - use double quotes for Cypher arrays
@@ -4153,6 +4154,17 @@ class PolarDBGraphDB(BaseGraphDB):
         if filter:
 
             def escape_cypher_string(value: str) -> str:
+                """
+                Escape single quotes in Cypher string literals.
+
+                In Cypher, single quotes in string literals are escaped by doubling them: ' -> ''
+                However, when inside PostgreSQL's $$ dollar-quoted string, we need to be careful.
+
+                The issue: In $$ delimiters, Cypher still needs to parse string literals correctly.
+                The solution: Use backslash escape \' instead of doubling '' when inside $$.
+                """
+                # Use backslash escape for single quotes inside $$ dollar-quoted strings
+                # This works because $$ protects the backslash from PostgreSQL interpretation
                 return value.replace("'", "\\'")
 
             def build_cypher_filter_condition(condition_dict: dict) -> str:
