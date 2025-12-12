@@ -136,6 +136,7 @@ class PolarDBGraphDB(BaseGraphDB):
             port = config.get("port")
             user = config.get("user")
             password = config.get("password")
+            maxconn = config.get("maxconn", 100)  # De
         else:
             self.db_name = config.db_name
             self.user_name = config.user_name
@@ -143,17 +144,19 @@ class PolarDBGraphDB(BaseGraphDB):
             port = config.port
             user = config.user
             password = config.password
+            maxconn = config.maxconn if hasattr(config, "maxconn") else 100
         """
         # Create connection
         self.connection = psycopg2.connect(
             host=host, port=port, user=user, password=password, dbname=self.db_name,minconn=10, maxconn=2000
         )
         """
+        logger.info(f" db_name: {self.db_name} current maxconn is:'{maxconn}'")
 
         # Create connection pool
         self.connection_pool = psycopg2.pool.ThreadedConnectionPool(
             minconn=5,
-            maxconn=100,
+            maxconn=maxconn,
             host=host,
             port=port,
             user=user,
@@ -216,6 +219,7 @@ class PolarDBGraphDB(BaseGraphDB):
         Raises:
             RuntimeError: If connection pool is closed or exhausted after retries
         """
+        logger.info(f" db_name: {self.db_name} pool maxconn is:'{self.connection_pool.maxconn}'")
         if self._pool_closed:
             raise RuntimeError("Connection pool has been closed")
 
