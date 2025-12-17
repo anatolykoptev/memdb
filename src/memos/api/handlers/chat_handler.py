@@ -496,33 +496,6 @@ class ChatHandler(BaseHandler):
                     end_time = time.time()
                     self.logger.info(f"second search time: {end_time - start_time}")
 
-                    # Extract memories from search results (second search)
-                    memories_list = []
-                    if search_response.data and search_response.data.get("text_mem"):
-                        text_mem_results = search_response.data["text_mem"]
-                        if text_mem_results and text_mem_results[0].get("memories"):
-                            memories_list = text_mem_results[0]["memories"]
-
-                    # Filter memories by threshold, min_num is the min number of memories for playground
-                    second_filtered_memories = self._filter_memories_by_threshold(
-                        memories_list, min_num=30
-                    )
-
-                    # dedup and supplement memories
-                    fast_length = len(filtered_memories)
-                    supplement_length = max(0, 50 - fast_length)  # 50 is the max mem for playground
-                    filtered_memories = self._dedup_and_supplement_memories(
-                        filtered_memories, second_filtered_memories
-                    )[:supplement_length]
-
-                    # Prepare remain reference data (second search)
-                    reference = prepare_reference_data(filtered_memories)
-                    # get internet reference
-                    internet_reference = self._get_internet_reference(
-                        search_response.data.get("text_mem")[0]["memories"]
-                    )
-                    yield f"data: {json.dumps({'type': 'reference', 'data': reference})}\n\n"
-
                     # for playground, add the query to memory without response
                     self._start_add_to_memory(
                         user_id=chat_req.user_id,
@@ -533,8 +506,42 @@ class ChatHandler(BaseHandler):
                         async_mode="sync",
                     )
 
+                    # Extract memories from search results (second search)
+                    memories_list = []
+                    if search_response.data and search_response.data.get("text_mem"):
+                        text_mem_results = search_response.data["text_mem"]
+                        if text_mem_results and text_mem_results[0].get("memories"):
+                            memories_list = text_mem_results[0]["memories"]
+
+                    # Filter memories by threshold, min_num is the min number of memories for playground
+                    second_filtered_memories = self._filter_memories_by_threshold(
+                        memories_list, min_num=35
+                    )
+
+                    # dedup and supplement memories
+                    fast_length = len(filtered_memories)
+                    supplement_length = max(0, 50 - fast_length)  # 50 is the max mem for playground
+                    second_dedup_memories = self._dedup_and_supplement_memories(
+                        filtered_memories, second_filtered_memories
+                    )[:supplement_length]
+                    filtered_memories = filtered_memories + second_dedup_memories
+
+                    # Prepare remain reference data (second search)
+                    reference = prepare_reference_data(filtered_memories)
+                    # get internet reference
+                    internet_reference = self._get_internet_reference(
+                        search_response.data.get("text_mem")[0]["memories"]
+                    )
+                    yield f"data: {json.dumps({'type': 'reference', 'data': reference})}\n\n"
+
                     # Step 2: Build system prompt with memories
                     lang = detect_lang(chat_req.query)
+                    if pref_string:
+                        pref_string += (
+                            "\n# 注意\n- 在思考内容中，不要出现引用序号和id [1,2,3]等标记，否则会导致引用错误。"
+                            if lang == "zh"
+                            else "\n#warning\n- In thinking content, do not appear the reference number and id [1,2,3]etc. otherwise it will cause reference error."
+                        )
                     system_prompt = self._build_enhance_system_prompt(
                         filtered_memories, pref_string, lang=lang
                     )
