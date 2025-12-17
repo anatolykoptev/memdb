@@ -723,8 +723,32 @@ class SchedulerRedisQueue(RedisSchedulerModule):
                     )
                     results.append(res)
                 except Exception as se:
-                    logger.warning(f"Sequential xautoclaim failed for '{stream_key}': {se}")
-                    results.append(None)
+                    err_msg = str(se).lower()
+                    if "nogroup" in err_msg or "no such key" in err_msg:
+                        logger.warning(
+                            f"Sequential xautoclaim failed for '{stream_key}': {se}. Retrying with _ensure_consumer_group."
+                        )
+                        with contextlib.suppress(Exception):
+                            self._ensure_consumer_group(stream_key=stream_key)
+                        try:
+                            res = self._redis_conn.xautoclaim(
+                                name=stream_key,
+                                groupname=self.consumer_group,
+                                consumername=self.consumer_name,
+                                min_idle_time=self.orchestrator.get_task_idle_min(task_label=label),
+                                start_id="0-0",
+                                count=need_count,
+                                justid=False,
+                            )
+                            results.append(res)
+                        except Exception as retry_err:
+                            logger.warning(
+                                f"Retry sequential xautoclaim failed for '{stream_key}': {retry_err}"
+                            )
+                            results.append(None)
+                    else:
+                        logger.warning(f"Sequential xautoclaim failed for '{stream_key}': {se}")
+                        results.append(None)
 
         claimed_pairs: list[tuple[str, list[tuple[str, dict]]]] = []
         for (stream_key, _need_count, _label), claimed_result in zip(

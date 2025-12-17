@@ -597,6 +597,7 @@ class SimpleStructMemReader(BaseMemReader, ABC):
             combined_messages = []
             for group_messages in messages:
                 combined_messages.extend(group_messages)
+
             for group_id in range(len(memory_list)):
                 try:
                     revised_memory_list = self.filter_hallucination_in_memories(
@@ -629,7 +630,7 @@ class SimpleStructMemReader(BaseMemReader, ABC):
                     ]
                     logger.error(
                         f"There is an exception while filtering group_id={group_id}: {e}\n"
-                        f"messages: {messages[group_id]}\n"
+                        f"messages: {combined_messages}\n"
                         f"memory_list(serialized): {group_serialized}",
                         exc_info=True,
                     )
