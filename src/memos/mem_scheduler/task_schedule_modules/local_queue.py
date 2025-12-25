@@ -245,15 +245,3 @@ class SchedulerLocalQueue(RedisSchedulerModule):
         return any(
             q.qsize() >= self.max_internal_message_queue_size for q in self.queue_streams.values()
         )
-
-    def ack_message(
-        self,
-        user_id: str,
-        mem_cube_id: str,
-        task_label: str,
-        redis_message_id,
-        message: ScheduleMessageItem | None,
-    ) -> None:
-        """
-        Acknowledge a message (no-op for local queue as messages are popped immediately).
-        """
