@@ -57,6 +57,7 @@ class SingleCubeView(MemCubeView):
     feedback_server: Any | None = None
     deepsearch_agent: Any | None = None
 
+    @timed
     def add_memories(self, add_req: APIADDRequest) -> list[dict[str, Any]]:
         """
         This is basically your current handle_add_memories logic,
@@ -103,6 +104,7 @@ class SingleCubeView(MemCubeView):
 
         return all_memories
 
+    @timed
     def search_memories(self, search_req: APISearchRequest) -> dict[str, Any]:
         # Create UserContext object
         user_context = UserContext(
@@ -150,6 +152,7 @@ class SingleCubeView(MemCubeView):
         self.logger.info(f"Search {len(memories_result)} memories.")
         return memories_result
 
+    @timed
     def feedback_memories(self, feedback_req: APIFeedbackRequest) -> dict[str, Any]:
         target_session_id = feedback_req.session_id or "default_session"
         if feedback_req.async_mode == "async":
@@ -554,6 +557,7 @@ class SingleCubeView(MemCubeView):
             )
             self.mem_scheduler.submit_messages(messages=[message_item_add])
 
+    @timed
     def _process_pref_mem(
         self,
         add_req: APIADDRequest,
@@ -732,6 +736,7 @@ class SingleCubeView(MemCubeView):
             self.logger.error(f"[add_before_search] LLM execution error: {e}")
             return memory_list
 
+    @timed
     def _process_text_mem(
         self,
         add_req: APIADDRequest,
