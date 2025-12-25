@@ -131,88 +131,32 @@ showcasing its capabilities in **information extraction**, **temporal and cross-
 - **🔌 Extensible**: Easily extend and customize memory modules, data sources, and LLM integrations.
 - **🏂 Lightweight Deployment** 🆕: Support for quick mode and complete mode deployment options.
 
-## 📦 Installation
+
+## 🚀 Quickstart Guide
+
+### Get API Key
+  - Sign up and get started on[`MemOS dashboard`](https://memos-dashboard.openmem.net/cn/quickstart/?source=landing)
+  - Open the API Keys Console in the MemOS dashboard and copy the API Key into the initialization code
 
 ### Install via pip
 
 ```bash
-pip install MemoryOS
+pip install MemoryOS -U
 ```
 
-### Optional Dependencies
+### Basic Usage
 
-MemOS provides several optional dependency groups for different features. You can install them based on your needs.
-
-| Feature               | Package Name              |
-| --------------------- | ------------------------- |
-| Tree Memory           | `MemoryOS[tree-mem]`      |
-| Memory Reader         | `MemoryOS[mem-reader]`    |
-| Memory Scheduler      | `MemoryOS[mem-scheduler]` |
-
-Example installation commands:
-
-```bash
-pip install MemoryOS[tree-mem]
-pip install MemoryOS[tree-mem,mem-reader]
-pip install MemoryOS[mem-scheduler]
-pip install MemoryOS[tree-mem,mem-reader,mem-scheduler]
-```
-
-### External Dependencies
-
-#### Ollama Support
-
-To use MemOS with [Ollama](https://ollama.com/), first install the Ollama CLI:
-
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-```
-
-#### Transformers Support
-
-To use functionalities based on the `transformers` library, ensure you have [PyTorch](https://pytorch.org/get-started/locally/) installed (CUDA version recommended for GPU acceleration).
-
-#### Download Examples
-
-To download example code, data and configurations, run the following command:
-
-```bash
-memos download_examples
-```
-
-## 🚀 Getting Started
-
-### ⭐️ MemOS online API
-The easiest way to use MemOS. Equip your agent with memory **in minutes**!
-
-Sign up and get started on[`MemOS dashboard`](https://memos-dashboard.openmem.net/cn/quickstart/?source=landing).
-
-
-### Self-Hosted Server
-1. Get the repository.
-```bash
-git clone https://github.com/MemTensor/MemOS.git
-cd MemOS
-pip install -r ./docker/requirements.txt
-```
-
-2. Configure `docker/.env.example` and copy to `MemOS/.env`
-3. Start the service.
-```bash
-uvicorn memos.api.server_api:app --host 0.0.0.0 --port 8001 --workers 8
-```
-
-### Interface SDK
-#### Here is a quick example showing how to create interface SDK
-
-This interface is used to add messages, supporting multiple types of content and batch additions. MemOS will automatically parse the messages and handle memory for reference in subsequent conversations.
+- Initialize MemOS client with API Key to start sending requests
 ```python
 # Please make sure MemoS is installed (pip install MemoryOS -U)
 from memos.api.client import MemOSClient
 
 # Initialize the client using the API Key
 client = MemOSClient(api_key="YOUR_API_KEY")
+```
 
+- This API allows you to add one or more messages to a specific conversation. As illustrated in the examples bellow, you can add messages in real time during a user-assistant interaction, import historical messages in bulk, or enrich the conversation with user preferences and behavior data. All added messages are transformed into memories by MemOS, enabling their retrieval in future conversations to support chat history management, user behavior tracking, and personalized interactions.
+```python
 messages = [
   {"role": "user", "content": "I have planned to travel to Guangzhou during the summer vacation. What chain hotels are available for accommodation?"},
   {"role": "assistant", "content": "You can consider [7 Days, All Seasons, Hilton], and so on."},
@@ -226,30 +170,19 @@ res = client.add_message(messages=messages, user_id=user_id, conversation_id=con
 print(f"result: {res}")
 ```
 
-This interface is used to retrieve the memories of a specified user, returning the memory fragments most relevant to the input query for Agent use. The recalled memory fragments include 'factual memory', 'preference memory', and 'tool memory'.
+- This API allows you to query a user’s memory and returns the fragments most relevant to the input. These can serve as references for the model when generating responses. As shown in the examples bellow, You can retrieve memory in real time during a user’s conversation with the AI, or perform a global search across their entire memory to create user profiles or support personalized recommendations, improving both dialogue coherence and personalization.
+In the latest update, in addition to “Fact Memory”, the system now supports “Preference Memory”, enabling LLM to respond in a way that better understands the user.
 ```python
-# Please make sure MemoS is installed (pip install MemoryOS -U)
-from memos.api.client import MemOSClient
-
-# Initialize the client using the API Key
-client = MemOSClient(api_key="YOUR_API_KEY")
-
 query = "I want to go out to play during National Day. Can you recommend a city I haven't been to and a hotel brand I haven't stayed at?"
 user_id = "memos_user_123"
-conversation_id = "0928"
+conversation_id = "0610"
 res = client.search_memory(query=query, user_id=user_id, conversation_id=conversation_id)
 
 print(f"result: {res}")
 ```
 
-This interface is used to delete the memory of specified users and supports batch deletion.
+- This API is used to delete specified user memories, supporting batch deletion.
 ```python
-# Please make sure MemoS is installed (pip install MemoryOS -U)
-from memos.api.client import MemOSClient
-
-# Initialize the client using the API Key
-client = MemOSClient(api_key="YOUR_API_KEY")
-
 user_ids = ["memos_user_123"]
 # Replace with the memory ID
 memory_ids = ["6b23b583-f4c4-4a8f-b345-58d0c48fea04"]
@@ -258,14 +191,8 @@ res = client.delete_memory(user_ids=user_ids, memory_ids=memory_ids)
 print(f"result: {res}")
 ```
 
-This interface is used to add feedback to messages in the current session, allowing MemOS to correct its memory based on user feedback.
+- This API is used to add feedback to current session messages, allowing MemOS to correct memories based on user feedback.
 ```python
-# Please make sure MemoS is installed (pip install MemoryOS -U)
-from memos.api.client import MemOSClient
-
-# Initialize the client using the API Key
-client = MemOSClient(api_key="YOUR_API_KEY")
-
 user_id = "memos_user_123"
 conversation_id = "memos_feedback_conv"
 feedback_content = "No, let's change it now to a meal allowance of 150 yuan per day and a lodging subsidy of 700 yuan per day for first-tier cities; for second- and third-tier cities, it remains the same as before."
@@ -282,14 +209,8 @@ res = client.add_feedback(
 print(f"result: {res}")
 ```
 
-This interface is used to create a knowledgebase associated with a project
+- This API is used to create a knowledgebase associated with a project
 ```python
-# Please make sure MemoS is installed (pip install MemoryOS -U)
-from memos.api.client import MemOSClient
-
-# Initialize the client using the API Key
-client = MemOSClient(api_key="YOUR_API_KEY")
-
 knowledgebase_name = "Financial Reimbursement Knowledge Base"
 knowledgebase_description = "A compilation of all knowledge related to the company's financial reimbursements."
 
@@ -299,6 +220,49 @@ res = client.create_knowledgebase(
 )
 print(f"result: {res}")
 ```
+
+### Self-Hosted Server
+1. Get the repository.
+```bash
+git clone https://github.com/MemTensor/MemOS.git
+cd MemOS
+pip install -r ./docker/requirements.txt
+```
+2. Configure `docker/.env.example` and copy to `MemOS/.env`
+ - The `OPENAI_API_KEY`,`MOS_EMBEDDER_API_KEY`,`MEMRADER_API_KEY` and others can be applied for through [`BaiLian`](https://bailian.console.aliyun.com/?spm=a2c4g.11186623.0.0.2f2165b08fRk4l&tab=api#/api).
+ - Fill in the corresponding configuration in the `MemOS/.env` file.
+3. Start the service.
+```bash
+uvicorn memos.api.server_api:app --host 0.0.0.0 --port 8001 --workers 2
+```
+
+For detailed integration steps, see the [`API Reference`](https://docs-pre.openmem.net/cn/open_source/getting_started/rest_api_server/#fork-memos-%E4%BB%93%E5%BA%93%E4%BB%A3%E7%A0%81httpsgithubcommemtensormemos-%E5%88%B0%E8%87%AA%E5%B7%B1%E7%9A%84%E4%BB%93%E5%BA%93).
+
+Example
+  - Add User Memory http://localhost:8000/product/add (POST)
+```json
+  // Request params
+  {
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+    "messages": [
+      {
+        "role": "user",
+        "content": "I like strawberry"
+      }
+    ],
+    "async_mode": "sync"
+  }
+  ```
+  - Query User Memory http://localhost:8000/product/search (POST)
+  ```json
+  // Request params
+  {
+    "query": "What do I like",
+    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+    "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca"
+  }
+  ```
 
 ## 💬 Community & Support
 
