@@ -117,8 +117,19 @@ showcasing its capabilities in **information extraction**, **temporal and cross-
     - **Textual Memory**: For storing and retrieving unstructured or structured text knowledge.
     - **Activation Memory**: Caches key-value pairs (`KVCacheMemory`) to accelerate LLM inference and context reuse.
     - **Parametric Memory**: Stores model adaptation parameters (e.g., LoRA weights).
+    - **Tool Memory** 🆕: Records Agent tool call trajectories and experiences to improve planning capabilities.
+- **📚 Knowledge Base System** 🆕: Build multi-dimensional knowledge bases with automatic document/URL parsing, splitting, and cross-project sharing capabilities.
+- **🔧 Memory Controllability** 🆕:
+    - **Feedback Mechanism**: Use `add_feedback` API to correct, supplement, or replace existing memories with natural language.
+    - **Precise Deletion**: Delete specific memories by User ID or Memory ID via API or MCP tools.
+- **👁️ Multi-Modal Support** 🆕: Support for image understanding and memory, including chart parsing in documents.
+- **⚡ Advanced Architecture**:
+    - **DB Optimization**: Enhanced connection management and batch insertion for high-concurrency scenarios.
+    - **Advanced Retrieval**: Custom tag and info field filtering with complex logical operations.
+    - **Redis Streams Scheduler**: Multi-level queue architecture with intelligent orchestration for fair multi-tenant scheduling.
+    - **Stream & Non-Stream Chat**: Ready-to-use streaming and non-streaming chat interfaces.
 - **🔌 Extensible**: Easily extend and customize memory modules, data sources, and LLM integrations.
-
+- **🏂 Lightweight Deployment** 🆕: Support for quick mode and complete mode deployment options.
 
 ## 📦 Installation
 
