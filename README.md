@@ -236,32 +236,37 @@ pip install -r ./docker/requirements.txt
 uvicorn memos.api.server_api:app --host 0.0.0.0 --port 8001 --workers 2
 ```
 
-For detailed integration steps, see the [`API Reference`](https://docs-pre.openmem.net/cn/open_source/getting_started/rest_api_server/#fork-memos-%E4%BB%93%E5%BA%93%E4%BB%A3%E7%A0%81httpsgithubcommemtensormemos-%E5%88%B0%E8%87%AA%E5%B7%B1%E7%9A%84%E4%BB%93%E5%BA%93).
+For detailed integration steps, see the [`API Reference`](https://docs.openmem.net/open_source/getting_started/rest_api_server/#run-locally).
+
+#### If you prefer to deploy using Docker, please refer to the [`Docker Reference`](https://docs.openmem.net/open_source/getting_started/rest_api_server/#method-1-docker-use-repository-dependency-package-imagestart-recommended-use).
+
 
 Example
-  - Add User Memory http://localhost:8000/product/add (POST)
-```json
-  // Request params
-  {
-    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
-    "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
-    "messages": [
-      {
-        "role": "user",
-        "content": "I like strawberry"
-      }
-    ],
-    "async_mode": "sync"
-  }
+  - Add User Message
+  ```bash
+  curl -X POST http://localhost:8000/product/add \
+    -H "Content-Type: application/json" \
+    -d '{
+      "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+      "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+      "messages": [
+        {
+          "role": "user",
+          "content": "I like strawberry"
+        }
+      ],
+      "async_mode": "sync"
+    }'
   ```
-  - Query User Memory http://localhost:8000/product/search (POST)
-  ```json
-  // Request params
-  {
-    "query": "What do I like",
-    "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
-    "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca"
-  }
+  - Search User Memory
+  ```bash
+  curl -X POST http://localhost:8000/product/search \
+    -H "Content-Type: application/json" \
+    -d '{
+      "query": "What do I like",
+      "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+      "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca"
+    }'
   ```
 
 ## 💬 Community & Support
