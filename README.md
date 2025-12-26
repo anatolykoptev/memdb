@@ -181,93 +181,78 @@ res = client.search_memory(query=query, user_id=user_id, conversation_id=convers
 print(f"result: {res}")
 ```
 
-- This API is used to delete specified user memories, supporting batch deletion.
-```python
-user_ids = ["memos_user_123"]
-# Replace with the memory ID
-memory_ids = ["6b23b583-f4c4-4a8f-b345-58d0c48fea04"]
-res = client.delete_memory(user_ids=user_ids, memory_ids=memory_ids)
-
-print(f"result: {res}")
-```
-
-- This API is used to add feedback to current session messages, allowing MemOS to correct memories based on user feedback.
-```python
-user_id = "memos_user_123"
-conversation_id = "memos_feedback_conv"
-feedback_content = "No, let's change it now to a meal allowance of 150 yuan per day and a lodging subsidy of 700 yuan per day for first-tier cities; for second- and third-tier cities, it remains the same as before."
-# Replace with the knowledgebase ID
-allow_knowledgebase_ids = ["basee5ec9050-c964-484f-abf1-ce3e8e2aa5b7"]
-
-res = client.add_feedback(
-    user_id=user_id,
-    conversation_id=conversation_id,
-    feedback_content=feedback_content,
-    allow_knowledgebase_ids=allow_knowledgebase_ids
-)
-
-print(f"result: {res}")
-```
-
-- This API is used to create a knowledgebase associated with a project
-```python
-knowledgebase_name = "Financial Reimbursement Knowledge Base"
-knowledgebase_description = "A compilation of all knowledge related to the company's financial reimbursements."
-
-res = client.create_knowledgebase(
-    knowledgebase_name=knowledgebase_name,
-    knowledgebase_description=knowledgebase_description
-)
-print(f"result: {res}")
-```
-
 ### Self-Hosted Server
 1. Get the repository.
-```bash
-git clone https://github.com/MemTensor/MemOS.git
-cd MemOS
-pip install -r ./docker/requirements.txt
-```
+    ```bash
+    git clone https://github.com/MemTensor/MemOS.git
+    cd MemOS
+    pip install -r ./docker/requirements.txt
+    ```
 2. Configure `docker/.env.example` and copy to `MemOS/.env`
  - The `OPENAI_API_KEY`,`MOS_EMBEDDER_API_KEY`,`MEMRADER_API_KEY` and others can be applied for through [`BaiLian`](https://bailian.console.aliyun.com/?spm=a2c4g.11186623.0.0.2f2165b08fRk4l&tab=api#/api).
  - Fill in the corresponding configuration in the `MemOS/.env` file.
 3. Start the service.
-```bash
-uvicorn memos.api.server_api:app --host 0.0.0.0 --port 8001 --workers 2
-```
 
-For detailed integration steps, see the [`API Reference`](https://docs.openmem.net/open_source/getting_started/rest_api_server/#run-locally).
+- Launch via Docker
+  ###### Tips: Please ensure that Docker Compose is installed successfully and that you have navigated to the docker directory (via `cd docker`) before executing the following command.
+  ```bash
+  # Enter docker directory
+  docker compose up
+  ```
+  ##### If you prefer to deploy using Docker, please refer to the [`Docker Reference`](https://docs.openmem.net/open_source/getting_started/rest_api_server/#method-1-docker-use-repository-dependency-package-imagestart-recommended-use).
 
-#### If you prefer to deploy using Docker, please refer to the [`Docker Reference`](https://docs.openmem.net/open_source/getting_started/rest_api_server/#method-1-docker-use-repository-dependency-package-imagestart-recommended-use).
+- Launch via the uvicorn command line interface (CLI)
+  ###### Tips: Please ensure that Neo4j and Qdrant are running before executing the following command.
+  ```bash
+  uvicorn memos.api.server_api:app --host 0.0.0.0 --port 8001 --workers 1
+  ```
+  ##### For detailed integration steps, see the [`CLI Reference`](https://docs.openmem.net/open_source/getting_started/rest_api_server/#method-3client-install-with-CLI).
+
 
 
 Example
   - Add User Message
-  ```bash
-  curl -X POST http://localhost:8000/product/add \
-    -H "Content-Type: application/json" \
-    -d '{
-      "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
-      "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
-      "messages": [
-        {
-          "role": "user",
-          "content": "I like strawberry"
-        }
-      ],
-      "async_mode": "sync"
-    }'
-  ```
+    ```python
+    import requests
+    import json
+    
+    data = {
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
+        "messages": [
+            {
+                "role": "user",
+                "content": "I like strawberry"
+            }
+        ],
+        "async_mode": "sync"
+    }
+    headers = {
+        "Content-Type": "application/json"
+    }
+    url = "http://localhost:8000/product/add"
+    
+    res = requests.post(url=url, headers=headers, data=json.dumps(data))
+    print(f"result: {res.json()}")
+    ```
   - Search User Memory
-  ```bash
-  curl -X POST http://localhost:8000/product/search \
-    -H "Content-Type: application/json" \
-    -d '{
-      "query": "What do I like",
-      "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
-      "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca"
-    }'
-  ```
+    ```python
+    import requests
+    import json
+    
+    data = {
+        "query": "What do I like",
+        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
+        "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca"
+    }
+    headers = {
+        "Content-Type": "application/json"
+    }
+    url = "http://localhost:8000/product/search"
+    
+    res = requests.post(url=url, headers=headers, data=json.dumps(data))
+    print(f"result: {res.json()}")
+    ```
 
 ## 💬 Community & Support
 
