@@ -2505,16 +2505,16 @@ class PolarDBGraphDB(BaseGraphDB):
         self,
         include_embedding: bool = False,
         user_name: str | None = None,
-        page: int = 1,
-        page_size: int = 10,
+        page: int | None = None,
+        page_size: int | None = None,
     ) -> dict[str, Any]:
         """
         Export all graph nodes and edges in a structured form.
         Args:
         include_embedding (bool): Whether to include the large embedding field.
         user_name (str, optional): User name for filtering in non-multi-db mode
-        page (int): Page number (starts from 1). Default is 1.
-        page_size (int): Number of items per page. Default is 1000.
+        page (int, optional): Page number (starts from 1). If None, exports all data without pagination.
+        page_size (int, optional): Number of items per page. If None, exports all data without pagination.
 
         Returns:
             {
@@ -2527,23 +2527,35 @@ class PolarDBGraphDB(BaseGraphDB):
         )
         user_name = user_name if user_name else self._get_config_value("user_name")
 
-        # Validate pagination parameters
-        if page < 1:
-            page = 1
-        if page_size < 1:
-            page_size = 10
+        # Determine if pagination is needed
+        use_pagination = page is not None and page_size is not None
+
+        # Validate pagination parameters if pagination is enabled
+        if use_pagination:
+            if page < 1:
+                page = 1
+            if page_size < 1:
+                page_size = 10
+            offset = (page - 1) * page_size
+        else:
+            offset = None
 
         conn = None
         try:
             conn = self._get_connection()
             # Export nodes
+            # Build pagination clause if needed
+            pagination_clause = ""
+            if use_pagination:
+                pagination_clause = f"LIMIT {page_size} OFFSET {offset}"
+
             if include_embedding:
                 node_query = f"""
                     SELECT id, properties, embedding
                     FROM "{self.db_name}_graph"."Memory"
                     WHERE ag_catalog.agtype_access_operator(properties, '"user_name"'::agtype) = '\"{user_name}\"'::agtype
                     ORDER BY id
-                    LIMIT {page_size} OFFSET {(page - 1) * page_size}
+                    {pagination_clause}
                 """
             else:
                 node_query = f"""
@@ -2551,7 +2563,7 @@ class PolarDBGraphDB(BaseGraphDB):
                     FROM "{self.db_name}_graph"."Memory"
                     WHERE ag_catalog.agtype_access_operator(properties, '"user_name"'::agtype) = '\"{user_name}\"'::agtype
                     ORDER BY id
-                    LIMIT {page_size} OFFSET {(page - 1) * page_size}
+                    {pagination_clause}
                 """
             logger.info(f"[export_graph nodes] Query: {node_query}")
             with conn.cursor() as cursor:
@@ -2601,6 +2613,11 @@ class PolarDBGraphDB(BaseGraphDB):
             conn = self._get_connection()
             # Export edges using cypher query
             # Note: Apache AGE Cypher may not support SKIP, so we use SQL LIMIT/OFFSET on the subquery
+            # Build pagination clause if needed
+            edge_pagination_clause = ""
+            if use_pagination:
+                edge_pagination_clause = f"LIMIT {page_size} OFFSET {offset}"
+
             edge_query = f"""
                 SELECT source, target, edge FROM (
                     SELECT * FROM cypher('{self.db_name}_graph', $$
@@ -2610,7 +2627,7 @@ class PolarDBGraphDB(BaseGraphDB):
                     ORDER BY a.id, b.id
                     $$) AS (source agtype, target agtype, edge agtype)
                 ) AS edges
-                LIMIT {page_size} OFFSET {(page - 1) * page_size}
+                {edge_pagination_clause}
             """
             logger.info(f"[export_graph edges] Query: {edge_query}")
             with conn.cursor() as cursor:
