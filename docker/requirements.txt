@@ -55,6 +55,7 @@ MarkupSafe==3.0.3
 mcp==1.21.1
 mdurl==0.1.2
 more-itertools==10.8.0
+neo4j==5.28.1
 numpy==2.3.4
 ollama==0.4.9
 openai==1.109.1
