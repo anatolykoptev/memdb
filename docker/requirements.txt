@@ -55,7 +55,6 @@ MarkupSafe==3.0.3
 mcp==1.21.1
 mdurl==0.1.2
 more-itertools==10.8.0
-neo4j==5.28.1
 numpy==2.3.4
 ollama==0.4.9
 openai==1.109.1
@@ -71,7 +70,7 @@ pluggy==1.6.0
 portalocker==2.8.0
 prometheus_client==0.23.1
 protobuf==6.33.1
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.11
 py-key-value-aio==0.2.8
 py-key-value-shared==0.2.8
 pycparser==2.23
@@ -123,6 +122,6 @@ tzdata==2025.2
 ujson==5.11.0
 urllib3==2.5.0
 uvicorn==0.38.0
-uvloop==0.22.1
+uvloop==0.22.1; sys_platform != 'win32'
 watchfiles==1.1.1
 websockets==15.0.1
