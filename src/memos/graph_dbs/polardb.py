@@ -5065,86 +5065,104 @@ class PolarDBGraphDB(BaseGraphDB):
         return total_deleted_count
 
     @timed
-    def get_user_names_by_memory_ids(self, memory_ids: list[str]) -> dict[str, list[str]]:
+    def get_user_names_by_memory_ids(self, memory_ids: list[str]) -> dict[str, str | None]:
         """Get user names by memory ids.
 
         Args:
             memory_ids: List of memory node IDs to query.
 
         Returns:
-            dict[str, list[str]]: Dictionary with one key:
-                - 'no_exist_memory_ids': List of memory_ids that do not exist (if any are missing)
-                - 'exist_user_names': List of distinct user names (if all memory_ids exist)
+            dict[str, str | None]: Dictionary mapping memory_id to user_name.
+                - Key: memory_id
+                - Value: user_name if exists, None if memory_id does not exist
+                Example: {"4918d700-6f01-4f4c-a076-75cc7b0e1a7c": "zhangsan", "2222222": None}
         """
         logger.info(f"[get_user_names_by_memory_ids] Querying memory_ids {memory_ids}")
         if not memory_ids:
-            return {"exist_user_names": []}
+            return {}
+
+        # Validate and normalize memory_ids
+        # Ensure all items are strings
+        normalized_memory_ids = []
+        for mid in memory_ids:
+            if not isinstance(mid, str):
+                mid = str(mid)
+            # Remove any whitespace
+            mid = mid.strip()
+            if mid:
+                normalized_memory_ids.append(mid)
+
+        if not normalized_memory_ids:
+            return {}
+
+        # Escape special characters for JSON string format in agtype
+        def escape_memory_id(mid: str) -> str:
+            """Escape special characters in memory_id for JSON string format."""
+            # Escape backslashes first, then double quotes
+            mid_str = mid.replace("\\", "\\\\")
+            mid_str = mid_str.replace('"', '\\"')
+            return mid_str
 
         # Build OR conditions for each memory_id
         id_conditions = []
-        for mid in memory_ids:
+        for mid in normalized_memory_ids:
+            # Escape special characters
+            escaped_mid = escape_memory_id(mid)
             id_conditions.append(
-                f"ag_catalog.agtype_access_operator(properties, '\"id\"'::agtype) = '\"{mid}\"'::agtype"
+                f"ag_catalog.agtype_access_operator(properties, '\"id\"'::agtype) = '\"{escaped_mid}\"'::agtype"
             )
 
         where_clause = f"({' OR '.join(id_conditions)})"
 
-        # Query to check which memory_ids exist
-        check_query = f"""
-            SELECT ag_catalog.agtype_access_operator(properties, '\"id\"'::agtype)::text
+        # Query to get memory_id and user_name pairs
+        query = f"""
+            SELECT
+                ag_catalog.agtype_access_operator(properties, '\"id\"'::agtype)::text AS memory_id,
+                ag_catalog.agtype_access_operator(properties, '\"user_name\"'::agtype)::text AS user_name
             FROM "{self.db_name}_graph"."Memory"
             WHERE {where_clause}
         """
 
-        logger.info(f"[get_user_names_by_memory_ids] check_query: {check_query}")
+        logger.info(f"[get_user_names_by_memory_ids] query: {query}")
         conn = None
+        result_dict = {}
         try:
             conn = self._get_connection()
             with conn.cursor() as cursor:
-                # Check which memory_ids exist
-                cursor.execute(check_query)
-                check_results = cursor.fetchall()
-                existing_ids = set()
-                for row in check_results:
-                    node_id = row[0]
-                    # Remove quotes if present
-                    if isinstance(node_id, str):
-                        node_id = node_id.strip('"').strip("'")
-                    existing_ids.add(node_id)
-
-                # Check if any memory_ids are missing
-                no_exist_list = [mid for mid in memory_ids if mid not in existing_ids]
-
-                # If any memory_ids are missing, return no_exist_memory_ids
-                if no_exist_list:
-                    logger.info(
-                        f"[get_user_names_by_memory_ids] Found {len(no_exist_list)} non-existing memory_ids: {no_exist_list}"
-                    )
-                    return {"no_exist_memory_ids": no_exist_list}
-
-                # All memory_ids exist, query user_names
-                user_names_query = f"""
-                    SELECT DISTINCT ag_catalog.agtype_access_operator(properties, '\"user_name\"'::agtype)::text
-                    FROM "{self.db_name}_graph"."Memory"
-                    WHERE {where_clause}
-                """
-                logger.info(f"[get_user_names_by_memory_ids] user_names_query: {user_names_query}")
-
-                cursor.execute(user_names_query)
+                cursor.execute(query)
                 results = cursor.fetchall()
-                user_names = []
+
+                # Build result dictionary from query results
                 for row in results:
-                    user_name = row[0]
+                    memory_id_raw = row[0]
+                    user_name_raw = row[1]
+
                     # Remove quotes if present
-                    if isinstance(user_name, str):
-                        user_name = user_name.strip('"').strip("'")
-                    user_names.append(user_name)
+                    if isinstance(memory_id_raw, str):
+                        memory_id = memory_id_raw.strip('"').strip("'")
+                    else:
+                        memory_id = str(memory_id_raw).strip('"').strip("'")
+
+                    if isinstance(user_name_raw, str):
+                        user_name = user_name_raw.strip('"').strip("'")
+                    else:
+                        user_name = (
+                            str(user_name_raw).strip('"').strip("'") if user_name_raw else None
+                        )
+
+                    result_dict[memory_id] = user_name if user_name else None
+
+                # Set None for memory_ids that were not found
+                for mid in normalized_memory_ids:
+                    if mid not in result_dict:
+                        result_dict[mid] = None
 
                 logger.info(
-                    f"[get_user_names_by_memory_ids] All memory_ids exist, found {len(user_names)} distinct user_names"
+                    f"[get_user_names_by_memory_ids] Found {len([v for v in result_dict.values() if v is not None])} memory_ids with user_names, "
+                    f"{len([v for v in result_dict.values() if v is None])} memory_ids without user_names"
                 )
 
-                return {"exist_user_names": user_names}
+                return result_dict
         except Exception as e:
             logger.error(
                 f"[get_user_names_by_memory_ids] Failed to get user names: {e}", exc_info=True
