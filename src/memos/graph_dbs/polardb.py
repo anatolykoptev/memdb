@@ -4686,8 +4686,10 @@ class PolarDBGraphDB(BaseGraphDB):
                                             f"ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '\"info\"'::ag_catalog.agtype, '\"{info_field}\"'::ag_catalog.agtype]) {sql_op} '\"{escaped_value}\"'::agtype"
                                         )
                                     else:
+                                        # For non-string values (numbers, booleans, etc.), convert to JSON string and then to agtype
+                                        value_json = json.dumps(op_value)
                                         condition_parts.append(
-                                            f"ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '\"info\"'::ag_catalog.agtype, '\"{info_field}\"'::ag_catalog.agtype]) {sql_op} {op_value}::agtype"
+                                            f"ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '\"info\"'::ag_catalog.agtype, '\"{info_field}\"'::ag_catalog.agtype]) {sql_op} ag_catalog.agtype_in('{value_json}')"
                                         )
                                 else:
                                     # Direct property access (e.g., "created_at" is directly in properties, not in properties.info)
@@ -4697,8 +4699,10 @@ class PolarDBGraphDB(BaseGraphDB):
                                             f"ag_catalog.agtype_access_operator(properties, '\"{key}\"'::agtype) {sql_op} '\"{escaped_value}\"'::agtype"
                                         )
                                     else:
+                                        # For non-string values (numbers, booleans, etc.), convert to JSON string and then to agtype
+                                        value_json = json.dumps(op_value)
                                         condition_parts.append(
-                                            f"ag_catalog.agtype_access_operator(properties, '\"{key}\"'::agtype) {sql_op} {op_value}::agtype"
+                                            f"ag_catalog.agtype_access_operator(properties, '\"{key}\"'::agtype) {sql_op} ag_catalog.agtype_in('{value_json}')"
                                         )
                             elif op == "=":
                                 # Handle equality operator
@@ -4739,8 +4743,10 @@ class PolarDBGraphDB(BaseGraphDB):
                                                 f"ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '\"info\"'::ag_catalog.agtype, '\"{info_field}\"'::ag_catalog.agtype]) = '[{op_value}]'::agtype"
                                             )
                                         else:
+                                            # For non-string values (numbers, booleans, etc.), convert to JSON string and then to agtype
+                                            value_json = json.dumps(op_value)
                                             condition_parts.append(
-                                                f"ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '\"info\"'::ag_catalog.agtype, '\"{info_field}\"'::ag_catalog.agtype]) = {op_value}::agtype"
+                                                f"ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '\"info\"'::ag_catalog.agtype, '\"{info_field}\"'::ag_catalog.agtype]) = ag_catalog.agtype_in('{value_json}')"
                                             )
                                 else:
                                     # Direct property access
@@ -4767,8 +4773,10 @@ class PolarDBGraphDB(BaseGraphDB):
                                                 f"ag_catalog.agtype_access_operator(properties, '\"{key}\"'::agtype) = '{json_array}'::agtype"
                                             )
                                         else:
+                                            # For non-string list values, convert to JSON string and then to agtype
+                                            value_json = json.dumps(op_value)
                                             condition_parts.append(
-                                                f"ag_catalog.agtype_access_operator(properties, '\"{key}\"'::agtype) = {op_value}::agtype"
+                                                f"ag_catalog.agtype_access_operator(properties, '\"{key}\"'::agtype) = ag_catalog.agtype_in('{value_json}')"
                                             )
                                     else:
                                         if key in ("tags", "sources"):
@@ -4776,8 +4784,10 @@ class PolarDBGraphDB(BaseGraphDB):
                                                 f"ag_catalog.agtype_access_operator(properties, '\"{key}\"'::agtype) = '[{op_value}]'::agtype"
                                             )
                                         else:
+                                            # For non-string values (numbers, booleans, etc.), convert to JSON string and then to agtype
+                                            value_json = json.dumps(op_value)
                                             condition_parts.append(
-                                                f"ag_catalog.agtype_access_operator(properties, '\"{key}\"'::agtype) = {op_value}::agtype"
+                                                f"ag_catalog.agtype_access_operator(properties, '\"{key}\"'::agtype) = ag_catalog.agtype_in('{value_json}')"
                                             )
                             elif op == "contains":
                                 # Handle contains operator
@@ -4962,8 +4972,10 @@ class PolarDBGraphDB(BaseGraphDB):
                                 f"ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '\"info\"'::ag_catalog.agtype, '\"{info_field}\"'::ag_catalog.agtype]) = '\"{escaped_value}\"'::agtype"
                             )
                         else:
+                            # For non-string values (numbers, booleans, etc.), convert to JSON string and then to agtype
+                            value_json = json.dumps(value)
                             condition_parts.append(
-                                f"ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '\"info\"'::ag_catalog.agtype, '\"{info_field}\"'::ag_catalog.agtype]) = '\"{value}\"'::agtype"
+                                f"ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '\"info\"'::ag_catalog.agtype, '\"{info_field}\"'::ag_catalog.agtype]) = ag_catalog.agtype_in('{value_json}')"
                             )
                     else:
                         # Direct property access (simple equality)
@@ -4973,8 +4985,10 @@ class PolarDBGraphDB(BaseGraphDB):
                                 f"ag_catalog.agtype_access_operator(properties, '\"{key}\"'::agtype) = '\"{escaped_value}\"'::agtype"
                             )
                         else:
+                            # For non-string values (numbers, booleans, etc.), convert to JSON string and then to agtype
+                            value_json = json.dumps(value)
                             condition_parts.append(
-                                f"ag_catalog.agtype_access_operator(properties, '\"{key}\"'::agtype) = {value}::agtype"
+                                f"ag_catalog.agtype_access_operator(properties, '\"{key}\"'::agtype) = ag_catalog.agtype_in('{value_json}')"
                             )
                 return " AND ".join(condition_parts)
 
