@@ -319,6 +319,15 @@ class APISearchRequest(BaseRequest):
         description="Number of textual memories to retrieve (top-K). Default: 10.",
     )
 
+    dedup: Literal["no", "sim"] | None = Field(
+        None,
+        description=(
+            "Optional dedup option for textual memories. "
+            "Use 'no' for no dedup, 'sim' for similarity dedup. "
+            "If None, default exact-text dedup is applied."
+        ),
+    )
+
     pref_top_k: int = Field(
         6,
         ge=0,
@@ -763,12 +772,19 @@ class GetMemoryRequest(BaseRequest):
     mem_cube_id: str = Field(..., description="Cube ID")
     user_id: str | None = Field(None, description="User ID")
     include_preference: bool = Field(True, description="Whether to handle preference memory")
+    page: int | None = Field(
+        None,
+        description="Page number (starts from 1). If None, exports all data without pagination.",
+    )
+    page_size: int | None = Field(
+        None, description="Number of items per page. If None, exports all data without pagination."
+    )
 
 
 class DeleteMemoryRequest(BaseRequest):
     """Request model for deleting memories."""
 
-    writable_cube_ids: list[str] = Field(..., description="Writable cube IDs")
+    writable_cube_ids: list[str] = Field(None, description="Writable cube IDs")
     memory_ids: list[str] | None = Field(None, description="Memory IDs")
     file_ids: list[str] | None = Field(None, description="File IDs")
     filter: dict[str, Any] | None = Field(None, description="Filter for the memory")
@@ -874,6 +890,7 @@ class DeleteMessageData(BaseModel):
 
     success: bool = Field(..., description="Operation success status")
 
+
 class ChatMessageData(BaseModel):
     """Data model for chat  Message based on actual API."""
 
@@ -950,6 +967,7 @@ class MemOSDeleteMemoryResponse(BaseModel):
         """Convenient access to success status."""
         return self.data.success
 
+
 class MemOSChatResponse(BaseModel):
     """Response model for chat operation based on actual API."""
 
@@ -968,11 +986,11 @@ class MemOSGetTaskStatusResponse(BaseModel):
 
     code: int = Field(..., description="Response status code")
     message: str = Field(..., description="Response message")
-    data: list[GetTaskStatusMessageData] = Field(..., description="delete results data")
+    data: list[GetTaskStatusMessageData] = Field(..., description="Task status data")
 
     @property
-    def data(self) -> list[GetTaskStatusMessageData]:
-        """Convenient access to task status."""
+    def messages(self) -> list[GetTaskStatusMessageData]:
+        """Convenient access to task status messages."""
         return self.data
 
 
@@ -1166,3 +1184,26 @@ class AllStatusResponse(BaseResponse[AllStatusResponseData]):
     """Response model for full scheduler status operations."""
 
     message: str = "Scheduler status summary retrieved successfully"
+
+
+# ─── Internal API Endpoints Models (for internal use) ───────────────────────────────────────────────────
+
+
+class GetUserNamesByMemoryIdsRequest(BaseRequest):
+    """Request model for getting user names by memory ids."""
+
+    memory_ids: list[str] = Field(..., description="Memory IDs")
+
+
+class GetUserNamesByMemoryIdsResponse(BaseResponse[dict[str, str | None]]):
+    """Response model for getting user names by memory ids."""
+
+
+class ExistMemCubeIdRequest(BaseRequest):
+    """Request model for checking if mem cube id exists."""
+
+    mem_cube_id: str = Field(..., description="Mem cube ID")
+
+
+class ExistMemCubeIdResponse(BaseResponse[dict[str, bool]]):
+    """Response model for checking if mem cube id exists."""
