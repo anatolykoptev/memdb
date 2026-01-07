@@ -116,6 +116,7 @@ showcasing its capabilities in **information extraction**, **temporal and cross-
     - **Activation Memory**: Caches key-value pairs (`KVCacheMemory`) to accelerate LLM inference and context reuse.
     - **Parametric Memory**: Stores model adaptation parameters (e.g., LoRA weights).
 - **🔌 Extensible**: Easily extend and customize memory modules, data sources, and LLM integrations.
+- **🏂 Lightweight Deployment** 🆕: Support for quick mode and complete mode deployment options.
 
 
 ## 🚀 Quickstart Guide
