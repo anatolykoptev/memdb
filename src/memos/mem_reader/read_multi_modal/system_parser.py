@@ -1,6 +1,7 @@
 """Parser for system messages."""
 
 import ast
+import hashlib
 import json
 import re
 import uuid
@@ -293,6 +294,22 @@ class SystemParser(BaseMessageParser):
         user_id = info_.pop("user_id", "")
         session_id = info_.pop("session_id", "")
 
+        # Deduplicate tool schemas based on memory content
+        # Use hash as key for efficiency, but store original string to handle collisions
+        seen_memories = {}  # hash -> memory_str mapping
+        unique_schemas = []
+        for schema in tool_schema:
+            memory_str = json.dumps(schema, ensure_ascii=False, sort_keys=True)
+            # Use SHA-256 for better collision resistance
+            memory_hash = hashlib.sha256(memory_str.encode("utf-8")).hexdigest()
+
+            # Check if hash exists and verify the actual content (handle potential collision)
+            if memory_hash not in seen_memories:
+                seen_memories[memory_hash] = memory_str
+                unique_schemas.append(schema)
+            elif seen_memories[memory_hash] != memory_str:
+                unique_schemas.append(schema)
+
         return [
             TextualMemoryItem(
                 id=str(uuid.uuid4()),
@@ -306,5 +323,5 @@ class SystemParser(BaseMessageParser):
                     info=info_,
                 ),
             )
-            for schema in tool_schema
+            for schema in unique_schemas
         ]
