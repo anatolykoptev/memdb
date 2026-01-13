@@ -91,6 +91,7 @@ def post_process_pref_mem(
             {
                 "cube_id": mem_cube_id,
                 "memories": pref_formatted_mem,
+                "total_nodes": len(pref_formatted_mem),
             }
         )
         pref_instruction, pref_note = instruct_completion(pref_formatted_mem)
@@ -123,12 +124,14 @@ def post_process_textual_mem(
         {
             "cube_id": mem_cube_id,
             "memories": fact_mem,
+            "total_nodes": len(fact_mem),
         }
     )
     memories_result["tool_mem"].append(
         {
             "cube_id": mem_cube_id,
             "memories": tool_mem,
+            "total_nodes": len(tool_mem),
         }
     )
     return memories_result
