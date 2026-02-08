@@ -337,9 +337,7 @@ class GraphMemoryRetriever:
         Perform vector-based similarity retrieval using query embedding.
         # TODO: tackle with post-filter and pre-filter(5.18+) better.
         """
-        logger.warning(f"[_vector_recall_DEBUG] Called with {len(query_embedding) if query_embedding else 0} embeddings, memory_scope: {memory_scope}, top_k: {top_k}")
         if not query_embedding:
-            logger.warning(f"[_vector_recall_DEBUG] Empty query_embedding, returning empty list")
             return []
 
         def search_single(vec, search_priority=None, search_filter=None):
@@ -391,13 +389,10 @@ class GraphMemoryRetriever:
 
             path_a_results = path_a_future.result()
             path_b_results = path_b_future.result()
-            logger.warning(f"[_vector_recall_DEBUG] Path A returned {len(path_a_results)} hits")
-            logger.warning(f"[_vector_recall_DEBUG] Path B returned {len(path_b_results)} hits")
             all_hits.extend(path_a_results)
             all_hits.extend(path_b_results)
 
         if not all_hits:
-            logger.warning(f"[_vector_recall_DEBUG] No hits found, returning empty list")
             return []
 
         # merge and deduplicate, keeping highest score per ID
