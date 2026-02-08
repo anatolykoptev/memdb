@@ -87,8 +87,8 @@ class MultiModalStructMemReader(SimpleStructMemReader):
             split_items = []
 
             def _create_chunk_item(chunk):
-                # Chunk objects have a 'text' attribute
-                chunk_text = chunk.text
+                # Chunk objects have a 'text' attribute; handle raw strings too
+                chunk_text = chunk if isinstance(chunk, str) else getattr(chunk, "text", str(chunk))
                 if not chunk_text or not chunk_text.strip():
                     return None
                 # Create a new memory item for each chunk, preserving original metadata

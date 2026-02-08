@@ -199,7 +199,7 @@ class SearchHandler(BaseHandler):
         # Get or compute embeddings
         embeddings = self._extract_embeddings([mem for _, _, mem, _ in flat])
         if embeddings is None:
-            self.logger.warning("[SearchHandler] Embedding is missing; recomputing embeddings")
+            self.logger.debug("[SearchHandler] Embedding is missing; recomputing embeddings")
             documents = [mem.get("memory", "") for _, _, mem, _ in flat]
             embeddings = self.searcher.embedder.embed(documents)
 
