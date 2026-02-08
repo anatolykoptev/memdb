@@ -306,6 +306,10 @@ class Searcher:
         if parsed_goal.memories:
             query_embedding = self.embedder.embed(list({query, *parsed_goal.memories}))
 
+        # Ensure query_embedding is always available for downstream retrieval paths
+        if query_embedding is None:
+            query_embedding = self.embedder.embed([query])
+
         return parsed_goal, query_embedding, context, query
 
     @timed
