@@ -101,13 +101,15 @@ class SearxngSearchRetriever:
             info = {"user_id": "", "session_id": ""}
 
         search_results = self.searxng_api.search(query, max_results=top_k)
+        if not search_results:
+            return []
 
-        memory_items = []
+        # Build all memory texts and metadata first, then batch embed
+        entries = []
         for result in search_results:
             title = result.get("title", "")
             snippet = result.get("content", "")
             link = result.get("url", "")
-
             memory_content = f"Title: {title}\nSummary: {snippet}\nSource: {link}"
 
             tags = ["web_search"]
@@ -117,28 +119,39 @@ class SearxngSearchRetriever:
                 if hasattr(parsed_goal, "concept") and parsed_goal.concept:
                     tags.append(parsed_goal.concept)
 
+            entries.append({"content": memory_content, "title": title, "link": link, "tags": tags})
+
+        # Batch embed all results in a single API call
+        all_texts = [e["content"] for e in entries]
+        all_embeddings = self.embedder.embed(all_texts)
+
+        now_str = datetime.now().strftime("%Y-%m-%d")
+        now_iso = datetime.now().isoformat()
+        user_id = info.get("user_id", "")
+        session_id = info.get("session_id", "")
+
+        memory_items = []
+        for entry, embedding in zip(entries, all_embeddings):
             metadata = TreeNodeTextualMemoryMetadata(
-                user_id=info.get("user_id", ""),
-                session_id=info.get("session_id", ""),
+                user_id=user_id,
+                session_id=session_id,
                 status="activated",
                 type="fact",
-                memory_time=datetime.now().strftime("%Y-%m-%d"),
+                memory_time=now_str,
                 source="web",
                 confidence=85.0,
-                tags=tags,
+                tags=entry["tags"],
                 visibility="public",
                 memory_type="LongTermMemory",
-                key=title,
-                sources=[SourceMessage(type="web", url=link)] if link else [],
-                embedding=self.embedder.embed([memory_content])[0],
-                created_at=datetime.now().isoformat(),
+                key=entry["title"],
+                sources=[SourceMessage(type="web", url=entry["link"])] if entry["link"] else [],
+                embedding=embedding,
+                created_at=now_iso,
                 usage=[],
-                background=f"SearXNG search result",
+                background="SearXNG search result",
             )
-
-            memory_item = TextualMemoryItem(
-                id=str(uuid.uuid4()), memory=memory_content, metadata=metadata
+            memory_items.append(
+                TextualMemoryItem(id=str(uuid.uuid4()), memory=entry["content"], metadata=metadata)
             )
-            memory_items.append(memory_item)
 
         return memory_items
