@@ -554,7 +554,19 @@ class APIConfig:
         return config
 
     def get_internet_config() -> dict[str, Any]:
-        """Get embedder configuration."""
+        """Get internet search configuration."""
+        internet_backend = os.getenv("INTERNET_SEARCH_BACKEND", "searxng")
+
+        if internet_backend == "searxng":
+            return {
+                "backend": "searxng",
+                "config": {
+                    "base_url": os.getenv("SEARXNG_BASE_URL", "http://searxng:8080"),
+                    "max_results": 15,
+                },
+            }
+
+        # Bocha backend (legacy)
         reader_config = APIConfig.get_reader_config()
         return {
             "backend": "bocha",

@@ -9,6 +9,7 @@ from memos.memories.textual.tree_text_memory.retrieve.bochasearch import BochaAI
 from memos.memories.textual.tree_text_memory.retrieve.internet_retriever import (
     InternetGoogleRetriever,
 )
+from memos.memories.textual.tree_text_memory.retrieve.searxng_search import SearxngSearchRetriever
 from memos.memories.textual.tree_text_memory.retrieve.xinyusearch import XinyuSearchRetriever
 from memos.memos_tools.singleton import singleton_factory
 
@@ -21,6 +22,7 @@ class InternetRetrieverFactory:
         "bing": InternetGoogleRetriever,  # TODO: Implement BingRetriever
         "xinyu": XinyuSearchRetriever,
         "bocha": BochaAISearchRetriever,
+        "searxng": SearxngSearchRetriever,
     }
 
     @classmethod
@@ -79,6 +81,12 @@ class InternetRetrieverFactory:
                 access_key=config.api_key,  # Use api_key as access_key for xinyu
                 embedder=embedder,
                 reader=MemReaderFactory.from_config(config.reader),
+                max_results=config.max_results,
+            )
+        elif backend == "searxng":
+            return retriever_class(
+                base_url=config.base_url,
+                embedder=embedder,
                 max_results=config.max_results,
             )
         else:
