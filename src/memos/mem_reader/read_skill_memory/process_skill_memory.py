@@ -557,9 +557,9 @@ def process_skill_memory_fine(
     **kwargs,
 ) -> list[TextualMemoryItem]:
     # Validate required configurations
-    if not oss_config:
-        logger.warning("[PROCESS_SKILLS] OSS configuration is required for skill memory processing")
-        return []
+    use_oss = bool(oss_config)
+    if not use_oss:
+        logger.info("[PROCESS_SKILLS] OSS not configured — skill files will be stored locally only")
 
     if not skills_dir_config:
         logger.warning(
@@ -573,7 +573,9 @@ def process_skill_memory_fine(
         logger.warning("[PROCESS_SKILLS] History is None in Skills")
 
     # Validate skills_dir has required keys
-    required_keys = ["skills_local_dir", "skills_oss_dir"]
+    required_keys = ["skills_local_dir"]
+    if use_oss:
+        required_keys.append("skills_oss_dir")
     missing_keys = [key for key in required_keys if key not in skills_dir_config]
     if missing_keys:
         logger.warning(
@@ -581,10 +583,12 @@ def process_skill_memory_fine(
         )
         return []
 
-    oss_client = create_oss_client(oss_config)
-    if not oss_client:
-        logger.warning("[PROCESS_SKILLS] Failed to create OSS client")
-        return []
+    oss_client = None
+    if use_oss:
+        oss_client = create_oss_client(oss_config)
+        if not oss_client:
+            logger.warning("[PROCESS_SKILLS] Failed to create OSS client")
+            return []
 
     messages = _reconstruct_messages_from_memory_items(fast_memory_items)
 
@@ -678,12 +682,12 @@ def process_skill_memory_fine(
 
     for skill_memory, zip_path in skill_memory_with_paths:
         try:
-            # Delete old skill from OSS if this is an update
+            # Delete old skill from graph db if this is an update
             if skill_memory.get("update", False) and skill_memory.get("old_memory_id"):
                 old_memory_id = skill_memory["old_memory_id"]
                 old_memory = old_memories_map.get(old_memory_id)
 
-                if old_memory:
+                if old_memory and use_oss:
                     # Get old OSS path from the old memory's metadata
                     old_oss_path = getattr(old_memory.metadata, "url", None)
 
@@ -709,40 +713,52 @@ def process_skill_memory_fine(
                         logger.info(
                             f"[PROCESS_SKILLS] Deleted old skill from graph db: {old_memory_id}"
                         )
+                elif old_memory and graph_db:
+                    # No OSS, but still clean up graph db
+                    graph_db.delete_node_by_prams(memory_ids=[old_memory_id])
+                    logger.info(
+                        f"[PROCESS_SKILLS] Deleted old skill from graph db: {old_memory_id}"
+                    )
 
-            # Upload new skill to OSS
-            # Use the same filename as the local zip file
-            zip_filename = Path(zip_path).name
-            oss_path = (
-                Path(skills_dir_config["skills_oss_dir"]) / user_id / zip_filename
-            ).as_posix()
+            if use_oss:
+                # Upload new skill to OSS
+                # Use the same filename as the local zip file
+                zip_filename = Path(zip_path).name
+                oss_path = (
+                    Path(skills_dir_config["skills_oss_dir"]) / user_id / zip_filename
+                ).as_posix()
 
-            # _upload_skills_to_oss returns the URL
-            url = _upload_skills_to_oss(
-                local_file_path=str(zip_path), oss_file_path=oss_path, client=oss_client
-            )
+                # _upload_skills_to_oss returns the URL
+                url = _upload_skills_to_oss(
+                    local_file_path=str(zip_path), oss_file_path=oss_path, client=oss_client
+                )
 
-            # Set URL directly to skill_memory
-            skill_memory["url"] = url
+                # Set URL directly to skill_memory
+                skill_memory["url"] = url
+                logger.info(f"[PROCESS_SKILLS] Uploaded skill to OSS: {url}")
+            else:
+                # No OSS — local-only, set url to empty
+                skill_memory["url"] = ""
+                logger.info(f"[PROCESS_SKILLS] Skill stored locally only: {zip_path}")
 
-            logger.info(f"[PROCESS_SKILLS] Uploaded skill to OSS: {url}")
         except Exception as e:
-            logger.warning(f"[PROCESS_SKILLS] Error uploading skill to OSS: {e}")
+            logger.warning(f"[PROCESS_SKILLS] Error processing skill upload: {e}")
             skill_memory["url"] = ""  # Set to empty string if upload fails
         finally:
-            # Clean up local files after upload
-            try:
-                zip_file = Path(zip_path)
-                skill_dir = zip_file.parent / zip_file.stem
-                # Delete zip file
-                if zip_file.exists():
-                    zip_file.unlink()
-                # Delete skill directory
-                if skill_dir.exists():
-                    shutil.rmtree(skill_dir)
-                logger.info(f"[PROCESS_SKILLS] Cleaned up local files: {zip_path} and {skill_dir}")
-            except Exception as cleanup_error:
-                logger.warning(f"[PROCESS_SKILLS] Error cleaning up local files: {cleanup_error}")
+            if use_oss:
+                # Clean up local files after OSS upload
+                try:
+                    zip_file = Path(zip_path)
+                    skill_dir = zip_file.parent / zip_file.stem
+                    # Delete zip file
+                    if zip_file.exists():
+                        zip_file.unlink()
+                    # Delete skill directory
+                    if skill_dir.exists():
+                        shutil.rmtree(skill_dir)
+                    logger.info(f"[PROCESS_SKILLS] Cleaned up local files: {zip_path} and {skill_dir}")
+                except Exception as cleanup_error:
+                    logger.warning(f"[PROCESS_SKILLS] Error cleaning up local files: {cleanup_error}")
 
     # Create TextualMemoryItem objects
     skill_memory_items = []
