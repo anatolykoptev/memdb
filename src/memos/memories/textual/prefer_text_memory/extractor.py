@@ -65,7 +65,7 @@ class NaiveExtractor(BaseExtractor):
             "zh": NAIVE_EXPLICIT_PREFERENCE_EXTRACT_PROMPT_ZH,
             "en": NAIVE_EXPLICIT_PREFERENCE_EXTRACT_PROMPT,
         }
-        prompt = _map[lang].replace("{qa_pair}", qa_pair_str)
+        prompt = _map.get(lang, _map["en"]).replace("{qa_pair}", qa_pair_str)
 
         try:
             response = self.llm_provider.generate([{"role": "user", "content": prompt}])
@@ -93,7 +93,7 @@ class NaiveExtractor(BaseExtractor):
             "zh": NAIVE_IMPLICIT_PREFERENCE_EXTRACT_PROMPT_ZH,
             "en": NAIVE_IMPLICIT_PREFERENCE_EXTRACT_PROMPT,
         }
-        prompt = _map[lang].replace("{qa_pair}", qa_pair_str)
+        prompt = _map.get(lang, _map["en"]).replace("{qa_pair}", qa_pair_str)
 
         try:
             response = self.llm_provider.generate([{"role": "user", "content": prompt}])

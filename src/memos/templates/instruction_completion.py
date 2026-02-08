@@ -49,6 +49,8 @@ def instruct_completion(
         explicit_pref_str.replace("Explicit Preference:\n", "")
         + implicit_pref_str.replace("Implicit Preference:\n", "")
     )
+    if lang not in ("en", "zh"):
+        lang = "en"
 
     if not explicit_pref_str and not implicit_pref_str:
         return "", ""

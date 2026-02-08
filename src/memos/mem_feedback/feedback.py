@@ -179,6 +179,8 @@ class MemFeedback(BaseMemFeedback):
         Determine whether it is keyword replacement
         """
         lang = detect_lang(feedback_content)
+        if lang not in ("en", "zh"):
+            lang = "en"
         template = FEEDBACK_PROMPT_DICT["if_kw_replace"][lang]
         prompt = template.format(
             user_feedback=feedback_content,
@@ -200,6 +202,8 @@ class MemFeedback(BaseMemFeedback):
         Generate a judgement for a given feedback.
         """
         lang = detect_lang(feedback_content)
+        if lang not in ("en", "zh"):
+            lang = "en"
         template = FEEDBACK_PROMPT_DICT["judge"][lang]
         chat_history_lis = [f"""{msg["role"]}: {msg["content"]}""" for msg in chat_history[-4:]]
         chat_history_str = "\n".join(chat_history_lis)
@@ -431,6 +435,8 @@ class MemFeedback(BaseMemFeedback):
     ):
         """Modify memory at the semantic level"""
         lang = detect_lang("".join(memory_item.memory))
+        if lang not in ("en", "zh"):
+            lang = "en"
         template = FEEDBACK_PROMPT_DICT["compare"][lang]
         if current_memories == []:
             # retrieve
@@ -726,6 +732,8 @@ class MemFeedback(BaseMemFeedback):
             return operations
 
         lang = detect_lang("".join(updated_operations[0]["text"]))
+        if lang not in ("en", "zh"):
+            lang = "en"
         template = FEEDBACK_PROMPT_DICT["compare_judge"][lang]
 
         all_judge = []
@@ -863,6 +871,8 @@ class MemFeedback(BaseMemFeedback):
         if not corrected_answer or feedback_content.strip() == "":
             return ""
         lang = detect_lang(feedback_content)
+        if lang not in ("en", "zh"):
+            lang = "en"
         template = FEEDBACK_PROMPT_DICT["generation"][lang]
         chat_history_str = "\n".join(
             [f"{item['role']}: {item['content']}" for item in chat_history]

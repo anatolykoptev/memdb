@@ -390,6 +390,10 @@ class MultiModalStructMemReader(SimpleStructMemReader):
         if lang is None:
             lang = detect_lang(mem_str)
 
+        # Only "en" and "zh" have prompt templates; all others fall back to English
+        if lang not in ("en", "zh"):
+            lang = "en"
+
         # Select prompt template based on prompt_type
         if prompt_type == "doc":
             template = PROMPT_DICT["doc"][lang]

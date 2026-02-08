@@ -63,6 +63,8 @@ class FileContentParser(BaseMessageParser):
             return {}
 
         lang = detect_lang(chunk_text)
+        if lang not in ("en", "zh"):
+            lang = "en"
         template = DOC_PROMPT_DICT["doc"][lang]
         prompt = template.replace("{chunk_text}", chunk_text)
 
