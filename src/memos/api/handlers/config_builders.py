@@ -54,11 +54,24 @@ def build_graph_db_config(user_id: str = "default") -> dict[str, Any]:
 
 def build_vec_db_config() -> dict[str, Any]:
     """
-    Build vector database configuration.
+    Build vector database configuration for preference memory.
+
+    Uses qdrant_multi by default (matches get_preference_memory_config).
+    Falls back to milvus if PREF_VEC_DB_BACKEND=milvus.
 
     Returns:
         Validated vector database configuration dictionary
     """
+    import os
+
+    pref_vec_backend = os.getenv("PREF_VEC_DB_BACKEND", "qdrant_multi")
+    if pref_vec_backend == "qdrant_multi":
+        return VectorDBConfigFactory.model_validate(
+            {
+                "backend": "qdrant_multi",
+                "config": APIConfig.get_qdrant_preference_config(),
+            }
+        )
     return VectorDBConfigFactory.model_validate(
         {
             "backend": "milvus",

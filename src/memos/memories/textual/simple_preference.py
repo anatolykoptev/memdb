@@ -11,7 +11,7 @@ from memos.log import get_logger
 from memos.memories.textual.item import PreferenceTextualMemoryMetadata, TextualMemoryItem
 from memos.memories.textual.preference import PreferenceTextMemory
 from memos.types import MessageList
-from memos.vec_dbs.factory import MilvusVecDB, QdrantVecDB
+from memos.vec_dbs.factory import MilvusVecDB, QdrantVecDB, QdrantMultiCollectionVecDB
 
 
 logger = get_logger(__name__)
@@ -23,7 +23,7 @@ class SimplePreferenceTextMemory(PreferenceTextMemory):
     def __init__(
         self,
         extractor_llm: OpenAILLM | OllamaLLM | AzureLLM,
-        vector_db: MilvusVecDB | QdrantVecDB,
+        vector_db: MilvusVecDB | QdrantVecDB | QdrantMultiCollectionVecDB,
         embedder: OllamaEmbedder | ArkEmbedder | SenTranEmbedder | UniversalAPIEmbedder,
         reranker,
         extractor,

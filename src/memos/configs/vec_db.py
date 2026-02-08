@@ -54,6 +54,17 @@ class MilvusVecDBConfig(BaseVecDBConfig):
     password: str = Field(default="", description="Password for Milvus connection")
 
 
+class QdrantMultiCollectionConfig(BaseVecDBConfig):
+    """Config for multi-collection Qdrant adapter (mirrors MilvusVecDBConfig shape)."""
+
+    collection_name: list[str] = Field(..., description="List of collection names")
+    host: str | None = Field(default=None, description="Host for Qdrant")
+    port: int | None = Field(default=None, description="Port for Qdrant")
+    path: str | None = Field(default=None, description="Path for local Qdrant")
+    url: str | None = Field(default=None, description="Qdrant Cloud/remote endpoint URL")
+    api_key: str | None = Field(default=None, description="Qdrant Cloud API key")
+
+
 class VectorDBConfigFactory(BaseConfig):
     """Factory class for creating vector database configurations."""
 
@@ -63,6 +74,7 @@ class VectorDBConfigFactory(BaseConfig):
     backend_to_class: ClassVar[dict[str, Any]] = {
         "qdrant": QdrantVecDBConfig,
         "milvus": MilvusVecDBConfig,
+        "qdrant_multi": QdrantMultiCollectionConfig,
     }
 
     @field_validator("backend")

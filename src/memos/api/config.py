@@ -355,21 +355,47 @@ class APIConfig:
 
     @staticmethod
     def get_preference_memory_config() -> dict[str, Any]:
-        """Get preference memory configuration."""
+        """Get preference memory configuration.
+
+        Uses qdrant_multi adapter (Qdrant with multi-collection support)
+        when QDRANT_HOST is set; otherwise falls back to Milvus.
+        """
+        pref_vec_backend = os.getenv("PREF_VEC_DB_BACKEND", "qdrant_multi")
+        if pref_vec_backend == "qdrant_multi":
+            vec_db_config = {
+                "backend": "qdrant_multi",
+                "config": APIConfig.get_qdrant_preference_config(),
+            }
+        else:
+            vec_db_config = {
+                "backend": "milvus",
+                "config": APIConfig.get_milvus_config(),
+            }
         return {
             "backend": "pref_text",
             "config": {
                 "extractor_llm": APIConfig.get_memreader_config(),
-                "vector_db": {
-                    "backend": "milvus",
-                    "config": APIConfig.get_milvus_config(),
-                },
+                "vector_db": vec_db_config,
                 "embedder": APIConfig.get_embedder_config(),
                 "reranker": APIConfig.get_reranker_config(),
                 "extractor": {"backend": "naive", "config": {}},
                 "adder": {"backend": "naive", "config": {}},
                 "retriever": {"backend": "naive", "config": {}},
             },
+        }
+
+    @staticmethod
+    def get_qdrant_preference_config() -> dict[str, Any]:
+        """Get Qdrant config for preference memory (multi-collection)."""
+        return {
+            "collection_name": [
+                "explicit_preference",
+                "implicit_preference",
+            ],
+            "vector_dimension": int(os.getenv("EMBEDDING_DIMENSION", 1024)),
+            "distance_metric": "cosine",
+            "host": os.getenv("QDRANT_HOST", "localhost"),
+            "port": int(os.getenv("QDRANT_PORT", "6333")),
         }
 
     @staticmethod
