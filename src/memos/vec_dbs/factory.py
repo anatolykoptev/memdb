@@ -4,6 +4,7 @@ from memos.configs.vec_db import VectorDBConfigFactory
 from memos.vec_dbs.base import BaseVecDB
 from memos.vec_dbs.milvus import MilvusVecDB
 from memos.vec_dbs.qdrant import QdrantVecDB
+from memos.vec_dbs.qdrant_multi import QdrantMultiCollectionVecDB
 
 
 class VecDBFactory(BaseVecDB):
@@ -12,6 +13,7 @@ class VecDBFactory(BaseVecDB):
     backend_to_class: ClassVar[dict[str, Any]] = {
         "qdrant": QdrantVecDB,
         "milvus": MilvusVecDB,
+        "qdrant_multi": QdrantMultiCollectionVecDB,
     }
 
     @classmethod

@@ -23,7 +23,7 @@ from memos.memories.textual.prefer_text_memory.factory import (
 )
 from memos.reranker.factory import RerankerFactory
 from memos.types import MessageList
-from memos.vec_dbs.factory import MilvusVecDB, QdrantVecDB, VecDBFactory
+from memos.vec_dbs.factory import MilvusVecDB, QdrantVecDB, QdrantMultiCollectionVecDB, VecDBFactory
 from memos.vec_dbs.item import VecDBItem
 
 
@@ -39,7 +39,7 @@ class PreferenceTextMemory(BaseTextMemory):
         self.extractor_llm: OpenAILLM | OllamaLLM | AzureLLM = LLMFactory.from_config(
             config.extractor_llm
         )
-        self.vector_db: MilvusVecDB | QdrantVecDB = VecDBFactory.from_config(config.vector_db)
+        self.vector_db: MilvusVecDB | QdrantVecDB | QdrantMultiCollectionVecDB = VecDBFactory.from_config(config.vector_db)
         self.embedder: OllamaEmbedder | ArkEmbedder | SenTranEmbedder | UniversalAPIEmbedder = (
             EmbedderFactory.from_config(config.embedder)
         )
