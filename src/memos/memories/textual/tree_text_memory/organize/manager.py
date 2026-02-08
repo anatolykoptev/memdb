@@ -83,6 +83,61 @@ class MemoryManager:
             graph_store, llm, embedder, is_reorganize=is_reorganize
         )
         self._merged_threshold = merged_threshold
+        self._dedup_threshold = 0.95  # normalized cosine (raw cosine > 0.90)
+
+    def _deduplicate_memories(
+        self,
+        memories: list[TextualMemoryItem],
+        user_name: str | None = None,
+    ) -> list[TextualMemoryItem]:
+        """
+        Filter out memories that are near-duplicates of existing DB entries.
+        Uses cosine similarity on embeddings; skips items above _dedup_threshold.
+        """
+        if not memories:
+            return memories
+
+        dedup_types = {"LongTermMemory", "UserMemory", "SkillMemory"}
+        unique: list[TextualMemoryItem] = []
+
+        for memory in memories:
+            mem_type = memory.metadata.memory_type
+            embedding = getattr(memory.metadata, "embedding", None)
+
+            # Skip dedup for types we don't check or missing embeddings
+            if mem_type not in dedup_types or not embedding:
+                unique.append(memory)
+                continue
+
+            try:
+                similar = self.graph_store.search_by_embedding(
+                    embedding,
+                    top_k=1,
+                    scope=mem_type,
+                    status="activated",
+                    threshold=self._dedup_threshold,
+                    user_name=user_name,
+                )
+                if similar:
+                    score = similar[0].get("score", 0)
+                    logger.info(
+                        f"[MemoryManager:dedup] Skipping duplicate "
+                        f"(score={score:.3f}): {memory.memory[:120]}"
+                    )
+                    continue
+            except Exception:
+                logger.warning(
+                    f"[MemoryManager:dedup] Check failed: {traceback.format_exc()}"
+                )
+
+            unique.append(memory)
+
+        skipped = len(memories) - len(unique)
+        if skipped:
+            logger.info(
+                f"[MemoryManager:dedup] Filtered {skipped}/{len(memories)} duplicate memories"
+            )
+        return unique
 
     def add(
         self,
@@ -104,6 +159,8 @@ class MemoryManager:
         Returns:
             List of added memory IDs.
         """
+        memories = self._deduplicate_memories(memories, user_name)
+
         added_ids: list[str] = []
         if use_batch:
             added_ids = self._add_memories_batch(memories, user_name)
