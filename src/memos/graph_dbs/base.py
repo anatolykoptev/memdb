@@ -287,7 +287,6 @@ class BaseGraphDB(ABC):
             List of edge dicts with 'from', 'to', and 'type' keys.
         """
 
-    @abstractmethod
     def search_by_fulltext(
         self, query_words: list[str], top_k: int = 10, **kwargs
     ) -> list[dict]:
@@ -299,6 +298,7 @@ class BaseGraphDB(ABC):
         Returns:
             List of dicts with 'id' and 'score'.
         """
+        return []
 
     @abstractmethod
     def get_neighbors_by_tag(
@@ -347,18 +347,18 @@ class BaseGraphDB(ABC):
         Check if a user_name exists in the graph.
         """
 
-    @abstractmethod
     def search_by_keywords_like(
         self, query_word: str, **kwargs
     ) -> list[dict]:
         """
         Search memories using SQL LIKE pattern matching.
         """
+        return []
 
-    @abstractmethod
     def search_by_keywords_tfidf(
         self, query_words: list[str], **kwargs
     ) -> list[dict]:
         """
         Search memories using TF-IDF fulltext scoring.
         """
+        return []
