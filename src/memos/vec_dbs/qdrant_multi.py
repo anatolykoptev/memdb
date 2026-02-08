@@ -49,6 +49,24 @@ def _prepare_for_qdrant(item: Any) -> VecDBItem | dict:
     return item
 
 
+def _flatten_milvus_filter(filter: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Flatten Milvus-style compound filters for Qdrant.
+
+    Milvus uses ``{"and": [dict1, dict2, ...]}`` to combine filters.
+    Qdrant expects a flat ``{key: scalar_value}`` dict.  This function
+    merges all sub-dicts, skipping None values.
+    """
+    if filter is None:
+        return None
+    if "and" in filter and isinstance(filter["and"], list):
+        flat: dict[str, Any] = {}
+        for part in filter["and"]:
+            if isinstance(part, dict):
+                flat.update(part)
+        return flat or None
+    return filter
+
+
 class QdrantMultiCollectionVecDB:
     """Qdrant adapter presenting the Milvus multi-collection interface.
 
@@ -110,7 +128,8 @@ class QdrantMultiCollectionVecDB:
         filter: dict[str, Any] | None = None,
         search_type: str = "dense",  # ignored — Qdrant only does dense
     ) -> list[MilvusVecDBItem]:
-        results = self._get(collection_name).search(query_vector, top_k, filter)
+        flat_filter = _flatten_milvus_filter(filter)
+        results = self._get(collection_name).search(query_vector, top_k, flat_filter)
         return [_to_milvus_item(r) for r in results]
 
     # ── CRUD (collection_name as first arg) ───────────────────────────
@@ -126,7 +145,8 @@ class QdrantMultiCollectionVecDB:
     def get_by_filter(
         self, collection_name: str, filter: dict[str, Any], scroll_limit: int = 100
     ) -> list[MilvusVecDBItem]:
-        results = self._get(collection_name).get_by_filter(filter, scroll_limit)
+        flat_filter = _flatten_milvus_filter(filter) or {}
+        results = self._get(collection_name).get_by_filter(flat_filter, scroll_limit)
         return [_to_milvus_item(r) for r in results]
 
     def get_all(self, collection_name: str, scroll_limit: int = 100) -> list[MilvusVecDBItem]:
@@ -154,7 +174,8 @@ class QdrantMultiCollectionVecDB:
     def delete_by_filter(self, collection_name: str, filter: dict[str, Any]) -> None:
         """Delete items matching filter — implemented via scroll + delete."""
         inst = self._get(collection_name)
-        items = inst.get_by_filter(filter)
+        flat_filter = _flatten_milvus_filter(filter) or {}
+        items = inst.get_by_filter(flat_filter)
         if items:
             inst.delete([item.id for item in items])
             logger.info(
