@@ -88,6 +88,7 @@ python-multipart==0.0.20
 pytz==2025.2
 PyYAML==6.0.3
 qdrant-client==1.14.3
+rank-bm25==0.2.2
 redis==6.4.0
 referencing==0.36.2
 regex==2025.11.3
