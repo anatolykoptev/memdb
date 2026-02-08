@@ -8,6 +8,7 @@ from fastmcp import FastMCP
 
 # Assuming these are your imports
 from memos.mem_os.main import MOS
+from memos.mem_cube.general import GeneralMemCube
 from memos.mem_user.user_manager import UserRole
 
 
@@ -40,7 +41,8 @@ class MOSMCPServer:
             config, cube_config = load_default_config()
             self.mos_core = MOS(config=config)
             if cube_config is not None:
-                self.mos_core.register_mem_cube(cube_config)
+                cube = GeneralMemCube(cube_config)
+                self.mos_core.register_mem_cube(cube)
         else:
             self.mos_core = mos_instance
         self._setup_tools()
@@ -146,7 +148,7 @@ class MOSMCPServer:
             try:
                 if not os.path.exists(cube_name_or_path):
                     _, cube_config = load_default_config(user_id=user_id)
-                    cube_to_register = cube_config
+                    cube_to_register = GeneralMemCube(cube_config)
                 else:
                     cube_to_register = cube_name_or_path
                 self.mos_core.register_mem_cube(
