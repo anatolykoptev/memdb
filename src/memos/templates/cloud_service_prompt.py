@@ -104,4 +104,8 @@ def get_cloud_chat_prompt(lang: str = "en") -> str:
             "{current_time}", datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         )
     else:
-        raise ValueError(f"Invalid language: {lang}")
+        # All other languages use English prompt (which includes instruction
+        # to respond in the user's query language)
+        return CLOUD_CHAT_PROMPT_EN.replace(
+            "{current_time}", datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
+        )
