@@ -993,6 +993,8 @@ class Searcher:
         """Generate chain-of-thought queries"""
 
         lang = detect_lang(query)
+        if lang not in ("en", "zh"):
+            lang = "en"
         if mode == "fine" and context:
             template = COT_DICT["fine"][lang]
             prompt = (

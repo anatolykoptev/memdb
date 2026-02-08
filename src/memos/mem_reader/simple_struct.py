@@ -247,6 +247,8 @@ class SimpleStructMemReader(BaseMemReader, ABC):
 
     def _get_llm_response(self, mem_str: str, custom_tags: list[str] | None) -> dict:
         lang = detect_lang(mem_str)
+        if lang not in ("en", "zh"):
+            lang = "en"
         template = PROMPT_DICT["chat"][lang]
         examples = PROMPT_DICT["chat"][f"{lang}_example"]
         prompt = template.replace("${conversation}", mem_str)
@@ -873,6 +875,8 @@ class SimpleStructMemReader(BaseMemReader, ABC):
         messages = []
         for chunk in chunks:
             lang = detect_lang(chunk.text)
+            if lang not in ("en", "zh"):
+                lang = "en"
             template = PROMPT_DICT["doc"][lang]
             prompt = template.replace("{chunk_text}", chunk.text)
             custom_tags_prompt = (

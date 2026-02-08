@@ -44,6 +44,8 @@ class StrategyStructMemReader(SimpleStructMemReader, ABC):
 
     def _get_llm_response(self, mem_str: str, custom_tags: list[str] | None) -> dict:
         lang = detect_lang(mem_str)
+        if lang not in ("en", "zh"):
+            lang = "en"
         template = STRATEGY_PROMPT_DICT["chat"][lang]
         examples = STRATEGY_PROMPT_DICT["chat"][f"{lang}_example"]
         prompt = template.replace("${conversation}", mem_str)
