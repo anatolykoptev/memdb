@@ -278,9 +278,10 @@ class GraphMemoryRetriever:
                 key_filters = [
                     {"field": "key", "op": "in", "value": parsed_goal.keys},
                     {"field": "memory_type", "op": "=", "value": memory_scope},
+                    {"field": "status", "op": "=", "value": "activated"},
                 ]
                 key_ids = self.graph_store.get_by_metadata(
-                    key_filters, user_name=user_name, status="activated"
+                    key_filters, user_name=user_name
                 )
                 candidate_ids.update(key_ids)
 
@@ -289,9 +290,10 @@ class GraphMemoryRetriever:
                 tag_filters = [
                     {"field": "tags", "op": "contains", "value": parsed_goal.tags},
                     {"field": "memory_type", "op": "=", "value": memory_scope},
+                    {"field": "status", "op": "=", "value": "activated"},
                 ]
                 tag_ids = self.graph_store.get_by_metadata(
-                    tag_filters, user_name=user_name, status="activated"
+                    tag_filters, user_name=user_name
                 )
                 candidate_ids.update(tag_ids)
 
