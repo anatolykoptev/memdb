@@ -230,7 +230,7 @@ class SearchMixin:
         query = f"""
             SELECT
                 ag_catalog.agtype_access_operator(properties::text::agtype, '"id"'::agtype) AS old_id,
-                agtype_object_field_text(properties, 'memory') as memory_text,
+                properties->>'memory' as memory_text,
                 ts_rank({tsvector_field}, to_tsquery('{tsquery_config}', %s)) as rank
             FROM "{self.db_name}_graph"."Memory"
             {where_clause}
