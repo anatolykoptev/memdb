@@ -307,7 +307,7 @@ class Searcher:
             query_embedding = self.embedder.embed(list({query, *parsed_goal.memories}))
 
         # Ensure query_embedding is always available for downstream retrieval paths
-        if query_embedding is None:
+        if not query_embedding:
             query_embedding = self.embedder.embed([query])
 
         return parsed_goal, query_embedding, context, query
