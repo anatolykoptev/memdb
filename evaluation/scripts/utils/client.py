@@ -163,12 +163,23 @@ class MemosApiClient:
                     "conversation_id": conv_id,
                 }
             )
-            response = requests.request("POST", url, data=payload, headers=self.headers)
-            assert response.status_code == 200, response.text
-            assert json.loads(response.text)["message"] == "Memory added successfully", (
-                response.text
-            )
-            added_memories += json.loads(response.text)["data"]
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    response = requests.request("POST", url, data=payload, headers=self.headers, timeout=300)
+                    assert response.status_code == 200, response.text
+                    assert json.loads(response.text)["message"] == "Memory added successfully", (
+                        response.text
+                    )
+                    added_memories += json.loads(response.text)["data"]
+                    break
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        wait = 2 ** (attempt + 1)
+                        print(f"Retry {attempt + 1}/{max_retries} after {wait}s: {e}")
+                        time.sleep(wait)
+                    else:
+                        raise
         return added_memories
 
     def search(self, query, user_id, top_k):
