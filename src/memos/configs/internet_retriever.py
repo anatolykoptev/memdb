@@ -67,6 +67,13 @@ class BochaSearchConfig(BaseInternetRetrieverConfig):
     )
 
 
+class SearxngSearchConfig(BaseConfig):
+    """Configuration class for SearXNG Search."""
+
+    base_url: str = Field(..., description="SearXNG instance URL (e.g. http://searxng:8080)")
+    max_results: int = Field(default=20, description="Maximum number of results to retrieve")
+
+
 class InternetRetrieverConfigFactory(BaseConfig):
     """Factory class for creating internet retriever configurations."""
 
@@ -82,6 +89,7 @@ class InternetRetrieverConfigFactory(BaseConfig):
         "bing": BingSearchConfig,
         "xinyu": XinyuSearchConfig,
         "bocha": BochaSearchConfig,
+        "searxng": SearxngSearchConfig,
     }
 
     @field_validator("backend")
