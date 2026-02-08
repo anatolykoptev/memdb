@@ -92,7 +92,8 @@ class MemoryManager:
     ) -> list[TextualMemoryItem]:
         """
         Filter out memories that are near-duplicates of existing DB entries.
-        Uses cosine similarity on embeddings; skips items above _dedup_threshold.
+        1. Check content_hash (exact cross-client dedup)
+        2. Check cosine similarity on embeddings (semantic dedup)
         """
         if not memories:
             return memories
@@ -109,20 +110,47 @@ class MemoryManager:
                 unique.append(memory)
                 continue
 
+            # Phase 1: Content hash dedup (cross-client exact match)
+            info = getattr(memory.metadata, "info", None) or {}
+            content_hash = info.get("content_hash") if isinstance(info, dict) else None
+            if content_hash:
+                try:
+                    existing = self.graph_store.get_by_metadata(
+                        [
+                            {"field": "info.content_hash", "op": "=", "value": content_hash},
+                            {"field": "status", "op": "=", "value": "activated"},
+                        ],
+                        user_name=user_name,
+                    )
+                    if existing:
+                        logger.info(
+                            f"[MemoryManager:dedup] Skipping hash duplicate "
+                            f"(hash={content_hash}): {memory.memory[:120]}"
+                        )
+                        continue
+                except Exception:
+                    logger.warning(
+                        f"[MemoryManager:dedup] Hash check failed: {traceback.format_exc()}"
+                    )
+
+            # Phase 2: Cosine similarity dedup
+            # Use lower threshold for fast-mode (already LLM-processed by client)
+            tags = getattr(memory.metadata, "tags", None) or []
+            threshold = 0.92 if "mode:fast" in tags else self._dedup_threshold
             try:
                 similar = self.graph_store.search_by_embedding(
                     embedding,
                     top_k=1,
                     scope=mem_type,
                     status="activated",
-                    threshold=self._dedup_threshold,
+                    threshold=threshold,
                     user_name=user_name,
                 )
                 if similar:
                     score = similar[0].get("score", 0)
                     logger.info(
                         f"[MemoryManager:dedup] Skipping duplicate "
-                        f"(score={score:.3f}): {memory.memory[:120]}"
+                        f"(score={score:.3f}, threshold={threshold}): {memory.memory[:120]}"
                     )
                     continue
             except Exception:

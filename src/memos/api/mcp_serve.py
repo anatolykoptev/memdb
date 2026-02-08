@@ -8,7 +8,6 @@ from fastmcp import FastMCP
 
 # Assuming these are your imports
 from memos.mem_os.main import MOS
-from memos.mem_os.utils.default_config import get_default
 from memos.mem_user.user_manager import UserRole
 
 
@@ -17,124 +16,18 @@ load_dotenv()
 
 def load_default_config(user_id="default_user"):
     """
-    Load MOS configuration from environment variables.
-
-    IMPORTANT for Neo4j Community Edition:
-    Community Edition does not support administrative commands like 'CREATE DATABASE'.
-    To avoid errors, ensure the following environment variables are set correctly:
-    - NEO4J_DB_NAME=neo4j (Must use the default database)
-    - NEO4J_AUTO_CREATE=false (Disable automatic database creation)
-    - NEO4J_USE_MULTI_DB=false (Disable multi-tenant database mode)
+    Load MOS configuration using the same APIConfig-based initialization
+    as the server_router, avoiding the embedder initialization bug in get_default().
     """
-    # Define mapping between environment variables and configuration parameters
-    # We support both clean names and MOS_ prefixed names for compatibility
-    env_mapping = {
-        "OPENAI_API_KEY": "openai_api_key",
-        "OPENAI_API_BASE": "openai_api_base",
-        "MOS_TEXT_MEM_TYPE": "text_mem_type",
-        "NEO4J_URI": "neo4j_uri",
-        "NEO4J_USER": "neo4j_user",
-        "NEO4J_PASSWORD": "neo4j_password",
-        "NEO4J_DB_NAME": "neo4j_db_name",
-        "NEO4J_AUTO_CREATE": "neo4j_auto_create",
-        "NEO4J_USE_MULTI_DB": "use_multi_db",
-        "MOS_NEO4J_SHARED_DB": "mos_shared_db",  # Special handle later
-        "MODEL_NAME": "model_name",
-        "MOS_CHAT_MODEL": "model_name",
-        "EMBEDDER_MODEL": "embedder_model",
-        "MOS_EMBEDDER_MODEL": "embedder_model",
-        "CHUNK_SIZE": "chunk_size",
-        "CHUNK_OVERLAP": "chunk_overlap",
-        "ENABLE_MEM_SCHEDULER": "enable_mem_scheduler",
-        "MOS_ENABLE_SCHEDULER": "enable_mem_scheduler",
-        "ENABLE_ACTIVATION_MEMORY": "enable_activation_memory",
-        "TEMPERATURE": "temperature",
-        "MOS_CHAT_TEMPERATURE": "temperature",
-        "MAX_TOKENS": "max_tokens",
-        "MOS_MAX_TOKENS": "max_tokens",
-        "TOP_P": "top_p",
-        "MOS_TOP_P": "top_p",
-        "TOP_K": "top_k",
-        "MOS_TOP_K": "top_k",
-        "SCHEDULER_TOP_K": "scheduler_top_k",
-        "MOS_SCHEDULER_TOP_K": "scheduler_top_k",
-        "SCHEDULER_TOP_N": "scheduler_top_n",
-        # Graph DB backend selection (neo4j, polardb, etc.)
-        "GRAPH_DB_BACKEND": "graph_db_backend",
-        "NEO4J_BACKEND": "graph_db_backend",
-        # PolarDB connection (Postgres + Apache AGE)
-        "POLAR_DB_HOST": "polar_db_host",
-        "POLAR_DB_PORT": "polar_db_port",
-        "POLAR_DB_USER": "polar_db_user",
-        "POLAR_DB_PASSWORD": "polar_db_password",
-        "POLAR_DB_DB_NAME": "polar_db_name",
-        "EMBEDDING_DIMENSION": "embedding_dimension",
-    }
+    from memos.api.config import APIConfig
 
-    # Fields that should always be kept as strings (not converted to numbers)
-    string_only_fields = {
-        "openai_api_key",
-        "openai_api_base",
-        "neo4j_uri",
-        "neo4j_user",
-        "neo4j_password",
-        "neo4j_db_name",
-        "text_mem_type",
-        "model_name",
-        "embedder_model",
-        "graph_db_backend",
-        "polar_db_host",
-        "polar_db_user",
-        "polar_db_password",
-        "polar_db_name",
-    }
+    default_config = APIConfig.get_product_default_config()
+    from memos.configs.mem_os import MOSConfig
 
-    kwargs = {"user_id": user_id}
-    for env_key, param_key in env_mapping.items():
-        val = os.getenv(env_key)
-        if val is not None:
-            # Strip quotes if they exist (sometimes happens with .env)
-            if (val.startswith('"') and val.endswith('"')) or (
-                val.startswith("'") and val.endswith("'")
-            ):
-                val = val[1:-1]
+    mos_config = MOSConfig(**default_config)
+    default_cube_config = APIConfig.get_default_cube_config()
 
-            # Handle boolean conversions
-            if val.lower() in ("true", "false"):
-                kwargs[param_key] = val.lower() == "true"
-            # Keep certain fields as strings
-            elif param_key in string_only_fields:
-                kwargs[param_key] = val
-            else:
-                # Try numeric conversions (int first, then float)
-                try:
-                    if "." in val:
-                        kwargs[param_key] = float(val)
-                    else:
-                        kwargs[param_key] = int(val)
-                except ValueError:
-                    kwargs[param_key] = val
-
-    # Logic handle for MOS_NEO4J_SHARED_DB vs use_multi_db
-    if "mos_shared_db" in kwargs:
-        kwargs["use_multi_db"] = not kwargs.pop("mos_shared_db")
-
-    # Extract mandatory or special params
-    openai_api_key = kwargs.pop("openai_api_key", os.getenv("OPENAI_API_KEY"))
-    openai_api_base = kwargs.pop("openai_api_base", "https://api.openai.com/v1")
-    text_mem_type = kwargs.pop("text_mem_type", "tree_text")
-
-    # Ensure embedder_model has a default value if not set
-    if "embedder_model" not in kwargs:
-        kwargs["embedder_model"] = os.getenv("EMBEDDER_MODEL", "nomic-embed-text:latest")
-
-    config, cube = get_default(
-        openai_api_key=openai_api_key,
-        openai_api_base=openai_api_base,
-        text_mem_type=text_mem_type,
-        **kwargs,
-    )
-    return config, cube
+    return mos_config, default_cube_config
 
 
 class MOSMCPServer:
@@ -143,10 +36,11 @@ class MOSMCPServer:
     def __init__(self, mos_instance: MOS | None = None):
         self.mcp = FastMCP("MOS Memory System")
         if mos_instance is None:
-            # Fall back to creating from default config
-            config, cube = load_default_config()
+            # Use APIConfig-based initialization (same as server_router)
+            config, cube_config = load_default_config()
             self.mos_core = MOS(config=config)
-            self.mos_core.register_mem_cube(cube)
+            if cube_config is not None:
+                self.mos_core.register_mem_cube(cube_config)
         else:
             self.mos_core = mos_instance
         self._setup_tools()
@@ -251,8 +145,8 @@ class MOSMCPServer:
             """
             try:
                 if not os.path.exists(cube_name_or_path):
-                    _, cube = load_default_config(user_id=user_id)
-                    cube_to_register = cube
+                    _, cube_config = load_default_config(user_id=user_id)
+                    cube_to_register = cube_config
                 else:
                     cube_to_register = cube_name_or_path
                 self.mos_core.register_mem_cube(

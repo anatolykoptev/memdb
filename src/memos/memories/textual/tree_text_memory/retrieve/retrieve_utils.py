@@ -331,9 +331,20 @@ class StopwordManager:
         }
         whitespace = {" ", "\t", "\n", "\r", "\f", "\v"}
 
+        russian_stop_words = {
+            "и", "в", "на", "с", "по", "для", "не", "что", "это", "как",
+            "а", "но", "да", "из", "он", "она", "они", "мы", "вы", "я",
+            "бы", "же", "к", "от", "до", "за", "о", "у", "все", "так",
+            "уже", "еще", "или", "ни", "только", "можно", "нужно", "нет",
+            "был", "была", "было", "были", "есть", "будет", "при",
+            "его", "её", "их", "этот", "эта", "эти", "тот", "та", "те",
+            "который", "которая", "которое", "которые",
+            "если", "то", "чтобы", "когда", "где", "кто",
+        }
         return (
             chinese_stop_words
             | english_stop_words
+            | russian_stop_words
             | chinese_punctuation
             | english_punctuation
             | numbers
@@ -367,9 +378,11 @@ class FastTokenizer:
             self.stopword_manager = StopwordManager
 
     def tokenize_mixed(self, text, **kwargs):
-        """fast tokenizer"""
+        """fast tokenizer — routes to Chinese, Cyrillic, or English tokenizer"""
         if self._is_chinese(text):
             return self._tokenize_chinese(text)
+        elif self._is_cyrillic(text):
+            return self._tokenize_cyrillic(text)
         else:
             return self._tokenize_english(text)
 
@@ -377,6 +390,11 @@ class FastTokenizer:
         """check if chinese"""
         chinese_chars = sum(1 for char in text if "\u4e00" <= char <= "\u9fff")
         return chinese_chars / max(len(text), 1) > 0.3
+
+    def _is_cyrillic(self, text):
+        """check if text contains significant Cyrillic content"""
+        cyrillic_chars = sum(1 for char in text if "\u0400" <= char <= "\u04ff")
+        return cyrillic_chars / max(len(text), 1) > 0.2
 
     @require_python_package(
         import_name="jieba",
@@ -394,8 +412,15 @@ class FastTokenizer:
 
         return tokens
 
+    def _tokenize_cyrillic(self, text):
+        """split Cyrillic + ASCII words by regex"""
+        tokens = re.findall(r"[a-zA-ZА-Яа-яёЁ0-9]+", text.lower())
+        if self.use_stopwords:
+            return self.stopword_manager.filter_words(tokens)
+        return tokens
+
     def _tokenize_english(self, text):
-        """split zh regex"""
+        """split English/ASCII words by regex"""
         tokens = re.findall(r"\b[a-zA-Z0-9]+\b", text.lower())
         if self.use_stopwords:
             return self.stopword_manager.filter_words(tokens)
@@ -422,10 +447,16 @@ def detect_lang(text):
     try:
         if not text or not isinstance(text, str):
             return "en"
+        text_clean = re.sub(r"[\s\d\W]", "", text)
+        if not text_clean:
+            return "en"
         chinese_pattern = r"[\u4e00-\u9fff\u3400-\u4dbf\U00020000-\U0002a6df\U0002a700-\U0002b73f\U0002b740-\U0002b81f\U0002b820-\U0002ceaf\uf900-\ufaff]"
         chinese_chars = re.findall(chinese_pattern, text)
-        if len(chinese_chars) / len(re.sub(r"[\s\d\W]", "", text)) > 0.3:
+        if len(chinese_chars) / len(text_clean) > 0.3:
             return "zh"
+        cyrillic_chars = sum(1 for c in text if "\u0400" <= c <= "\u04ff")
+        if cyrillic_chars / len(text_clean) > 0.3:
+            return "ru"
         return "en"
     except Exception:
         return "en"
