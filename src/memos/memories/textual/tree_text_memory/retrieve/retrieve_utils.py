@@ -420,8 +420,8 @@ class FastTokenizer:
         return tokens
 
     def _tokenize_english(self, text):
-        """split English/ASCII words by regex"""
-        tokens = re.findall(r"\b[a-zA-Z0-9]+\b", text.lower())
+        """split English/ASCII words by regex (also catches stray Cyrillic tokens)"""
+        tokens = re.findall(r"[a-zA-ZА-Яа-яёЁ0-9]+", text.lower())
         if self.use_stopwords:
             return self.stopword_manager.filter_words(tokens)
         return tokens
