@@ -154,8 +154,6 @@ class ConnectionMixin:
 
                     conn = None
                     if attempt < max_retries - 1:
-                        # Exponential backoff: 0.1s, 0.2s, 0.4s
-                        """time.sleep(0.1 * (2**attempt))"""
                         time.sleep(0.003)
                         continue
                     else:
@@ -186,8 +184,6 @@ class ConnectionMixin:
 
                     conn = None
                     if attempt < max_retries - 1:
-                        # Exponential backoff: 0.1s, 0.2s, 0.4s
-                        """time.sleep(0.1 * (2**attempt))"""
                         time.sleep(0.003)
                         continue
                     else:
@@ -219,8 +215,7 @@ class ConnectionMixin:
                     if attempt < max_retries - 1:
                         # Longer backoff for pool exhaustion: 0.5s, 1.0s, 2.0s
                         wait_time = 0.5 * (2**attempt)
-                        logger.info(f"[_get_connection] Waiting {wait_time}s before retry...")
-                        """time.sleep(wait_time)"""
+                        logger.info(f"[_get_connection] Waiting before retry...")
                         time.sleep(0.003)
                         continue
                     else:
@@ -232,7 +227,6 @@ class ConnectionMixin:
                 else:
                     # Other pool errors - retry with normal backoff
                     if attempt < max_retries - 1:
-                        """time.sleep(0.1 * (2**attempt))"""
                         time.sleep(0.003)
                         continue
                     else:
@@ -258,8 +252,6 @@ class ConnectionMixin:
                 if attempt >= max_retries - 1:
                     raise RuntimeError(f"Failed to get a valid connection from pool: {e}") from e
                 else:
-                    # Exponential backoff: 0.1s, 0.2s, 0.4s
-                    """time.sleep(0.1 * (2**attempt))"""
                     time.sleep(0.003)
                 continue
 
