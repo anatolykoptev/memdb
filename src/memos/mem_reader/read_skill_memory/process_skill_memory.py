@@ -570,7 +570,7 @@ def process_skill_memory_fine(
     chat_history = kwargs.get("chat_history")
     if not chat_history or not isinstance(chat_history, list):
         chat_history = []
-        logger.warning("[PROCESS_SKILLS] History is None in Skills")
+        logger.debug("[PROCESS_SKILLS] History is None in Skills")
 
     # Validate skills_dir has required keys
     required_keys = ["skills_local_dir"]
