@@ -83,7 +83,7 @@ class SearxngSearchRetriever:
         self.embedder = embedder
 
     def retrieve_from_internet(
-        self, query: str, top_k: int = 10, parsed_goal=None, info=None
+        self, query: str, top_k: int = 10, parsed_goal=None, info=None, mode="fast"
     ) -> list[TextualMemoryItem]:
         """
         Retrieve information from SearXNG and convert to TextualMemoryItem format.
