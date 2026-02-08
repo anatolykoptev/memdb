@@ -165,6 +165,7 @@ class TreeTextMemory(BaseTextMemory):
         include_skill_memory: bool = False,
         skill_mem_top_k: int = 3,
         dedup: str | None = None,
+        include_embedding: bool | None = None,
         **kwargs,
     ) -> list[TextualMemoryItem]:
         print(f"🌲 [TREE.SEARCH] query='{query}', mode={mode}, user_name={user_name}, kwargs={kwargs}", flush=True)
@@ -189,6 +190,9 @@ class TreeTextMemory(BaseTextMemory):
         Returns:
             list[TextualMemoryItem]: List of matching memories.
         """
+        # Use parameter if provided, otherwise fall back to instance attribute
+        include_emb = include_embedding if include_embedding is not None else self.include_embedding
+
         searcher = Searcher(
             self.dispatcher_llm,
             self.graph_store,
@@ -199,7 +203,7 @@ class TreeTextMemory(BaseTextMemory):
             search_strategy=self.search_strategy,
             manual_close_internet=manual_close_internet,
             tokenizer=self.tokenizer,
-            include_embedding=self.include_embedding,
+            include_embedding=include_emb,
         )
         return searcher.search(
             query,
