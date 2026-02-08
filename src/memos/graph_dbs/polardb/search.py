@@ -355,6 +355,3 @@ class SearchMixin:
         finally:
             self._return_connection(conn)
 
-    # Backward-compatible aliases for renamed methods (typo -> correct)
-    seach_by_keywords_like = search_by_keywords_like
-    seach_by_keywords_tfidf = search_by_keywords_tfidf

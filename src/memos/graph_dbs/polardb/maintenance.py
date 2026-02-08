@@ -376,17 +376,11 @@ class MaintenanceMixin:
             logger.error(f"[ERROR] Failed to clear database: {e}")
 
     def drop_database(self) -> None:
-        """Permanently delete the entire graph this instance is using."""
+        """Permanently delete the entire graph this instance is using.
+
+        Disabled for safety — PolarDB graph drop is irreversible.
+        """
         return
-        if self._get_config_value("use_multi_db", True):
-            with self.connection.cursor() as cursor:
-                cursor.execute(f"SELECT drop_graph('{self.db_name}_graph', true)")
-                logger.info(f"Graph '{self.db_name}_graph' has been dropped.")
-        else:
-            raise ValueError(
-                f"Refusing to drop graph '{self.db_name}_graph' in "
-                f"Shared Database Multi-Tenant mode"
-            )
 
     @timed
     def remove_oldest_memory(
@@ -463,7 +457,6 @@ class MaintenanceMixin:
         raise NotImplementedError
 
     def _convert_graph_edges(self, core_node: dict) -> dict:
-        import copy
 
         data = copy.deepcopy(core_node)
         id_map = {}

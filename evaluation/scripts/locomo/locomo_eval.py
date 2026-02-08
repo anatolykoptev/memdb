@@ -8,39 +8,36 @@ import time
 
 import nltk
 import numpy as np
-import tiktoken
-import transformers
 
-from bert_score import score as bert_score
 from dotenv import load_dotenv
 from nltk.translate.bleu_score import SmoothingFunction, sentence_bleu
 from nltk.translate.meteor_score import meteor_score
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 from rouge_score import rouge_scorer
-from scipy.spatial.distance import cosine
-from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 
 
 logging.basicConfig(level=logging.CRITICAL)
-transformers.logging.set_verbosity_error()
-encoding = tiktoken.get_encoding("cl100k_base")
+
+# Optional heavy imports for semantic metrics
+encoding = None
+sentence_model = None
+
+try:
+    import tiktoken
+    encoding = tiktoken.get_encoding("cl100k_base")
+except ImportError:
+    print("tiktoken not available, using word count for context_tokens")
+
 # Download necessary NLTK resources
 try:
     nltk.download("wordnet", quiet=True)
     nltk.download("punkt", quiet=True)
+    nltk.download("punkt_tab", quiet=True)
     print("NLTK resources downloaded successfully.")
 except Exception as e:
     print(f"Warning: Failed to download NLTK resources: {e}")
-
-try:
-    sentence_model_name = "Qwen/Qwen3-Embedding-0.6B"
-    sentence_model = SentenceTransformer(sentence_model_name)
-    print(f"SentenceTransformer model : {sentence_model_name} loaded successfully.")
-except Exception as e:
-    print(f"Failed to load SentenceTransformer model: {e}")
-    sentence_model = None
 
 
 class LLMGrade(BaseModel):
@@ -164,12 +161,17 @@ def calculate_semantic_similarity(gold_answer, response):
     global sentence_model
 
     try:
+        from scipy.spatial.distance import cosine
         if sentence_model is None:
+            from sentence_transformers import SentenceTransformer
             sentence_model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B")
 
         gold_embedding = sentence_model.encode([gold_answer], show_progress_bar=False)[0]
         response_embedding = sentence_model.encode([response], show_progress_bar=False)[0]
         return 1 - cosine(gold_embedding, response_embedding)
+    except ImportError:
+        print("sentence_transformers/scipy not available, skipping semantic similarity")
+        return 0.0
     except Exception as e:
         print(f"Failed to calculate semantic similarity: {e}")
         return 0.0
@@ -201,7 +203,10 @@ def calculate_nlp_metrics(gold_answer, response, context, options=None):
     gold_answer = str(gold_answer) if gold_answer is not None else ""
     response = str(response) if response is not None else ""
 
-    metrics = {"context_tokens": len(encoding.encode(context)) if context else 0}
+    if encoding is not None:
+        metrics = {"context_tokens": len(encoding.encode(context)) if context else 0}
+    else:
+        metrics = {"context_tokens": len(context.split()) if context else 0}
 
     if "lexical" in options:
         gold_tokens = nltk.word_tokenize(gold_answer.lower())
@@ -216,10 +221,14 @@ def calculate_nlp_metrics(gold_answer, response, context, options=None):
     if "semantic" in options:
         metrics["semantic"] = {}
         metrics["semantic"]["similarity"] = calculate_semantic_similarity(gold_answer, response)
-        _, _, f1 = bert_score(
-            [gold_answer], [response], lang="en", rescale_with_baseline=True, verbose=False
-        )
-        metrics["semantic"]["bert_f1"] = f1.item() if f1 is not None else 0.0
+        try:
+            from bert_score import score as bert_score_fn
+            _, _, f1 = bert_score_fn(
+                [gold_answer], [response], lang="en", rescale_with_baseline=True, verbose=False
+            )
+            metrics["semantic"]["bert_f1"] = f1.item() if f1 is not None else 0.0
+        except ImportError:
+            metrics["semantic"]["bert_f1"] = 0.0
 
     return metrics
 

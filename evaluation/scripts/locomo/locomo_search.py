@@ -105,12 +105,17 @@ def memos_api_search(
     search_a_results = client.search(query=query, user_id=speaker_a_user_id, top_k=top_k)
     search_b_results = client.search(query=query, user_id=speaker_b_user_id, top_k=top_k)
 
+    a_memories = search_a_results.get("text_mem", [{}])
+    a_mem_list = a_memories[0].get("memories", []) if a_memories else []
+    b_memories = search_b_results.get("text_mem", [{}])
+    b_mem_list = b_memories[0].get("memories", []) if b_memories else []
+
     speaker_a_context = (
-        "\n".join([i["memory"] for i in search_a_results["text_mem"][0]["memories"]])
+        "\n".join([i["memory"] for i in a_mem_list])
         + f"\n{search_a_results.get('pref_string', '')}"
     )
     speaker_b_context = (
-        "\n".join([i["memory"] for i in search_b_results["text_mem"][0]["memories"]])
+        "\n".join([i["memory"] for i in b_mem_list])
         + f"\n{search_b_results.get('pref_string', '')}"
     )
 
