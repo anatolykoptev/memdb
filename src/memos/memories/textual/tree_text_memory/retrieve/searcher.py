@@ -85,7 +85,6 @@ class Searcher:
         skill_mem_top_k: int = 3,
         **kwargs,
     ) -> list[tuple[TextualMemoryItem, float]]:
-        print(f"🔍 [SEARCHER.RETRIEVE] query='{query}', mode={mode}, kwargs={kwargs}", flush=True)
         logger.info(
             f"[RECALL] Start query='{query}', top_k={top_k}, mode={mode}, memory_type={memory_type}"
         )
@@ -302,18 +301,10 @@ class Searcher:
             **kwargs,
         )
 
-        # DIAGNOSTIC: Log parsed goal
-        print(f"🔍 [PARSE_TASK] memories={parsed_goal.memories}, rephrased={parsed_goal.rephrased_query}", flush=True)
-        logger.warning(f"[_parse_task_DEBUG] Parsed goal: memories={parsed_goal.memories}, rephrased_query={parsed_goal.rephrased_query}")
-        logger.warning(f"[_parse_task_DEBUG] Parsed goal keys={parsed_goal.keys}, tags={parsed_goal.tags}, internet_search={parsed_goal.internet_search}")
-
         query = parsed_goal.rephrased_query or query
         # if goal has extra memories, embed them too
         if parsed_goal.memories:
             query_embedding = self.embedder.embed(list({query, *parsed_goal.memories}))
-            logger.warning(f"[_parse_task_DEBUG] Generated {len(query_embedding)} embeddings from parsed_goal.memories")
-        else:
-            logger.warning(f"[_parse_task_DEBUG] parsed_goal.memories is EMPTY - query_embedding will be None!")
 
         return parsed_goal, query_embedding, context, query
 
@@ -761,31 +752,16 @@ class Searcher:
         query_words = [query, *query_words]
         logger.info(f"[SIMPLESEARCH] Query words: {query_words}")
 
-        # DIAGNOSTIC: Log embedder config
-        logger.warning(f"[SIMPLESEARCH_DEBUG] Embedder type: {type(self.embedder).__name__}")
-        logger.warning(f"[SIMPLESEARCH_DEBUG] Embedder config: {getattr(self.embedder, 'config', 'No config attr')}")
+        query_embeddings = self.embedder.embed(query_words)
 
-        try:
-            query_embeddings = self.embedder.embed(query_words)
-            logger.warning(f"[SIMPLESEARCH_DEBUG] Successfully generated {len(query_embeddings)} embeddings, dims: {len(query_embeddings[0]) if query_embeddings else 'N/A'}")
-        except Exception as e:
-            logger.error(f"[SIMPLESEARCH_DEBUG] EMBEDDER FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return []
-
-        logger.warning(f"[SIMPLESEARCH_DEBUG] Calling retrieve_from_mixed with {len(query_embeddings)} embeddings")
-        try:
-            items = self.graph_retriever.retrieve_from_mixed(
-                top_k=top_k * 2,
-                memory_scope=None,
-                query_embedding=query_embeddings,
-                search_filter=search_filter,
-                user_name=user_name,
-            )
-            logger.info(f"[SIMPLESEARCH] Items count: {len(items)}")
-            logger.warning(f"[SIMPLESEARCH_DEBUG] Retrieved items: {[item.id for item in items] if items else 'NONE'}")
-        except Exception as e:
-            logger.error(f"[SIMPLESEARCH_DEBUG] retrieve_from_mixed FAILED: {type(e).__name__}: {e}", exc_info=True)
-            return []
+        items = self.graph_retriever.retrieve_from_mixed(
+            top_k=top_k * 2,
+            memory_scope=None,
+            query_embedding=query_embeddings,
+            search_filter=search_filter,
+            user_name=user_name,
+        )
+        logger.info(f"[SIMPLESEARCH] Items count: {len(items)}")
         documents = [getattr(item, "memory", "") for item in items]
         if not documents:
             return []
