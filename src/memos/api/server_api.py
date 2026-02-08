@@ -22,6 +22,12 @@ app.add_middleware(RequestContextMiddleware, source="server_api")
 # Include routers
 app.include_router(server_router)
 
+
+@app.get("/health", tags=["System"])
+def health_check():
+    """Lightweight health check endpoint for container orchestration."""
+    return {"status": "ok"}
+
 # Request validation failed
 app.exception_handler(RequestValidationError)(APIExceptionHandler.validation_error_handler)
 # Invalid business code parameters
