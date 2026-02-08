@@ -450,6 +450,7 @@ class GraphMemoryRetriever:
             return []
         key_filters = [
             {"field": "memory_type", "op": "=", "value": memory_scope},
+            {"field": "status", "op": "=", "value": "activated"},
         ]
         # corpus_name is user_name + user_id
         corpus_name = f"{user_name}" if user_name else ""
@@ -459,7 +460,7 @@ class GraphMemoryRetriever:
                 key_filters.append({"field": key, "op": "=", "value": value})
             corpus_name += "".join(list(search_filter.values()))
         candidate_ids = self.graph_store.get_by_metadata(
-            key_filters, user_name=user_name, status="activated"
+            key_filters, user_name=user_name
         )
         node_dicts = self.graph_store.get_nodes(
             list(candidate_ids), include_embedding=self.include_embedding, user_name=user_name
