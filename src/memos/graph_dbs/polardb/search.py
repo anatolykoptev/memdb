@@ -185,7 +185,7 @@ class SearchMixin:
         filter: dict | None = None,
         knowledgebase_ids: list[str] | None = None,
         tsvector_field: str = "properties_tsvector_zh",
-        tsquery_config: str = "jiebacfg",
+        tsquery_config: str = "simple",
         **kwargs,
     ) -> list[dict]:
         """
