@@ -1,3 +1,4 @@
+import re
 import traceback
 
 from string import Template
@@ -10,6 +11,53 @@ from memos.memories.textual.tree_text_memory.retrieve.retrieve_utils import (
     parse_json_result,
 )
 from memos.memories.textual.tree_text_memory.retrieve.utils import TASK_PARSE_PROMPT
+
+
+# Temporal intent patterns (EN + RU)
+_TEMPORAL_PATTERNS: list[tuple[str, str]] = [
+    # last 24 hours
+    (r"\b(?:today|yesterday|last\s*(?:24\s*h|night)|сегодня|вчера|за\s*(?:последние\s*)?сутки)\b", "last_24h"),
+    # last 7 days
+    (r"\b(?:(?:this|last|past)\s*week|last\s*(?:7|seven)\s*days|(?:на\s*)?(?:этой|прошлой)\s*неделе|за\s*(?:последн(?:юю|ие)\s*)?неделю|последни[ех]\s*7\s*дн)\b", "last_7_days"),
+    # last 30 days
+    (r"\b(?:(?:this|last|past)\s*month|last\s*(?:30|thirty)\s*days|(?:в\s*)?(?:этом|прошлом)\s*месяце|за\s*(?:последний\s*)?месяц|последни[ех]\s*30\s*дн)\b", "last_30_days"),
+    # last 90 days / quarter
+    (r"\b(?:(?:this|last|past)\s*(?:quarter|3\s*months)|last\s*(?:90|ninety)\s*days|за\s*(?:последни[ех]\s*)?(?:3\s*месяц|квартал))\b", "last_90_days"),
+    # generic recent
+    (r"\b(?:recently|recent|недавно|последн(?:ее|ие|ий))\b", "last_30_days"),
+]
+_COMPILED_TEMPORAL = [(re.compile(pat, re.IGNORECASE), scope) for pat, scope in _TEMPORAL_PATTERNS]
+
+
+def detect_temporal_scope(text: str) -> str | None:
+    """Detect temporal intent from query text using regex patterns (EN + RU)."""
+    for pattern, scope in _COMPILED_TEMPORAL:
+        if pattern.search(text):
+            return scope
+    return None
+
+
+_SCOPE_TO_DAYS: dict[str, int] = {
+    "last_24h": 1,
+    "last_7_days": 7,
+    "last_30_days": 30,
+    "last_90_days": 90,
+}
+
+
+def temporal_scope_to_cutoff(scope: str | None) -> str | None:
+    """Convert a temporal_scope string to an ISO-format UTC cutoff timestamp.
+
+    Returns None if scope is None or unrecognized.
+    """
+    if not scope:
+        return None
+    from datetime import datetime, timedelta, timezone
+    days = _SCOPE_TO_DAYS.get(scope)
+    if days is None:
+        return None
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    return cutoff.isoformat()
 
 
 logger = get_logger(__name__)
@@ -58,6 +106,9 @@ class TaskGoalParser:
         """
         context = kwargs.get("context", "")
         use_fast_graph = kwargs.get("use_fast_graph", False)
+        temporal_scope = detect_temporal_scope(task_description)
+        if temporal_scope:
+            logger.info(f"[TEMPORAL] Fast-mode detected temporal_scope='{temporal_scope}' from query")
         if use_fast_graph:
             desc_tokenized = self.tokenizer.tokenize_mixed(task_description)
             return ParsedTaskGoal(
@@ -68,6 +119,7 @@ class TaskGoalParser:
                 rephrased_query=task_description,
                 internet_search=False,
                 context=context,
+                temporal_scope=temporal_scope,
             )
         else:
             return ParsedTaskGoal(
@@ -78,6 +130,7 @@ class TaskGoalParser:
                 rephrased_query=task_description,
                 internet_search=False,
                 context=context,
+                temporal_scope=temporal_scope,
             )
 
     def _parse_fine(
@@ -118,6 +171,13 @@ class TaskGoalParser:
                 if not response_json:
                     raise ValueError("Parsed JSON is empty")
 
+                # LLM may return temporal_scope; fall back to regex detection
+                llm_temporal = response_json.get("temporal_scope", None)
+                if not llm_temporal:
+                    rephrased = response_json.get("rephrased_instruction", "") or ""
+                    llm_temporal = detect_temporal_scope(rephrased) or detect_temporal_scope(context)
+                if llm_temporal:
+                    logger.info(f"[TEMPORAL] Fine-mode detected temporal_scope='{llm_temporal}'")
                 return ParsedTaskGoal(
                     memories=response_json.get("memories", []),
                     keys=response_json.get("keys", []),
@@ -126,6 +186,7 @@ class TaskGoalParser:
                     internet_search=response_json.get("internet_search", False),
                     goal_type=response_json.get("goal_type", "default"),
                     context=context,
+                    temporal_scope=llm_temporal,
                 )
             except Exception as e:
                 if attempt_times == attempts - 1:

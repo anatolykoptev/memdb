@@ -25,7 +25,7 @@ from memos.utils import timed
 
 from .reasoner import MemoryReasoner
 from .recall import GraphMemoryRetriever
-from .task_goal_parser import TaskGoalParser
+from .task_goal_parser import TaskGoalParser, temporal_scope_to_cutoff
 
 
 logger = get_logger(__name__)
@@ -339,6 +339,14 @@ class Searcher:
             "session_id": info.get("session_id", None),
         }
         id_filter = {k: v for k, v in id_filter.items() if v is not None}
+
+        # Inject temporal cutoff into search_filter when temporal intent is detected
+        temporal_scope = getattr(parsed_goal, "temporal_scope", None)
+        created_after = temporal_scope_to_cutoff(temporal_scope)
+        if created_after:
+            search_filter = dict(search_filter) if search_filter else {}
+            search_filter["_created_after"] = created_after
+            logger.info(f"[TEMPORAL] Injecting created_after={created_after} into search_filter")
 
         with ContextThreadPoolExecutor(max_workers=5) as executor:
             tasks.append(

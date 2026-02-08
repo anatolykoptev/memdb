@@ -22,6 +22,16 @@ class SearchMixin:
         """Build common WHERE clauses for SQL-based search methods."""
         where_clauses = []
 
+        # Extract temporal filter from either search_filter or filter dict
+        # (_vector_recall maps recall's search_filter to DB's filter param)
+        created_after = None
+        if search_filter and isinstance(search_filter, dict) and "_created_after" in search_filter:
+            created_after = search_filter["_created_after"]
+            search_filter = {k: v for k, v in search_filter.items() if k != "_created_after"}
+        if filter and isinstance(filter, dict) and "_created_after" in filter:
+            created_after = filter["_created_after"]
+            filter = {k: v for k, v in filter.items() if k != "_created_after"} or None
+
         if scope:
             where_clauses.append(
                 f"ag_catalog.agtype_access_operator(properties::text::agtype, '\"memory_type\"'::agtype) = '\"{scope}\"'::agtype"
@@ -46,6 +56,10 @@ class SearchMixin:
                 where_clauses.append(user_name_conditions[0])
             else:
                 where_clauses.append(f"({' OR '.join(user_name_conditions)})")
+
+        # Apply temporal filter (created_at >= cutoff)
+        if created_after:
+            where_clauses.append(f"created_at >= '{created_after}'::timestamptz")
 
         # Add search_filter conditions
         if search_filter:
