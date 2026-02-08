@@ -130,6 +130,8 @@ class Searcher:
     ):
         if dedup == "no":
             deduped = retrieved_results
+        elif dedup == "mmr":
+            deduped = self._deduplicate_results_mmr(retrieved_results)
         else:
             deduped = self._deduplicate_results(retrieved_results)
         final_results = self._sort_and_trim(
@@ -794,6 +796,46 @@ class Searcher:
             if item.memory not in deduped or score > deduped[item.memory][1]:
                 deduped[item.memory] = (item, score)
         return list(deduped.values())
+
+    @timed
+    def _deduplicate_results_mmr(self, results, bar=0.8):
+        """Deduplicate results using MMR (Maximal Marginal Relevance).
+
+        First does text-exact dedup, then uses embedding similarity to select
+        a diverse subset where no two items have cosine similarity > bar.
+        Falls back to text-exact dedup on any error.
+        """
+        # First pass: text-exact dedup (keeps highest score per text)
+        deduped = {}
+        for item, score in results:
+            if item.memory not in deduped or score > deduped[item.memory][1]:
+                deduped[item.memory] = (item, score)
+        unique_results = list(deduped.values())
+
+        if len(unique_results) <= 2:
+            return unique_results
+
+        try:
+            # Collect texts and embed them
+            documents = [item.memory for item, _ in unique_results]
+            embeddings = self.embedder.embed(documents)
+            if not embeddings or len(embeddings) != len(documents):
+                return unique_results
+
+            sim_matrix = cosine_similarity_matrix(embeddings)
+            selected_indices, _ = find_best_unrelated_subgroup(
+                documents, sim_matrix, bar=bar
+            )
+            mmr_results = [unique_results[i] for i in selected_indices]
+            dropped = len(unique_results) - len(mmr_results)
+            if dropped:
+                logger.info(
+                    f"[SEARCH:MMR] Diversified {len(unique_results)} → {len(mmr_results)} results"
+                )
+            return mmr_results
+        except Exception:
+            logger.warning(f"[SEARCH:MMR] Fallback to text dedup: {traceback.format_exc()}")
+            return unique_results
 
     @timed
     def _sort_and_trim(

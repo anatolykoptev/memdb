@@ -67,6 +67,56 @@ class SchemaMixin:
                 except Exception as e:
                     logger.warning(f"Vector index creation failed (might not be supported): {e}")
 
+                # Create tsvector column and GIN index for fulltext search
+                try:
+                    cursor.execute(f"""
+                        ALTER TABLE "{self.db_name}_graph"."Memory"
+                        ADD COLUMN IF NOT EXISTS properties_tsvector_zh tsvector;
+                    """)
+
+                    # Create or replace trigger function for auto-updating tsvector
+                    cursor.execute(f"""
+                        CREATE OR REPLACE FUNCTION "{self.db_name}_graph".update_tsvector_zh()
+                        RETURNS trigger AS $$
+                        BEGIN
+                            NEW.properties_tsvector_zh :=
+                                to_tsvector('simple', COALESCE(NEW.properties->>'memory', ''));
+                            RETURN NEW;
+                        END;
+                        $$ LANGUAGE plpgsql;
+                    """)
+
+                    # Create trigger (drop first to avoid duplicate)
+                    cursor.execute(f"""
+                        DROP TRIGGER IF EXISTS trg_update_tsvector_zh
+                        ON "{self.db_name}_graph"."Memory";
+                    """)
+                    cursor.execute(f"""
+                        CREATE TRIGGER trg_update_tsvector_zh
+                        BEFORE INSERT OR UPDATE ON "{self.db_name}_graph"."Memory"
+                        FOR EACH ROW
+                        EXECUTE FUNCTION "{self.db_name}_graph".update_tsvector_zh();
+                    """)
+
+                    # Create GIN index on the tsvector column
+                    cursor.execute(f"""
+                        CREATE INDEX IF NOT EXISTS idx_memory_tsvector_zh
+                        ON "{self.db_name}_graph"."Memory"
+                        USING GIN (properties_tsvector_zh);
+                    """)
+
+                    # Backfill existing rows that have NULL tsvector
+                    cursor.execute(f"""
+                        UPDATE "{self.db_name}_graph"."Memory"
+                        SET properties_tsvector_zh =
+                            to_tsvector('simple', COALESCE(properties->>'memory', ''))
+                        WHERE properties_tsvector_zh IS NULL;
+                    """)
+
+                    logger.info("Fulltext search (tsvector + GIN index) created for Memory table.")
+                except Exception as e:
+                    logger.warning(f"Fulltext search setup failed (non-fatal): {e}")
+
                 logger.info("Indexes created for Memory table.")
 
         except Exception as e:
