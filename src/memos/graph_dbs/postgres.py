@@ -548,6 +548,16 @@ class PostgresGraphDB(BaseGraphDB):
         """Search nodes by vector similarity using pgvector."""
         user_name = user_name or self.user_name
 
+        # Extract temporal filter from either search_filter or filter dict
+        # (_vector_recall maps recall's search_filter to DB's filter param)
+        created_after = None
+        if search_filter and "_created_after" in search_filter:
+            created_after = search_filter["_created_after"]
+            search_filter = {k: v for k, v in search_filter.items() if k != "_created_after"}
+        if filter and isinstance(filter, dict) and "_created_after" in filter:
+            created_after = filter["_created_after"]
+            filter = {k: v for k, v in filter.items() if k != "_created_after"} or None
+
         # Build WHERE clause
         conditions = ["embedding IS NOT NULL"]
         params = []
@@ -565,6 +575,10 @@ class PostgresGraphDB(BaseGraphDB):
             params.append(status)
         else:
             conditions.append("(properties->>'status' = 'activated' OR properties->>'status' IS NULL)")
+
+        if created_after:
+            conditions.append("created_at >= %s::timestamptz")
+            params.append(str(created_after))
 
         if search_filter:
             for k, v in search_filter.items():
