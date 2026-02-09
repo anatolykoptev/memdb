@@ -26,7 +26,8 @@ from memos.context.context import (
 # Load environment variables
 load_dotenv()
 
-selected_log_level = logging.DEBUG if settings.DEBUG else logging.WARNING
+_console_level_name = os.getenv("MEMOS_CONSOLE_LOG_LEVEL", "DEBUG" if settings.DEBUG else "INFO")
+selected_log_level = getattr(logging, _console_level_name.upper(), logging.INFO)
 
 
 def _setup_logfile() -> Path:

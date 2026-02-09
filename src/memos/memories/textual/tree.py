@@ -168,7 +168,7 @@ class TreeTextMemory(BaseTextMemory):
         include_embedding: bool | None = None,
         **kwargs,
     ) -> list[TextualMemoryItem]:
-        print(f"🌲 [TREE.SEARCH] query='{query}', mode={mode}, user_name={user_name}, kwargs={kwargs}", flush=True)
+        logger.info(f"🌲 [TREE.SEARCH] query='{query}', mode={mode}, user_name={user_name}, kwargs={kwargs}")
         """Search for memories based on a query.
         User query -> TaskGoalParser -> MemoryPathResolver ->
         GraphMemoryRetriever -> MemoryReranker -> MemoryReasoner -> Final output
@@ -205,7 +205,7 @@ class TreeTextMemory(BaseTextMemory):
             tokenizer=self.tokenizer,
             include_embedding=include_emb,
         )
-        return searcher.search(
+        results = searcher.search(
             query,
             top_k,
             info,
@@ -221,6 +221,8 @@ class TreeTextMemory(BaseTextMemory):
             dedup=dedup,
             **kwargs,
         )
+        logger.info(f"🌲 [TREE.SEARCH] done: {len(results)} results for query='{query[:80]}'")
+        return results
 
     def get_relevant_subgraph(
         self,

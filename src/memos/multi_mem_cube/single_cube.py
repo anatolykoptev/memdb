@@ -150,8 +150,14 @@ class SingleCubeView(MemCubeView):
             search_req.include_preference,
         )
 
-        self.logger.info(f"Search memories result: {memories_result}")
-        self.logger.info(f"Search {len(memories_result)} memories.")
+        # Log per-type counts
+        text_count = sum(len(c.get("memories", [])) for c in memories_result.get("text_mem", []))
+        pref_count = sum(len(c.get("memories", [])) for c in memories_result.get("pref_mem", []))
+        skill_count = sum(len(c.get("memories", [])) for c in memories_result.get("skill_mem", []))
+        self.logger.info(
+            f"[SEARCH] done: text={text_count}, pref={pref_count}, skill={skill_count}, "
+            f"mode={search_mode}, query='{search_req.query[:80]}'"
+        )
         return memories_result
 
     @timed
@@ -236,6 +242,7 @@ class SingleCubeView(MemCubeView):
             else:
                 self.logger.error(f"Unsupported search mode: {search_mode}")
                 return []
+            self.logger.info(f"[SEARCH:TEXT] mode={search_mode}, results={len(text_memories)}")
             return text_memories
 
         except Exception as e:
@@ -435,6 +442,7 @@ class SingleCubeView(MemCubeView):
                 },
                 search_filter=search_req.filter,
             )
+            self.logger.info(f"[SEARCH:PREF] results={len(results)}, top_k={search_req.pref_top_k}")
             return [format_memory_item(data) for data in results]
         except Exception as e:
             self.logger.error("Error in _search_pref: %s; traceback: %s", e, traceback.format_exc())

@@ -80,6 +80,7 @@ class GraphMemoryRetriever:
                 filter=search_filter,
                 status="activated",
             )
+            logger.info(f"[RECALL] WorkingMemory: {len(working_memories)} items (top_k={top_k})")
             return [TextualMemoryItem.from_dict(record) for record in working_memories[:top_k]]
 
         with ContextThreadPoolExecutor(max_workers=3) as executor:
@@ -127,12 +128,18 @@ class GraphMemoryRetriever:
             bm25_results = future_bm25.result() if self.use_bm25 else []
             fulltext_results = future_fulltext.result() if use_fast_graph else []
 
+        logger.info(
+            f"[RECALL] {memory_scope}: graph={len(graph_results)}, vector={len(vector_results)}, "
+            f"bm25={len(bm25_results)}, fulltext={len(fulltext_results)}"
+        )
+
         # Merge and deduplicate by ID
         combined = {
             item.id: item
             for item in graph_results + vector_results + bm25_results + fulltext_results
         }
 
+        logger.info(f"[RECALL] {memory_scope}: {len(combined)} unique after merge (from {len(graph_results) + len(vector_results) + len(bm25_results) + len(fulltext_results)} total)")
         return list(combined.values())
 
     def retrieve_from_cube(
@@ -201,6 +208,7 @@ class GraphMemoryRetriever:
         - scope filters by memory_type if provided
         """
         use_fast_graph = kwargs.get("use_fast_graph", False)
+        logger.info(f"[RECALL:GRAPH] scope={memory_scope}, keys={parsed_goal.keys}, tags={parsed_goal.tags}, fast_graph={use_fast_graph}")
 
         def process_node(node):
             meta = node.get("metadata", {})
@@ -269,6 +277,7 @@ class GraphMemoryRetriever:
                         keep = True
                 if keep:
                     final_nodes.append(TextualMemoryItem.from_dict(node))
+            logger.info(f"[RECALL:GRAPH] candidates={len(candidate_ids)}, loaded={len(node_dicts)}, kept={len(final_nodes)}")
             return final_nodes
         else:
             candidate_ids = set()
@@ -319,6 +328,7 @@ class GraphMemoryRetriever:
                     temp_results[original_index] = result
 
                 final_nodes = [result for result in temp_results if result is not None]
+            logger.info(f"[RECALL:GRAPH] fast_graph: candidates={len(candidate_ids)}, loaded={len(node_dicts)}, kept={len(final_nodes)}")
             return final_nodes
 
     def _vector_recall(
@@ -338,7 +348,9 @@ class GraphMemoryRetriever:
         # TODO: tackle with post-filter and pre-filter(5.18+) better.
         """
         if not query_embedding:
+            logger.info(f"[RECALL:VECTOR] skipped — no embeddings, scope={memory_scope}")
             return []
+        logger.info(f"[RECALL:VECTOR] scope={memory_scope}, embeddings={len(query_embedding)}, top_k={top_k}")
 
         def search_single(vec, search_priority=None, search_filter=None):
             return (
@@ -429,6 +441,7 @@ class GraphMemoryRetriever:
                 node["metadata"]["relativity"] = id_to_score.get(rid, 0.0)
                 ordered_nodes.append(node)
 
+        logger.info(f"[RECALL:VECTOR] hits={len(all_hits)}, unique={len(id_to_score)}, nodes={len(ordered_nodes)}")
         return [TextualMemoryItem.from_dict(n) for n in ordered_nodes]
 
     def _bm25_recall(
@@ -444,7 +457,9 @@ class GraphMemoryRetriever:
         Perform BM25-based retrieval.
         """
         if not self.bm25_retriever:
+            logger.info(f"[RECALL:BM25] skipped — no retriever, scope={memory_scope}")
             return []
+        logger.info(f"[RECALL:BM25] scope={memory_scope}, top_k={top_k}")
         key_filters = [
             {"field": "memory_type", "op": "=", "value": memory_scope},
             {"field": "status", "op": "=", "value": "activated"},
@@ -468,6 +483,7 @@ class GraphMemoryRetriever:
             bm25_query, node_dicts, top_k=top_k, corpus_name=corpus_name
         )
 
+        logger.info(f"[RECALL:BM25] candidates={len(candidate_ids)}, corpus={len(node_dicts)}, results={len(bm25_results)}")
         return [TextualMemoryItem.from_dict(n) for n in bm25_results]
 
     def _fulltext_recall(
@@ -498,7 +514,7 @@ class GraphMemoryRetriever:
         """
         if not query_words:
             return []
-        logger.info(f"[FULLTEXT] query_words: {query_words}")
+        logger.info(f"[RECALL:FULLTEXT] scope={memory_scope}, query_words={query_words}, top_k={top_k}")
         all_hits = self.graph_store.search_by_fulltext(
             query_words=query_words,
             top_k=top_k,
@@ -510,6 +526,7 @@ class GraphMemoryRetriever:
             user_name=user_name,
         )
         if not all_hits:
+            logger.info(f"[RECALL:FULLTEXT] no hits for scope={memory_scope}")
             return []
 
         # merge and deduplicate, keeping highest score per ID
@@ -546,4 +563,5 @@ class GraphMemoryRetriever:
                 node["metadata"]["relativity"] = id_to_score.get(rid, 0.0)
                 ordered_nodes.append(node)
 
+        logger.info(f"[RECALL:FULLTEXT] hits={len(all_hits)}, unique={len(id_to_score)}, nodes={len(ordered_nodes)}")
         return [TextualMemoryItem.from_dict(n) for n in ordered_nodes]

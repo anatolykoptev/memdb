@@ -406,6 +406,12 @@ class QueryMixin:
                     # properties is JSONB — already a dict
                     memory_data = json.loads(props_val) if isinstance(props_val, str) else props_val
                     if include_embedding and embedding_val is not None:
+                        # pgvector returns embedding as string '[-0.01,...]' — parse to list
+                        if isinstance(embedding_val, str):
+                            try:
+                                embedding_val = json.loads(embedding_val)
+                            except (json.JSONDecodeError, TypeError):
+                                pass
                         memory_data["embedding"] = embedding_val
                     node = self._parse_node(memory_data)
                     if node:
@@ -415,10 +421,11 @@ class QueryMixin:
                             node_ids.add(node_id)
 
         except Exception as e:
-            logger.error(f"Failed to get memories: {e}", exc_info=True)
+            logger.error(f"[get_all_memory_items] Failed to get memories: {e}", exc_info=True)
         finally:
             self._return_connection(conn)
 
+        logger.info(f"[get_all_memory_items] scope={scope}, returned={len(nodes)}, include_embedding={include_embedding}")
         return nodes
 
     @timed
@@ -458,6 +465,12 @@ class QueryMixin:
 
                     memory_data = json.loads(props_val) if isinstance(props_val, str) else props_val
                     if include_embedding and embedding_val is not None:
+                        # pgvector returns embedding as string '[-0.01,...]' — parse to list
+                        if isinstance(embedding_val, str):
+                            try:
+                                embedding_val = json.loads(embedding_val)
+                            except (json.JSONDecodeError, TypeError):
+                                pass
                         memory_data["embedding"] = embedding_val
 
                     try:
