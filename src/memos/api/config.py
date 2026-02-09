@@ -455,7 +455,6 @@ class APIConfig:
     @staticmethod
     def get_embedder_config() -> dict[str, Any]:
         """Get embedder configuration."""
-        print(f"DEBUG: get_embedder_config called. BACKEND={os.getenv('MOS_EMBEDDER_BACKEND')}")
         embedder_backend = os.getenv("MOS_EMBEDDER_BACKEND", "ollama")
 
         # Map voyageai to universal_api
