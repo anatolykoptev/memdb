@@ -744,10 +744,9 @@ class GeneralScheduler(BaseScheduler):
             logger.error(f"Error processing feedbackMemory message: {e}", exc_info=True)
 
     def _mem_read_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
-        logger.info(
-            f"[DIAGNOSTIC] general_scheduler._mem_read_message_consumer called. Received messages: {[msg.model_dump_json(indent=2) for msg in messages]}"
+        logger.debug(
+            f"[DIAGNOSTIC] general_scheduler._mem_read_message_consumer called. Received {len(messages)} messages"
         )
-        logger.info(f"Messages {messages} assigned to {MEM_READ_TASK_LABEL} handler.")
 
         def process_message(message: ScheduleMessageItem):
             try:
@@ -1324,7 +1323,7 @@ class GeneralScheduler(BaseScheduler):
             )
 
     def _pref_add_message_consumer(self, messages: list[ScheduleMessageItem]) -> None:
-        logger.info(f"Messages {messages} assigned to {PREF_ADD_TASK_LABEL} handler.")
+        logger.debug(f"Received {len(messages)} messages for {PREF_ADD_TASK_LABEL} handler.")
 
         def process_message(message: ScheduleMessageItem):
             try:

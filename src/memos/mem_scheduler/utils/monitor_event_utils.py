@@ -62,6 +62,6 @@ def emit_monitor_event(event: str, msg: ScheduleMessageItem, extra: dict[str, An
         if extra:
             payload.update(extra)
 
-        logger.info("MONITOR_EVENT " + json.dumps(payload, ensure_ascii=False))
+        logger.debug("MONITOR_EVENT " + json.dumps(payload, ensure_ascii=False))
     except Exception:
         logger.debug("Failed to emit MONITOR_EVENT", exc_info=True)

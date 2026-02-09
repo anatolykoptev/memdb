@@ -233,6 +233,10 @@ LOGGING_CONFIG = {
             "level": logging.WARNING,
             "propagate": True,
         },
+        "openai": {
+            "level": logging.WARNING,
+            "propagate": True,
+        },
     },
 }
 
