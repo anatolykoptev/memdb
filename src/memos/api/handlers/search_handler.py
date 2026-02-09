@@ -81,7 +81,7 @@ class SearchHandler(BaseHandler):
             results = self._mmr_dedup_text_memories(results, search_req.top_k, pref_top_k)
             self._strip_embeddings(results)
 
-        self.logger.info(
+        self.logger.debug(
             f"[SearchHandler] Final search results: count={len(results)} results={results}"
         )
 

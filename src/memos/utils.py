@@ -76,7 +76,8 @@ def timed_with_status(
                 if extra_items:
                     ctx_parts.extend(f"{key}={val}" for key, val in extra_items.items())
 
-                ctx_str = f" [{', '.join(ctx_parts)}]" if ctx_parts else ""
+                raw_ctx = f" [{', '.join(ctx_parts)}]" if ctx_parts else ""
+                ctx_str = raw_ctx[:200] if len(raw_ctx) > 200 else raw_ctx
 
                 status = "SUCCESS" if success_flag else "FAILED"
                 status_info = f", status: {status}"
