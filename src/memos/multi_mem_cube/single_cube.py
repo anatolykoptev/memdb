@@ -113,7 +113,7 @@ class SingleCubeView(MemCubeView):
             mem_cube_id=self.cube_id,
             session_id=search_req.session_id or "default_session",
         )
-        self.logger.info(f"Search Req is: {search_req}")
+        self.logger.debug(f"Search Req is: {search_req}")
 
         memories_result: MOSSearchResult = {
             "text_mem": [],
@@ -428,8 +428,7 @@ class SingleCubeView(MemCubeView):
         if not search_req.include_preference:
             return []
 
-        logger.info(f"search_req.filter for preference memory: {search_req.filter}")
-        logger.info(f"type of pref_mem: {type(self.naive_mem_cube.pref_mem)}")
+        logger.debug(f"search_req.filter for preference memory: {search_req.filter}")
         try:
             results = self.naive_mem_cube.pref_mem.search(
                 query=search_req.query,
