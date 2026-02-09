@@ -446,7 +446,7 @@ class QueryMixin:
               AND properties->>'status' = 'activated'
               AND properties->>'user_name' = '{user_name}'
         """
-        logger.info(f"[get_structure_optimization_candidates] query: {sql_query}")
+        logger.debug(f"[get_structure_optimization_candidates] query: {sql_query}")
 
         candidates = []
         node_ids = set()

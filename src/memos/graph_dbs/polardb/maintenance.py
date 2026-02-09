@@ -542,7 +542,7 @@ class MaintenanceMixin:
             WHERE {where_clause}
         """
 
-        logger.info(f"[get_user_names_by_memory_ids] query: {query}")
+        logger.debug(f"[get_user_names_by_memory_ids] query: {query}")
         conn = None
         result_dict = {}
         try:
@@ -620,7 +620,7 @@ class MaintenanceMixin:
             FROM "{self.db_name}_graph"."Memory"
             WHERE ag_catalog.agtype_access_operator(properties::text::agtype, '\"user_name\"'::agtype) = '\"{escaped_un}\"'::agtype
         """
-        logger.info(f"[exist_user_name] query: {query}")
+        logger.debug(f"[exist_user_name] query: {query}")
         result_dict = {}
         conn = None
         try:
@@ -739,7 +739,7 @@ class MaintenanceMixin:
                     DELETE FROM "{self.db_name}_graph"."Memory"
                     WHERE {where_clause}
                 """
-                logger.info(f"[delete_node_by_prams] delete_query: {delete_query}")
+                logger.debug(f"[delete_node_by_prams] delete_query: {delete_query}")
 
                 cursor.execute(delete_query)
                 deleted_count = cursor.rowcount
