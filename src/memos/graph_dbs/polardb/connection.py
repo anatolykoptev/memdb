@@ -64,7 +64,7 @@ class ConnectionMixin:
             host=host, port=port, user=user, password=password, dbname=self.db_name,minconn=10, maxconn=2000
         )
         """
-        logger.info(f" db_name: {self.db_name} current maxconn is:'{maxconn}'")
+        logger.debug(f" db_name: {self.db_name} current maxconn is:'{maxconn}'")
 
         # Create connection pool
         self.connection_pool = psycopg2.pool.ThreadedConnectionPool(
@@ -123,7 +123,7 @@ class ConnectionMixin:
         Raises:
             RuntimeError: If connection pool is closed or exhausted after retries
         """
-        logger.info(f" db_name: {self.db_name} pool maxconn is:'{self.connection_pool.maxconn}'")
+        logger.debug(f" db_name: {self.db_name} pool maxconn is:'{self.connection_pool.maxconn}'")
         if self._pool_closed:
             raise RuntimeError("Connection pool has been closed")
 
@@ -215,7 +215,7 @@ class ConnectionMixin:
                     if attempt < max_retries - 1:
                         # Longer backoff for pool exhaustion: 0.5s, 1.0s, 2.0s
                         wait_time = 0.5 * (2**attempt)
-                        logger.info(f"[_get_connection] Waiting before retry...")
+                        logger.debug(f"[_get_connection] Waiting before retry...")
                         time.sleep(0.003)
                         continue
                     else:

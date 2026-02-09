@@ -109,8 +109,8 @@ class SearchMixin:
             """
 
         params = (query_word,)
-        logger.info(
-            f"[search_by_keywords_LIKE start:]  user_name: {user_name}, query: {query}, params: {params}"
+        logger.debug(
+            f"[search_by_keywords_LIKE] user_name: {user_name}, query: {query}, params: {params}"
         )
         conn = None
         try:
@@ -123,8 +123,8 @@ class SearchMixin:
                     oldid = row[0]
                     id_val = str(oldid).strip('"')
                     output.append({"id": id_val})
-                logger.info(
-                    f"[search_by_keywords_LIKE end:] user_name: {user_name}, query: {query}, params: {params} recalled: {output}"
+                logger.debug(
+                    f"[search_by_keywords_LIKE] results={len(output)}, user_name={user_name}"
                 )
                 return output
         finally:
@@ -164,8 +164,8 @@ class SearchMixin:
         """
 
         params = (tsquery_string,)
-        logger.info(
-            f"[search_by_keywords_TFIDF start:] user_name: {user_name}, query: {query}, params: {params}"
+        logger.debug(
+            f"[search_by_keywords_TFIDF] user_name: {user_name}, query: {query}, params: {params}"
         )
         conn = None
         try:
@@ -179,8 +179,8 @@ class SearchMixin:
                     id_val = str(oldid).strip('"')
                     output.append({"id": id_val})
 
-                logger.info(
-                    f"[search_by_keywords_TFIDF end:] user_name: {user_name}, query: {query}, params: {params} recalled: {output}"
+                logger.debug(
+                    f"[search_by_keywords_TFIDF] results={len(output)}, user_name={user_name}"
                 )
                 return output
         finally:
@@ -238,7 +238,7 @@ class SearchMixin:
 
         where_clause = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-        logger.info(f"[search_by_fulltext] where_clause: {where_clause}")
+        logger.debug(f"[search_by_fulltext] where_clause: {where_clause}")
 
         # Build fulltext search query
         query = f"""
@@ -253,7 +253,7 @@ class SearchMixin:
         """
 
         params = [tsquery_string, tsquery_string]
-        logger.info(f"[search_by_fulltext] query: {query}, params: {params}")
+        logger.debug(f"[search_by_fulltext] query: {query}, params: {params}")
         conn = None
         try:
             conn = self._get_connection()
@@ -334,7 +334,7 @@ class SearchMixin:
         query = query.replace("%s::vector(1024)", f"'{vector_str}'::vector(1024)")
         params = []
 
-        logger.info(f"[search_by_embedding] query: {query}, params: {params}")
+        logger.debug(f"[search_by_embedding] query: {query}")
 
         conn = None
         try:
