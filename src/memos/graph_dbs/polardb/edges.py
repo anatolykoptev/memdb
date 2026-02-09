@@ -72,7 +72,7 @@ class EdgeMixin:
                   AND edge_type = '{type}'
             );
         """
-        logger.info(f"polardb [add_edge] query: {query}, properties: {json.dumps(properties)}")
+        logger.debug(f"polardb [add_edge] query: {query}, properties: {json.dumps(properties)}")
         conn = None
         try:
             conn = self._get_connection()
