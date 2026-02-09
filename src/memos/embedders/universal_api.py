@@ -76,7 +76,7 @@ class UniversalAPIEmbedder(BaseEmbedder):
         texts = [_sanitize_unicode(t) for t in texts]
         # Truncate texts if max_tokens is configured
         texts = self._truncate_texts(texts)
-        logger.info(f"Embeddings request with input: {texts}")
+        logger.debug(f"Embeddings request with input: {texts}")
         if self.provider == "openai" or self.provider == "azure":
             try:
 
@@ -92,8 +92,7 @@ class UniversalAPIEmbedder(BaseEmbedder):
                         _create_embeddings(), timeout=int(os.getenv("MOS_EMBEDDER_TIMEOUT", 5))
                     )
                 )
-                logger.info(f"Embeddings request succeeded with {time.time() - init_time} seconds")
-                logger.info(f"Embeddings request response: {response}")
+                logger.info(f"Embeddings request succeeded: {len(response.data)} vectors in {time.time() - init_time:.2f}s")
                 return [r.embedding for r in response.data]
             except Exception as e:
                 if self.use_backup_client:
