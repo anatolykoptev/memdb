@@ -218,7 +218,7 @@ def _extract_skill_memory_by_llm(
     )
 
     prompt = [{"role": "user", "content": prompt_content}]
-    logger.info(f"[Skill Memory]: Prompt {prompt_content}")
+    logger.debug(f"[Skill Memory]: Prompt {prompt_content}")
 
     # Call LLM to extract skill memory with retry logic
     for attempt in range(3):
