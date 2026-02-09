@@ -355,128 +355,71 @@ class QueryMixin:
         if scope not in {"WorkingMemory", "LongTermMemory", "UserMemory", "OuterMemory"}:
             raise ValueError(f"Unsupported memory type scope: {scope}")
 
-        # Build user_name filter with knowledgebase_ids support (OR relationship) using common method
-        user_name_conditions = self._build_user_name_and_kb_ids_conditions_cypher(
+        # Build SQL WHERE clauses (plain SQL, not Cypher — our Memory table is not an AGE vertex label)
+        where_clauses = [f"properties->>'memory_type' = '{scope}'"]
+        if status:
+            where_clauses.append(f"properties->>'status' = '{status}'")
+
+        # Build user_name filter with knowledgebase_ids support
+        user_name_conditions = self._build_user_name_and_kb_ids_conditions_sql(
             user_name=user_name,
             knowledgebase_ids=knowledgebase_ids,
             default_user_name=self._get_config_value("user_name"),
         )
-
-        # Build user_name WHERE clause
         if user_name_conditions:
             if len(user_name_conditions) == 1:
-                user_name_where = user_name_conditions[0]
+                where_clauses.append(user_name_conditions[0])
             else:
-                user_name_where = f"({' OR '.join(user_name_conditions)})"
-        else:
-            user_name_where = ""
+                where_clauses.append(f"({' OR '.join(user_name_conditions)})")
 
-        # Build filter conditions using common method
-        filter_where_clause = self._build_filter_conditions_cypher(filter)
-        logger.info(f"[get_all_memory_items] filter_where_clause: {filter_where_clause}")
+        # Build filter conditions
+        filter_conditions = self._build_filter_conditions_sql(filter)
+        where_clauses.extend(filter_conditions)
 
-        # Use cypher query to retrieve memory items
-        if include_embedding:
-            # Build WHERE clause with user_name/knowledgebase_ids and filter
-            where_parts = [f"n.memory_type = '{scope}'"]
-            if status:
-                where_parts.append(f"n.status = '{status}'")
-            if user_name_where:
-                # user_name_where already contains parentheses if it's an OR condition
-                where_parts.append(user_name_where)
-            if filter_where_clause:
-                # filter_where_clause already contains " AND " prefix, so we just append it
-                where_clause = " AND ".join(where_parts) + filter_where_clause
-            else:
-                where_clause = " AND ".join(where_parts)
+        where_sql = " AND ".join(where_clauses)
 
-            cypher_query = f"""
-                   WITH t as (
-                       SELECT * FROM cypher('{self.db_name}_graph', $$
-                       MATCH (n:Memory)
-                       WHERE {where_clause}
-                       RETURN id(n) as id1,n
-                       LIMIT 100
-                       $$) AS (id1 agtype,n agtype)
-                   )
-                   SELECT
-                       m.embedding,
-                       t.n
-                   FROM t,
-                        {self.db_name}_graph."Memory" m
-                   WHERE t.id1 = m.id;
-                   """
-            nodes = []
-            node_ids = set()
-            conn = None
-            logger.info(f"[get_all_memory_items] cypher_query: {cypher_query}")
-            try:
-                conn = self._get_connection()
-                with conn.cursor() as cursor:
-                    cursor.execute(cypher_query)
-                    results = cursor.fetchall()
+        # Select embedding column only when requested
+        select_cols = "properties, embedding" if include_embedding else "properties"
+        sql_query = f"""
+            SELECT {select_cols}
+            FROM "{self.db_name}_graph"."Memory"
+            WHERE {where_sql}
+            LIMIT 100
+        """
 
-                    for row in results:
-                        if isinstance(row, list | tuple) and len(row) >= 2:
-                            embedding_val, node_val = row[0], row[1]
-                        else:
-                            embedding_val, node_val = None, row[0]
+        nodes = []
+        node_ids = set()
+        conn = None
+        logger.info(f"[get_all_memory_items] sql_query: {sql_query}")
+        try:
+            conn = self._get_connection()
+            with conn.cursor() as cursor:
+                cursor.execute(sql_query)
+                results = cursor.fetchall()
 
-                        node = self._build_node_from_agtype(node_val, embedding_val)
-                        if node:
-                            node_id = node["id"]
-                            if node_id not in node_ids:
-                                nodes.append(node)
-                                node_ids.add(node_id)
+                for row in results:
+                    if include_embedding:
+                        props_val, embedding_val = row[0], row[1]
+                    else:
+                        props_val, embedding_val = row[0], None
 
-            except Exception as e:
-                logger.error(f"Failed to get memories: {e}", exc_info=True)
-            finally:
-                self._return_connection(conn)
+                    # properties is JSONB — already a dict
+                    memory_data = json.loads(props_val) if isinstance(props_val, str) else props_val
+                    if include_embedding and embedding_val is not None:
+                        memory_data["embedding"] = embedding_val
+                    node = self._parse_node(memory_data)
+                    if node:
+                        node_id = node["id"]
+                        if node_id not in node_ids:
+                            nodes.append(node)
+                            node_ids.add(node_id)
 
-            return nodes
-        else:
-            # Build WHERE clause with user_name/knowledgebase_ids and filter
-            where_parts = [f"n.memory_type = '{scope}'"]
-            if status:
-                where_parts.append(f"n.status = '{status}'")
-            if user_name_where:
-                # user_name_where already contains parentheses if it's an OR condition
-                where_parts.append(user_name_where)
-            if filter_where_clause:
-                # filter_where_clause already contains " AND " prefix, so we just append it
-                where_clause = " AND ".join(where_parts) + filter_where_clause
-            else:
-                where_clause = " AND ".join(where_parts)
+        except Exception as e:
+            logger.error(f"Failed to get memories: {e}", exc_info=True)
+        finally:
+            self._return_connection(conn)
 
-            cypher_query = f"""
-                   SELECT * FROM cypher('{self.db_name}_graph', $$
-                   MATCH (n:Memory)
-                   WHERE {where_clause}
-                   RETURN properties(n) as props
-                   LIMIT 100
-                   $$) AS (nprops agtype)
-               """
-
-            nodes = []
-            conn = None
-            logger.info(f"[get_all_memory_items] cypher_query: {cypher_query}")
-            try:
-                conn = self._get_connection()
-                with conn.cursor() as cursor:
-                    cursor.execute(cypher_query)
-                    results = cursor.fetchall()
-
-                    for row in results:
-                        memory_data = json.loads(row[0]) if isinstance(row[0], str) else row[0]
-                        nodes.append(self._parse_node(memory_data))
-
-            except Exception as e:
-                logger.error(f"Failed to get memories: {e}", exc_info=True)
-            finally:
-                self._return_connection(conn)
-
-            return nodes
+        return nodes
 
     @timed
     def get_structure_optimization_candidates(
@@ -484,90 +427,19 @@ class QueryMixin:
     ) -> list[dict]:
         """
         Find nodes that are likely candidates for structure optimization:
-        - Isolated nodes, nodes with empty background, or nodes with exactly one child.
-        - Plus: the child of any parent node that has exactly one child.
+        - All activated nodes (our SQL-only schema has no graph edges, so all nodes are isolated).
         """
         user_name = user_name if user_name else self._get_config_value("user_name")
 
-        # Build return fields based on include_embedding flag
-        if include_embedding:
-            return_fields = "id(n) as id1,n"
-            return_fields_agtype = " id1 agtype,n agtype"
-        else:
-            # Build field list without embedding
-            return_fields = ",".join(
-                [
-                    "n.id AS id",
-                    "n.memory AS memory",
-                    "n.user_name AS user_name",
-                    "n.user_id AS user_id",
-                    "n.session_id AS session_id",
-                    "n.status AS status",
-                    "n.key AS key",
-                    "n.confidence AS confidence",
-                    "n.tags AS tags",
-                    "n.created_at AS created_at",
-                    "n.updated_at AS updated_at",
-                    "n.memory_type AS memory_type",
-                    "n.sources AS sources",
-                    "n.source AS source",
-                    "n.node_type AS node_type",
-                    "n.visibility AS visibility",
-                    "n.usage AS usage",
-                    "n.background AS background",
-                    "n.graph_id as graph_id",
-                ]
-            )
-            fields = [
-                "id",
-                "memory",
-                "user_name",
-                "user_id",
-                "session_id",
-                "status",
-                "key",
-                "confidence",
-                "tags",
-                "created_at",
-                "updated_at",
-                "memory_type",
-                "sources",
-                "source",
-                "node_type",
-                "visibility",
-                "usage",
-                "background",
-                "graph_id",
-            ]
-            return_fields_agtype = ", ".join([f"{field} agtype" for field in fields])
-
-        # Use OPTIONAL MATCH to find isolated nodes (no parents or children)
-        cypher_query = f"""
-            SELECT * FROM cypher('{self.db_name}_graph', $$
-            MATCH (n:Memory)
-            WHERE n.memory_type = '{scope}'
-              AND n.status = 'activated'
-              AND n.user_name = '{user_name}'
-            OPTIONAL MATCH (n)-[:PARENT]->(c:Memory)
-            OPTIONAL MATCH (p:Memory)-[:PARENT]->(n)
-            WITH n, c, p
-            WHERE c IS NULL AND p IS NULL
-            RETURN {return_fields}
-            $$) AS ({return_fields_agtype})
+        select_cols = "properties, embedding" if include_embedding else "properties"
+        sql_query = f"""
+            SELECT {select_cols}
+            FROM "{self.db_name}_graph"."Memory"
+            WHERE properties->>'memory_type' = '{scope}'
+              AND properties->>'status' = 'activated'
+              AND properties->>'user_name' = '{user_name}'
         """
-        if include_embedding:
-            cypher_query = f"""
-                    WITH t as (
-                        {cypher_query}
-                    )
-                        SELECT
-                        m.embedding,
-                        t.n
-                        FROM t,
-                             {self.db_name}_graph."Memory" m
-                        WHERE t.id1 = m.id
-                    """
-        logger.info(f"[get_structure_optimization_candidates] query: {cypher_query}")
+        logger.info(f"[get_structure_optimization_candidates] query: {sql_query}")
 
         candidates = []
         node_ids = set()
@@ -575,79 +447,28 @@ class QueryMixin:
         try:
             conn = self._get_connection()
             with conn.cursor() as cursor:
-                cursor.execute(cypher_query)
+                cursor.execute(sql_query)
                 results = cursor.fetchall()
                 logger.info(f"Found {len(results)} structure optimization candidates")
                 for row in results:
                     if include_embedding:
-                        # When include_embedding=True, return full node object
-                        """
-                        if isinstance(row, (list, tuple)) and len(row) >= 2:
-                        """
-                        if isinstance(row, list | tuple) and len(row) >= 2:
-                            embedding_val, node_val = row[0], row[1]
-                        else:
-                            embedding_val, node_val = None, row[0]
+                        props_val, embedding_val = row[0], row[1]
+                    else:
+                        props_val, embedding_val = row[0], None
 
-                        node = self._build_node_from_agtype(node_val, embedding_val)
+                    memory_data = json.loads(props_val) if isinstance(props_val, str) else props_val
+                    if include_embedding and embedding_val is not None:
+                        memory_data["embedding"] = embedding_val
+
+                    try:
+                        node = self._parse_node(memory_data)
                         if node:
                             node_id = node["id"]
                             if node_id not in node_ids:
                                 candidates.append(node)
                                 node_ids.add(node_id)
-                    else:
-                        # When include_embedding=False, return field dictionary
-                        # Define field names matching the RETURN clause
-                        field_names = [
-                            "id",
-                            "memory",
-                            "user_name",
-                            "user_id",
-                            "session_id",
-                            "status",
-                            "key",
-                            "confidence",
-                            "tags",
-                            "created_at",
-                            "updated_at",
-                            "memory_type",
-                            "sources",
-                            "source",
-                            "node_type",
-                            "visibility",
-                            "usage",
-                            "background",
-                            "graph_id",
-                        ]
-
-                        # Convert row to dictionary
-                        node_data = {}
-                        for i, field_name in enumerate(field_names):
-                            if i < len(row):
-                                value = row[i]
-                                # Handle special fields
-                                if field_name in ["tags", "sources", "usage"] and isinstance(
-                                    value, str
-                                ):
-                                    try:
-                                        # Try parsing JSON string
-                                        node_data[field_name] = json.loads(value)
-                                    except (json.JSONDecodeError, TypeError):
-                                        node_data[field_name] = value
-                                else:
-                                    node_data[field_name] = value
-
-                        # Parse node using _parse_node_new
-                        try:
-                            node = self._parse_node(node_data)
-                            node_id = node["id"]
-
-                            if node_id not in node_ids:
-                                candidates.append(node)
-                                node_ids.add(node_id)
-                                logger.debug(f"Parsed node successfully: {node_id}")
-                        except Exception as e:
-                            logger.error(f"Failed to parse node: {e}")
+                    except Exception as e:
+                        logger.error(f"Failed to parse node: {e}")
 
         except Exception as e:
             logger.error(f"Failed to get structure optimization candidates: {e}", exc_info=True)
