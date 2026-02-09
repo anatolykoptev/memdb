@@ -19,7 +19,7 @@ class NodeMixin:
         self, id: str, memory: str, metadata: dict[str, Any], user_name: str | None = None
     ) -> None:
         """Add a memory node to the graph."""
-        logger.info(f"[add_node] id: {id}, memory: {memory}, metadata: {metadata}")
+        logger.debug(f"[add_node] id: {id}, memory: {memory}, metadata: {metadata}")
 
         # user_name comes from metadata; fallback to config if missing
         metadata["user_name"] = user_name if user_name else self.config.user_name
@@ -119,7 +119,7 @@ class NodeMixin:
             raise
         finally:
             if insert_query:
-                logger.info(f"In add node polardb: id-{id} memory-{memory} query-{insert_query}")
+                logger.debug(f"In add node polardb: id-{id} memory-{memory} query-{insert_query}")
             self._return_connection(conn)
 
     @timed
@@ -384,7 +384,7 @@ class NodeMixin:
             query += "\nAND ag_catalog.agtype_access_operator(properties::text::agtype, '\"user_name\"'::agtype) = %s::agtype"
             params.append(self.format_param_value(user_name))
 
-        logger.info(f"polardb [get_node] query: {query},params: {params}")
+        logger.debug(f"polardb [get_node] query: {query},params: {params}")
         conn = None
         try:
             conn = self._get_connection()
@@ -455,7 +455,7 @@ class NodeMixin:
             - Assumes all provided IDs are valid and exist.
             - Returns empty list if input is empty.
         """
-        logger.info(f"get_nodes ids:{ids},user_name:{user_name}")
+        logger.debug(f"get_nodes ids:{ids},user_name:{user_name}")
         if not ids:
             return []
 
@@ -475,7 +475,7 @@ class NodeMixin:
             query += " AND ag_catalog.agtype_access_operator(properties::text::agtype, '\"user_name\"'::agtype) = %s::agtype"
             params.append(self.format_param_value(user_name))
 
-        logger.info(f"get_nodes query:{query},params:{params}")
+        logger.debug(f"get_nodes query:{query},params:{params}")
 
         conn = None
         try:

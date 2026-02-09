@@ -99,7 +99,7 @@ class QueryMixin:
             knowledgebase_ids=knowledgebase_ids,
             default_user_name=self._get_config_value("user_name"),
         )
-        logger.info(f"[get_by_metadata] user_name_conditions: {user_name_conditions}")
+        logger.debug(f"[get_by_metadata] user_name_conditions: {user_name_conditions}")
 
         # Add user_name WHERE clause
         if user_name_conditions:
@@ -110,7 +110,7 @@ class QueryMixin:
 
         # Build filter conditions using common method
         filter_where_clause = self._build_filter_conditions_cypher(filter)
-        logger.info(f"[get_by_metadata] filter_where_clause: {filter_where_clause}")
+        logger.debug(f"[get_by_metadata] filter_where_clause: {filter_where_clause}")
 
         where_str = " AND ".join(where_conditions) + filter_where_clause
 
@@ -125,7 +125,7 @@ class QueryMixin:
 
         ids = []
         conn = None
-        logger.info(f"[get_by_metadata] cypher_query: {cypher_query}")
+        logger.debug(f"[get_by_metadata] cypher_query: {cypher_query}")
         try:
             conn = self._get_connection()
             with conn.cursor() as cursor:
@@ -390,7 +390,7 @@ class QueryMixin:
         nodes = []
         node_ids = set()
         conn = None
-        logger.info(f"[get_all_memory_items] sql_query: {sql_query}")
+        logger.debug(f"[get_all_memory_items] sql_query: {sql_query}")
         try:
             conn = self._get_connection()
             with conn.cursor() as cursor:
