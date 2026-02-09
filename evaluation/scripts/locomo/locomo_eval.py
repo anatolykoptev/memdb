@@ -58,13 +58,20 @@ def extract_label_json(text: str) -> str | None:
         The full matching JSON string (e.g., '{"label": "CORRECT"}') if found.
         None if no valid label JSON is found.
     """
-    # Regex pattern to match: { "label": "value" } with optional whitespace
-    # Matches both single and double quotes, allows spaces around keys and values
-    pattern = r'\{\s*"label"\s*:\s*["\']([^"\']*)["\']\s*\}'
+    # Extract any JSON object containing a "label" key
+    # Find all JSON-like blocks and try to parse them
+    for match in re.finditer(r'\{[^{}]*\}', text):
+        try:
+            obj = json.loads(match.group(0))
+            if "label" in obj:
+                return json.dumps({"label": obj["label"]})
+        except (json.JSONDecodeError, ValueError):
+            continue
+    # Fallback: look for label value directly
+    pattern = r'"label"\s*:\s*["\'](\w+)["\']'
     match = re.search(pattern, text)
     if match:
-        # Return the complete matched JSON string for safe json.loads()
-        return match.group(0)
+        return json.dumps({"label": match.group(1)})
     return None
 
 
@@ -119,8 +126,12 @@ async def locomo_grader(llm_client, question: str, gold_answer: str, response: s
                 print(f"Rate limited, retrying in {wait}s (attempt {attempt + 1}/5)...")
                 await asyncio.sleep(wait)
             else:
-                print(f"======== {e}, {response} ===========")
-                raise
+                print(f"Grading error (attempt {attempt + 1}/5): {e}")
+                if attempt < 4:
+                    await asyncio.sleep(2)
+                else:
+                    return False
+    return False
 
 
 def calculate_rouge_scores(gold_answer, response):
