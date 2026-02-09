@@ -98,5 +98,5 @@ class CosineLocalReranker(BaseReranker):
             chosen = {it.id for it, _ in top_items}
             remain = [(it, -1.0) for it in graph_results if it.id not in chosen]
             top_items.extend(remain[: top_k - len(top_items)])
-        logger.info(f"CosineLocalReranker rerank result: {top_items[:1]}")
+        logger.debug(f"CosineLocalReranker rerank result: {top_items[:1]}")
         return top_items

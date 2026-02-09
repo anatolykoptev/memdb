@@ -109,8 +109,8 @@ def timed(func=None, *, log=True, log_prefix=""):
             if log is not True:
                 return result
 
-            # 100ms threshold
-            if elapsed_ms >= 100.0:
+            # 1s threshold — only log slow operations
+            if elapsed_ms >= 1000.0:
                 logger.info(f"[TIMER] {log_prefix or fn.__name__} took {elapsed_ms:.0f} ms")
 
             return result

@@ -67,9 +67,8 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         )
         set_request_context(context)
 
-        logger.info(
-            f"Request started, source: {self.source}, method: {request.method}, path: {request.url.path}, "
-            f"headers: {request.headers}"
+        logger.debug(
+            f"Request started, source: {self.source}, method: {request.method}, path: {request.url.path}"
         )
 
         response = await call_next(request)
