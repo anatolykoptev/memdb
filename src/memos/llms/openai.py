@@ -48,14 +48,12 @@ class OpenAILLM(BaseLLM):
             "tools": kwargs.get("tools", NOT_GIVEN),
         }
         start_time = time.perf_counter()
-        logger.info(f"OpenAI LLM Request body: {request_body}")
+        logger.debug(f"OpenAI LLM Request body: {request_body}")
 
         response = self.client.chat.completions.create(**request_body)
 
         cost_time = time.perf_counter() - start_time
-        logger.info(
-            f"Request body: {request_body}, Response from OpenAI: {response.model_dump_json()}, Cost time: {cost_time}"
-        )
+        logger.info(f"OpenAI LLM response in {cost_time:.2f}s, model={request_body.get('model')}")
 
         if not response.choices:
             logger.warning("OpenAI response has no choices")
@@ -97,7 +95,7 @@ class OpenAILLM(BaseLLM):
             "tools": kwargs.get("tools", NOT_GIVEN),
         }
 
-        logger.info(f"OpenAI LLM Stream Request body: {request_body}")
+        logger.debug(f"OpenAI LLM Stream Request body: {request_body}")
         response = self.client.chat.completions.create(**request_body)
 
         reasoning_started = False
@@ -158,7 +156,7 @@ class AzureLLM(BaseLLM):
             tools=kwargs.get("tools", NOT_GIVEN),
             extra_body=kwargs.get("extra_body", self.config.extra_body),
         )
-        logger.info(f"Response from Azure OpenAI: {response.model_dump_json()}")
+        logger.debug(f"Response from Azure OpenAI: {response.model_dump_json()}")
         if not response.choices:
             logger.warning("Azure OpenAI response has no choices")
             return ""
