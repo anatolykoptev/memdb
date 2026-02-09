@@ -98,23 +98,29 @@ async def locomo_grader(llm_client, question: str, gold_answer: str, response: s
 
     Just return the label CORRECT or WRONG in a json format with the key as "label".
     """
-    try:
-        response = await llm_client.chat.completions.create(
-            model=os.getenv("EVAL_MODEL", "gpt-4o-mini"),
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": accuracy_prompt},
-            ],
-            temperature=0,
-        )
-        message_content = response.choices[0].message.content
-        message_content = extract_label_json(text=message_content)
-        label = json.loads(message_content)["label"]
-        parsed = LLMGrade(llm_judgment=label, llm_reasoning="")
-        return parsed.llm_judgment.strip().lower() == "correct"
-    except Exception as e:
-        print(f"======== {e}, {response} ===========")
-        exit()
+    for attempt in range(5):
+        try:
+            response = await llm_client.chat.completions.create(
+                model=os.getenv("EVAL_MODEL", "gpt-4o-mini"),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": accuracy_prompt},
+                ],
+                temperature=0,
+            )
+            message_content = response.choices[0].message.content
+            message_content = extract_label_json(text=message_content)
+            label = json.loads(message_content)["label"]
+            parsed = LLMGrade(llm_judgment=label, llm_reasoning="")
+            return parsed.llm_judgment.strip().lower() == "correct"
+        except Exception as e:
+            if "429" in str(e) or "rate" in str(e).lower():
+                wait = 2 ** attempt * 5
+                print(f"Rate limited, retrying in {wait}s (attempt {attempt + 1}/5)...")
+                await asyncio.sleep(wait)
+            else:
+                print(f"======== {e}, {response} ===========")
+                raise
 
 
 def calculate_rouge_scores(gold_answer, response):
