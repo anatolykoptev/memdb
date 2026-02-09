@@ -277,11 +277,8 @@ class NodeMixin:
                                     $3::vector
                                 )
                             """
-                            logger.info(
-                                f"[add_nodes_batch] embedding Preparing prepare_name: {prepare_name}"
-                            )
-                            logger.info(
-                                f"[add_nodes_batch] embedding Preparing prepare_query: {prepare_query}"
+                            logger.debug(
+                                f"[add_nodes_batch] Preparing: {prepare_name}"
                             )
 
                             cursor.execute(prepare_query)
@@ -328,8 +325,8 @@ class NodeMixin:
                         # DEALLOCATE prepared statement (always execute, even on error)
                         try:
                             cursor.execute(f"DEALLOCATE {prepare_name}")
-                            logger.info(
-                                f"[add_nodes_batch] Deallocated prepared statement: {prepare_name}"
+                            logger.debug(
+                                f"[add_nodes_batch] Deallocated: {prepare_name}"
                             )
                         except Exception as dealloc_error:
                             logger.warning(

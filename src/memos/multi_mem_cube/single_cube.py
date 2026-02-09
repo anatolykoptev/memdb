@@ -65,8 +65,8 @@ class SingleCubeView(MemCubeView):
         but scoped to a single cube_id.
         """
         sync_mode = add_req.async_mode or self._get_sync_mode()
-        self.logger.info(
-            f"[DIAGNOSTIC] single_cube.add_memories called for cube_id: {self.cube_id}. sync_mode: {sync_mode}. Request: {add_req.model_dump_json(indent=2)}"
+        self.logger.debug(
+            f"[DIAGNOSTIC] single_cube.add_memories cube_id={self.cube_id}, sync_mode={sync_mode}"
         )
         user_context = UserContext(
             user_id=add_req.user_id,
@@ -818,8 +818,8 @@ class SingleCubeView(MemCubeView):
             user_name=user_context.mem_cube_id,
             chat_history=add_req.chat_history,
         )
-        self.logger.info(
-            f"Time for get_memory in extract mode {extract_mode}: {time.time() - init_time}"
+        self.logger.debug(
+            f"Time for get_memory in extract mode {extract_mode}: {time.time() - init_time:.2f}s"
         )
         flattened_local = [mm for m in memories_local for mm in m]
 

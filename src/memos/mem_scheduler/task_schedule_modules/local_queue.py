@@ -95,8 +95,8 @@ class SchedulerLocalQueue(RedisSchedulerModule):
 
         try:
             self.queue_streams[stream_key].put(item=message, block=block, timeout=timeout)
-            logger.info(
-                f"Message successfully put into queue '{stream_key}'. Current size: {self.queue_streams[stream_key].qsize()}"
+            logger.debug(
+                f"Message put into queue '{stream_key}'. Size: {self.queue_streams[stream_key].qsize()}"
             )
         except Exception as e:
             logger.error(f"Failed to put message into queue '{stream_key}': {e}", exc_info=True)

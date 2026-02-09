@@ -820,8 +820,8 @@ class GeneralScheduler(BaseScheduler):
         info: dict | None = None,
         chat_history: list | None = None,
     ) -> None:
-        logger.info(
-            f"[DIAGNOSTIC] general_scheduler._process_memories_with_reader called. mem_ids: {mem_ids}, user_id: {user_id}, mem_cube_id: {mem_cube_id}, task_id: {task_id}"
+        logger.debug(
+            f"[DIAGNOSTIC] _process_memories_with_reader: {len(mem_ids)} mem_ids, user_id={user_id}, task_id={task_id}"
         )
         """
         Process memories using mem_reader for enhanced memory processing.
