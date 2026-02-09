@@ -343,24 +343,20 @@ class RabbitMQSchedulerModule(BaseSchedulerModule):
             routing_key = (
                 env_routing_key if env_routing_key is not None and env_routing_key != "" else ""
             )
-            logger.info(
-                f"[DIAGNOSTIC] Publishing {label} message with env exchange override. "
+            logger.debug(
+                f"[DIAGNOSTIC] Publishing {label} with env exchange override. "
                 f"Exchange: {exchange_name}, Routing Key: '{routing_key}'."
             )
-            logger.info(f"  - Message Content: {json.dumps(message, indent=2, ensure_ascii=False)}")
         elif label == "knowledgeBaseUpdate":
             # Original diagnostic logging for knowledgeBaseUpdate if NOT in cloud env
-            logger.info(
-                f"[DIAGNOSTIC] Publishing knowledgeBaseUpdate message (Local Env). "
-                f"Current configured Exchange: {exchange_name}, Routing Key: '{routing_key}'."
+            logger.debug(
+                f"[DIAGNOSTIC] Publishing knowledgeBaseUpdate (Local Env). "
+                f"Exchange: {exchange_name}, Routing Key: '{routing_key}'."
             )
-            logger.info(f"  - Message Content: {json.dumps(message, indent=2, ensure_ascii=False)}")
 
         with self._rabbitmq_lock:
-            logger.info(
-                f"[DIAGNOSTIC] rabbitmq_service.rabbitmq_publish_message invoked. "
-                f"is_connected={self.is_rabbitmq_connected()}, exchange={exchange_name}, "
-                f"routing_key='{routing_key}', label={label}"
+            logger.debug(
+                f"rabbitmq_publish: connected={self.is_rabbitmq_connected()}, exchange={exchange_name}, label={label}"
             )
             if not self.is_rabbitmq_connected():
                 logger.error(
@@ -374,8 +370,8 @@ class RabbitMQSchedulerModule(BaseSchedulerModule):
                 self.initialize_rabbitmq(config=self.rabbitmq_config)
                 return False
 
-            logger.info(
-                f"[DIAGNOSTIC] rabbitmq_service.rabbitmq_publish_message: Attempting to publish message. Exchange: {exchange_name}, Routing Key: {routing_key}, Message Content: {json.dumps(message, indent=2, ensure_ascii=False)}"
+            logger.debug(
+                f"rabbitmq_publish: publishing to exchange={exchange_name}, routing_key={routing_key}"
             )
             try:
                 self.rabbitmq_channel.basic_publish(
