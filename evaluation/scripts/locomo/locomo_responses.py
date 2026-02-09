@@ -23,6 +23,9 @@ sys.path.insert(0, ROOT_DIR)
 sys.path.insert(0, EVAL_SCRIPTS_DIR)
 
 
+SEMAPHORE = asyncio.Semaphore(10)
+
+
 async def locomo_response(frame, llm_client, context: str, question: str) -> str:
     if frame == "zep":
         prompt = ANSWER_PROMPT_ZEP.format(
@@ -39,16 +42,26 @@ async def locomo_response(frame, llm_client, context: str, question: str) -> str
             context=context,
             question=question,
         )
-    response = await llm_client.chat.completions.create(
-        model=os.getenv("CHAT_MODEL"),
-        messages=[
-            {"role": "system", "content": prompt},
-        ],
-        temperature=0,
-    )
-    result = response.choices[0].message.content or ""
-
-    return result
+    for attempt in range(5):
+        try:
+            async with SEMAPHORE:
+                response = await llm_client.chat.completions.create(
+                    model=os.getenv("CHAT_MODEL"),
+                    messages=[
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0,
+                )
+            result = response.choices[0].message.content or ""
+            return result
+        except Exception as e:
+            if "429" in str(e) or "rate" in str(e).lower():
+                wait = 2 ** attempt * 5
+                print(f"Rate limited, retrying in {wait}s (attempt {attempt + 1}/5)...")
+                await asyncio.sleep(wait)
+            else:
+                raise
+    raise RuntimeError("Max retries exceeded for rate limit")
 
 
 async def process_qa(frame, qa, search_result, oai_client):
@@ -121,6 +134,7 @@ async def main(frame, version="default"):
 
         responses = await asyncio.gather(*tasks)
         all_responses[group_id] = responses
+        print(f"Completed {group_id}: {len(responses)} responses")
 
     os.makedirs("data", exist_ok=True)
 
