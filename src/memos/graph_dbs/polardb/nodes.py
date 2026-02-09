@@ -138,7 +138,6 @@ class NodeMixin:
                 - metadata: dict[str, Any] - Node metadata
             user_name: Optional user name (will use config default if not provided)
         """
-        batch_start_time = time.time()
         if not nodes:
             logger.warning("[add_nodes_batch] Empty nodes list, skipping")
             return
@@ -340,10 +339,6 @@ class NodeMixin:
                     logger.info(
                         f"[add_nodes_batch] Inserted {len(nodes_group)} nodes with embedding_column={embedding_column}"
                     )
-                    elapsed_time = time.time() - batch_start_time
-                    logger.info(
-                        f"[add_nodes_batch] PREPARE/EXECUTE batch insert completed successfully in {elapsed_time:.2f}s"
-                    )
 
         except Exception as e:
             logger.error(f"[add_nodes_batch] Failed to add nodes: {e}", exc_info=True)
@@ -366,10 +361,9 @@ class NodeMixin:
         Returns:
             dict: Node properties as key-value pairs, or None if not found.
         """
-        logger.info(
+        logger.debug(
             f"polardb [get_node] id: {id}, include_embedding: {include_embedding}, user_name: {user_name}"
         )
-        start_time = time.time()
         select_fields = "id, properties, embedding" if include_embedding else "id, properties"
 
         query = f"""
@@ -421,10 +415,6 @@ class NodeMixin:
                         except (json.JSONDecodeError, TypeError):
                             logger.warning(f"Failed to parse embedding for node {id}")
 
-                    elapsed_time = time.time() - start_time
-                    logger.info(
-                        f" polardb [get_node] get_node completed time in {elapsed_time:.2f}s"
-                    )
                     return self._parse_node(
                         {
                             "id": id,

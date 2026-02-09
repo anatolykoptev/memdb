@@ -536,8 +536,8 @@ class MultiModalStructMemReader(SimpleStructMemReader):
                         "memory": mem.get("memory", ""),
                     }
                 )
-            logger.info(
-                f"Valid similar memories for {mem_text} is "
+            logger.debug(
+                f"Valid similar memories for {mem_text[:100]} is "
                 f"{len(filtered_similar)}: {filtered_similar}"
             )
 
