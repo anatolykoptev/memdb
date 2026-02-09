@@ -48,11 +48,7 @@ def add_id_to_mysql(memory_id: str, mem_cube_id: str):
     try:
         response = requests.post(skill_mysql_url, headers=headers, json=data)
 
-        logger.info(f"[PROCESS_SKILLS] response: \n\n{response.json()}")
-        logger.info(f"[PROCESS_SKILLS] memory_id: \n\n{memory_id}")
-        logger.info(f"[PROCESS_SKILLS] mem_cube_id: \n\n{mem_cube_id}")
-        logger.info(f"[PROCESS_SKILLS] skill_mysql_url: \n\n{skill_mysql_url}")
-        logger.info(f"[PROCESS_SKILLS] skill_mysql_bearer: \n\n{skill_mysql_bearer}")
+        logger.debug(f"[PROCESS_SKILLS] MySQL response: {response.status_code}, memory_id={memory_id}")
         logger.info(f"[PROCESS_SKILLS] headers: \n\n{headers}")
         logger.info(f"[PROCESS_SKILLS] data: \n\n{data}")
 
@@ -228,7 +224,7 @@ def _extract_skill_memory_by_llm(
             llm_kwargs = {"model_name_or_path": skills_llm} if skills_llm else {}
             response_text = llm.generate(prompt, **llm_kwargs)
             # Clean up response (remove Markdown code blocks if present)
-            logger.info(f"[Skill Memory]: response_text {response_text}")
+            logger.debug(f"[Skill Memory]: response_text {response_text}")
             response_text = response_text.strip()
             response_text = response_text.replace("```json", "").replace("```", "").strip()
 
