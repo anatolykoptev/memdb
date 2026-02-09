@@ -221,6 +221,18 @@ LOGGING_CONFIG = {
             "level": logging.DEBUG if settings.DEBUG else logging.INFO,
             "propagate": True,  # Let logs bubble up to root
         },
+        "httpx": {
+            "level": logging.WARNING,
+            "propagate": True,
+        },
+        "httpcore": {
+            "level": logging.WARNING,
+            "propagate": True,
+        },
+        "uvicorn.access": {
+            "level": logging.WARNING,
+            "propagate": True,
+        },
     },
 }
 

@@ -70,7 +70,7 @@ class SearchHandler(BaseHandler):
         results = cube_view.search_memories(search_req_local)
         if not search_req_local.relativity:
             search_req_local.relativity = 0
-        self.logger.info(f"[SearchHandler] Relativity filter: {search_req_local.relativity}")
+        self.logger.debug(f"[SearchHandler] Relativity filter: {search_req_local.relativity}")
         results = self._apply_relativity_threshold(results, search_req_local.relativity)
 
         if search_req_local.dedup == "sim":

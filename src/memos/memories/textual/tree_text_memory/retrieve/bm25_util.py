@@ -46,9 +46,7 @@ class EnhancedBM25:
 
         with _CACHE_LOCK:
             if corpus_name in _BM25_CACHE:
-                print("hit::", corpus_name)
                 return _BM25_CACHE[corpus_name]
-            print("not hit::", corpus_name)
 
             tokenized_corpus = [self._tokenize_doc(doc) for doc in corpus]
             bm25_model = BM25Okapi(tokenized_corpus)
