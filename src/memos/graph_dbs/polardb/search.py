@@ -362,7 +362,9 @@ class SearchMixin:
                     score_val = (score_val + 1) / 2  # align to neo4j, Normalized Cosine Score
                     if threshold is None or score_val >= threshold:
                         output.append({"id": id_val, "score": score_val})
-                return output[:top_k]
+                result = output[:top_k]
+                logger.info(f"[search_by_embedding] rows={len(results)}, after_threshold={len(output)}, returned={len(result)}")
+                return result
         except Exception as e:
             logger.error(f"[search_by_embedding] Error: {type(e).__name__}: {e}", exc_info=True)
             return []
