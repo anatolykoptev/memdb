@@ -208,7 +208,7 @@ class GraphMemoryRetriever:
         - scope filters by memory_type if provided
         """
         use_fast_graph = kwargs.get("use_fast_graph", False)
-        logger.info(f"[RECALL:GRAPH] scope={memory_scope}, keys={parsed_goal.keys}, tags={parsed_goal.tags}, fast_graph={use_fast_graph}")
+        logger.info(f"[RECALL:GRAPH] scope={memory_scope}, keys={len(parsed_goal.keys)}, tags={len(parsed_goal.tags)}, fast_graph={use_fast_graph}")
 
         def process_node(node):
             meta = node.get("metadata", {})
@@ -514,7 +514,7 @@ class GraphMemoryRetriever:
         """
         if not query_words:
             return []
-        logger.info(f"[RECALL:FULLTEXT] scope={memory_scope}, query_words={query_words}, top_k={top_k}")
+        logger.info(f"[RECALL:FULLTEXT] scope={memory_scope}, words={len(query_words)}, top_k={top_k}")
         all_hits = self.graph_store.search_by_fulltext(
             query_words=query_words,
             top_k=top_k,

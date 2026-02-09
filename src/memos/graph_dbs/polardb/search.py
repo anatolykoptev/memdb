@@ -1,5 +1,3 @@
-import time
-
 from memos.graph_dbs.utils import convert_to_vector
 from memos.log import get_logger
 from memos.utils import timed
@@ -222,10 +220,9 @@ class SearchMixin:
         Returns:
             list[dict]: result list containing id and score
         """
-        logger.info(
+        logger.debug(
             f"[search_by_fulltext] query_words: {query_words}, top_k: {top_k}, scope: {scope}, filter: {filter}"
         )
-        start_time = time.time()
         where_clauses = self._build_search_where_clauses_sql(
             scope=scope, status=status, search_filter=search_filter,
             user_name=user_name, filter=filter, knowledgebase_ids=knowledgebase_ids,
@@ -271,10 +268,6 @@ class SearchMixin:
                     # Apply threshold filter if specified
                     if threshold is None or score_val >= threshold:
                         output.append({"id": id_val, "score": score_val})
-                elapsed_time = time.time() - start_time
-                logger.info(
-                    f" polardb [search_by_fulltext] query completed time in {elapsed_time:.2f}s"
-                )
                 return output[:top_k]
         finally:
             self._return_connection(conn)
