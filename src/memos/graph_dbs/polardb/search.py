@@ -296,7 +296,7 @@ class SearchMixin:
         """
         Retrieve node IDs based on vector similarity using PostgreSQL vector operations.
         """
-        logger.info(
+        logger.debug(
             f"[search_by_embedding] filter: {filter}, knowledgebase_ids: {knowledgebase_ids}"
         )
         where_clauses = self._build_search_where_clauses_sql(

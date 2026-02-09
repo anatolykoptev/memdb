@@ -36,7 +36,7 @@ class QueryMixin:
         Returns:
             list[str]: Node IDs whose metadata match the filter conditions. (AND logic).
         """
-        logger.info(f"[get_by_metadata] filter: {filter}, knowledgebase_ids: {knowledgebase_ids}")
+        logger.debug(f"[get_by_metadata] filter: {filter}, knowledgebase_ids: {knowledgebase_ids}")
 
         user_name = user_name if user_name else self._get_config_value("user_name")
 
