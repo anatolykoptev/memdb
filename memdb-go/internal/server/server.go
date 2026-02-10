@@ -42,7 +42,7 @@ func New(cfg *config.Config, logger *slog.Logger) *http.Server {
 	mux.HandleFunc("GET /health", h.Health)
 	mux.HandleFunc("GET /ready", h.ReadinessCheck)
 
-	// ─── Product Endpoints (maps to server_router.py) ───────────────────
+	// ─── Server Router Endpoints (server_router.py — deployed) ─────────
 
 	// Memory CRUD — validated
 	mux.HandleFunc("POST /product/get_all", h.ValidatedGetAll)
@@ -56,8 +56,7 @@ func New(cfg *config.Config, logger *slog.Logger) *http.Server {
 
 	// Suggestions
 	mux.HandleFunc("POST /product/suggestions", h.ProxyToProduct)
-
-	// ─── Server Router (maps to server_router.py) ───────────────────────
+	mux.HandleFunc("GET /product/suggestions/{user_id}", h.ProxyToProduct)
 
 	// Scheduler
 	mux.HandleFunc("GET /product/scheduler/allstatus", h.ProxyToProduct)
@@ -75,9 +74,29 @@ func New(cfg *config.Config, logger *slog.Logger) *http.Server {
 	// Feedback — validated
 	mux.HandleFunc("POST /product/feedback", h.ValidatedFeedback)
 
-	// Internal — validated
+	// Internal
 	mux.HandleFunc("POST /product/get_user_names_by_memory_ids", h.ProxyToProduct)
 	mux.HandleFunc("POST /product/exist_mem_cube_id", h.ValidatedExistMemCube)
+
+	// ─── Product Router Endpoints (product_router.py — migration) ───────
+
+	// Configuration
+	mux.HandleFunc("POST /product/configure", h.ProxyToProduct)
+	mux.HandleFunc("GET /product/configure/{user_id}", h.ProxyToProduct)
+
+	// User management
+	mux.HandleFunc("POST /product/users/register", h.ProxyToProduct)
+	mux.HandleFunc("GET /product/users", h.ProxyToProduct)
+	mux.HandleFunc("GET /product/users/{user_id}", h.ProxyToProduct)
+	mux.HandleFunc("GET /product/users/{user_id}/config", h.ProxyToProduct)
+	mux.HandleFunc("PUT /product/users/{user_id}/config", h.ProxyToProduct)
+
+	// Chat (product_router variant — SSE streaming)
+	mux.HandleFunc("POST /product/chat", h.ValidatedChatStream)
+
+	// Instance monitoring
+	mux.HandleFunc("GET /product/instances/status", h.ProxyToProduct)
+	mux.HandleFunc("GET /product/instances/count", h.ProxyToProduct)
 
 	// ─── Apply middleware stack ──────────────────────────────────────────
 	// Order: outermost wrapper first → innermost last

@@ -1,0 +1,4 @@
+POST http://localhost:8080/product/search
+Content-Type: application/json
+X-Service-Secret: ${SERVICE_SECRET}
+@search-body.json

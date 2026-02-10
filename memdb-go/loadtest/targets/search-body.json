@@ -1,0 +1,6 @@
+{
+  "query": "What programming languages does the user know?",
+  "user_id": "memos",
+  "top_k": 5,
+  "dedup": "mmr"
+}
