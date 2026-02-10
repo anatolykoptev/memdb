@@ -5,10 +5,12 @@
 # Scenarios:
 #   health     - GET /health (baseline latency)
 #   search     - POST /product/search (main workload)
+#   get_all    - POST /product/get_all (native DB read)
+#   users      - GET /product/users (native DB read)
 #   add        - POST /product/add in fast mode
 #   stream     - POST /product/chat/stream (SSE)
 #   ratelimit  - Burst test to verify 429 responses
-#   all        - Run health + search sequentially
+#   all        - Run health + search + get_all sequentially
 #
 # Options:
 #   -r RATE      Requests per second (default: 10)
@@ -71,20 +73,23 @@ run_scenario() {
     echo "  Target: :${PORT}, Rate: ${rate} req/s, Duration: ${duration}"
 
     # Substitute variables in target file
-    local tmp_target
-    tmp_target=$(mktemp)
-    envsubst < "${target_file}" > "$tmp_target"
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    envsubst < "${target_file}" > "$tmp_dir/target.txt"
 
     # Replace port in target file
-    sed -i "s|localhost:8080|${HOST}:${PORT}|g" "$tmp_target"
+    sed -i "s|localhost:8080|${HOST}:${PORT}|g" "$tmp_dir/target.txt"
 
-    # Run vegeta attack
-    vegeta attack \
-        -targets="$tmp_target" \
+    # Copy body files to temp dir so vegeta can find them
+    cp "${TARGETS_DIR}"/*-body.json "$tmp_dir/" 2>/dev/null || true
+
+    # Run vegeta attack (from tmp_dir so @body.json refs resolve)
+    (cd "$tmp_dir" && vegeta attack \
+        -targets="target.txt" \
         -rate="${rate}" \
         -duration="${duration}" \
         -timeout="30s" \
-        -workers=10 \
+        -workers=10) \
     | tee "${result_prefix}.bin" \
     | vegeta report \
     | tee "${result_prefix}.txt"
@@ -95,7 +100,7 @@ run_scenario() {
     # JSON report for programmatic comparison
     vegeta report -type=json < "${result_prefix}.bin" > "${result_prefix}.json" 2>/dev/null || true
 
-    rm -f "$tmp_target"
+    rm -rf "$tmp_dir"
     echo ""
 }
 
@@ -103,18 +108,18 @@ run_ratelimit_test() {
     echo "=== Rate Limit Burst Test ==="
     echo "  Sending 200 requests at 200 req/s to trigger rate limiting"
 
-    local tmp_target
-    tmp_target=$(mktemp)
-    envsubst < "${TARGETS_DIR}/health.txt" > "$tmp_target"
-    sed -i "s|localhost:8080|${HOST}:${PORT}|g" "$tmp_target"
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    envsubst < "${TARGETS_DIR}/health.txt" > "$tmp_dir/target.txt"
+    sed -i "s|localhost:8080|${HOST}:${PORT}|g" "$tmp_dir/target.txt"
 
     local result_prefix="${RESULTS_DIR}/ratelimit_${TIMESTAMP}"
 
-    vegeta attack \
-        -targets="$tmp_target" \
+    (cd "$tmp_dir" && vegeta attack \
+        -targets="target.txt" \
         -rate=200 \
         -duration="1s" \
-        -timeout="5s" \
+        -timeout="5s") \
     | tee "${result_prefix}.bin" \
     | vegeta report \
     | tee "${result_prefix}.txt"
@@ -129,7 +134,7 @@ print(codes.get('429', 0))
 " 2>/dev/null || echo "N/A")
     echo "  429 responses: ${total_429}"
 
-    rm -f "$tmp_target"
+    rm -rf "$tmp_dir"
     echo ""
 }
 
@@ -139,6 +144,12 @@ case "$SCENARIO" in
         ;;
     search)
         run_scenario "search" "${TARGETS_DIR}/search.txt"
+        ;;
+    get_all)
+        run_scenario "get_all" "${TARGETS_DIR}/get-all.txt"
+        ;;
+    users)
+        run_scenario "users" "${TARGETS_DIR}/users.txt"
         ;;
     add)
         run_scenario "add" "${TARGETS_DIR}/add.txt" 5
@@ -152,15 +163,21 @@ case "$SCENARIO" in
     all)
         run_scenario "health" "${TARGETS_DIR}/health.txt"
         run_scenario "search" "${TARGETS_DIR}/search.txt"
+        run_scenario "get_all" "${TARGETS_DIR}/get-all.txt"
+        run_scenario "users" "${TARGETS_DIR}/users.txt"
         ;;
     compare)
         echo "=== Comparing Go gateway vs Python direct ==="
         echo ""
         PORT=8080
         run_scenario "go_health" "${TARGETS_DIR}/health.txt"
+        run_scenario "go_get_all" "${TARGETS_DIR}/get-all.txt"
+        run_scenario "go_users" "${TARGETS_DIR}/users.txt"
         run_scenario "go_search" "${TARGETS_DIR}/search.txt"
         PORT=8000
         run_scenario "py_health" "${TARGETS_DIR}/health.txt"
+        run_scenario "py_get_all" "${TARGETS_DIR}/get-all.txt"
+        run_scenario "py_users" "${TARGETS_DIR}/users.txt"
         run_scenario "py_search" "${TARGETS_DIR}/search.txt"
         echo "=== Comparison complete ==="
         echo "Results in: ${RESULTS_DIR}/"
@@ -168,7 +185,7 @@ case "$SCENARIO" in
         ;;
     *)
         echo "Unknown scenario: $SCENARIO"
-        echo "Available: health, search, add, stream, ratelimit, all, compare"
+        echo "Available: health, search, get_all, users, add, stream, ratelimit, all, compare"
         exit 1
         ;;
 esac

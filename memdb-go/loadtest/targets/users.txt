@@ -1,0 +1,2 @@
+GET http://localhost:8080/product/users
+X-Service-Secret: ${SERVICE_SECRET}
