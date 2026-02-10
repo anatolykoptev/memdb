@@ -71,7 +71,7 @@ func NewONNXEmbedder(modelDir string, logger *slog.Logger) (*ONNXEmbedder, error
 	opts.SetInterOpNumThreads(1)
 
 	modelPath := filepath.Join(modelDir, "model_quantized.onnx")
-	inputNames := []string{"input_ids", "attention_mask", "token_type_ids"}
+	inputNames := []string{"input_ids", "attention_mask"}
 	outputNames := []string{"last_hidden_state"}
 
 	session, err := ort.NewDynamicAdvancedSession(
@@ -159,7 +159,6 @@ func (e *ONNXEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 	totalTokens := batchSize * maxSeqLen
 	inputIDs := make([]int64, totalTokens)
 	attentionMask := make([]int64, totalTokens)
-	tokenTypeIDs := make([]int64, totalTokens) // all zeros for XLM-RoBERTa
 
 	for b := 0; b < batchSize; b++ {
 		offset := b * maxSeqLen
@@ -173,13 +172,12 @@ func (e *ONNXEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		for s := seqLen; s < maxSeqLen; s++ {
 			inputIDs[offset+s] = e5PadID
 			attentionMask[offset+s] = 0
-			// tokenTypeIDs already zero
 		}
 	}
 
 	// --- Run ONNX inference (serialized) --------------------------------------
 	e.mu.Lock()
-	hidden, err := e.runInference(batchSize, maxSeqLen, inputIDs, attentionMask, tokenTypeIDs)
+	hidden, err := e.runInference(batchSize, maxSeqLen, inputIDs, attentionMask)
 	e.mu.Unlock()
 
 	if err != nil {
@@ -201,7 +199,7 @@ func (e *ONNXEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 // state. Caller must hold e.mu.
 func (e *ONNXEmbedder) runInference(
 	batchSize, seqLen int,
-	inputIDs, attentionMask, tokenTypeIDs []int64,
+	inputIDs, attentionMask []int64,
 ) ([]float32, error) {
 
 	shape := ort.NewShape(int64(batchSize), int64(seqLen))
@@ -218,17 +216,11 @@ func (e *ONNXEmbedder) runInference(
 	}
 	defer maskTensor.Destroy()
 
-	typeTensor, err := ort.NewTensor(shape, tokenTypeIDs)
-	if err != nil {
-		return nil, fmt.Errorf("onnx: create token_type_ids tensor: %w", err)
-	}
-	defer typeTensor.Destroy()
-
 	// Auto-allocate output: pass nil and let ONNX Runtime determine the shape.
 	outputs := []ort.Value{nil}
 
 	err = e.session.Run(
-		[]ort.Value{idsTensor, maskTensor, typeTensor},
+		[]ort.Value{idsTensor, maskTensor},
 		outputs,
 	)
 	if err != nil {
