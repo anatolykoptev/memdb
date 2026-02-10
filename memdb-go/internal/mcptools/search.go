@@ -81,7 +81,7 @@ func RegisterSearchTool(server *mcp.Server, pg *db.Postgres, qd *db.Qdrant, emb 
 		if qd != nil {
 			g.Go(func() error {
 				for _, coll := range prefCollections {
-					results, err := qd.SearchByVector(gctx, coll, queryVec, uint64(topK*5))
+					results, err := qd.SearchByVector(gctx, coll, queryVec, uint64(topK*5), userName)
 					if err != nil {
 						logger.Debug("pref search failed", slog.String("collection", coll), slog.Any("error", err))
 						continue

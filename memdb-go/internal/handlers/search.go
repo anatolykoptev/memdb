@@ -197,7 +197,7 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 	if h.qdrant != nil && prefTopK > 0 {
 		g.Go(func() error {
 			for _, coll := range prefCollections {
-				results, err := h.qdrant.SearchByVector(gctx, coll, queryVec, uint64(searchPrefTopK))
+				results, err := h.qdrant.SearchByVector(gctx, coll, queryVec, uint64(searchPrefTopK), userName)
 				if err != nil {
 					h.logger.Debug("pref search failed",
 						slog.String("collection", coll),
