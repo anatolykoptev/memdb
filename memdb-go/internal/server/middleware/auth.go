@@ -43,8 +43,13 @@ func Auth(logger *slog.Logger, cfg AuthConfig) func(http.Handler) http.Handler {
 			}
 
 			// Check internal service secret first (for service-to-service calls)
+			// Accept both X-Service-Secret and X-Internal-Service headers for compatibility
 			if cfg.ServiceSecret != "" {
-				if secret := r.Header.Get("X-Service-Secret"); secret != "" {
+				secret := r.Header.Get("X-Service-Secret")
+				if secret == "" {
+					secret = r.Header.Get("X-Internal-Service")
+				}
+				if secret != "" {
 					if subtle.ConstantTimeCompare([]byte(secret), []byte(cfg.ServiceSecret)) == 1 {
 						next.ServeHTTP(w, r)
 						return
