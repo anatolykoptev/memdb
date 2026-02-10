@@ -40,6 +40,28 @@ func (h *Handler) SetDBClients(pg *db.Postgres, qd *db.Qdrant, rd *db.Redis) {
 	h.redis = rd
 }
 
+// Close releases all database connections held by the handler.
+func (h *Handler) Close() {
+	if h.postgres != nil {
+		h.postgres.Close()
+		h.logger.Info("postgres connection closed")
+	}
+	if h.qdrant != nil {
+		if err := h.qdrant.Close(); err != nil {
+			h.logger.Error("qdrant close error", slog.Any("error", err))
+		} else {
+			h.logger.Info("qdrant connection closed")
+		}
+	}
+	if h.redis != nil {
+		if err := h.redis.Close(); err != nil {
+			h.logger.Error("redis close error", slog.Any("error", err))
+		} else {
+			h.logger.Info("redis connection closed")
+		}
+	}
+}
+
 // --- Health endpoints (handled directly by Go, no proxy) ---
 
 // Health returns a simple health check response.

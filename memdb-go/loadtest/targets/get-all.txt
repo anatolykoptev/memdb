@@ -1,0 +1,4 @@
+POST http://localhost:8080/product/get_all
+Content-Type: application/json
+X-Service-Secret: ${SERVICE_SECRET}
+@get-all-body.json

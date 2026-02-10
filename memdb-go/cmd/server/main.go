@@ -66,7 +66,8 @@ func main() {
 	}
 
 	// Create HTTP server
-	srv := server.New(cfg, logger)
+	srv, cleanup := server.New(cfg, logger)
+	defer cleanup()
 
 	// Graceful shutdown
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

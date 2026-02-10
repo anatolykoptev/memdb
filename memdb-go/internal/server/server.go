@@ -14,8 +14,9 @@ import (
 	mw "github.com/MemDBai/MemDB/memdb-go/internal/server/middleware"
 )
 
-// New creates a fully configured HTTP server.
-func New(cfg *config.Config, logger *slog.Logger) *http.Server {
+// New creates a fully configured HTTP server and returns a cleanup function
+// that closes all database connections on shutdown.
+func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	// Initialize cache client (non-fatal if unavailable)
 	var cacheClient *cache.Client
 	if cfg.CacheEnabled {
@@ -119,12 +120,21 @@ func New(cfg *config.Config, logger *slog.Logger) *http.Server {
 	handler = mw.RequestID(handler)
 	handler = mw.Recovery(logger)(handler)
 
-	return &http.Server{
+	srv := &http.Server{
 		Addr:         ":" + cfg.PortStr(),
 		Handler:      handler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 	}
+
+	cleanup := func() {
+		h.Close()
+		if cacheClient != nil {
+			cacheClient.Close()
+		}
+	}
+
+	return srv, cleanup
 }
 
 // initDBClients connects to databases for native handlers.
