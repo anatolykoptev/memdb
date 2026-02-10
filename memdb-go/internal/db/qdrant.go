@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
+	"strconv"
 
 	"github.com/qdrant/go-client/qdrant"
 )
@@ -15,15 +17,23 @@ type Qdrant struct {
 }
 
 // NewQdrant creates a new Qdrant gRPC client.
-// addr should be "host:port" (default Qdrant gRPC port is 6334).
+// addr should be "host:port" or just "host" (default gRPC port is 6334).
 func NewQdrant(ctx context.Context, addr string, logger *slog.Logger) (*Qdrant, error) {
 	if addr == "" {
 		return nil, fmt.Errorf("qdrant address is empty")
 	}
 
-	client, err := qdrant.NewClient(&qdrant.Config{
-		Host: addr,
-	})
+	cfg := &qdrant.Config{}
+	if host, portStr, err := net.SplitHostPort(addr); err == nil {
+		cfg.Host = host
+		if p, err := strconv.Atoi(portStr); err == nil {
+			cfg.Port = p
+		}
+	} else {
+		cfg.Host = addr // no port, use default 6334
+	}
+
+	client, err := qdrant.NewClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("qdrant connect failed: %w", err)
 	}
