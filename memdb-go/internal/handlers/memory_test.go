@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestNativeGetMemoryByIDs_NoPostgres verifies validation still works when
@@ -188,3 +190,28 @@ func TestNativeDelete_NoPostgres_InvalidJSON(t *testing.T) {
 		t.Errorf("expected JSON error, got: %s", w.Body.String())
 	}
 }
+
+// --- Cache helper tests (redis=nil graceful degradation) ---
+
+func TestCacheGet_NilRedis(t *testing.T) {
+	h := testValidateHandler() // redis is nil
+	got := h.cacheGet(context.Background(), "memdb:db:test:key")
+	if got != nil {
+		t.Errorf("expected nil from cacheGet with nil redis, got %v", got)
+	}
+}
+
+func TestCacheSet_NilRedis(t *testing.T) {
+	h := testValidateHandler()
+	// Should not panic
+	h.cacheSet(context.Background(), "memdb:db:test:key", []byte("data"), 30*time.Second)
+}
+
+func TestCacheInvalidate_NilRedis(t *testing.T) {
+	h := testValidateHandler()
+	// Should not panic
+	h.cacheInvalidate(context.Background(), "memdb:db:*")
+}
+
+// Integration tests with a real Redis would cover cache hit/miss paths.
+// Unit tests verify graceful degradation when redis=nil (all handlers still work).

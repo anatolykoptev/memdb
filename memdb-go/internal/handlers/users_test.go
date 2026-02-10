@@ -106,3 +106,19 @@ func TestNativeGetUserNamesByMemoryIDs_NoPostgres_InvalidJSON(t *testing.T) {
 	defer func() { recover() }()
 	h.NativeGetUserNamesByMemoryIDs(w, req)
 }
+
+// --- NativeListUsers cache tests (redis=nil graceful degradation) ---
+
+func TestNativeListUsers_NoRedis_NoPostgres(t *testing.T) {
+	h := testValidateHandler() // redis=nil, postgres=nil
+
+	req := httptest.NewRequest("GET", "/product/users", nil)
+	w := httptest.NewRecorder()
+
+	// postgres=nil → ProxyToProduct → panics (nil python)
+	defer func() { recover() }()
+	h.NativeListUsers(w, req)
+}
+
+// Integration tests with real Redis+Postgres would cover cache hit/miss paths
+// for NativeListUsers, NativeInstancesCount.

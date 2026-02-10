@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// Cache TTL for user-related queries (users list, instance count).
+const usersCacheTTL = 120 * time.Second
+
 // NativeListUsers handles GET /product/users natively via PostgreSQL.
 func (h *Handler) NativeListUsers(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
@@ -16,7 +19,18 @@ func (h *Handler) NativeListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	users, err := h.postgres.ListUsers(r.Context())
+	ctx := r.Context()
+	cacheKey := cachePrefix + "users:list"
+
+	// Check cache
+	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(cached)
+		return
+	}
+
+	users, err := h.postgres.ListUsers(ctx)
 	if err != nil {
 		h.logger.Debug("native list_users failed, falling back to proxy",
 			slog.Any("error", err),
@@ -28,11 +42,16 @@ func (h *Handler) NativeListUsers(w http.ResponseWriter, r *http.Request) {
 		users = []string{}
 	}
 
-	h.writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"code":    200,
 		"message": "ok",
 		"data":    users,
-	})
+	}
+	if encoded, err := json.Marshal(resp); err == nil {
+		h.cacheSet(ctx, cacheKey, encoded, usersCacheTTL)
+	}
+
+	h.writeJSON(w, http.StatusOK, resp)
 }
 
 // NativeGetUser handles GET /product/users/{user_id} natively via PostgreSQL.
@@ -133,7 +152,18 @@ func (h *Handler) NativeInstancesCount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := h.postgres.CountDistinctUsers(r.Context())
+	ctx := r.Context()
+	cacheKey := cachePrefix + "users:count"
+
+	// Check cache
+	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(cached)
+		return
+	}
+
+	count, err := h.postgres.CountDistinctUsers(ctx)
 	if err != nil {
 		h.logger.Debug("native instances_count failed, falling back to proxy",
 			slog.Any("error", err),
@@ -142,13 +172,18 @@ func (h *Handler) NativeInstancesCount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"code":    200,
 		"message": "ok",
 		"data": map[string]any{
 			"count": count,
 		},
-	})
+	}
+	if encoded, err := json.Marshal(resp); err == nil {
+		h.cacheSet(ctx, cacheKey, encoded, usersCacheTTL)
+	}
+
+	h.writeJSON(w, http.StatusOK, resp)
 }
 
 // NativeConfigure handles POST /product/configure.
