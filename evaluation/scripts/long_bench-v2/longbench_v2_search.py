@@ -21,14 +21,14 @@ sys.path.insert(0, EVAL_SCRIPTS_DIR)
 
 
 def memos_api_search(client, query, user_id, top_k, frame):
-    """Search using memos API."""
+    """Search using MemDB API."""
     start = time()
     search_results = client.search(query=query, user_id=user_id, top_k=top_k)
 
     # Extract raw memory texts in the same way as longbench_stx.memos_search
     memories_texts: list[str] = []
     if (
-        (frame == "memos-api" or frame == "memos-api-online")
+        (frame == "memdb-api" or frame == "memdb-api-online")
         and isinstance(search_results, dict)
         and "text_mem" in search_results
     ):
@@ -178,11 +178,11 @@ def main(frame, version="default", num_workers=10, top_k=20, max_samples=None):
 
     # Initialize client
     client = None
-    if frame == "memos-api":
+    if frame == "memdb-api":
         from utils.client import MemosApiClient
 
         client = MemosApiClient()
-    elif frame == "memos-api-online":
+    elif frame == "memdb-api-online":
         from utils.client import MemosApiOnlineClient
 
         client = MemosApiOnlineClient()
@@ -241,8 +241,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--lib",
         type=str,
-        choices=["memos-api", "memos-api-online"],
-        default="memos-api",
+        choices=["memdb-api", "memdb-api-online"],
+        default="memdb-api",
     )
     parser.add_argument(
         "--version",

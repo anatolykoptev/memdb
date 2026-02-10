@@ -27,7 +27,7 @@ def ingest_session(session, user_id, session_id, frame, client):
         timestamp_add = int(time.time() * 100)
         client.add(messages=messages, user_id=user_id, timestamp=timestamp_add, batch_size=10)
         print(f"[{frame}] ✅ Session [{session_id}]: Ingested {len(messages)} messages")
-    elif frame == "memos-api":
+    elif frame == "memdb-api":
         client.add(messages=session, user_id=user_id, conv_id=session_id, batch_size=10)
         print(f"[{frame}] ✅ Session [{session_id}]: Ingested {len(session)} messages")
     elif frame == "memobase":
@@ -56,7 +56,7 @@ def ingest_session(session, user_id, session_id, frame, client):
         for _idx, msg in enumerate(session):
             messages.append({"role": msg["role"], "content": msg["content"]})
         client.add(messages, user_id, datetime.now().astimezone().isoformat())
-    elif frame == "memos-api-online":
+    elif frame == "memdb-api-online":
         client.add(messages, user_id, session_id, batch_size=10)
 
 
@@ -150,7 +150,7 @@ def ingest_conv(row_data, context, version, conv_idx, frame, success_records, f)
         print("🔌 Using Mem0 client for ingestion...")
         client.client.delete_all(user_id=user_id)
         print(f"🗑️  Deleted existing memories for user {user_id}...")
-    elif frame == "memos-api":
+    elif frame == "memdb-api":
         from utils.client import MemosApiClient
 
         client = MemosApiClient()
@@ -166,7 +166,7 @@ def ingest_conv(row_data, context, version, conv_idx, frame, success_records, f)
         from utils.client import MemuClient
 
         client = MemuClient()
-    elif frame == "memos-api-online":
+    elif frame == "memdb-api-online":
         from utils.client import MemosApiOnlineClient
 
         client = MemosApiOnlineClient()
@@ -272,16 +272,16 @@ if __name__ == "__main__":
         "--lib",
         type=str,
         choices=[
-            "memos-api-online",
+            "memdb-api-online",
             "mem0",
             "mem0_graph",
-            "memos-api",
+            "memdb-api",
             "memobase",
             "memu",
             "supermemory",
             "zep",
         ],
-        default="memos-api",
+        default="memdb-api",
     )
     parser.add_argument(
         "--version", type=str, default="default", help="Version of the evaluation framework."

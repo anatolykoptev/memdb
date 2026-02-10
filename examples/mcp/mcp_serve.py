@@ -7,9 +7,9 @@ from dotenv import load_dotenv
 from fastmcp import FastMCP
 
 # Assuming these are your imports
-from memos.mem_os.main import MOS
-from memos.mem_os.utils.default_config import get_default
-from memos.mem_user.user_manager import UserRole
+from memdb.mem_os.main import MOS
+from memdb.mem_os.utils.default_config import get_default
+from memdb.mem_user.user_manager import UserRole
 
 
 load_dotenv()
@@ -383,7 +383,7 @@ class MOSMCPServer:
                 str: Success message confirming the memory was updated
             """
             try:
-                from memos.memories.textual.item import TextualMemoryItem, TextualMemoryMetadata
+                from memdb.memories.textual.item import TextualMemoryItem, TextualMemoryMetadata
 
                 metadata = TextualMemoryMetadata(
                     user_id=user_id or self.mos_core.user_id,

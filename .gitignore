@@ -1,5 +1,5 @@
-# MemOS home
-.memos/
+# MemDB home
+.memdb/
 
 # Temporary files
 tmp/

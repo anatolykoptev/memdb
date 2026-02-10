@@ -27,7 +27,7 @@ Please describe the tests that you ran to verify your changes. Provide instructi
 - [ ] I have performed a self-review of my own code | 我已自行检查了自己的代码
 - [ ] I have commented my code in hard-to-understand areas | 我已在难以理解的地方对代码进行了注释
 - [ ] I have added tests that prove my fix is effective or that my feature works | 我已添加测试以证明我的修复有效或功能正常
-- [ ] I have created related documentation issue/PR in [MemOS-Docs](https://github.com/MemTensor/MemOS-Docs) (if applicable) | 我已在 [MemOS-Docs](https://github.com/MemTensor/MemOS-Docs) 中创建了相关的文档 issue/PR（如果适用）
+- [ ] I have created related documentation issue/PR in [MemDB-Docs](https://github.com/MemDBai/MemDB-Docs) (if applicable) | 我已在 [MemDB-Docs](https://github.com/MemDBai/MemDB-Docs) 中创建了相关的文档 issue/PR（如果适用）
 - [ ] I have linked the issue to this PR (if applicable) | 我已将 issue 链接到此 PR（如果适用）
 - [ ] I have mentioned the person who will review this PR | 我已提及将审查此 PR 的人
 

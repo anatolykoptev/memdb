@@ -2,8 +2,8 @@ import unittest
 
 from unittest.mock import patch
 
-from memos.configs.embedder import EmbedderConfigFactory
-from memos.embedders.factory import ArkEmbedder, EmbedderFactory
+from memdb.configs.embedder import EmbedderConfigFactory
+from memdb.embedders.factory import ArkEmbedder, EmbedderFactory
 
 
 class TestEmbedderFactory(unittest.TestCase):

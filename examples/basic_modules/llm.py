@@ -1,6 +1,6 @@
-from memos.configs.llm import LLMConfigFactory, OllamaLLMConfig
-from memos.llms.factory import LLMFactory
-from memos.llms.ollama import OllamaLLM
+from memdb.configs.llm import LLMConfigFactory, OllamaLLMConfig
+from memdb.llms.factory import LLMFactory
+from memdb.llms.ollama import OllamaLLM
 
 
 # Scenario 1: Using LLMFactory with Ollama Backend

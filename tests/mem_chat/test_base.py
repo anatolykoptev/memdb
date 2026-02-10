@@ -1,4 +1,4 @@
-from memos.mem_chat.base import BaseMemChat
+from memdb.mem_chat.base import BaseMemChat
 from tests.utils import check_module_base_class
 
 

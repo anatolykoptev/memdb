@@ -37,7 +37,7 @@ def add_memory_for_line(
     f,
 ) -> dict:
     """
-    Adds conversation memory for a single line of data to MemOS and returns the data with a persistent user_id.
+    Adds conversation memory for a single line of data to MemDB and returns the data with a persistent user_id.
     """
     i, line = line_data
     user_id = f"{lib}_user_pref_eval_{i}_{version}"
@@ -170,7 +170,7 @@ def generate_response_for_line(line_data: tuple, openai_client: OpenAI) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Process conversations with MemOS. Run 'add', then 'search', then 'response'."
+        description="Process conversations with MemDB. Run 'add', then 'search', then 'response'."
     )
     parser.add_argument(
         "mode",

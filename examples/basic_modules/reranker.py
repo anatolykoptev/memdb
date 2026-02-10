@@ -3,12 +3,12 @@ import uuid
 
 from dotenv import load_dotenv
 
-from memos import log
-from memos.configs.embedder import EmbedderConfigFactory
-from memos.configs.reranker import RerankerConfigFactory
-from memos.embedders.factory import EmbedderFactory
-from memos.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
-from memos.reranker.factory import RerankerFactory
+from memdb import log
+from memdb.configs.embedder import EmbedderConfigFactory
+from memdb.configs.reranker import RerankerConfigFactory
+from memdb.embedders.factory import EmbedderFactory
+from memdb.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
+from memdb.reranker.factory import RerankerFactory
 
 
 load_dotenv()

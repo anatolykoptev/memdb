@@ -4,14 +4,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from memos.extras.nli_model.client import NLIClient
-from memos.extras.nli_model.types import NLIResult
-from memos.graph_dbs.base import BaseGraphDB
-from memos.memories.textual.item import (
+from memdb.extras.nli_model.client import NLIClient
+from memdb.extras.nli_model.types import NLIResult
+from memdb.graph_dbs.base import BaseGraphDB
+from memdb.memories.textual.item import (
     TextualMemoryItem,
     TextualMemoryMetadata,
 )
-from memos.memories.textual.tree_text_memory.organize.history_manager import (
+from memdb.memories.textual.tree_text_memory.organize.history_manager import (
     MemoryHistoryManager,
     _append_related_content,
     _detach_related_content,

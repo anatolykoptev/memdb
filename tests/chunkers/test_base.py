@@ -1,4 +1,4 @@
-from memos.chunkers.base import BaseChunker
+from memdb.chunkers.base import BaseChunker
 from tests.utils import check_module_base_class
 
 

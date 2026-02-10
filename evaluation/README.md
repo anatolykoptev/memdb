@@ -18,26 +18,26 @@ This repository provides tools and scripts for evaluating the `LoCoMo`, `LongMem
 ## Configuration
 Copy the `.env-example` file to `.env`, and fill in the required environment variables according to your environment and API keys.
 
-## Setup MemOS
+## Setup MemDB
 ### local server
 ```bash
 # modify {project_dir}/.env file and start server
-uvicorn memos.api.server_api:app --host 0.0.0.0 --port 8001 --workers 8
+uvicorn memdb.api.server_api:app --host 0.0.0.0 --port 8001 --workers 8
 
 # configure {project_dir}/evaluation/.env file
-MEMOS_URL="http://127.0.0.1:8001"
+MEMDB_URL="http://127.0.0.1:8001"
 ```
 ### online service
 ```bash
-# get your api key at https://memos-dashboard.openmem.net/cn/quickstart/
+# get your api key at https://github.com/MemDBai/MemDB
 # configure {project_dir}/evaluation/.env file
-MEMOS_KEY="Token mpg-xxxxx"
-MEMOS_ONLINE_URL="https://memos.memtensor.cn/api/openmem/v1"
+MEMDB_KEY="Token mpg-xxxxx"
+MEMDB_ONLINE_URL="https://api.memdb.io/v1"
 
 ```
 
 ## Supported frameworks
-We support `memos-api` and `memos-api-online` in our scripts.
+We support `memdb-api` and `memdb-api-online` in our scripts.
 And give unofficial implementations for the following memory frameworks:`zep`, `mem0`, `memobase`, `supermemory`, `memu`.
 
 

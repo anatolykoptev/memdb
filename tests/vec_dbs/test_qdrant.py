@@ -4,10 +4,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from memos import settings
-from memos.configs.vec_db import VectorDBConfigFactory
-from memos.vec_dbs.factory import VecDBFactory
-from memos.vec_dbs.item import VecDBItem
+from memdb import settings
+from memdb.configs.vec_db import VectorDBConfigFactory
+from memdb.vec_dbs.factory import VecDBFactory
+from memdb.vec_dbs.item import VecDBItem
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def config():
                 "collection_name": "test_collection",
                 "vector_dimension": 4,
                 "distance_metric": "cosine",
-                "path": str(settings.MEMOS_DIR / "qdrant"),
+                "path": str(settings.MEMDB_DIR / "qdrant"),
             },
         }
     )

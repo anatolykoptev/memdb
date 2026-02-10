@@ -135,13 +135,13 @@ if __name__ == "__main__":
         choices=[
             "mem0",
             "mem0_graph",
-            "memos-api",
-            "memos-api-online",
+            "memdb-api",
+            "memdb-api-online",
             "memobase",
             "memu",
             "supermemory",
         ],
-        default="memos-api",
+        default="memdb-api",
     )
     parser.add_argument(
         "--version", type=str, default="default", help="Version of the evaluation framework."

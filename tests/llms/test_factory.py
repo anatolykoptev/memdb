@@ -1,4 +1,4 @@
-from memos.llms.factory import LLMFactory
+from memdb.llms.factory import LLMFactory
 from tests.utils import check_module_factory_class
 
 

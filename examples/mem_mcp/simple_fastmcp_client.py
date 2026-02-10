@@ -28,7 +28,7 @@ async def main():
         result = await client.call_tool(
             "add_memory",
             arguments={
-                "memory_content": "MemOS is a great tool for memory management.",
+                "memory_content": "MemDB is a great tool for memory management.",
                 "user_id": user_id,
             },
         )
@@ -37,14 +37,14 @@ async def main():
         print("\n  2. Searching memories...")
         result = await client.call_tool(
             "search_memories",
-            arguments={"query": "MemOS", "user_id": user_id},
+            arguments={"query": "MemDB", "user_id": user_id},
         )
         print(f"    Result: {result}")
 
         print("\n  3. Chatting...")
         result = await client.call_tool(
             "chat",
-            arguments={"query": "What is MemOS?", "user_id": user_id},
+            arguments={"query": "What is MemDB?", "user_id": user_id},
         )
         print(f"    Result: {result}")
 

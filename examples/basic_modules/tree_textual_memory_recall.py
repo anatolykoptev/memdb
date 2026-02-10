@@ -2,7 +2,7 @@
 Tree Textual Memory Recall Example
 ===================================
 
-This example demonstrates how to use MemOS's GraphMemoryRetriever to recall memories
+This example demonstrates how to use MemDB's GraphMemoryRetriever to recall memories
 from a shared graph database.
 
 **What you'll learn:**
@@ -23,14 +23,14 @@ Run this example:
 import json
 import os
 
-from memos import log
-from memos.configs.embedder import EmbedderConfigFactory
-from memos.configs.graph_db import GraphDBConfigFactory
-from memos.embedders.factory import EmbedderFactory
-from memos.graph_dbs.factory import GraphStoreFactory
-from memos.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
-from memos.memories.textual.tree_text_memory.retrieve.recall import GraphMemoryRetriever
-from memos.memories.textual.tree_text_memory.retrieve.retrieval_mid_structs import ParsedTaskGoal
+from memdb import log
+from memdb.configs.embedder import EmbedderConfigFactory
+from memdb.configs.graph_db import GraphDBConfigFactory
+from memdb.embedders.factory import EmbedderFactory
+from memdb.graph_dbs.factory import GraphStoreFactory
+from memdb.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
+from memdb.memories.textual.tree_text_memory.retrieve.recall import GraphMemoryRetriever
+from memdb.memories.textual.tree_text_memory.retrieve.retrieval_mid_structs import ParsedTaskGoal
 
 
 logger = log.get_logger(__name__)

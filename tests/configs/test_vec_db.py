@@ -1,4 +1,4 @@
-from memos.configs.vec_db import (
+from memdb.configs.vec_db import (
     BaseVecDBConfig,
     QdrantVecDBConfig,
     VectorDBConfigFactory,

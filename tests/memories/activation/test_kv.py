@@ -5,9 +5,9 @@ import torch
 
 from transformers import DynamicCache
 
-from memos.configs.memory import KVCacheMemoryConfig
-from memos.memories.activation.item import KVCacheItem
-from memos.memories.activation.kv import KVCacheMemory
+from memdb.configs.memory import KVCacheMemoryConfig
+from memdb.memories.activation.item import KVCacheItem
+from memdb.memories.activation.kv import KVCacheMemory
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def dummy_config():
 def kv_memory(dummy_config):
     # Patch LLMFactory to avoid real LLM calls
     with pytest.MonkeyPatch.context() as m:
-        from memos.llms import factory
+        from memdb.llms import factory
 
         m.setattr(
             factory.LLMFactory,

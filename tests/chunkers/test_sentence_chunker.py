@@ -2,8 +2,8 @@ import unittest
 
 from unittest.mock import MagicMock, patch
 
-from memos.chunkers.factory import ChunkerFactory
-from memos.configs.chunker import ChunkerConfigFactory
+from memdb.chunkers.factory import ChunkerFactory
+from memdb.configs.chunker import ChunkerConfigFactory
 
 
 class TestSentenceChunker(unittest.TestCase):

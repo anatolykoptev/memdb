@@ -1,5 +1,5 @@
 {
-  "model_schema": "memos.configs.mem_cube.GeneralMemCubeConfig",
+  "model_schema": "memdb.configs.mem_cube.GeneralMemCubeConfig",
   "user_id": "Ki-Seki",
   "cube_id": "Ki-Seki/mem_cube_2",
   "config_filename": "config.json",

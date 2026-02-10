@@ -2,9 +2,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from memos.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
-from memos.memories.textual.tree_text_memory.retrieve.searcher import Searcher
-from memos.reranker.base import BaseReranker
+from memdb.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
+from memdb.memories.textual.tree_text_memory.retrieve.searcher import Searcher
+from memdb.reranker.base import BaseReranker
 
 
 @pytest.fixture

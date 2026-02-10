@@ -1,6 +1,6 @@
 import warnings
 
-from src.memos.deprecation import (
+from src.memdb.deprecation import (
     deprecated,
     deprecated_class,
     deprecated_parameter,

@@ -1,4 +1,4 @@
-from memos.configs.llm import (
+from memdb.configs.llm import (
     BaseLLMConfig,
     HFLLMConfig,
     LLMConfigFactory,

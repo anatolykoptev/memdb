@@ -5,12 +5,12 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from memos.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
-from memos.memories.textual.tree_text_memory.retrieve.reranker import (
+from memdb.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
+from memdb.memories.textual.tree_text_memory.retrieve.reranker import (
     MemoryReranker,
     batch_cosine_similarity,
 )
-from memos.memories.textual.tree_text_memory.retrieve.retrieval_mid_structs import ParsedTaskGoal
+from memdb.memories.textual.tree_text_memory.retrieve.retrieval_mid_structs import ParsedTaskGoal
 
 
 def test_batch_cosine_similarity_basic():

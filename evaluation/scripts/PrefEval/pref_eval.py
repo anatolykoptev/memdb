@@ -405,16 +405,16 @@ if __name__ == "__main__":
         "--lib",
         type=str,
         choices=[
-            "memos-api-online",
+            "memdb-api-online",
             "mem0",
             "mem0_graph",
-            "memos-api",
+            "memdb-api",
             "memobase",
             "memu",
             "supermemory",
             "zep",
         ],
-        default="memos-api",
+        default="memdb-api",
         help="Which library to use (used in 'add' mode).",
     )
 

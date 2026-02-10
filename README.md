@@ -1,90 +1,74 @@
 <div align="center">
-  <a href="https://memos.openmem.net/">
-    <img src="https://statics.memtensor.com.cn/memos/memos-banner.gif" alt="MemOS Banner">
-  </a>
 
   <h1 align="center">
-    <img src="https://statics.memtensor.com.cn/logo/memos_color_m.png" alt="MemOS Logo" width="50"/>
-    MemOS 2.0: 星尘（Stardust）
+    MemDB 2.0: Stardust
     <img src="https://img.shields.io/badge/status-Preview-blue" alt="Preview Badge"/>
   </h1>
 
   <p>
-    <a href="https://www.memtensor.com.cn/">
-      <img alt="Static Badge" src="https://img.shields.io/badge/Maintained_by-MemTensor-blue">
+    <a href="https://github.com/MemDBai/MemDB">
+      <img alt="Static Badge" src="https://img.shields.io/badge/Maintained_by-MemDB-blue">
     </a>
-    <a href="https://pypi.org/project/MemoryOS">
-      <img src="https://img.shields.io/pypi/v/MemoryOS?label=pypi%20package" alt="PyPI Version">
+    <a href="https://pypi.org/project/memdb">
+      <img src="https://img.shields.io/pypi/v/memdb?label=pypi%20package" alt="PyPI Version">
     </a>
-    <a href="https://pypi.org/project/MemoryOS">
-      <img src="https://img.shields.io/pypi/pyversions/MemoryOS.svg" alt="Supported Python versions">
+    <a href="https://pypi.org/project/memdb">
+      <img src="https://img.shields.io/pypi/pyversions/memdb.svg" alt="Supported Python versions">
     </a>
-    <a href="https://pypi.org/project/MemoryOS">
+    <a href="https://pypi.org/project/memdb">
       <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Supported Platforms">
-    </a>
-    <a href="https://memos-docs.openmem.net/home/overview/">
-      <img src="https://img.shields.io/badge/Documentation-view-blue.svg" alt="Documentation">
     </a>
     <a href="https://arxiv.org/abs/2507.03724">
       <img src="https://img.shields.io/badge/arXiv-2507.03724-b31b1b.svg" alt="ArXiv Paper">
     </a>
-    <a href="https://github.com/MemTensor/MemOS/discussions">
+    <a href="https://github.com/MemDBai/MemDB/discussions">
       <img src="https://img.shields.io/badge/GitHub-Discussions-181717.svg?logo=github" alt="GitHub Discussions">
     </a>
     <a href="https://discord.gg/Txbx3gebZR">
       <img src="https://img.shields.io/badge/Discord-join%20chat-7289DA.svg?logo=discord" alt="Discord">
-    </a>
-    <a href="https://statics.memtensor.com.cn/memos/qr-code.png">
-      <img src="https://img.shields.io/badge/WeChat-Group-07C160.svg?logo=wechat" alt="WeChat Group">
     </a>
     <a href="https://opensource.org/license/apache-2-0/">
       <img src="https://img.shields.io/badge/License-Apache_2.0-green.svg?logo=apache" alt="License">
     </a>
     <a href="https://github.com/IAAR-Shanghai/Awesome-AI-Memory">
       <img alt="Awesome AI Memory" src="https://img.shields.io/badge/Resources-Awesome--AI--Memory-8A2BE2">
-    </a>  
+    </a>
   </p>
 
 <p align="center">
-  <strong>🎯 +43.70% Accuracy vs. OpenAI Memory</strong><br/>
-  <strong>🏆 Top-tier long-term memory + personalization</strong><br/>
-  <strong>💰 Saves 35.24% memory tokens</strong><br/>
-  <sub>LoCoMo 75.80 • LongMemEval +40.43% • PrefEval-10 +2568% • PersonaMem +40.75%</sub>
-  <a href="https://memos.openmem.net/">
-    <img src="https://statics.memtensor.com.cn/memos/github_api_free_banner.gif" alt="MemOS Free API Banner">
-  </a>
-
+  <strong>+43.70% Accuracy vs. OpenAI Memory</strong><br/>
+  <strong>Top-tier long-term memory + personalization</strong><br/>
+  <strong>Saves 35.24% memory tokens</strong><br/>
+  <sub>LoCoMo 75.80 | LongMemEval +40.43% | PrefEval-10 +2568% | PersonaMem +40.75%</sub>
 </p>
-  
-</div>
 
-Get Free API: [Try API](https://memos-dashboard.openmem.net/quickstart/?source=github)
+</div>
 
 ---
 
 <br>
 
-## 📌 MemOS: Memory Operating System for AI Agents
+## MemDB: Memory Database for AI Agents
 
-**MemOS** is a Memory Operating System for LLMs and AI agents that unifies **store / retrieve / manage** for long-term memory, enabling **context-aware and personalized** interactions with **KB**, **multi-modal**, **tool memory**, and **enterprise-grade** optimizations built in.
+**MemDB** is a Memory Database for LLMs and AI agents that unifies **store / retrieve / manage** for long-term memory, enabling **context-aware and personalized** interactions with **KB**, **multi-modal**, **tool memory**, and **enterprise-grade** optimizations built in.
 
-
+MemDB is a hard fork of [MemOS](https://github.com/MemTensor/MemOS) (arxiv 2507.03724), repackaged and rebranded for independent development.
 
 ### Key Features
 
-- **Unified Memory API**: A single API to add, retrieve, edit, and delete memory—structured as a graph, inspectable and editable by design, not a black-box embedding store.
+- **Unified Memory API**: A single API to add, retrieve, edit, and delete memory -- structured as a graph, inspectable and editable by design, not a black-box embedding store.
 - **Multi-Modal Memory**: Natively supports text, images, tool traces, and personas, retrieved and reasoned together in one memory system.
 - **Multi-Cube Knowledge Base Management**: Manage multiple knowledge bases as composable memory cubes, enabling isolation, controlled sharing, and dynamic composition across users, projects, and agents.
 - **Asynchronous Ingestion via MemScheduler**: Run memory operations asynchronously with millisecond-level latency for production stability under high concurrency.
-- **Memory Feedback & Correction**: Refine memory with natural-language feedback—correcting, supplementing, or replacing existing memories over time.
+- **Memory Feedback & Correction**: Refine memory with natural-language feedback -- correcting, supplementing, or replacing existing memories over time.
 
 
-### News
+### Changelog
 
-- **2025-12-24** · 🎉 **MemOS v2.0: Stardust (星尘) Release**  
+- **2025-12-24** -- **MemDB v2.0: Stardust Release**
   Comprehensive KB (doc/URL parsing + cross-project sharing), memory feedback & precise deletion, multi-modal memory (images/charts), tool memory for agent planning, Redis Streams scheduling + DB optimizations, streaming/non-streaming chat, MCP upgrade, and lightweight quick/full deployment.
   <details>
-    <summary>✨ <b>New Features</b></summary>
+    <summary><b>New Features</b></summary>
 
   **Knowledge Base & Memory**
   - Added knowledge base support for long-term memory from documents and URLs
@@ -105,7 +89,7 @@ Get Free API: [Try API](https://memos-dashboard.openmem.net/quickstart/?source=g
   </details>
 
   <details>
-    <summary>📈 <b>Improvements</b></summary>
+    <summary><b>Improvements</b></summary>
 
   **Data & Infrastructure**
   - Upgraded database for better stability and performance
@@ -120,7 +104,7 @@ Get Free API: [Try API](https://memos-dashboard.openmem.net/quickstart/?source=g
   </details>
 
   <details>
-    <summary>🐞 <b>Bug Fixes</b></summary>
+    <summary><b>Bug Fixes</b></summary>
 
   **Memory Scheduling & Updates**
   - Fixed legacy scheduling API to ensure correct memory isolation
@@ -128,102 +112,48 @@ Get Free API: [Try API](https://memos-dashboard.openmem.net/quickstart/?source=g
 
   </details>
 
-- **2025-08-07** · 🎉 **MemOS v1.0.0 (MemCube) Release**  
+- **2025-08-07** -- **v1.0.0 (MemCube) Release**
   First MemCube release with a word-game demo, LongMemEval evaluation, BochaAISearchRetriever integration, NebulaGraph support, improved search capabilities, and the official Playground launch.
 
-  <details>
-    <summary>✨ <b>New Features</b></summary>
-
-  **Playground**
-  - Expanded Playground features and algorithm performance.
-
-  **MemCube Construction**
-  - Added a text game demo based on the MemCube novel.
-
-  **Extended Evaluation Set**
-  - Added LongMemEval evaluation results and scripts.
-
-  </details>
-
-  <details>
-    <summary>📈 <b>Improvements</b></summary>
-
-  **Plaintext Memory**
-  - Integrated internet search with Bocha.
-  - Added support for Nebula database.
-  - Added contextual understanding for the tree-structured plaintext memory search interface.
-
-  </details>
-
-  <details>
-    <summary>🐞 <b>Bug Fixes</b></summary>
-
-  **KV Cache Concatenation**
-  - Fixed the concat_cache method.
-
-  **Plaintext Memory**
-  - Fixed Nebula search-related issues.
-
-  </details>
-
-- **2025-07-07** · 🎉 **MemOS v1.0: Stellar (星河) Preview Release**  
-  A SOTA Memory OS for LLMs is now open-sourced.
-- **2025-07-04** · 🎉 **MemOS Paper Release**  
+- **2025-07-07** -- **v1.0: Stellar Preview Release**
+  A SOTA Memory system for LLMs is now open-sourced.
+- **2025-07-04** -- **Paper Release**
   [MemOS: A Memory OS for AI System](https://arxiv.org/abs/2507.03724) is available on arXiv.
-- **2024-07-04** · 🎉 **Memory3 Model Release at WAIC 2024**  
-  The Memory3 model, featuring a memory-layered architecture, was unveiled at the 2024 World Artificial Intelligence Conference.
 
 <br>
 
-## 🚀 Quickstart Guide
+## Quickstart Guide
 
-### ☁️ 1、Cloud API (Hosted)
-#### Get API Key
-- Sign up on the [MemOS dashboard](https://memos-dashboard.openmem.net/cn/quickstart/?source=landing)
-- Go to **API Keys** and copy your key
+### Self-Hosted (Local/Private)
 
-#### Next Steps
-- [MemOS Cloud Getting Started](https://memos-docs.openmem.net/memos_cloud/quick_start/)  
-  Connect to MemOS Cloud and enable memory in minutes.
-- [MemOS Cloud Platform](https://memos.openmem.net/?from=/quickstart/)  
-  Explore the Cloud dashboard, features, and workflows.
-
-### 🖥️ 2、Self-Hosted (Local/Private)
 1. Get the repository.
     ```bash
-    git clone https://github.com/MemTensor/MemOS.git
-    cd MemOS
+    git clone https://github.com/MemDBai/MemDB.git
+    cd MemDB
     pip install -r ./docker/requirements.txt
     ```
-2. Configure `docker/.env.example` and copy to `MemOS/.env`
- - The `OPENAI_API_KEY`,`MOS_EMBEDDER_API_KEY`,`MEMRADER_API_KEY` and others can be applied for through [`BaiLian`](https://bailian.console.aliyun.com/?spm=a2c4g.11186623.0.0.2f2165b08fRk4l&tab=api#/api).
- - Fill in the corresponding configuration in the `MemOS/.env` file.
+2. Configure `docker/.env.example` and copy to `MemDB/.env`
 3. Start the service.
 
 - Launch via Docker
-  ###### Tips: Please ensure that Docker Compose is installed successfully and that you have navigated to the docker directory (via `cd docker`) before executing the following command.
   ```bash
-  # Enter docker directory
+  cd docker
   docker compose up
   ```
-  ##### For detailed steps, see the[`Docker Reference`](https://docs.openmem.net/open_source/getting_started/rest_api_server/#method-1-docker-use-repository-dependency-package-imagestart-recommended-use).
 
 - Launch via the uvicorn command line interface (CLI)
-  ###### Tips: Please ensure that Neo4j and Qdrant are running before executing the following command.
+  Make sure that your graph DB and vector DB are running before executing:
   ```bash
   cd src
-  uvicorn memos.api.server_api:app --host 0.0.0.0 --port 8001 --workers 1
+  uvicorn memdb.api.server_api:app --host 0.0.0.0 --port 8001 --workers 1
   ```
-  ##### For detailed integration steps, see the [`CLI Reference`](https://docs.openmem.net/open_source/getting_started/rest_api_server/#method-3client-install-with-CLI).
-
-
 
 ### Basic Usage (Self-Hosted)
   - Add User Message
     ```python
     import requests
     import json
-    
+
     data = {
         "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
         "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
@@ -239,7 +169,7 @@ Get Free API: [Try API](https://memos-dashboard.openmem.net/quickstart/?source=g
         "Content-Type": "application/json"
     }
     url = "http://localhost:8000/product/add"
-    
+
     res = requests.post(url=url, headers=headers, data=json.dumps(data))
     print(f"result: {res.json()}")
     ```
@@ -247,7 +177,7 @@ Get Free API: [Try API](https://memos-dashboard.openmem.net/quickstart/?source=g
     ```python
     import requests
     import json
-    
+
     data = {
         "query": "What do I like",
         "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
@@ -257,46 +187,35 @@ Get Free API: [Try API](https://memos-dashboard.openmem.net/quickstart/?source=g
         "Content-Type": "application/json"
     }
     url = "http://localhost:8000/product/search"
-    
+
     res = requests.post(url=url, headers=headers, data=json.dumps(data))
     print(f"result: {res.json()}")
     ```
 
 <br>
 
-## 📚 Resources
+## Resources
 
-- **Awesome-AI-Memory**   
- This is a curated repository dedicated to resources on memory and memory systems for large language models. It systematically collects relevant research papers, frameworks, tools, and practical insights. The repository aims to organize and present the rapidly evolving research landscape of LLM memory, bridging multiple research directions including natural language processing, information retrieval, agentic systems, and cognitive science.  
-- **Get started** 👉 [IAAR-Shanghai/Awesome-AI-Memory](https://github.com/IAAR-Shanghai/Awesome-AI-Memory)
-- **MemOS Cloud OpenClaw Plugin**
-  Official OpenClaw lifecycle plugin for MemOS Cloud. It automatically recalls context from MemOS before the agent starts and saves the conversation back to MemOS after the agent finishes.
-- **Get started** 👉 [MemTensor/MemOS-Cloud-OpenClaw-Plugin](https://github.com/MemTensor/MemOS-Cloud-OpenClaw-Plugin)
+- **Awesome-AI-Memory**
+ A curated repository dedicated to resources on memory and memory systems for large language models. It systematically collects relevant research papers, frameworks, tools, and practical insights.
+- **Get started**: [IAAR-Shanghai/Awesome-AI-Memory](https://github.com/IAAR-Shanghai/Awesome-AI-Memory)
 
 <br>
 
-## 💬 Community & Support
+## Community & Support
 
 Join our community to ask questions, share your projects, and connect with other developers.
 
-- **GitHub Issues**: Report bugs or request features in our <a href="https://github.com/MemTensor/MemOS/issues" target="_blank">GitHub Issues</a>.
-- **GitHub Pull Requests**: Contribute code improvements via <a href="https://github.com/MemTensor/MemOS/pulls" target="_blank">Pull Requests</a>.
-- **GitHub Discussions**: Participate in our <a href="https://github.com/MemTensor/MemOS/discussions" target="_blank">GitHub Discussions</a> to ask questions or share ideas.
+- **GitHub Issues**: Report bugs or request features in our <a href="https://github.com/MemDBai/MemDB/issues" target="_blank">GitHub Issues</a>.
+- **GitHub Pull Requests**: Contribute code improvements via <a href="https://github.com/MemDBai/MemDB/pulls" target="_blank">Pull Requests</a>.
+- **GitHub Discussions**: Participate in our <a href="https://github.com/MemDBai/MemDB/discussions" target="_blank">GitHub Discussions</a> to ask questions or share ideas.
 - **Discord**: Join our <a href="https://discord.gg/Txbx3gebZR" target="_blank">Discord Server</a>.
-- **WeChat**: Scan the QR code to join our WeChat group.
-
-<div align="center">
-  <img src="https://statics.memtensor.com.cn/memos/qr-code.png" alt="QR Code" width="300" />
-</div>
 
 <br>
 
-## 📜 Citation
+## Citation
 
-> [!NOTE]
-> We publicly released the Short Version on **May 28, 2025**, making it the earliest work to propose the concept of a Memory Operating System for LLMs.
-
-If you use MemOS in your research, we would appreciate citations to our papers.
+If you use MemDB in your research, we would appreciate citations to the original papers.
 
 ```bibtex
 
@@ -332,12 +251,12 @@ url = {https://global-sci.com/article/91443/memory3-language-modeling-with-expli
 
 <br>
 
-## 🙌 Contributing
+## Contributing
 
-We welcome contributions from the community! Please read our [contribution guidelines](https://memos-docs.openmem.net/contribution/overview) to get started.
+We welcome contributions from the community! Please read our [contribution guidelines](https://github.com/MemDBai/MemDB/blob/main/CONTRIBUTING.md) to get started.
 
 <br>
 
-## 📄 License
+## License
 
-MemOS is licensed under the [Apache 2.0 License](./LICENSE).
+MemDB is licensed under the [Apache 2.0 License](./LICENSE).

@@ -10,8 +10,8 @@
 from pathlib import Path
 from time import sleep
 
-from memos.api.routers.server_router import mem_scheduler
-from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
+from memdb.api.routers.server_router import mem_scheduler
+from memdb.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
 
 
 # Debug: Print scheduler configuration
@@ -19,11 +19,11 @@ print("=== Scheduler Configuration Debug ===")
 print(f"Scheduler type: {type(mem_scheduler).__name__}")
 print(f"Config: {mem_scheduler.config}")
 print(f"use_redis_queue: {mem_scheduler.use_redis_queue}")
-print(f"Queue type: {type(mem_scheduler.memos_message_queue).__name__}")
-print(f"Queue maxsize: {getattr(mem_scheduler.memos_message_queue, 'maxsize', 'N/A')}")
+print(f"Queue type: {type(mem_scheduler.memdb_message_queue).__name__}")
+print(f"Queue maxsize: {getattr(mem_scheduler.memdb_message_queue, 'maxsize', 'N/A')}")
 print("=====================================\n")
 
-queue = mem_scheduler.memos_message_queue
+queue = mem_scheduler.memdb_message_queue
 
 
 # Define a handler function
@@ -42,7 +42,7 @@ def my_test_handler(messages: list[ScheduleMessageItem]):
 
 
 def submit_tasks():
-    mem_scheduler.memos_message_queue.clear()
+    mem_scheduler.memdb_message_queue.clear()
 
     # Create 100 messages (task_id 0..99)
     users = ["user_A", "user_B"]
@@ -58,7 +58,7 @@ def submit_tasks():
     ]
     # Submit messages in batch and print completion
     print(f"Submitting {len(messages_to_send)} messages to the scheduler...")
-    mem_scheduler.memos_message_queue.submit_messages(messages_to_send)
+    mem_scheduler.memdb_message_queue.submit_messages(messages_to_send)
     print(f"Task submission done! tasks in queue: {mem_scheduler.get_tasks_status()}")
 
 

@@ -44,7 +44,7 @@ def ingest_session(client, session, frame, version, metadata):
             speaker_a_messages.append({"role": "assistant", "content": data})
             speaker_b_messages.append({"role": "user", "content": data})
 
-    if "memos-api" in frame:
+    if "memdb-api" in frame:
         for m in speaker_a_messages:
             m["chat_time"] = iso_date
         for m in speaker_b_messages:
@@ -106,11 +106,11 @@ def process_user(conv_idx, frame, locomo_df, version, success_records, f):
         client.client.update_project(custom_instructions=custom_instructions)
         client.client.delete_all(user_id=speaker_a_user_id)
         client.client.delete_all(user_id=speaker_b_user_id)
-    elif frame == "memos-api":
+    elif frame == "memdb-api":
         from utils.client import MemosApiClient
 
         client = MemosApiClient()
-    elif frame == "memos-api-online":
+    elif frame == "memdb-api-online":
         from utils.client import MemosApiOnlineClient
 
         client = MemosApiOnlineClient()
@@ -216,13 +216,13 @@ if __name__ == "__main__":
         choices=[
             "mem0",
             "mem0_graph",
-            "memos-api",
-            "memos-api-online",
+            "memdb-api",
+            "memdb-api-online",
             "memobase",
             "memu",
             "supermemory",
         ],
-        default="memos-api",
+        default="memdb-api",
     )
     parser.add_argument(
         "--version",

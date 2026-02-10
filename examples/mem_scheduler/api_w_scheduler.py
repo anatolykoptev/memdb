@@ -17,12 +17,12 @@ FILE_PATH = Path(__file__).absolute()
 BASE_DIR = FILE_PATH.parent.parent.parent
 sys.path.insert(0, str(BASE_DIR))  # Enable execution from any working directory
 
-from memos.api.handlers.scheduler_handler import (  # noqa: E402
+from memdb.api.handlers.scheduler_handler import (  # noqa: E402
     handle_scheduler_status,
     handle_scheduler_wait,
 )
-from memos.api.routers.server_router import mem_scheduler, status_tracker  # noqa: E402
-from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem  # noqa: E402
+from memdb.api.routers.server_router import mem_scheduler, status_tracker  # noqa: E402
+from memdb.mem_scheduler.schemas.message_schemas import ScheduleMessageItem  # noqa: E402
 
 
 TEST_HANDLER_LABEL = "test_handler"
@@ -36,11 +36,11 @@ def run_with_scheduler_api():
     print(f"Scheduler type: {type(mem_scheduler).__name__}")
     print(f"Config: {mem_scheduler.config}")
     print(f"use_redis_queue: {mem_scheduler.use_redis_queue}")
-    print(f"Queue type: {type(mem_scheduler.memos_message_queue).__name__}")
-    print(f"Queue maxsize: {getattr(mem_scheduler.memos_message_queue, 'maxsize', 'N/A')}")
+    print(f"Queue type: {type(mem_scheduler.memdb_message_queue).__name__}")
+    print(f"Queue maxsize: {getattr(mem_scheduler.memdb_message_queue, 'maxsize', 'N/A')}")
     print("=====================================\n")
 
-    queue = mem_scheduler.memos_message_queue
+    queue = mem_scheduler.memdb_message_queue
     queue.clear()
 
     # 1. Define a handler function

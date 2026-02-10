@@ -7,7 +7,7 @@ Demonstrates:
 3. Dump ONLY this cube's data to directory
 
 Requirements:
-    - MemOS service environment (.env configured)
+    - MemDB service environment (.env configured)
     - Neo4j graph database (set NEO4J_BACKEND=neo4j in .env)
 
 Note on Embeddings:
@@ -23,10 +23,10 @@ import json
 import os
 import shutil
 
-from memos.api.handlers import init_server
-from memos.api.product_models import APIADDRequest
-from memos.log import get_logger
-from memos.multi_mem_cube.single_cube import SingleCubeView
+from memdb.api.handlers import init_server
+from memdb.api.product_models import APIADDRequest
+from memdb.log import get_logger
+from memdb.multi_mem_cube.single_cube import SingleCubeView
 
 
 logger = get_logger(__name__)

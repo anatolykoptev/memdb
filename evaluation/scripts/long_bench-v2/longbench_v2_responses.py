@@ -299,8 +299,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--lib",
         type=str,
-        choices=["memos-api", "memos-api-online"],
-        default="memos-api",
+        choices=["memdb-api", "memdb-api-online"],
+        default="memdb-api",
     )
     parser.add_argument(
         "--version",

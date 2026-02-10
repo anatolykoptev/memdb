@@ -1,6 +1,6 @@
 import json
 
-from memos.configs.mem_cube import BaseMemCubeConfig, GeneralMemCubeConfig
+from memdb.configs.mem_cube import BaseMemCubeConfig, GeneralMemCubeConfig
 from tests.utils import (
     check_config_base_class,
     check_config_instantiation_invalid,

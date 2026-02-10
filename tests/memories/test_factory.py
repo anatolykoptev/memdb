@@ -1,4 +1,4 @@
-from memos.memories.factory import MemoryFactory
+from memdb.memories.factory import MemoryFactory
 from tests.utils import check_module_factory_class
 
 

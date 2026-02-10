@@ -5,8 +5,8 @@ import sys
 from pathlib import Path
 
 
-EXCLUDE_MODULES = {"memos"}  # Exclude from import checks (e.g., our own package)
-PYTHON_PACKAGE_DIR = Path("src/memos")
+EXCLUDE_MODULES = {"memdb"}  # Exclude from import checks (e.g., our own package)
+PYTHON_PACKAGE_DIR = Path("src/memdb")
 
 
 def extract_top_level_modules(tree: ast.Module) -> set[str]:

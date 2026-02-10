@@ -3,15 +3,15 @@ import uuid
 
 from dotenv import load_dotenv
 
-from memos.api.handlers.config_builders import build_embedder_config, build_graph_db_config
-from memos.embedders.factory import EmbedderFactory
-from memos.graph_dbs.factory import GraphStoreFactory
-from memos.memories.textual.item import (
+from memdb.api.handlers.config_builders import build_embedder_config, build_graph_db_config
+from memdb.embedders.factory import EmbedderFactory
+from memdb.graph_dbs.factory import GraphStoreFactory
+from memdb.memories.textual.item import (
     SourceMessage,
     TextualMemoryItem,
     TreeNodeTextualMemoryMetadata,
 )
-from memos.memories.textual.tree_text_memory.retrieve.pre_update import PreUpdateRetriever
+from memdb.memories.textual.tree_text_memory.retrieve.pre_update import PreUpdateRetriever
 
 
 # Load environment variables

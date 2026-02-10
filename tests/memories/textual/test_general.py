@@ -4,16 +4,16 @@ import uuid
 
 from unittest.mock import MagicMock, patch
 
-from memos.configs.embedder import EmbedderConfigFactory
-from memos.configs.llm import LLMConfigFactory
-from memos.configs.memory import GeneralTextMemoryConfig
-from memos.configs.vec_db import VectorDBConfigFactory
-from memos.embedders.factory import OllamaEmbedder
-from memos.llms.factory import OllamaLLM
-from memos.memories.textual.general import GeneralTextMemory
-from memos.memories.textual.item import TextualMemoryItem
-from memos.vec_dbs.factory import QdrantVecDB
-from memos.vec_dbs.item import VecDBItem
+from memdb.configs.embedder import EmbedderConfigFactory
+from memdb.configs.llm import LLMConfigFactory
+from memdb.configs.memory import GeneralTextMemoryConfig
+from memdb.configs.vec_db import VectorDBConfigFactory
+from memdb.embedders.factory import OllamaEmbedder
+from memdb.llms.factory import OllamaLLM
+from memdb.memories.textual.general import GeneralTextMemory
+from memdb.memories.textual.item import TextualMemoryItem
+from memdb.vec_dbs.factory import QdrantVecDB
+from memdb.vec_dbs.item import VecDBItem
 
 
 class TestGeneralTextMemory(unittest.TestCase):
@@ -22,17 +22,17 @@ class TestGeneralTextMemory(unittest.TestCase):
         self.mock_llm_config_arg = MagicMock(spec=LLMConfigFactory)
         self.mock_llm_config_arg.backend = "ollama"  # Example valid backend
         self.mock_llm_config_arg.config = {"model_name_or_path": "test-llm"}
-        self.mock_llm_config_arg.model_schema = "memos.configs.llm.LLMConfigFactory"
+        self.mock_llm_config_arg.model_schema = "memdb.configs.llm.LLMConfigFactory"
 
         self.mock_embedder_config_arg = MagicMock(spec=EmbedderConfigFactory)
         self.mock_embedder_config_arg.backend = "ollama"  # Example valid backend
         self.mock_embedder_config_arg.config = {"model_name_or_path": "test-embedder"}
-        self.mock_embedder_config_arg.model_schema = "memos.configs.embedder.EmbedderConfigFactory"
+        self.mock_embedder_config_arg.model_schema = "memdb.configs.embedder.EmbedderConfigFactory"
 
         self.mock_vector_db_config_arg = MagicMock(spec=VectorDBConfigFactory)
         self.mock_vector_db_config_arg.backend = "qdrant"  # Example valid backend
         self.mock_vector_db_config_arg.config = {"collection_name": "test-collection-for-factory"}
-        self.mock_vector_db_config_arg.model_schema = "memos.configs.vec_db.VectorDBConfigFactory"
+        self.mock_vector_db_config_arg.model_schema = "memdb.configs.vec_db.VectorDBConfigFactory"
 
         # This mock_qdrant_config is for the *internal* config of the QdrantVecDB mock instance.
         # It is NOT passed directly to GeneralTextMemoryConfig.
@@ -47,9 +47,9 @@ class TestGeneralTextMemory(unittest.TestCase):
         self.mock_embedder = MagicMock(spec=OllamaEmbedder)
 
         # Patch factories used in GeneralTextMemory constructor
-        self.patcher_llm_factory = patch("memos.memories.textual.general.LLMFactory")
-        self.patcher_vecdb_factory = patch("memos.memories.textual.general.VecDBFactory")
-        self.patcher_embedder_factory = patch("memos.memories.textual.general.EmbedderFactory")
+        self.patcher_llm_factory = patch("memdb.memories.textual.general.LLMFactory")
+        self.patcher_vecdb_factory = patch("memdb.memories.textual.general.VecDBFactory")
+        self.patcher_embedder_factory = patch("memdb.memories.textual.general.EmbedderFactory")
 
         self.mock_llm_factory = self.patcher_llm_factory.start()
         self.mock_vecdb_factory = self.patcher_vecdb_factory.start()
@@ -130,9 +130,9 @@ class TestGeneralTextMemory(unittest.TestCase):
                 },
             },
             {
-                "memory": "MemOS is awesome!",
+                "memory": "MemDB is awesome!",
                 "metadata": {
-                    "key": "MemOS",
+                    "key": "MemDB",
                     "source": "conversation",
                     "tags": ["awesome"],
                     "updated_at": "2025-05-19T00:00:00",
@@ -152,7 +152,7 @@ class TestGeneralTextMemory(unittest.TestCase):
             "id": memory_id_to_update,
             "memory": "This is the updated memory content via dict.",
             "metadata": {
-                "key": "MemOS",
+                "key": "MemDB",
                 "source": "conversation",
                 "tags": ["awesome"],
                 "updated_at": "2025-05-19T00:00:00",
@@ -176,7 +176,7 @@ class TestGeneralTextMemory(unittest.TestCase):
 
         memory_dict = updated_data_to_db.payload
         self.assertEqual(memory_dict["memory"], "This is the updated memory content via dict.")
-        self.assertEqual(memory_dict["metadata"]["key"], "MemOS")
+        self.assertEqual(memory_dict["metadata"]["key"], "MemDB")
         self.assertEqual(memory_dict["metadata"]["source"], "conversation")
 
     def test_search_memories(self):

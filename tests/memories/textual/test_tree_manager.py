@@ -4,8 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from memos.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
-from memos.memories.textual.tree_text_memory.organize.manager import MemoryManager
+from memdb.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
+from memdb.memories.textual.tree_text_memory.organize.manager import MemoryManager
 
 
 @pytest.fixture

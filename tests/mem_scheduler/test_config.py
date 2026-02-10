@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
 
-from memos.configs.mem_scheduler import AuthConfig, GraphDBAuthConfig, OpenAIConfig, RabbitMQConfig
-from memos.mem_scheduler.general_modules.misc import EnvConfigMixin
-from memos.mem_scheduler.utils.config_utils import convert_config_to_env, flatten_dict
+from memdb.configs.mem_scheduler import AuthConfig, GraphDBAuthConfig, OpenAIConfig, RabbitMQConfig
+from memdb.mem_scheduler.general_modules.misc import EnvConfigMixin
+from memdb.mem_scheduler.utils.config_utils import convert_config_to_env, flatten_dict
 
 
 FILE_PATH = Path(__file__).absolute()
@@ -22,7 +22,7 @@ class TestEnvConfigMixin(unittest.TestCase):
 
     def test_env_prefix_class_variable(self):
         """Verify the base environment prefix is set correctly"""
-        self.assertEqual(EnvConfigMixin.ENV_PREFIX, "MEMSCHEDULER_")
+        self.assertEqual(EnvConfigMixin.ENV_PREFIX, "MEMDBSCHEDULER_")
 
     def test_get_env_prefix_generation(self):
         """Test the dynamic environment variable prefix generation"""

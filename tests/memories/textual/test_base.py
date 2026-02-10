@@ -1,4 +1,4 @@
-from memos.memories.textual.base import BaseTextMemory
+from memdb.memories.textual.base import BaseTextMemory
 from tests.utils import check_module_base_class
 
 

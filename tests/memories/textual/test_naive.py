@@ -5,10 +5,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from memos.configs.memory import NaiveTextMemoryConfig
-from memos.llms.factory import LLMFactory
-from memos.memories.textual.item import TextualMemoryItem, TextualMemoryMetadata
-from memos.memories.textual.naive import NaiveTextMemory
+from memdb.configs.memory import NaiveTextMemoryConfig
+from memdb.llms.factory import LLMFactory
+from memdb.memories.textual.item import TextualMemoryItem, TextualMemoryMetadata
+from memdb.memories.textual.naive import NaiveTextMemory
 
 
 class TestNaiveMemory:

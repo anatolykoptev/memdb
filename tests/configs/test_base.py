@@ -7,7 +7,7 @@ import yaml
 
 from pydantic import ValidationError
 
-from memos.configs.base import BaseConfig
+from memdb.configs.base import BaseConfig
 
 
 class DummyConfig(BaseConfig):

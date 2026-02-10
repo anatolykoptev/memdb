@@ -1,4 +1,4 @@
-from memos.vec_dbs.factory import VecDBFactory
+from memdb.vec_dbs.factory import VecDBFactory
 from tests.utils import check_module_factory_class
 
 

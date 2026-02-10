@@ -1,4 +1,4 @@
-from memos.embedders.base import BaseEmbedder
+from memdb.embedders.base import BaseEmbedder
 from tests.utils import check_module_base_class
 
 

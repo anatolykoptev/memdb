@@ -4,8 +4,8 @@ import pytest
 
 from fastapi.testclient import TestClient
 
-from memos.api.start_api import app
-from memos.mem_user.user_manager import UserRole
+from memdb.api.start_api import app
+from memdb.mem_user.user_manager import UserRole
 
 
 client = TestClient(app)
@@ -57,7 +57,7 @@ MOCK_CONFIG = {
 @pytest.fixture
 def mock_mos():
     """Mock MOS instance for testing."""
-    with patch("memos.api.start_api.get_mos_instance") as mock_get_mos:
+    with patch("memdb.api.start_api.get_mos_instance") as mock_get_mos:
         # Create a mock MOS instance
         mock_instance = Mock()
 
@@ -84,7 +84,7 @@ def mock_mos():
 
 def test_configure_error(mock_mos):
     """Test configuration endpoint with error."""
-    with patch("memos.api.start_api.MOS_INSTANCE", None):
+    with patch("memdb.api.start_api.MEMDB_INSTANCE", None):
         response = client.post("/configure", json={})
         assert response.status_code == 422  # FastAPI validation error
 

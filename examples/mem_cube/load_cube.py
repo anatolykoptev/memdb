@@ -8,7 +8,7 @@ Demonstrates:
 4. Search loaded memories (semantic search)
 
 Requirements:
-    - MemOS service environment (.env configured)
+    - MemDB service environment (.env configured)
     - Neo4j graph database (set NEO4J_BACKEND=neo4j in .env)
 
 Note on Embeddings:
@@ -20,10 +20,10 @@ Note on Embeddings:
 import json
 import os
 
-from memos.api.handlers import init_server
-from memos.api.product_models import APISearchRequest
-from memos.log import get_logger
-from memos.multi_mem_cube.single_cube import SingleCubeView
+from memdb.api.handlers import init_server
+from memdb.api.product_models import APISearchRequest
+from memdb.log import get_logger
+from memdb.multi_mem_cube.single_cube import SingleCubeView
 
 
 logger = get_logger(__name__)

@@ -3,9 +3,9 @@ import tempfile
 
 import pytest
 
-from memos.mem_scheduler.orm_modules.base_model import BaseDBManager
-from memos.mem_scheduler.orm_modules.monitor_models import DBManagerForMemoryMonitorManager
-from memos.mem_scheduler.schemas.monitor_schemas import (
+from memdb.mem_scheduler.orm_modules.base_model import BaseDBManager
+from memdb.mem_scheduler.orm_modules.monitor_models import DBManagerForMemoryMonitorManager
+from memdb.mem_scheduler.schemas.monitor_schemas import (
     MemoryMonitorItem,
     MemoryMonitorManager,
 )

@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from memos.configs.graph_db import Neo4jGraphDBConfig
-from memos.graph_dbs.neo4j import Neo4jGraphDB
+from memdb.configs.graph_db import Neo4jGraphDBConfig
+from memdb.graph_dbs.neo4j import Neo4jGraphDB
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def config():
 
 @pytest.fixture
 def mock_driver():
-    with patch("memos.graph_dbs.neo4j.GraphDatabase.driver") as mock:
+    with patch("memdb.graph_dbs.neo4j.GraphDatabase.driver") as mock:
         yield mock
 
 

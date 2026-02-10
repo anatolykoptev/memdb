@@ -2,7 +2,7 @@
 Tree Textual Memory Task Goal Parser Example
 =============================================
 
-This example demonstrates how to use MemOS's TaskGoalParser to parse natural
+This example demonstrates how to use MemDB's TaskGoalParser to parse natural
 language queries into structured retrieval goals.
 
 **What you'll learn:**
@@ -28,10 +28,10 @@ import json
 import os
 import time
 
-from memos import log
-from memos.configs.llm import LLMConfigFactory
-from memos.llms.factory import LLMFactory
-from memos.memories.textual.tree_text_memory.retrieve.task_goal_parser import TaskGoalParser
+from memdb import log
+from memdb.configs.llm import LLMConfigFactory
+from memdb.llms.factory import LLMFactory
+from memdb.memories.textual.tree_text_memory.retrieve.task_goal_parser import TaskGoalParser
 
 
 logger = log.get_logger(__name__)

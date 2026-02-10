@@ -1,5 +1,5 @@
 """
-Test cases for the MemOS User Management System.
+Test cases for the MemDB User Management System.
 
 This module contains comprehensive test cases for testing user authentication,
 authorization, and cube management functionality.
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from memos.mem_user.user_manager import UserManager, UserRole
+from memdb.mem_user.user_manager import UserManager, UserRole
 
 
 class TestUserManager:
@@ -25,7 +25,7 @@ class TestUserManager:
         """Create a temporary database for testing."""
         # Create temporary database file
         temp_dir = tempfile.mkdtemp()
-        db_path = os.path.join(temp_dir, "test_memos.db")
+        db_path = os.path.join(temp_dir, "test_memdb.db")
         yield db_path
         # Cleanup - note: file cleanup is handled by user_manager fixture
         try:
@@ -60,20 +60,20 @@ class TestUserManager:
 
     def test_initialization_default_path(self, monkeypatch):
         """Test UserManager initialization with default path."""
-        # Mock settings.MEMOS_DIR
+        # Mock settings.MEMDB_DIR
         temp_dir = tempfile.mkdtemp()
         mock_memos_dir = Path(temp_dir)
 
         class MockSettings:
-            MEMOS_DIR = mock_memos_dir
+            MEMDB_DIR = mock_memos_dir
 
         # Replace the settings import
-        monkeypatch.setattr("memos.mem_user.user_manager.settings", MockSettings())
+        monkeypatch.setattr("memdb.mem_user.user_manager.settings", MockSettings())
 
         manager = None
         try:
             manager = UserManager()
-            expected_path = mock_memos_dir / "memos_users.db"
+            expected_path = mock_memos_dir / "memdb_users.db"
             assert manager.db_path == str(expected_path)
             assert os.path.exists(expected_path)
         finally:
@@ -83,7 +83,7 @@ class TestUserManager:
 
             # Cleanup
             try:
-                expected_path = mock_memos_dir / "memos_users.db"
+                expected_path = mock_memos_dir / "memdb_users.db"
                 if os.path.exists(expected_path):
                     os.remove(expected_path)
                 if os.path.exists(temp_dir):
@@ -100,7 +100,7 @@ class TestUserOperations:
     def temp_db(self):
         """Create a temporary database for testing."""
         temp_dir = tempfile.mkdtemp()
-        db_path = os.path.join(temp_dir, "test_memos.db")
+        db_path = os.path.join(temp_dir, "test_memdb.db")
         yield db_path
         if os.path.exists(db_path):
             os.remove(db_path)
@@ -248,7 +248,7 @@ class TestCubeOperations:
     def temp_db(self):
         """Create a temporary database for testing."""
         temp_dir = tempfile.mkdtemp()
-        db_path = os.path.join(temp_dir, "test_memos.db")
+        db_path = os.path.join(temp_dir, "test_memdb.db")
         yield db_path
         if os.path.exists(db_path):
             os.remove(db_path)
@@ -444,7 +444,7 @@ class TestUserRoles:
     def temp_db(self):
         """Create a temporary database for testing."""
         temp_dir = tempfile.mkdtemp()
-        db_path = os.path.join(temp_dir, "test_memos.db")
+        db_path = os.path.join(temp_dir, "test_memdb.db")
         yield db_path
         if os.path.exists(db_path):
             os.remove(db_path)
@@ -496,7 +496,7 @@ class TestDatabaseIntegrity:
     def temp_db(self):
         """Create a temporary database for testing."""
         temp_dir = tempfile.mkdtemp()
-        db_path = os.path.join(temp_dir, "test_memos.db")
+        db_path = os.path.join(temp_dir, "test_memdb.db")
         yield db_path
         if os.path.exists(db_path):
             os.remove(db_path)

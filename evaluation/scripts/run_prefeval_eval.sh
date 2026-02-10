@@ -4,14 +4,14 @@
 # This script runs the PrefEval pipeline in three steps.
 
 # Number of workers for parallel processing.
-# This variable controls both pref_memos.py (--max-workers)
+# This variable controls both pref_memdb.py (--max-workers)
 # and pref_eval.py (--concurrency-limit).
 WORKERS=20
 
-# Parameters for pref_memos.py
+# Parameters for pref_memdb.py
 TOP_K=10
 ADD_TURN=10  # Options: 0, 10, or 300
-LIB="memos-api"  # Options: memos-api, memos-api-online, mem0, mem0-graph, memobase, supermemory, memu, zep
+LIB="memdb-api"  # Options: memdb-api, memdb-api-online, mem0, mem0-graph, memobase, supermemory, memu, zep
 VERSION="default"
 
 # --- File Paths ---
@@ -19,14 +19,14 @@ VERSION="default"
 # Step 1 (preprocess) outputs this file:
 PREPROCESSED_FILE="data/prefeval/pref_processed.jsonl"
 
-# Create a directory name based on the *specific* LIB (e.g., "memos")
+# Create a directory name based on the *specific* LIB (e.g., "memdb")
 OUTPUT_DIR="results/prefeval/${LIB}_${VERSION}"
 
 
 if [[ "$LIB" == *"mem0"* ]]; then
     SCRIPT_NAME_BASE="mem0"
-elif [[ "$LIB" == *"memos"* ]]; then
-    SCRIPT_NAME_BASE="memos"
+elif [[ "$LIB" == *"memdb"* ]]; then
+    SCRIPT_NAME_BASE="memdb"
 elif [[ "$LIB" == *"memobase"* ]]; then
     SCRIPT_NAME_BASE="memobase"
 elif [[ "$LIB" == *"supermemory"* ]]; then
@@ -42,7 +42,7 @@ fi
 # The script to be executed (e.g., pref_mem0.py)
 LIB_SCRIPT="scripts/PrefEval/pref_${SCRIPT_NAME_BASE}.py"
 
-# Output files will be unique to the $LIB (e.g., pref_memos-api_add.jsonl)
+# Output files will be unique to the $LIB (e.g., pref_memdb-api_add.jsonl)
 IDS_FILE="${OUTPUT_DIR}/pref_${LIB}_add.jsonl"
 SEARCH_FILE="${OUTPUT_DIR}/pref_${LIB}_search.jsonl"
 RESPONSE_FILE="${OUTPUT_DIR}/pref_${LIB}_response.jsonl"

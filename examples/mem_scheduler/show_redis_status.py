@@ -9,8 +9,8 @@
 
 import time
 
-from memos.mem_scheduler.task_schedule_modules.orchestrator import SchedulerOrchestrator
-from memos.mem_scheduler.task_schedule_modules.redis_queue import SchedulerRedisQueue
+from memdb.mem_scheduler.task_schedule_modules.orchestrator import SchedulerOrchestrator
+from memdb.mem_scheduler.task_schedule_modules.redis_queue import SchedulerRedisQueue
 
 
 # Explicitly initialize Redis queue for monitoring

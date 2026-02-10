@@ -5,8 +5,8 @@ import time
 import requests
 import uvicorn
 
-from memos.extras.nli_model.client import NLIClient
-from memos.extras.nli_model.server.serve import app
+from memdb.extras.nli_model.client import NLIClient
+from memdb.extras.nli_model.server.serve import app
 
 
 # Config

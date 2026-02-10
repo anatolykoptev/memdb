@@ -3,8 +3,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from memos.configs.llm import QwenLLMConfig
-from memos.llms.qwen import QwenLLM
+from memdb.configs.llm import QwenLLMConfig
+from memdb.llms.qwen import QwenLLM
 
 
 class TestQwenLLM(unittest.TestCase):

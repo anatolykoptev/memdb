@@ -3,8 +3,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from memos.configs.llm import LLMConfigFactory
-from memos.llms.factory import LLMFactory
+from memdb.configs.llm import LLMConfigFactory
+from memdb.llms.factory import LLMFactory
 
 
 class TestLLMFactoryWithOpenAIBackend(unittest.TestCase):

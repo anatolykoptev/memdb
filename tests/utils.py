@@ -107,7 +107,7 @@ def check_config_base_class(
         required_fields: List of field names that should be required, despite factory fields.
         optional_fields: List of field names that should be optional, despite factory fields.
         reserved_fields: List of field names that should be ignored in the checks.
-            Like fields defined in `memos.configs.base.BaseConfig`.
+            Like fields defined in `memdb.configs.base.BaseConfig`.
     """
     if reserved_fields is None:
         reserved_fields = ["model_schema"]

@@ -1,11 +1,11 @@
 import time
 
-from memos import log
-from memos.configs.mem_reader import SimpleStructMemReaderConfig
-from memos.configs.memory import TreeTextMemoryConfig
-from memos.mem_reader.multi_modal_struct import MultiModalStructMemReader
-from memos.mem_reader.simple_struct import SimpleStructMemReader
-from memos.memories.textual.tree import TreeTextMemory
+from memdb import log
+from memdb.configs.mem_reader import SimpleStructMemReaderConfig
+from memdb.configs.memory import TreeTextMemoryConfig
+from memdb.mem_reader.multi_modal_struct import MultiModalStructMemReader
+from memdb.mem_reader.simple_struct import SimpleStructMemReader
+from memdb.memories.textual.tree import TreeTextMemory
 
 
 logger = log.get_logger(__name__)
@@ -237,9 +237,9 @@ for m_list in doc_memory:
     my_tree_textual_memory.memory_manager.wait_reorganizer()
 
 results = my_tree_textual_memory.search(
-    "Tell me about what memos consist of?",
+    "Tell me about what memories consist of?",
     top_k=30,
-    info={"query": "Tell me about what memos consist of?", "user_id": "111", "session": "2234"},
+    info={"query": "Tell me about what memories consist of?", "user_id": "111", "session": "2234"},
 )
 
 for i, r in enumerate(results):

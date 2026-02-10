@@ -1,25 +1,25 @@
 [project]
 ##############################################################################
-# Here define the project metadata and dependencies for the MemoryOS package.
+# Here define the project metadata and dependencies for the MemDB package.
 ##############################################################################
 
-name = "MemoryOS"
-version = "2.0.4"
-description = "Intelligence Begins with Memory"
+name = "MemDB"
+version = "0.1.0"
+description = "Personal Memory Database for AI Agents"
 license = {text = "Apache-2.0"}
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
-    {name = "MemTensor", email = "MemTensor@memtensor.cn"}
+    {name = "MemDB", email = "hello@memdb.ai"}
 ]
 keywords = [
     "memory",
     "llm",
     "language model",
-    "memoryOS",
+    "memdb",
     "agent",
-    "kv cache",
-    "lora",
+    "vector database",
+    "knowledge graph",
 ]
 classifiers = [
     "Intended Audience :: Developers",
@@ -51,21 +51,17 @@ dependencies = [
 ]
 
 [project.urls]
-homepage = "https://memos.openmem.net/"
-repository = "https://github.com/MemTensor/MemOS"
-download = "https://pypi.org/project/MemoryOS/#files"
-changelog = "https://github.com/MemTensor/MemOS/releases"
-releasenotes = "https://github.com/MemTensor/MemOS/releases"
-documentation = "https://memos-docs.openmem.net/home/overview/"
-issues = "https://github.com/MemTensor/MemOS/issues"
+homepage = "https://memdb.ai"
+repository = "https://github.com/MemDBai/MemDB"
+issues = "https://github.com/MemDBai/MemDB/issues"
 
 [project.scripts]
-memos = "memos.cli:main"
+memdb = "memdb.cli:main"
 
 [project.optional-dependencies]
-# These are optional dependencies for various features of MemoryOS.
+# These are optional dependencies for various features of MemDB.
 # Developers install: `poetry install --extras <feature>`. e.g., `poetry install --extras general-mem`
-# Users install: `pip install MemoryOS[<feature>]`. e.g., `pip install MemoryOS[general-mem]`
+# Users install: `pip install MemDB[<feature>]`. e.g., `pip install MemDB[general-mem]`
 
 # TreeTextualMemory
 tree-mem = [
@@ -103,7 +99,7 @@ skill-mem = [
 ]
 
 # All optional dependencies
-# Allow users to install with `pip install MemoryOS[all]`
+# Allow users to install with `pip install MemDB[all]`
 all = [
     # Exist in the above optional groups
     "neo4j (>=5.28.1,<6.0.0)",
@@ -146,14 +142,14 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry]
 ##############################################################################
 # Here mainly define dependencies for development, testing, and evaluation.
-# These dependencies will NOT be included in the MemoryOS package itself.
+# These dependencies will NOT be included in the MemDB package itself.
 # They will be installed when you run `poetry install --with dev,test,eval`.
 #
 # More about version specifiers (e.g. "^0.1.0" or ">=0.1.0,<0.2.0"):
 # https://python-poetry.org/docs/dependency-specification#caret-requirements
 ##############################################################################
 
-packages = [{include = "memos", from = "src"}]
+packages = [{include = "memdb", from = "src"}]
 requires-poetry = ">=2.0"
 dependencies = { "python" = ">=3.10,<4.0" }
 

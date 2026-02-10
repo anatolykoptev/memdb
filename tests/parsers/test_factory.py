@@ -1,4 +1,4 @@
-from memos.parsers.factory import ParserFactory
+from memdb.parsers.factory import ParserFactory
 from tests.utils import check_module_factory_class
 
 

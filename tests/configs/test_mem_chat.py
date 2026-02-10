@@ -1,4 +1,4 @@
-from memos.configs.mem_chat import (
+from memdb.configs.mem_chat import (
     BaseMemChatConfig,
     MemChatConfigFactory,
     SimpleMemChatConfig,

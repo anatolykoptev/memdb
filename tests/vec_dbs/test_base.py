@@ -1,4 +1,4 @@
-from memos.vec_dbs.base import BaseVecDB
+from memdb.vec_dbs.base import BaseVecDB
 from tests.utils import check_module_base_class
 
 

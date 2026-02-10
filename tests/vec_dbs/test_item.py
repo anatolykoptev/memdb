@@ -4,7 +4,7 @@ import pytest
 
 from pydantic import ValidationError
 
-from memos.vec_dbs.item import VecDBItem
+from memdb.vec_dbs.item import VecDBItem
 
 
 def test_item_creation():

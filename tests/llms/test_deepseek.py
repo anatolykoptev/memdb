@@ -3,8 +3,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from memos.configs.llm import DeepSeekLLMConfig
-from memos.llms.deepseek import DeepSeekLLM
+from memdb.configs.llm import DeepSeekLLMConfig
+from memdb.llms.deepseek import DeepSeekLLM
 
 
 class TestDeepSeekLLM(unittest.TestCase):

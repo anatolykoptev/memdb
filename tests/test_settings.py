@@ -1,13 +1,13 @@
-from memos.settings import (
+from memdb.settings import (
     DEBUG,
-    MEMOS_DIR,
+    MEMDB_DIR,
 )
 
 
-def test_memos_dir():
-    """Test if the MEMOS_DIR is created correctly."""
-    assert MEMOS_DIR.is_dir()
-    assert MEMOS_DIR.name == ".memos"
+def test_memdb_dir():
+    """Test if the MEMDB_DIR is created correctly."""
+    assert MEMDB_DIR.is_dir()
+    assert MEMDB_DIR.name == ".memdb"
 
 
 def test_debug():
