@@ -154,8 +154,8 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 1: Embed query
-	embeddings, err := h.embedder.Embed(ctx, []string{query})
+	// Step 1: Embed query (e5 models need "query: " prefix for retrieval)
+	embeddings, err := h.embedder.Embed(ctx, []string{"query: " + query})
 	if err != nil {
 		h.logger.Warn("native search: embed failed, proxying",
 			slog.Any("error", err),

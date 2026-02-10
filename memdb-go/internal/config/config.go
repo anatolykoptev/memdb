@@ -47,9 +47,11 @@ type Config struct {
 	QdrantAddr  string `json:"qdrant_addr"` // host:port for gRPC
 	DBRedisURL  string `json:"db_redis_url"` // separate from cache Redis DB
 
-	// Embedder (VoyageAI)
-	VoyageAPIKey  string `json:"voyage_api_key"`
-	EmbedderModel string `json:"embedder_model"` // default "voyage-4-lite"
+	// Embedder
+	EmbedderType  string `json:"embedder_type"`   // "onnx" or "voyage"
+	ONNXModelDir  string `json:"onnx_model_dir"`  // path to ONNX model files
+	VoyageAPIKey  string `json:"voyage_api_key"`   // kept for rollback
+	EmbedderModel string `json:"embedder_model"`   // kept for rollback
 
 	// API settings
 	EnableChatAPI bool `json:"enable_chat_api"`
@@ -87,6 +89,8 @@ func Load() *Config {
 		QdrantAddr:  envStr("MEMDB_QDRANT_ADDR", ""),
 		DBRedisURL:  envStr("MEMDB_DB_REDIS_URL", ""),
 
+		EmbedderType:  envStr("MEMDB_EMBEDDER_TYPE", "onnx"),
+		ONNXModelDir:  envStr("MEMDB_ONNX_MODEL_DIR", "/models"),
 		VoyageAPIKey:  envStr("VOYAGE_API_KEY", ""),
 		EmbedderModel: envStr("MEMDB_EMBEDDER_MODEL", "voyage-4-lite"),
 
