@@ -154,8 +154,10 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Step 1: Embed query (e5 models need "query: " prefix for retrieval)
-	embeddings, err := h.embedder.Embed(ctx, []string{"query: " + query})
+	// Step 1: Embed query
+	// Note: VoyageAI uses InputType:"query" in the API request, not a text prefix.
+	// ONNX models may need "query: " prefix but it's handled inside the embedder.
+	embeddings, err := h.embedder.Embed(ctx, []string{query})
 	if err != nil {
 		h.logger.Warn("native search: embed failed, proxying",
 			slog.Any("error", err),
@@ -412,11 +414,9 @@ func toSearchItems(items []map[string]any, queryVec []float32, memType string) [
 				}
 			}
 		}
-		// If no embedding available, use query vector as fallback
-		// (dedup will use embedding similarity matrix)
-		if len(embedding) == 0 {
-			embedding = queryVec
-		}
+		// If no embedding available, leave nil — CosineSimilarityMatrix
+		// treats nil embeddings as similarity=0 (unknown), which is safer
+		// than using queryVec (which would make all items appear identical).
 		result = append(result, search.SearchItem{
 			Memory:     memory,
 			Score:      score,

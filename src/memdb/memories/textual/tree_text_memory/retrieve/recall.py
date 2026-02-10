@@ -123,10 +123,27 @@ class GraphMemoryRetriever:
                     user_name=user_name,
                 )
 
-            graph_results = future_graph.result()
-            vector_results = future_vector.result()
-            bm25_results = future_bm25.result() if self.use_bm25 else []
-            fulltext_results = future_fulltext.result() if use_fast_graph else []
+            # Each retrieval strategy is independent; one failure should not kill the others
+            try:
+                graph_results = future_graph.result()
+            except Exception as e:
+                logger.warning(f"[RECALL] graph_recall failed: {e}")
+                graph_results = []
+            try:
+                vector_results = future_vector.result()
+            except Exception as e:
+                logger.warning(f"[RECALL] vector_recall failed: {e}")
+                vector_results = []
+            try:
+                bm25_results = future_bm25.result() if self.use_bm25 else []
+            except Exception as e:
+                logger.warning(f"[RECALL] bm25_recall failed: {e}")
+                bm25_results = []
+            try:
+                fulltext_results = future_fulltext.result() if use_fast_graph else []
+            except Exception as e:
+                logger.warning(f"[RECALL] fulltext_recall failed: {e}")
+                fulltext_results = []
 
         logger.info(
             f"[RECALL] {memory_scope}: graph={len(graph_results)}, vector={len(vector_results)}, "

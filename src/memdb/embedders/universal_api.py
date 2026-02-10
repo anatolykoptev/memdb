@@ -31,8 +31,8 @@ def _sanitize_unicode(text: str) -> str:
 
 class UniversalAPIEmbedder(BaseEmbedder):
     def __init__(self, config: UniversalAPIEmbedderConfig):
-        print(
-            f"DEBUG: UniversalAPIEmbedder init. Config provider={config.provider}, base_url={config.base_url}"
+        logger.debug(
+            f"UniversalAPIEmbedder init. Config provider={config.provider}, base_url={config.base_url}"
         )
         self.provider = config.provider
         self.config = config

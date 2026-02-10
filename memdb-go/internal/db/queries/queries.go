@@ -40,8 +40,8 @@ LIMIT 1`
 // GetAllMemories returns paginated memories for a user filtered by memory_type.
 // Args: $1 = user_name, $2 = memory_type, $3 = limit, $4 = offset
 const GetAllMemories = `
-SELECT id,
-       properties
+SELECT id::text,
+       properties::text
 FROM %[1]s."Memory"
 WHERE properties->>'user_name' = $1
   AND properties->>'memory_type' = $2
