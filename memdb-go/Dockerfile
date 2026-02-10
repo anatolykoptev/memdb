@@ -51,7 +51,7 @@ RUN CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/local/lib" \
 FROM debian:trixie-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates tzdata && \
+    apt-get install -y --no-install-recommends ca-certificates tzdata curl && \
     rm -rf /var/lib/apt/lists/*
 
 # ONNX Runtime shared library
