@@ -46,6 +46,17 @@ func RegisterSearchTool(server *mcp.Server, pg *db.Postgres, qd *db.Qdrant, emb 
 		}
 
 		topK := defaultTopK
+		if input.TopK > 0 {
+			topK = input.TopK
+		}
+		relativity := 0.85
+		if input.Relativity > 0 {
+			relativity = input.Relativity
+		}
+		dedup := "mmr"
+		if input.Dedup != "" {
+			dedup = input.Dedup
+		}
 
 		// Embed query
 		embeddings, err := emb.Embed(ctx, []string{input.Query})
@@ -113,6 +124,35 @@ func RegisterSearchTool(server *mcp.Server, pg *db.Postgres, qd *db.Qdrant, emb 
 			formatted = append(formatted, item)
 		}
 
+		// Filter by relativity threshold
+		if relativity > 0 {
+			filtered := make([]map[string]any, 0, len(formatted))
+			for _, item := range formatted {
+				if meta, ok := item["metadata"].(map[string]any); ok {
+					if score, ok := meta["relativity"].(float64); ok && score >= relativity {
+						filtered = append(filtered, item)
+					}
+				}
+			}
+			formatted = filtered
+		}
+
+		// Text-exact dedup (embedding-based dedup handled by REST handler, not MCP)
+		if dedup != "no" && len(formatted) > 1 {
+			seen := make(map[string]bool)
+			deduped := make([]map[string]any, 0, len(formatted))
+			for _, item := range formatted {
+				mem, _ := item["memory"].(string)
+				key := strings.TrimSpace(mem)
+				if key == "" || seen[key] {
+					continue
+				}
+				seen[key] = true
+				deduped = append(deduped, item)
+			}
+			formatted = deduped
+		}
+
 		// Split by type
 		factMem, _, skillMem := search.SplitByMemoryType(formatted)
 		if len(factMem) > topK {
@@ -122,8 +162,19 @@ func RegisterSearchTool(server *mcp.Server, pg *db.Postgres, qd *db.Qdrant, emb 
 			skillMem = skillMem[:topK]
 		}
 
-		// Format pref results
+		// Format pref results + apply relativity threshold
 		prefFormatted := formatPrefSearchResults(prefResults)
+		if relativity > 0 {
+			filtered := make([]map[string]any, 0, len(prefFormatted))
+			for _, item := range prefFormatted {
+				if meta, ok := item["metadata"].(map[string]any); ok {
+					if score, ok := meta["relativity"].(float64); ok && score >= relativity {
+						filtered = append(filtered, item)
+					}
+				}
+			}
+			prefFormatted = filtered
+		}
 		if len(prefFormatted) > topK {
 			prefFormatted = prefFormatted[:topK]
 		}

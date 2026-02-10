@@ -5,9 +5,12 @@ package mcptools
 
 // SearchInput maps to the Python search_memories MCP tool parameters.
 type SearchInput struct {
-	Query   string   `json:"query" jsonschema:"Search query text"`
-	UserID  string   `json:"user_id,omitempty" jsonschema:"User ID for memory scoping"`
-	CubeIDs []string `json:"cube_ids,omitempty" jsonschema:"List of cube IDs to search in"`
+	Query      string   `json:"query" jsonschema:"Search query text"`
+	UserID     string   `json:"user_id,omitempty" jsonschema:"User ID for memory scoping"`
+	CubeIDs    []string `json:"cube_ids,omitempty" jsonschema:"List of cube IDs to search in"`
+	TopK       int      `json:"top_k,omitempty" jsonschema:"Max results per category (default 6)"`
+	Relativity float64  `json:"relativity,omitempty" jsonschema:"Minimum relevance score threshold 0-1 (default 0.85)"`
+	Dedup      string   `json:"dedup,omitempty" jsonschema:"Dedup mode: no, sim, mmr (default mmr)"`
 }
 
 // --- Memory CRUD tools ---
