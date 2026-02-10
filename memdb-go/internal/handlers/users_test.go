@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/MemDBai/MemDB/memdb-go/internal/db"
 )
 
 // --- NativeInstancesStatus tests (always native, no DB needed) ---
@@ -118,6 +120,86 @@ func TestNativeListUsers_NoRedis_NoPostgres(t *testing.T) {
 	// postgres=nil → ProxyToProduct → panics (nil python)
 	defer func() { recover() }()
 	h.NativeListUsers(w, req)
+}
+
+// --- NativeUpdateUserConfig tests ---
+// These use a non-nil postgres (zero-value struct) to reach the native path.
+// Invalid JSON returns 400 before any DB call, so nil pool is safe.
+
+func testNativeHandler() *Handler {
+	h := testValidateHandler()
+	h.postgres = &db.Postgres{}
+	return h
+}
+
+func TestNativeUpdateUserConfig_InvalidJSON(t *testing.T) {
+	h := testNativeHandler()
+	req := httptest.NewRequest("PUT", "/product/users/testuser/config",
+		strings.NewReader(`{not json`))
+	w := httptest.NewRecorder()
+
+	h.NativeUpdateUserConfig(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp["code"] != float64(400) {
+		t.Errorf("expected code=400, got %v", resp["code"])
+	}
+	msg, _ := resp["message"].(string)
+	if !strings.Contains(msg, "invalid JSON body") {
+		t.Errorf("expected 'invalid JSON body' in message, got: %s", msg)
+	}
+}
+
+func TestNativeUpdateUserConfig_EmptyBody(t *testing.T) {
+	h := testNativeHandler()
+	req := httptest.NewRequest("PUT", "/product/users/testuser/config", nil)
+	w := httptest.NewRecorder()
+
+	h.NativeUpdateUserConfig(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "request body is required") {
+		t.Errorf("expected body-required error, got: %s", w.Body.String())
+	}
+}
+
+func TestNativeUpdateUserConfig_ValidJSON(t *testing.T) {
+	h := testNativeHandler()
+	req := httptest.NewRequest("PUT", "/product/users/testuser/config",
+		strings.NewReader(`{"theme":"dark","lang":"en"}`))
+	req.SetPathValue("user_id", "testuser")
+	w := httptest.NewRecorder()
+
+	h.NativeUpdateUserConfig(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if resp["code"] != float64(200) {
+		t.Errorf("expected code=200, got %v", resp["code"])
+	}
+	data, _ := resp["data"].(map[string]any)
+	if data["user_id"] != "testuser" {
+		t.Errorf("expected user_id=testuser, got %v", data["user_id"])
+	}
+	cfg, _ := data["config"].(map[string]any)
+	if cfg["theme"] != "dark" {
+		t.Errorf("expected theme=dark, got %v", cfg["theme"])
+	}
 }
 
 // Integration tests with real Redis+Postgres would cover cache hit/miss paths

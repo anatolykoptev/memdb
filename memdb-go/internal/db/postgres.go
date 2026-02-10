@@ -67,6 +67,13 @@ func NewPostgres(ctx context.Context, connStr string, logger *slog.Logger) (*Pos
 	return &Postgres{pool: pool, logger: logger}, nil
 }
 
+// NewStubPostgres creates a Postgres stub with no connection pool.
+// For testing only: the nil-check (postgres != nil) will pass, but any
+// actual DB query will panic. Use this to test validation paths.
+func NewStubPostgres() *Postgres {
+	return &Postgres{}
+}
+
 // Pool returns the underlying pgx pool for direct query access.
 func (p *Postgres) Pool() *pgxpool.Pool {
 	return p.pool
