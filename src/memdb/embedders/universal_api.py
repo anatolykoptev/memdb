@@ -64,9 +64,8 @@ class UniversalAPIEmbedder(BaseEmbedder):
     @timed_with_status(
         log_prefix="model_timed_embedding",
         log_extra_args=lambda self, texts: {
-            "model_name_or_path": "text-embedding-3-large",
+            "model_name_or_path": getattr(getattr(self, "config", None), "model_name_or_path", "unknown"),
             "text_len": len(texts),
-            "text_content": texts,
         },
     )
     def embed(self, texts: list[str]) -> list[list[float]]:

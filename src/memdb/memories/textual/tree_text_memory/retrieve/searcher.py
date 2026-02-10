@@ -419,7 +419,9 @@ class Searcher:
                 )
             results = []
             for t in tasks:
-                results.extend(t.result())
+                result = t.result()
+                if result is not None:
+                    results.extend(result)
 
         logger.info(f"[SEARCH] Total raw results: {len(results)}")
         return results
@@ -527,7 +529,9 @@ class Searcher:
 
             # Collect results from all tasks
             for task in tasks:
-                results.extend(task.result())
+                result = task.result()
+                if result is not None:
+                    results.extend(result)
 
         return self.reranker.rerank(
             query=query,
@@ -818,10 +822,14 @@ class Searcher:
             return unique_results
 
         try:
-            # Collect texts and embed them
-            documents = [item.memory for item, _ in unique_results]
-            embeddings = self.embedder.embed(documents)
-            if not embeddings or len(embeddings) != len(documents):
+            # Use existing embeddings from search results when available (avoids costly re-embedding)
+            existing = [item.metadata.embedding for item, _ in unique_results]
+            if all(e and len(e) > 0 for e in existing):
+                embeddings = existing
+            else:
+                documents = [item.memory for item, _ in unique_results]
+                embeddings = self.embedder.embed(documents)
+            if not embeddings or len(embeddings) != len(unique_results):
                 return unique_results
 
             sim_matrix = cosine_similarity_matrix(embeddings)
