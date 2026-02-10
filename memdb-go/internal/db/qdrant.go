@@ -90,3 +90,78 @@ func (q *Qdrant) DeleteByIDs(ctx context.Context, collection string, ids []strin
 func (q *Qdrant) ListCollections(ctx context.Context) ([]string, error) {
 	return q.client.ListCollections(ctx)
 }
+
+// QdrantSearchResult holds a single search result from Qdrant.
+type QdrantSearchResult struct {
+	ID      string
+	Score   float32
+	Payload map[string]any
+}
+
+// SearchByVector searches a collection by vector similarity.
+func (q *Qdrant) SearchByVector(ctx context.Context, collection string, vector []float32, limit uint64) ([]QdrantSearchResult, error) {
+	points, err := q.client.Query(ctx, &qdrant.QueryPoints{
+		CollectionName: collection,
+		Query:          qdrant.NewQueryDense(vector),
+		Limit:          qdrant.PtrOf(limit),
+		WithPayload:    qdrant.NewWithPayload(true),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("qdrant search %s: %w", collection, err)
+	}
+
+	results := make([]QdrantSearchResult, 0, len(points))
+	for _, pt := range points {
+		r := QdrantSearchResult{
+			Score:   pt.GetScore(),
+			Payload: make(map[string]any),
+		}
+		// Extract ID (UUID string or num)
+		if pid := pt.GetId(); pid != nil {
+			if uuid := pid.GetUuid(); uuid != "" {
+				r.ID = uuid
+			} else {
+				r.ID = fmt.Sprintf("%d", pid.GetNum())
+			}
+		}
+		// Extract payload values
+		for k, v := range pt.GetPayload() {
+			r.Payload[k] = extractQdrantValue(v)
+		}
+		results = append(results, r)
+	}
+	return results, nil
+}
+
+// extractQdrantValue converts a qdrant.Value to a Go native type.
+func extractQdrantValue(v *qdrant.Value) any {
+	if v == nil {
+		return nil
+	}
+	switch val := v.GetKind().(type) {
+	case *qdrant.Value_StringValue:
+		return val.StringValue
+	case *qdrant.Value_IntegerValue:
+		return val.IntegerValue
+	case *qdrant.Value_DoubleValue:
+		return val.DoubleValue
+	case *qdrant.Value_BoolValue:
+		return val.BoolValue
+	case *qdrant.Value_ListValue:
+		items := val.ListValue.GetValues()
+		result := make([]any, len(items))
+		for i, item := range items {
+			result[i] = extractQdrantValue(item)
+		}
+		return result
+	case *qdrant.Value_StructValue:
+		fields := val.StructValue.GetFields()
+		result := make(map[string]any, len(fields))
+		for k, fv := range fields {
+			result[k] = extractQdrantValue(fv)
+		}
+		return result
+	default:
+		return nil
+	}
+}

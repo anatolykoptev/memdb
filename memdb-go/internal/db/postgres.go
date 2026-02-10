@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -239,4 +240,71 @@ func (p *Postgres) GetUserNamesByMemoryIDs(ctx context.Context, memoryIDs []stri
 		result[propID] = userName
 	}
 	return result, rows.Err()
+}
+
+// VectorSearchResult holds a single result from vector or fulltext search.
+type VectorSearchResult struct {
+	ID         string  // AGE node ID (text)
+	Properties string  // raw JSON properties
+	Score      float64 // similarity/rank score
+}
+
+// FormatVector formats a float32 slice as a pgvector string literal: '[0.1,0.2,...]'.
+func FormatVector(vec []float32) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, v := range vec {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, "%g", v)
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+// VectorSearch performs cosine similarity search across multiple memory types.
+// Returns results sorted by similarity score (descending).
+func (p *Postgres) VectorSearch(ctx context.Context, vector []float32, userName string, memoryTypes []string, limit int) ([]VectorSearchResult, error) {
+	vecStr := FormatVector(vector)
+	q := fmt.Sprintf(queries.VectorSearch, graphName)
+	rows, err := p.pool.Query(ctx, q, vecStr, userName, memoryTypes, limit)
+	if err != nil {
+		return nil, fmt.Errorf("vector search: %w", err)
+	}
+	defer rows.Close()
+
+	var results []VectorSearchResult
+	for rows.Next() {
+		var r VectorSearchResult
+		if err := rows.Scan(&r.ID, &r.Properties, &r.Score); err != nil {
+			return nil, fmt.Errorf("vector search scan: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// FulltextSearch performs tsvector fulltext search across multiple memory types.
+// The tsquery should be pre-built (e.g. "token1 | token2 | token3").
+func (p *Postgres) FulltextSearch(ctx context.Context, tsquery string, userName string, memoryTypes []string, limit int) ([]VectorSearchResult, error) {
+	if tsquery == "" {
+		return nil, nil
+	}
+	q := fmt.Sprintf(queries.FulltextSearch, graphName)
+	rows, err := p.pool.Query(ctx, q, tsquery, userName, memoryTypes, limit)
+	if err != nil {
+		return nil, fmt.Errorf("fulltext search: %w", err)
+	}
+	defer rows.Close()
+
+	var results []VectorSearchResult
+	for rows.Next() {
+		var r VectorSearchResult
+		if err := rows.Scan(&r.ID, &r.Properties, &r.Score); err != nil {
+			return nil, fmt.Errorf("fulltext search scan: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
 }

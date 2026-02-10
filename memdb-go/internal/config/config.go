@@ -47,6 +47,10 @@ type Config struct {
 	QdrantAddr  string `json:"qdrant_addr"` // host:port for gRPC
 	DBRedisURL  string `json:"db_redis_url"` // separate from cache Redis DB
 
+	// Embedder (VoyageAI)
+	VoyageAPIKey  string `json:"voyage_api_key"`
+	EmbedderModel string `json:"embedder_model"` // default "voyage-4-lite"
+
 	// API settings
 	EnableChatAPI bool `json:"enable_chat_api"`
 }
@@ -82,6 +86,9 @@ func Load() *Config {
 		PostgresURL: envStr("MEMDB_POSTGRES_URL", ""),
 		QdrantAddr:  envStr("MEMDB_QDRANT_ADDR", ""),
 		DBRedisURL:  envStr("MEMDB_DB_REDIS_URL", ""),
+
+		VoyageAPIKey:  envStr("VOYAGE_API_KEY", ""),
+		EmbedderModel: envStr("MEMDB_EMBEDDER_MODEL", "voyage-4-lite"),
 
 		EnableChatAPI: envBool("ENABLE_CHAT_API", false),
 	}
