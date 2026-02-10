@@ -140,6 +140,24 @@ func TestAuth_ServiceSecret(t *testing.T) {
 	}
 }
 
+func TestAuth_ServiceSecretLegacyHeader(t *testing.T) {
+	mw := Auth(testLogger(), AuthConfig{
+		Enabled:       true,
+		MasterKeyHash: hashKey("user-key"),
+		ServiceSecret: "internal-secret-123",
+	})
+	handler := mw(testHandler())
+
+	req := httptest.NewRequest("POST", "/product/search", nil)
+	req.Header.Set("X-Internal-Service", "internal-secret-123")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 with X-Internal-Service header, got %d", w.Code)
+	}
+}
+
 func TestAuth_InvalidServiceSecret(t *testing.T) {
 	mw := Auth(testLogger(), AuthConfig{
 		Enabled:       true,

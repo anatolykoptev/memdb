@@ -40,9 +40,13 @@ func RateLimit(logger *slog.Logger, cfg RateLimitConfig) func(http.Handler) http
 				return
 			}
 
-			// Skip for service secret
+			// Skip for service secret (accept both header names)
 			if cfg.ServiceSecret != "" {
-				if secret := r.Header.Get("X-Service-Secret"); secret == cfg.ServiceSecret {
+				secret := r.Header.Get("X-Service-Secret")
+				if secret == "" {
+					secret = r.Header.Get("X-Internal-Service")
+				}
+				if secret == cfg.ServiceSecret {
 					next.ServeHTTP(w, r)
 					return
 				}
