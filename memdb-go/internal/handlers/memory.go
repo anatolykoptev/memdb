@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-
-	"github.com/MemDBai/MemDB/memdb-go/internal/db/queries"
 )
 
 // NativeGetMemory handles GET /product/get_memory/{memory_id} natively via PostgreSQL.
@@ -44,6 +42,14 @@ func (h *Handler) NativeGetMemory(w http.ResponseWriter, r *http.Request) {
 			"data":    nil,
 		})
 		return
+	}
+
+	// Parse properties JSON string into a map
+	if propsStr, ok := result["properties"].(string); ok {
+		var props map[string]any
+		if json.Unmarshal([]byte(propsStr), &props) == nil {
+			result["properties"] = props
+		}
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
@@ -122,7 +128,13 @@ var memoryTypeToDBType = map[string]string{
 	"act_mem":   "ActivationMemory",
 	"param_mem": "ParametricMemory",
 	"para_mem":  "ParametricMemory",
+	"skill_mem": "SkillMemory",
+	"user_mem":  "UserMemory",
+	"pref_mem":  "PreferenceMemory",
 }
+
+// maxPageSize caps the page_size parameter to prevent excessive DB load.
+const maxPageSize = 1000
 
 // NativeGetAll handles POST /product/get_all natively via PostgreSQL.
 // Falls back to Python proxy if Postgres is not initialized.
@@ -151,7 +163,7 @@ func (h *Handler) NativeGetAll(w http.ResponseWriter, r *http.Request) {
 		errs = append(errs, "memory_type is required")
 	} else {
 		if _, ok := memoryTypeToDBType[*req.MemoryType]; !ok {
-			errs = append(errs, "memory_type must be one of: text_mem, act_mem, param_mem, para_mem")
+			errs = append(errs, "memory_type must be one of: text_mem, act_mem, param_mem, para_mem, skill_mem, user_mem, pref_mem")
 		}
 	}
 	if !h.checkErrors(w, errs) {
@@ -166,10 +178,13 @@ func (h *Handler) NativeGetAll(w http.ResponseWriter, r *http.Request) {
 	if req.PageSize != nil && *req.PageSize > 0 {
 		pageSize = *req.PageSize
 	}
+	if pageSize > maxPageSize {
+		pageSize = maxPageSize
+	}
 
 	dbType := memoryTypeToDBType[*req.MemoryType]
 
-	results, total, err := h.postgres.GetAllMemories(r.Context(), queries.DefaultGraphName, *req.UserID, dbType, page, pageSize)
+	results, total, err := h.postgres.GetAllMemories(r.Context(), *req.UserID, dbType, page, pageSize)
 	if err != nil {
 		h.logger.Debug("native get_all failed, falling back to proxy",
 			slog.Any("error", err),
@@ -244,13 +259,14 @@ func (h *Handler) NativeDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Native path: delete by memory_ids
-	userName := ""
-	if req.UserID != nil {
-		userName = *req.UserID
+	// Native path: delete by memory_ids — requires user_id
+	if req.UserID == nil || *req.UserID == "" {
+		// Fall back to proxy when user_id is missing (Python can handle it)
+		h.proxyWithBody(w, r, body)
+		return
 	}
 
-	deleted, err := h.postgres.DeleteByPropertyIDs(r.Context(), queries.DefaultGraphName, *req.MemoryIDs, userName)
+	deleted, err := h.postgres.DeleteByPropertyIDs(r.Context(), *req.MemoryIDs, *req.UserID)
 	if err != nil {
 		h.logger.Debug("native delete failed, falling back to proxy",
 			slog.Any("error", err),

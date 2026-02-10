@@ -7,10 +7,14 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/db/queries"
 )
+
+// graphName is the fixed PolarDB graph name. All queries use this constant.
+const graphName = queries.DefaultGraphName
 
 // Postgres wraps a pgx connection pool for PolarDB (PostgreSQL + Apache AGE).
 type Postgres struct {
@@ -34,6 +38,19 @@ func NewPostgres(ctx context.Context, connStr string, logger *slog.Logger) (*Pos
 	cfg.MaxConnLifetime = 30 * time.Minute
 	cfg.MaxConnIdleTime = 5 * time.Minute
 
+	// Run LOAD 'age' and SET search_path on every new connection in the pool.
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, "LOAD 'age'")
+		if err != nil {
+			logger.Warn("AGE extension load failed on connection", slog.Any("error", err))
+		}
+		_, err = conn.Exec(ctx, "SET search_path = ag_catalog, memos_graph, public")
+		if err != nil {
+			logger.Warn("failed to set search_path on connection", slog.Any("error", err))
+		}
+		return nil // non-fatal — queries use fully-qualified table names
+	}
+
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("postgres connect failed: %w", err)
@@ -43,17 +60,6 @@ func NewPostgres(ctx context.Context, connStr string, logger *slog.Logger) (*Pos
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("postgres ping failed: %w", err)
-	}
-
-	// Ensure Apache AGE extension is loaded for this connection pool
-	_, err = pool.Exec(ctx, "LOAD 'age'")
-	if err != nil {
-		logger.Warn("AGE extension load failed (may not be installed)", slog.Any("error", err))
-	}
-
-	_, err = pool.Exec(ctx, "SET search_path = ag_catalog, memos_graph, public")
-	if err != nil {
-		logger.Warn("failed to set search_path", slog.Any("error", err))
 	}
 
 	logger.Info("postgres connected", slog.Int("max_conns", int(cfg.MaxConns)))
@@ -131,7 +137,7 @@ func (p *Postgres) GetMemoryByIDs(ctx context.Context, memoryIDs []string) ([]ma
 }
 
 // ListUsers returns distinct user_name values from activated memories.
-func (p *Postgres) ListUsers(ctx context.Context, graphName string) ([]string, error) {
+func (p *Postgres) ListUsers(ctx context.Context) ([]string, error) {
 	q := fmt.Sprintf(queries.ListUsers, graphName)
 	rows, err := p.pool.Query(ctx, q)
 	if err != nil {
@@ -151,7 +157,7 @@ func (p *Postgres) ListUsers(ctx context.Context, graphName string) ([]string, e
 }
 
 // CountDistinctUsers returns the number of distinct users with activated memories.
-func (p *Postgres) CountDistinctUsers(ctx context.Context, graphName string) (int, error) {
+func (p *Postgres) CountDistinctUsers(ctx context.Context) (int, error) {
 	q := fmt.Sprintf(queries.CountDistinctUsers, graphName)
 	var count int
 	err := p.pool.QueryRow(ctx, q).Scan(&count)
@@ -159,7 +165,7 @@ func (p *Postgres) CountDistinctUsers(ctx context.Context, graphName string) (in
 }
 
 // ExistUser checks whether a user has any activated memories.
-func (p *Postgres) ExistUser(ctx context.Context, graphName string, userName string) (bool, error) {
+func (p *Postgres) ExistUser(ctx context.Context, userName string) (bool, error) {
 	q := fmt.Sprintf(queries.ExistUser, graphName)
 	var exists bool
 	err := p.pool.QueryRow(ctx, q, userName).Scan(&exists)
@@ -168,7 +174,7 @@ func (p *Postgres) ExistUser(ctx context.Context, graphName string, userName str
 
 // GetAllMemories returns paginated memories for a user filtered by memory_type.
 // Returns (results, totalCount, error).
-func (p *Postgres) GetAllMemories(ctx context.Context, graphName, userName, memoryType string, page, pageSize int) ([]map[string]any, int, error) {
+func (p *Postgres) GetAllMemories(ctx context.Context, userName, memoryType string, page, pageSize int) ([]map[string]any, int, error) {
 	offset := page * pageSize
 
 	// Get total count
@@ -206,7 +212,7 @@ func (p *Postgres) GetAllMemories(ctx context.Context, graphName, userName, memo
 
 // DeleteByPropertyIDs deletes nodes matching the given property IDs and user name.
 // Returns the number of rows deleted.
-func (p *Postgres) DeleteByPropertyIDs(ctx context.Context, graphName string, propertyIDs []string, userName string) (int64, error) {
+func (p *Postgres) DeleteByPropertyIDs(ctx context.Context, propertyIDs []string, userName string) (int64, error) {
 	q := fmt.Sprintf(queries.DeleteByPropertyIDs, graphName)
 	tag, err := p.pool.Exec(ctx, q, propertyIDs, userName)
 	if err != nil {
@@ -216,7 +222,7 @@ func (p *Postgres) DeleteByPropertyIDs(ctx context.Context, graphName string, pr
 }
 
 // GetUserNamesByMemoryIDs maps property IDs to their user_name values.
-func (p *Postgres) GetUserNamesByMemoryIDs(ctx context.Context, graphName string, memoryIDs []string) (map[string]string, error) {
+func (p *Postgres) GetUserNamesByMemoryIDs(ctx context.Context, memoryIDs []string) (map[string]string, error) {
 	q := fmt.Sprintf(queries.GetUserNamesByPropertyIDs, graphName)
 	rows, err := p.pool.Query(ctx, q, memoryIDs)
 	if err != nil {
