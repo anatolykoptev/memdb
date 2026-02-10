@@ -1,0 +1,61 @@
+// Chat service definitions for MemDB internal RPC.
+// Includes streaming support for real-time chat responses.
+syntax = "proto3";
+
+package memdb.v1;
+
+option go_package = "github.com/MemDBai/MemDB/memdb-go/gen/proto/memdb/v1;memdbv1";
+
+import "google/protobuf/struct.proto";
+import "memdb/v1/memory.proto";
+
+// ─── Chat Service ───────────────────────────────────────────────────
+
+service ChatService {
+  // Complete chat response (non-streaming).
+  rpc Complete(CompleteRequest) returns (CompleteResponse);
+
+  // Stream chat response via server-side streaming.
+  rpc Stream(StreamRequest) returns (stream StreamResponse);
+}
+
+// ─── Messages ───────────────────────────────────────────────────────
+
+message ChatParams {
+  string user_id = 1;
+  string query = 2;
+  string mem_cube_id = 3;
+  repeated Message history = 4;
+  bool internet_search = 5;
+  bool moscube = 6;
+  string base_prompt = 7;
+  string system_prompt = 8;
+  int32 top_k = 9;
+  float threshold = 10;
+  string session_id = 11;
+}
+
+message CompleteRequest {
+  ChatParams params = 1;
+}
+
+message CompleteResponse {
+  int32 code = 1;
+  string message = 2;
+  ChatResponseData data = 3;
+}
+
+message StreamRequest {
+  ChatParams params = 1;
+}
+
+message StreamResponse {
+  string type = 1;     // "content", "references", "error", "done"
+  string content = 2;
+  google.protobuf.Struct metadata = 3;
+}
+
+message ChatResponseData {
+  string response = 1;
+  google.protobuf.Struct references = 2;
+}
