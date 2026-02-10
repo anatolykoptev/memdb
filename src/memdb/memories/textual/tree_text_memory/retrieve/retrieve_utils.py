@@ -497,7 +497,16 @@ def find_best_unrelated_subgroup(sentences: list, similarity_matrix: list, bar: 
 
 
 def cosine_similarity_matrix(embeddings: list[list[float]]) -> list[list[float]]:
-    embeddings_array = np.asarray(embeddings)
+    # Filter out None/empty embeddings — replace with zero vectors
+    dim = 0
+    for e in embeddings:
+        if e is not None and len(e) > 0:
+            dim = len(e)
+            break
+    if dim == 0:
+        return np.zeros((len(embeddings), len(embeddings)))
+    clean = [e if (e is not None and len(e) > 0) else [0.0] * dim for e in embeddings]
+    embeddings_array = np.asarray(clean, dtype=np.float32)
     norms = np.linalg.norm(embeddings_array, axis=1, keepdims=True)
     # Handle zero vectors to avoid division by zero
     norms[norms == 0] = 1.0

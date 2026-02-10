@@ -140,8 +140,14 @@ class SearchHandler(BaseHandler):
 
         embeddings = self._extract_embeddings([mem for _, mem, _ in flat])
         if embeddings is None:
-            documents = [mem.get("memory", "") for _, mem, _ in flat]
-            embeddings = self.searcher.embedder.embed(documents)
+            try:
+                documents = [mem.get("memory", "") for _, mem, _ in flat]
+                embeddings = self.searcher.embedder.embed(documents)
+            except Exception as e:
+                self.logger.warning(f"[SearchHandler] sim dedup embed failed: {e}")
+                return results
+        if not embeddings:
+            return results
 
         similarity_matrix = cosine_similarity_matrix(embeddings)
 
@@ -222,8 +228,14 @@ class SearchHandler(BaseHandler):
         embeddings = self._extract_embeddings([mem for _, _, mem, _ in flat])
         if embeddings is None:
             self.logger.debug("[SearchHandler] Embedding is missing; recomputing embeddings")
-            documents = [mem.get("memory", "") for _, _, mem, _ in flat]
-            embeddings = self.searcher.embedder.embed(documents)
+            try:
+                documents = [mem.get("memory", "") for _, _, mem, _ in flat]
+                embeddings = self.searcher.embedder.embed(documents)
+            except Exception as e:
+                self.logger.warning(f"[SearchHandler] MMR dedup embed failed: {e}")
+                return results
+        if not embeddings:
+            return results
 
         # Compute similarity matrix using NumPy-optimized method
         # Returns numpy array but compatible with list[i][j] indexing
