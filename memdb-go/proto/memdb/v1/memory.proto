@@ -1,0 +1,196 @@
+// Memory service definitions for MemDB internal RPC.
+// Used between Go API gateway and Python backend via ConnectRPC.
+syntax = "proto3";
+
+package memdb.v1;
+
+option go_package = "github.com/MemDBai/MemDB/memdb-go/gen/proto/memdb/v1;memdbv1";
+
+import "google/protobuf/struct.proto";
+
+// ─── Memory Service ─────────────────────────────────────────────────
+
+service MemoryService {
+  // Search memories for a user across cubes.
+  rpc Search(SearchRequest) returns (SearchResponse);
+
+  // Add messages/memories for a user.
+  rpc Add(AddRequest) returns (AddResponse);
+
+  // Get all memories for a user.
+  rpc GetAll(GetAllRequest) returns (GetAllResponse);
+
+  // Get specific memories by IDs.
+  rpc GetByIds(GetByIdsRequest) returns (GetByIdsResponse);
+
+  // Get a single memory by ID.
+  rpc GetById(GetByIdRequest) returns (GetByIdResponse);
+
+  // Get memories with filters.
+  rpc GetMemory(GetMemoryRequest) returns (GetMemoryResponse);
+
+  // Delete memories for a user.
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+
+  // Submit feedback on memories.
+  rpc Feedback(FeedbackRequest) returns (FeedbackResponse);
+}
+
+// ─── Search ─────────────────────────────────────────────────────────
+
+message SearchRequest {
+  string user_id = 1;
+  string query = 2;
+  int32 top_k = 3;
+  repeated string mem_cube_ids = 4;
+  repeated string writable_cube_ids = 5;
+  string session_id = 6;
+  string dedup = 7;        // "no", "sim", "mmr"
+  string mode = 8;         // "fast", "fine"
+  string async_mode = 9;   // "sync", "async"
+  
+  // Threshold and filter
+  float threshold = 10;
+  google.protobuf.Struct filter = 11;
+  
+  // Search configuration
+  bool enable_text_mem = 12;
+  bool enable_act_mem = 13;
+  bool enable_para_mem = 14;
+  bool enable_pref_mem = 15;
+  bool enable_tool_mem = 16;
+  bool enable_knowledge_base = 17;
+  
+  // Backward compat fields
+  string mem_cube_id = 18;  // deprecated, use mem_cube_ids
+}
+
+message SearchResponse {
+  int32 code = 1;
+  string message = 2;
+  google.protobuf.Struct data = 3;  // Complex nested search results
+}
+
+// ─── Add ────────────────────────────────────────────────────────────
+
+message Message {
+  string role = 1;
+  string content = 2;
+  string name = 3;
+  string tool_call_id = 4;
+}
+
+message AddRequest {
+  string user_id = 1;
+  repeated Message messages = 2;
+  string memory_content = 3;
+  repeated string mem_cube_ids = 4;
+  repeated string writable_cube_ids = 5;
+  string session_id = 6;
+  string mode = 7;         // "fast", "fine"
+  string async_mode = 8;   // "sync", "async"
+  string source = 9;
+  string user_profile = 10;
+  string task_id = 11;
+  string doc_path = 12;
+  
+  // Backward compat
+  string mem_cube_id = 13;  // deprecated
+}
+
+message MemoryItem {
+  string memory = 1;
+  string memory_id = 2;
+  string memory_type = 3;
+  string cube_id = 4;
+}
+
+message AddResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated MemoryItem data = 3;
+}
+
+// ─── Get ────────────────────────────────────────────────────────────
+
+message GetAllRequest {
+  string user_id = 1;
+  repeated string mem_cube_ids = 2;
+  string memory_type = 3;
+  string search_query = 4;
+}
+
+message GetAllResponse {
+  int32 code = 1;
+  string message = 2;
+  google.protobuf.Struct data = 3;
+}
+
+message GetByIdsRequest {
+  repeated string memory_ids = 1;
+}
+
+message GetByIdsResponse {
+  int32 code = 1;
+  string message = 2;
+  google.protobuf.Struct data = 3;
+}
+
+message GetByIdRequest {
+  string memory_id = 1;
+}
+
+message GetByIdResponse {
+  int32 code = 1;
+  string message = 2;
+  google.protobuf.Struct data = 3;
+}
+
+message GetMemoryRequest {
+  string user_id = 1;
+  repeated string mem_cube_ids = 2;
+  string memory_type = 3;
+  google.protobuf.Struct filter = 4;
+  int32 page = 5;
+  int32 page_size = 6;
+}
+
+message GetMemoryResponse {
+  int32 code = 1;
+  string message = 2;
+  google.protobuf.Struct data = 3;
+}
+
+// ─── Delete ─────────────────────────────────────────────────────────
+
+message DeleteRequest {
+  repeated string writable_cube_ids = 1;
+  repeated string memory_ids = 2;
+  repeated string file_ids = 3;
+  google.protobuf.Struct filter = 4;
+}
+
+message DeleteResponse {
+  int32 code = 1;
+  string message = 2;
+  bool success = 3;
+}
+
+// ─── Feedback ───────────────────────────────────────────────────────
+
+message FeedbackRequest {
+  string user_id = 1;
+  repeated Message messages = 2;
+  repeated string mem_cube_ids = 3;
+  repeated string writable_cube_ids = 4;
+  string session_id = 5;
+  string mode = 6;
+  string async_mode = 7;
+  google.protobuf.Struct feedback = 8;
+}
+
+message FeedbackResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated MemoryItem data = 3;
+}

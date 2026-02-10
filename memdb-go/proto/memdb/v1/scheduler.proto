@@ -1,0 +1,115 @@
+// Scheduler service definitions for MemDB internal RPC.
+// Includes streaming for real-time scheduler progress updates.
+syntax = "proto3";
+
+package memdb.v1;
+
+option go_package = "github.com/MemDBai/MemDB/memdb-go/gen/proto/memdb/v1;memdbv1";
+
+// ─── Scheduler Service ──────────────────────────────────────────────
+
+service SchedulerService {
+  // Get overall scheduler status summary.
+  rpc GetAllStatus(GetAllStatusRequest) returns (GetAllStatusResponse);
+
+  // Get task status for a specific user.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+
+  // Get task queue backlog for a user.
+  rpc GetTaskQueueStatus(GetTaskQueueStatusRequest) returns (GetTaskQueueStatusResponse);
+
+  // Wait until scheduler is idle (blocking).
+  rpc WaitForIdle(WaitForIdleRequest) returns (WaitForIdleResponse);
+
+  // Stream scheduler progress via server-side streaming.
+  rpc WaitStream(WaitStreamRequest) returns (stream WaitStreamResponse);
+}
+
+// ─── Requests ───────────────────────────────────────────────────────
+
+message GetAllStatusRequest {}
+
+message GetStatusRequest {
+  string user_id = 1;
+  string task_id = 2;  // optional
+}
+
+message GetTaskQueueStatusRequest {
+  string user_id = 1;
+}
+
+message WaitForIdleRequest {
+  string user_name = 1;
+  double timeout_seconds = 2;
+  double poll_interval = 3;
+}
+
+message WaitStreamRequest {
+  string user_name = 1;
+  double timeout_seconds = 2;
+  double poll_interval = 3;
+}
+
+// ─── Responses ──────────────────────────────────────────────────────
+
+message TaskSummary {
+  int32 waiting = 1;
+  int32 in_progress = 2;
+  int32 pending = 3;
+  int32 completed = 4;
+  int32 failed = 5;
+  int32 cancelled = 6;
+  int32 total = 7;
+}
+
+message GetAllStatusResponse {
+  int32 code = 1;
+  string message = 2;
+  GetAllStatusData data = 3;
+}
+
+message GetAllStatusData {
+  TaskSummary scheduler_summary = 1;
+  TaskSummary all_tasks_summary = 2;
+}
+
+message StatusResponseItem {
+  string task_id = 1;
+  string status = 2;  // "in_progress", "completed", "waiting", "failed", "cancelled"
+}
+
+message GetStatusResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated StatusResponseItem data = 3;
+}
+
+message TaskQueueData {
+  string user_id = 1;
+  string user_name = 2;
+  string mem_cube_id = 3;
+  repeated string stream_keys = 4;
+  int32 users_count = 5;
+  int32 pending_tasks_count = 6;
+  int32 remaining_tasks_count = 7;
+  repeated string pending_tasks_detail = 8;
+  repeated string remaining_tasks_detail = 9;
+}
+
+message GetTaskQueueStatusResponse {
+  int32 code = 1;
+  string message = 2;
+  TaskQueueData data = 3;
+}
+
+message WaitForIdleResponse {
+  bool idle = 1;
+  string message = 2;
+}
+
+message WaitStreamResponse {
+  string status = 1;   // "waiting", "idle", "timeout", "error"
+  string message = 2;
+  string instance_id = 3;
+  double elapsed = 4;
+}
