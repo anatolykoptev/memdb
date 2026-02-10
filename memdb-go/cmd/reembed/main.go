@@ -1,3 +1,5 @@
+//go:build cgo
+
 // Re-embedding CLI tool — re-embeds all existing memories with a new model.
 //
 // Usage: memdb-reembed

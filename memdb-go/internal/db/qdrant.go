@@ -133,6 +133,71 @@ func (q *Qdrant) SearchByVector(ctx context.Context, collection string, vector [
 	return results, nil
 }
 
+// ScrollByUserID scrolls all points in a collection filtered by user_id in payload.
+// Returns points as QdrantSearchResult (Score is 0 since there's no vector query).
+// Uses pagination to handle large result sets.
+func (q *Qdrant) ScrollByUserID(ctx context.Context, collection, userID string, limit int) ([]QdrantSearchResult, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	pageSize := uint32(100)
+	if limit < 100 {
+		pageSize = uint32(limit)
+	}
+
+	filter := &qdrant.Filter{
+		Must: []*qdrant.Condition{
+			qdrant.NewMatch("user_id", userID),
+		},
+	}
+
+	var allResults []QdrantSearchResult
+	var scrollOffset *qdrant.PointId
+
+	for {
+		points, nextOffset, err := q.client.ScrollAndOffset(ctx, &qdrant.ScrollPoints{
+			CollectionName: collection,
+			Limit:          &pageSize,
+			Offset:         scrollOffset,
+			Filter:         filter,
+			WithPayload:    qdrant.NewWithPayload(true),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("qdrant scroll %s: %w", collection, err)
+		}
+
+		for _, pt := range points {
+			r := QdrantSearchResult{
+				Score:   0,
+				Payload: make(map[string]any),
+			}
+			if pid := pt.GetId(); pid != nil {
+				if uuid := pid.GetUuid(); uuid != "" {
+					r.ID = uuid
+				} else {
+					r.ID = fmt.Sprintf("%d", pid.GetNum())
+				}
+			}
+			for k, v := range pt.GetPayload() {
+				r.Payload[k] = extractQdrantValue(v)
+			}
+			allResults = append(allResults, r)
+
+			if len(allResults) >= limit {
+				return allResults, nil
+			}
+		}
+
+		if nextOffset == nil {
+			break
+		}
+		scrollOffset = nextOffset
+	}
+
+	return allResults, nil
+}
+
 // extractQdrantValue converts a qdrant.Value to a Go native type.
 func extractQdrantValue(v *qdrant.Value) any {
 	if v == nil {

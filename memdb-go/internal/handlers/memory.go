@@ -1,11 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/MemDBai/MemDB/memdb-go/internal/search"
 )
 
 // NativeGetMemory handles GET /product/get_memory/{memory_id} natively via PostgreSQL.
@@ -174,6 +178,252 @@ func (h *Handler) NativeGetMemoryByIDs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// prefCollectionsGetMemory lists the Qdrant collections for preference memory.
+var prefCollectionsGetMemory = []string{"explicit_preference", "implicit_preference"}
+
+// NativePostGetMemory handles POST /product/get_memory natively via PostgreSQL+Qdrant.
+// Falls back to Python proxy if Postgres is not initialized or if complex filters are used.
+//
+// This returns all memory types in a single response:
+//   - text_mem (LongTermMemory) from PolarDB
+//   - skill_mem (SkillMemory) from PolarDB
+//   - pref_mem from Qdrant preference collections
+//   - tool_mem (always empty)
+func (h *Handler) NativePostGetMemory(w http.ResponseWriter, r *http.Request) {
+	if h.postgres == nil {
+		h.ValidatedGetMemory(w, r)
+		return
+	}
+
+	body, ok := h.readBody(w, r)
+	if !ok {
+		return
+	}
+
+	var req getMemoryRequest
+	if !h.decodeJSON(w, body, &req) {
+		return
+	}
+
+	// mem_cube_id is required
+	if req.MemCubeID == nil || *req.MemCubeID == "" {
+		h.writeValidationError(w, []string{"mem_cube_id is required"})
+		return
+	}
+
+	// Complex filters: fall back to Python
+	if len(req.Filter) > 0 {
+		h.logger.Debug("native post_get_memory: filter specified, proxying")
+		h.proxyWithBody(w, r, body)
+		return
+	}
+
+	// Defaults
+	memCubeID := *req.MemCubeID
+	page := 0
+	pageSize := 100
+	includePreference := true
+	includeSkillMemory := true
+
+	if req.Page != nil && *req.Page >= 0 {
+		page = *req.Page
+	}
+	if req.PageSize != nil && *req.PageSize > 0 {
+		pageSize = *req.PageSize
+	}
+	if pageSize > maxPageSize {
+		pageSize = maxPageSize
+	}
+	if req.IncludePreference != nil {
+		includePreference = *req.IncludePreference
+	}
+	if req.IncludeSkillMemory != nil {
+		includeSkillMemory = *req.IncludeSkillMemory
+	}
+
+	ctx := r.Context()
+	cacheKey := fmt.Sprintf("%spost_get_memory:%s:%d:%d:%t:%t",
+		cachePrefix, memCubeID, page, pageSize, includePreference, includeSkillMemory)
+
+	// Check cache
+	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(cached)
+		return
+	}
+
+	// Fetch text_mem (LongTermMemory)
+	textResults, textTotal, err := h.postgres.GetAllMemories(ctx, memCubeID, "LongTermMemory", page, pageSize)
+	if err != nil {
+		h.logger.Debug("native post_get_memory: text_mem query failed, proxying",
+			slog.Any("error", err),
+		)
+		h.proxyWithBody(w, r, body)
+		return
+	}
+
+	textMem := formatMemoryBucket(textResults, memCubeID, textTotal)
+
+	// Fetch skill_mem (SkillMemory) if requested
+	var skillMem search.MemoryBucket
+	if includeSkillMemory {
+		skillResults, skillTotal, err := h.postgres.GetAllMemories(ctx, memCubeID, "SkillMemory", page, pageSize)
+		if err != nil {
+			h.logger.Debug("native post_get_memory: skill_mem query failed",
+				slog.Any("error", err),
+			)
+			// Non-fatal: return empty skill_mem
+			skillMem = search.MemoryBucket{
+				CubeID:     memCubeID,
+				Memories:   []map[string]any{},
+				TotalNodes: 0,
+			}
+		} else {
+			skillMem = formatMemoryBucket(skillResults, memCubeID, skillTotal)
+		}
+	} else {
+		skillMem = search.MemoryBucket{
+			CubeID:     memCubeID,
+			Memories:   []map[string]any{},
+			TotalNodes: 0,
+		}
+	}
+
+	// Fetch pref_mem from Qdrant if requested and available
+	var prefMem search.MemoryBucket
+	if includePreference && h.qdrant != nil {
+		prefItems := h.scrollPreferences(ctx, memCubeID, pageSize)
+		prefMem = search.MemoryBucket{
+			CubeID:     memCubeID,
+			Memories:   prefItems,
+			TotalNodes: len(prefItems),
+		}
+	} else {
+		prefMem = search.MemoryBucket{
+			CubeID:     memCubeID,
+			Memories:   []map[string]any{},
+			TotalNodes: 0,
+		}
+	}
+
+	// tool_mem is always empty
+	toolMem := search.MemoryBucket{
+		CubeID:     memCubeID,
+		Memories:   []map[string]any{},
+		TotalNodes: 0,
+	}
+
+	resp := map[string]any{
+		"code":    200,
+		"message": "Memories retrieved successfully",
+		"data": map[string]any{
+			"text_mem":  []search.MemoryBucket{textMem},
+			"skill_mem": []search.MemoryBucket{skillMem},
+			"pref_mem":  []search.MemoryBucket{prefMem},
+			"tool_mem":  []search.MemoryBucket{toolMem},
+		},
+	}
+
+	if encoded, err := json.Marshal(resp); err == nil {
+		h.cacheSet(ctx, cacheKey, encoded, 30*time.Second)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(encoded)
+	} else {
+		h.writeJSON(w, http.StatusOK, resp)
+	}
+
+	h.logger.Info("native post_get_memory complete",
+		slog.String("mem_cube_id", memCubeID),
+		slog.Int("text_mem", textMem.TotalNodes),
+		slog.Int("skill_mem", skillMem.TotalNodes),
+		slog.Int("pref_mem", prefMem.TotalNodes),
+	)
+}
+
+// formatMemoryBucket formats PolarDB results into a MemoryBucket with parsed properties.
+// Each memory item gets the full FormatMemoryItem treatment matching the Python API.
+func formatMemoryBucket(results []map[string]any, cubeID string, total int) search.MemoryBucket {
+	memories := make([]map[string]any, 0, len(results))
+	for _, result := range results {
+		if propsStr, ok := result["properties"].(string); ok {
+			var props map[string]any
+			if json.Unmarshal([]byte(propsStr), &props) == nil {
+				item := search.FormatMemoryItem(props, false)
+				memories = append(memories, item)
+			}
+		}
+	}
+	return search.MemoryBucket{
+		CubeID:     cubeID,
+		Memories:   memories,
+		TotalNodes: total,
+	}
+}
+
+// scrollPreferences scrolls Qdrant preference collections for a user and formats results.
+func (h *Handler) scrollPreferences(ctx context.Context, userID string, limit int) []map[string]any {
+	var allItems []map[string]any
+	seen := make(map[string]bool)
+
+	for _, coll := range prefCollectionsGetMemory {
+		results, err := h.qdrant.ScrollByUserID(ctx, coll, userID, limit)
+		if err != nil {
+			h.logger.Debug("pref scroll failed",
+				slog.String("collection", coll),
+				slog.Any("error", err),
+			)
+			continue
+		}
+
+		for _, r := range results {
+			if seen[r.ID] {
+				continue
+			}
+			seen[r.ID] = true
+
+			memory, _ := r.Payload["memory"].(string)
+			if memory == "" {
+				memory, _ = r.Payload["memory_content"].(string)
+			}
+			if memory == "" {
+				continue
+			}
+
+			// Build metadata from payload
+			metadata := make(map[string]any)
+			for k, v := range r.Payload {
+				metadata[k] = v
+			}
+			metadata["embedding"] = []any{}
+			metadata["usage"] = []any{}
+			metadata["id"] = r.ID
+			metadata["memory"] = memory
+
+			refID := r.ID
+			if idx := strings.IndexByte(refID, '-'); idx > 0 {
+				refID = refID[:idx]
+			}
+			refIDStr := "[" + refID + "]"
+			metadata["ref_id"] = refIDStr
+
+			item := map[string]any{
+				"id":       r.ID,
+				"ref_id":   refIDStr,
+				"memory":   memory,
+				"metadata": metadata,
+			}
+			allItems = append(allItems, item)
+		}
+	}
+
+	if allItems == nil {
+		allItems = []map[string]any{}
+	}
+	return allItems
+}
+
 // getAllNativeRequest extends getAllRequest with pagination fields.
 type getAllNativeRequest struct {
 	UserID     *string `json:"user_id"`
@@ -215,17 +465,7 @@ func (h *Handler) NativeGetAll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required fields
-	var errs []string
-	if req.UserID == nil || *req.UserID == "" {
-		errs = append(errs, "user_id is required")
-	}
-	if req.MemoryType == nil || *req.MemoryType == "" {
-		errs = append(errs, "memory_type is required")
-	} else {
-		if _, ok := memoryTypeToDBType[*req.MemoryType]; !ok {
-			errs = append(errs, "memory_type must be one of: text_mem, act_mem, param_mem, para_mem, skill_mem, user_mem, pref_mem")
-		}
-	}
+	errs := validateGetAllRequest(req.UserID, req.MemoryType)
 	if !h.checkErrors(w, errs) {
 		return
 	}

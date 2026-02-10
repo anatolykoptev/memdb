@@ -1,3 +1,5 @@
+//go:build cgo
+
 // Package embedder provides text embedding backends.
 //
 // ONNXEmbedder runs multilingual-e5-large locally via ONNX Runtime,

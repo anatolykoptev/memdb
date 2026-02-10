@@ -93,7 +93,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	mux.HandleFunc("GET /product/scheduler/wait/stream", h.ProxyToProduct)
 
 	// Memory (Server) — native with proxy fallback
-	mux.HandleFunc("POST /product/get_memory", h.ValidatedGetMemory)
+	mux.HandleFunc("POST /product/get_memory", h.NativePostGetMemory)
 	mux.HandleFunc("GET /product/get_memory/{memory_id}", h.NativeGetMemory)
 	mux.HandleFunc("POST /product/get_memory_by_ids", h.NativeGetMemoryByIDs)
 	mux.HandleFunc("POST /product/delete_memory", h.NativeDelete)

@@ -78,7 +78,14 @@ type chatRequest struct {
 
 // getMemoryRequest validates POST /product/get_memory.
 type getMemoryRequest struct {
-	MemCubeID *string `json:"mem_cube_id"`
+	MemCubeID          *string                `json:"mem_cube_id"`
+	UserID             *string                `json:"user_id,omitempty"`
+	IncludePreference  *bool                  `json:"include_preference,omitempty"`
+	IncludeToolMemory  *bool                  `json:"include_tool_memory,omitempty"`
+	IncludeSkillMemory *bool                  `json:"include_skill_memory,omitempty"`
+	Filter             map[string]interface{} `json:"filter,omitempty"`
+	Page               *int                   `json:"page,omitempty"`
+	PageSize           *int                   `json:"page_size,omitempty"`
 }
 
 // getMemoryByIDsRequest validates POST /product/get_memory_by_ids.
@@ -246,20 +253,7 @@ func (h *Handler) ValidatedGetAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var errs []string
-	if req.UserID == nil || *req.UserID == "" {
-		errs = append(errs, "user_id is required")
-	}
-	if req.MemoryType == nil || *req.MemoryType == "" {
-		errs = append(errs, "memory_type is required")
-	} else {
-		switch *req.MemoryType {
-		case "text_mem", "act_mem", "param_mem", "para_mem", "skill_mem", "user_mem", "pref_mem":
-		default:
-			errs = append(errs, "memory_type must be one of: text_mem, act_mem, param_mem, para_mem, skill_mem, user_mem, pref_mem")
-		}
-	}
-
+	errs := validateGetAllRequest(req.UserID, req.MemoryType)
 	if !h.checkErrors(w, errs) {
 		return
 	}
@@ -429,6 +423,23 @@ func (h *Handler) checkErrors(w http.ResponseWriter, errs []string) bool {
 		return false
 	}
 	return true
+}
+
+// validateGetAllRequest validates the common fields for get_all requests.
+// Returns a list of validation errors (empty if valid).
+func validateGetAllRequest(userID, memoryType *string) []string {
+	var errs []string
+	if userID == nil || *userID == "" {
+		errs = append(errs, "user_id is required")
+	}
+	if memoryType == nil || *memoryType == "" {
+		errs = append(errs, "memory_type is required")
+	} else {
+		if _, ok := memoryTypeToDBType[*memoryType]; !ok {
+			errs = append(errs, "memory_type must be one of: text_mem, act_mem, param_mem, para_mem, skill_mem, user_mem, pref_mem")
+		}
+	}
+	return errs
 }
 
 // proxyWithBody resets r.Body from the buffered bytes and proxies to Python.

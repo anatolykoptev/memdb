@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -256,7 +257,8 @@ func (h *Handler) NativeUpdateUserConfig(w http.ResponseWriter, r *http.Request)
 
 	var cfg map[string]any
 	if err := json.Unmarshal(body, &cfg); err != nil {
-		cfg = map[string]any{}
+		h.writeValidationError(w, []string{fmt.Sprintf("invalid JSON body: %s", err.Error())})
+		return
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
