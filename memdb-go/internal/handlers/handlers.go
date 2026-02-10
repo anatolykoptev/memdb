@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
+	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
 	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
 )
 
@@ -20,9 +21,10 @@ import (
 type Handler struct {
 	python   *rpc.PythonClient
 	logger   *slog.Logger
-	postgres *db.Postgres // nil = not initialized, fall back to proxy
-	qdrant   *db.Qdrant   // nil = not initialized
-	redis    *db.Redis    // nil = not initialized
+	postgres *db.Postgres          // nil = not initialized, fall back to proxy
+	qdrant   *db.Qdrant            // nil = not initialized
+	redis    *db.Redis             // nil = not initialized
+	embedder *embedder.VoyageClient // nil = native search disabled
 }
 
 // NewHandler creates a new Handler with the given dependencies.
@@ -39,6 +41,11 @@ func (h *Handler) SetDBClients(pg *db.Postgres, qd *db.Qdrant, rd *db.Redis) {
 	h.postgres = pg
 	h.qdrant = qd
 	h.redis = rd
+}
+
+// SetEmbedder sets the VoyageAI embedding client for native search.
+func (h *Handler) SetEmbedder(e *embedder.VoyageClient) {
+	h.embedder = e
 }
 
 // Close releases all database connections held by the handler.

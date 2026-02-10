@@ -28,6 +28,12 @@ type searchRequest struct {
 	PrefTopK     *int     `json:"pref_top_k,omitempty"`
 	ToolMemTopK  *int     `json:"tool_mem_top_k,omitempty"`
 	SkillMemTopK *int     `json:"skill_mem_top_k,omitempty"`
+
+	// Fields for native search handler proxy-fallback decisions
+	Mode             *string   `json:"mode,omitempty"`
+	InternetSearch   *bool     `json:"internet_search,omitempty"`
+	ReadableCubeIDs  *[]string `json:"readable_cube_ids,omitempty"`
+	IncludeEmbedding *bool     `json:"include_embedding,omitempty"`
 }
 
 // addRequest validates POST /product/add.

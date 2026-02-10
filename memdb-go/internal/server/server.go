@@ -9,6 +9,7 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/cache"
 	"github.com/MemDBai/MemDB/memdb-go/internal/config"
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
+	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
 	"github.com/MemDBai/MemDB/memdb-go/internal/handlers"
 	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
 	mw "github.com/MemDBai/MemDB/memdb-go/internal/server/middleware"
@@ -36,6 +37,13 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	// Initialize database clients for Phase 2 native handlers (non-fatal)
 	initDBClients(cfg, h, logger)
 
+	// Initialize VoyageAI embedder for native search (non-fatal)
+	if cfg.VoyageAPIKey != "" {
+		emb := embedder.NewVoyageClient(cfg.VoyageAPIKey, cfg.EmbedderModel, logger)
+		h.SetEmbedder(emb)
+		logger.Info("voyage embedder initialized", slog.String("model", cfg.EmbedderModel))
+	}
+
 	// Create router using Go 1.22+ stdlib ServeMux
 	mux := http.NewServeMux()
 
@@ -48,7 +56,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	// Memory CRUD — native or validated
 	mux.HandleFunc("POST /product/get_all", h.NativeGetAll)
 	mux.HandleFunc("POST /product/add", h.ValidatedAdd)
-	mux.HandleFunc("POST /product/search", h.ValidatedSearch)
+	mux.HandleFunc("POST /product/search", h.NativeSearch)
 
 	// Chat — validated
 	mux.HandleFunc("POST /product/chat/complete", h.ValidatedChatComplete)
