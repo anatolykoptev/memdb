@@ -1,0 +1,6 @@
+*.bin
+*.html
+*.json
+*.txt
+!.gitkeep
+!.gitignore
