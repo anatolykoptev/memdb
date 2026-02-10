@@ -7,8 +7,6 @@ import (
 	"os"
 	"runtime"
 	"time"
-
-	"github.com/MemDBai/MemDB/memdb-go/internal/db/queries"
 )
 
 // NativeListUsers handles GET /product/users natively via PostgreSQL.
@@ -18,7 +16,7 @@ func (h *Handler) NativeListUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	users, err := h.postgres.ListUsers(r.Context(), queries.DefaultGraphName)
+	users, err := h.postgres.ListUsers(r.Context())
 	if err != nil {
 		h.logger.Debug("native list_users failed, falling back to proxy",
 			slog.Any("error", err),
@@ -54,7 +52,7 @@ func (h *Handler) NativeGetUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exists, err := h.postgres.ExistUser(r.Context(), queries.DefaultGraphName, userID)
+	exists, err := h.postgres.ExistUser(r.Context(), userID)
 	if err != nil {
 		h.logger.Debug("native get_user failed, falling back to proxy",
 			slog.String("user_id", userID),
@@ -135,7 +133,7 @@ func (h *Handler) NativeInstancesCount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	count, err := h.postgres.CountDistinctUsers(r.Context(), queries.DefaultGraphName)
+	count, err := h.postgres.CountDistinctUsers(r.Context())
 	if err != nil {
 		h.logger.Debug("native instances_count failed, falling back to proxy",
 			slog.Any("error", err),
@@ -258,7 +256,7 @@ func (h *Handler) NativeExistMemCube(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exists, err := h.postgres.ExistUser(r.Context(), queries.DefaultGraphName, *req.MemCubeID)
+	exists, err := h.postgres.ExistUser(r.Context(), *req.MemCubeID)
 	if err != nil {
 		h.logger.Debug("native exist_mem_cube_id failed, falling back to proxy",
 			slog.Any("error", err),
@@ -301,7 +299,7 @@ func (h *Handler) NativeGetUserNamesByMemoryIDs(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	result, err := h.postgres.GetUserNamesByMemoryIDs(r.Context(), queries.DefaultGraphName, *req.MemoryIDs)
+	result, err := h.postgres.GetUserNamesByMemoryIDs(r.Context(), *req.MemoryIDs)
 	if err != nil {
 		h.logger.Debug("native get_user_names_by_memory_ids failed, falling back to proxy",
 			slog.Any("error", err),

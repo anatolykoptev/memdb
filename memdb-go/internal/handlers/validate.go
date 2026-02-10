@@ -248,9 +248,9 @@ func (h *Handler) ValidatedGetAll(w http.ResponseWriter, r *http.Request) {
 		errs = append(errs, "memory_type is required")
 	} else {
 		switch *req.MemoryType {
-		case "text_mem", "act_mem", "param_mem", "para_mem":
+		case "text_mem", "act_mem", "param_mem", "para_mem", "skill_mem", "user_mem", "pref_mem":
 		default:
-			errs = append(errs, "memory_type must be one of: text_mem, act_mem, param_mem, para_mem")
+			errs = append(errs, "memory_type must be one of: text_mem, act_mem, param_mem, para_mem, skill_mem, user_mem, pref_mem")
 		}
 	}
 
