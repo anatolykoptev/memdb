@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"math"
@@ -46,7 +47,7 @@ func RateLimit(logger *slog.Logger, cfg RateLimitConfig) func(http.Handler) http
 				if secret == "" {
 					secret = r.Header.Get("X-Internal-Service")
 				}
-				if secret == cfg.ServiceSecret {
+				if subtle.ConstantTimeCompare([]byte(secret), []byte(cfg.ServiceSecret)) == 1 {
 					next.ServeHTTP(w, r)
 					return
 				}

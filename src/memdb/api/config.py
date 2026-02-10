@@ -552,6 +552,7 @@ class APIConfig:
 
         return config
 
+    @staticmethod
     def get_internet_config() -> dict[str, Any]:
         """Get internet search configuration."""
         internet_backend = os.getenv("INTERNET_SEARCH_BACKEND", "searxng")
