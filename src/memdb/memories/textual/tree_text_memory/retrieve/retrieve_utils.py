@@ -428,6 +428,8 @@ class FastTokenizer:
 
 
 def parse_json_result(response_text):
+    if not response_text:
+        return {}
     try:
         json_start = response_text.find("{")
         response_text = response_text[json_start:]
