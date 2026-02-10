@@ -98,14 +98,22 @@ type QdrantSearchResult struct {
 	Payload map[string]any
 }
 
-// SearchByVector searches a collection by vector similarity.
-func (q *Qdrant) SearchByVector(ctx context.Context, collection string, vector []float32, limit uint64) ([]QdrantSearchResult, error) {
-	points, err := q.client.Query(ctx, &qdrant.QueryPoints{
+// SearchByVector searches a collection by vector similarity, filtered by user_id.
+func (q *Qdrant) SearchByVector(ctx context.Context, collection string, vector []float32, limit uint64, userID string) ([]QdrantSearchResult, error) {
+	queryReq := &qdrant.QueryPoints{
 		CollectionName: collection,
 		Query:          qdrant.NewQueryDense(vector),
 		Limit:          qdrant.PtrOf(limit),
 		WithPayload:    qdrant.NewWithPayload(true),
-	})
+	}
+	if userID != "" {
+		queryReq.Filter = &qdrant.Filter{
+			Must: []*qdrant.Condition{
+				qdrant.NewMatch("user_id", userID),
+			},
+		}
+	}
+	points, err := q.client.Query(ctx, queryReq)
 	if err != nil {
 		return nil, fmt.Errorf("qdrant search %s: %w", collection, err)
 	}
