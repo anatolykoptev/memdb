@@ -44,8 +44,8 @@ func New(cfg *config.Config, logger *slog.Logger) *http.Server {
 
 	// ─── Server Router Endpoints (server_router.py — deployed) ─────────
 
-	// Memory CRUD — validated
-	mux.HandleFunc("POST /product/get_all", h.ValidatedGetAll)
+	// Memory CRUD — native or validated
+	mux.HandleFunc("POST /product/get_all", h.NativeGetAll)
 	mux.HandleFunc("POST /product/add", h.ValidatedAdd)
 	mux.HandleFunc("POST /product/search", h.ValidatedSearch)
 
@@ -69,34 +69,34 @@ func New(cfg *config.Config, logger *slog.Logger) *http.Server {
 	mux.HandleFunc("POST /product/get_memory", h.ValidatedGetMemory)
 	mux.HandleFunc("GET /product/get_memory/{memory_id}", h.NativeGetMemory)
 	mux.HandleFunc("POST /product/get_memory_by_ids", h.NativeGetMemoryByIDs)
-	mux.HandleFunc("POST /product/delete_memory", h.ValidatedDelete)
+	mux.HandleFunc("POST /product/delete_memory", h.NativeDelete)
 
 	// Feedback — validated
 	mux.HandleFunc("POST /product/feedback", h.ValidatedFeedback)
 
-	// Internal
-	mux.HandleFunc("POST /product/get_user_names_by_memory_ids", h.ProxyToProduct)
-	mux.HandleFunc("POST /product/exist_mem_cube_id", h.ValidatedExistMemCube)
+	// Internal — native with proxy fallback
+	mux.HandleFunc("POST /product/get_user_names_by_memory_ids", h.NativeGetUserNamesByMemoryIDs)
+	mux.HandleFunc("POST /product/exist_mem_cube_id", h.NativeExistMemCube)
 
 	// ─── Product Router Endpoints (product_router.py — migration) ───────
 
-	// Configuration
-	mux.HandleFunc("POST /product/configure", h.ProxyToProduct)
-	mux.HandleFunc("GET /product/configure/{user_id}", h.ProxyToProduct)
+	// Configuration — native stubs with proxy fallback
+	mux.HandleFunc("POST /product/configure", h.NativeConfigure)
+	mux.HandleFunc("GET /product/configure/{user_id}", h.NativeGetConfig)
 
-	// User management
-	mux.HandleFunc("POST /product/users/register", h.ProxyToProduct)
-	mux.HandleFunc("GET /product/users", h.ProxyToProduct)
-	mux.HandleFunc("GET /product/users/{user_id}", h.ProxyToProduct)
-	mux.HandleFunc("GET /product/users/{user_id}/config", h.ProxyToProduct)
-	mux.HandleFunc("PUT /product/users/{user_id}/config", h.ProxyToProduct)
+	// User management — native with proxy fallback
+	mux.HandleFunc("POST /product/users/register", h.NativeRegisterUser)
+	mux.HandleFunc("GET /product/users", h.NativeListUsers)
+	mux.HandleFunc("GET /product/users/{user_id}", h.NativeGetUser)
+	mux.HandleFunc("GET /product/users/{user_id}/config", h.NativeGetUserConfig)
+	mux.HandleFunc("PUT /product/users/{user_id}/config", h.NativeUpdateUserConfig)
 
 	// Chat (product_router variant — SSE streaming)
 	mux.HandleFunc("POST /product/chat", h.ValidatedChatStream)
 
-	// Instance monitoring
-	mux.HandleFunc("GET /product/instances/status", h.ProxyToProduct)
-	mux.HandleFunc("GET /product/instances/count", h.ProxyToProduct)
+	// Instance monitoring — native
+	mux.HandleFunc("GET /product/instances/status", h.NativeInstancesStatus)
+	mux.HandleFunc("GET /product/instances/count", h.NativeInstancesCount)
 
 	// ─── Apply middleware stack ──────────────────────────────────────────
 	// Order: outermost wrapper first → innermost last

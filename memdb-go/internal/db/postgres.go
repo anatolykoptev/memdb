@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/MemDBai/MemDB/memdb-go/internal/db/queries"
 )
 
 // Postgres wraps a pgx connection pool for PolarDB (PostgreSQL + Apache AGE).
@@ -126,4 +128,109 @@ func (p *Postgres) GetMemoryByIDs(ctx context.Context, memoryIDs []string) ([]ma
 		})
 	}
 	return results, rows.Err()
+}
+
+// ListUsers returns distinct user_name values from activated memories.
+func (p *Postgres) ListUsers(ctx context.Context, graphName string) ([]string, error) {
+	q := fmt.Sprintf(queries.ListUsers, graphName)
+	rows, err := p.pool.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		users = append(users, name)
+	}
+	return users, rows.Err()
+}
+
+// CountDistinctUsers returns the number of distinct users with activated memories.
+func (p *Postgres) CountDistinctUsers(ctx context.Context, graphName string) (int, error) {
+	q := fmt.Sprintf(queries.CountDistinctUsers, graphName)
+	var count int
+	err := p.pool.QueryRow(ctx, q).Scan(&count)
+	return count, err
+}
+
+// ExistUser checks whether a user has any activated memories.
+func (p *Postgres) ExistUser(ctx context.Context, graphName string, userName string) (bool, error) {
+	q := fmt.Sprintf(queries.ExistUser, graphName)
+	var exists bool
+	err := p.pool.QueryRow(ctx, q, userName).Scan(&exists)
+	return exists, err
+}
+
+// GetAllMemories returns paginated memories for a user filtered by memory_type.
+// Returns (results, totalCount, error).
+func (p *Postgres) GetAllMemories(ctx context.Context, graphName, userName, memoryType string, page, pageSize int) ([]map[string]any, int, error) {
+	offset := page * pageSize
+
+	// Get total count
+	countQ := fmt.Sprintf(queries.CountByUserAndType, graphName)
+	var total int
+	if err := p.pool.QueryRow(ctx, countQ, userName, memoryType).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// Get paginated results
+	q := fmt.Sprintf(queries.GetAllMemories, graphName)
+	rows, err := p.pool.Query(ctx, q, userName, memoryType, pageSize, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var results []map[string]any
+	for rows.Next() {
+		var id int64
+		var propsJSON []byte
+		if err := rows.Scan(&id, &propsJSON); err != nil {
+			return nil, 0, err
+		}
+		results = append(results, map[string]any{
+			"memory_id":  id,
+			"properties": string(propsJSON),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return results, total, nil
+}
+
+// DeleteByPropertyIDs deletes nodes matching the given property IDs and user name.
+// Returns the number of rows deleted.
+func (p *Postgres) DeleteByPropertyIDs(ctx context.Context, graphName string, propertyIDs []string, userName string) (int64, error) {
+	q := fmt.Sprintf(queries.DeleteByPropertyIDs, graphName)
+	tag, err := p.pool.Exec(ctx, q, propertyIDs, userName)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// GetUserNamesByMemoryIDs maps property IDs to their user_name values.
+func (p *Postgres) GetUserNamesByMemoryIDs(ctx context.Context, graphName string, memoryIDs []string) (map[string]string, error) {
+	q := fmt.Sprintf(queries.GetUserNamesByPropertyIDs, graphName)
+	rows, err := p.pool.Query(ctx, q, memoryIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]string)
+	for rows.Next() {
+		var propID, userName string
+		if err := rows.Scan(&propID, &userName); err != nil {
+			return nil, err
+		}
+		result[propID] = userName
+	}
+	return result, rows.Err()
 }
