@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Common parameters for all scripts
-LIB="memos-api"
+LIB="memdb-api"
 VERSION="default"
 WORKERS=10
 TOPK=20

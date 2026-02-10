@@ -3,9 +3,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from memos.configs.llm import LLMConfigFactory, OllamaLLMConfig
-from memos.llms.factory import LLMFactory
-from memos.llms.ollama import OllamaLLM
+from memdb.configs.llm import LLMConfigFactory, OllamaLLMConfig
+from memdb.llms.factory import LLMFactory
+from memdb.llms.ollama import OllamaLLM
 
 
 class TestOllamaLLM(unittest.TestCase):

@@ -33,7 +33,7 @@ def ingest_sample(
     # Get context and convert to messages
     context = sample.get("context", "")
 
-    # For memos, we ingest the context as a raw document content
+    # For MemDB, we ingest the context as a raw document content
     messages = [
         {
             "type": "file",
@@ -44,7 +44,7 @@ def ingest_sample(
         }
     ]
 
-    if "memos-api" in frame:
+    if "memdb-api" in frame:
         try:
             client.add(messages=messages, user_id=user_id, conv_id=conv_id, batch_size=1)
             print(f"✅ [{frame}] Ingested sample {sample_idx}")
@@ -125,7 +125,7 @@ def main(frame, version="default", num_workers=10, max_samples=None):
 
     # Initialize client
     client = None
-    if frame == "memos-api":
+    if frame == "memdb-api":
         from utils.client import MemosApiClient
 
         client = MemosApiClient()
@@ -173,8 +173,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--lib",
         type=str,
-        choices=["memos-api", "memos-api-online"],
-        default="memos-api",
+        choices=["memdb-api", "memdb-api-online"],
+        default="memdb-api",
     )
     parser.add_argument(
         "--version",

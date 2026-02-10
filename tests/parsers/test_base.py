@@ -1,4 +1,4 @@
-from memos.parsers.base import BaseParser
+from memdb.parsers.base import BaseParser
 from tests.utils import check_module_base_class
 
 

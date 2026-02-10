@@ -1,13 +1,13 @@
 import time
 
-from memos.context.context import (
+from memdb.context.context import (
     ContextThread,
     ContextThreadPoolExecutor,
     RequestContext,
     get_current_context,
     set_request_context,
 )
-from memos.log import get_logger
+from memdb.log import get_logger
 
 
 logger = get_logger(__name__)

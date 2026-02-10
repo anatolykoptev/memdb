@@ -1,4 +1,4 @@
-from memos.mem_cube.general import GeneralMemCube
+from memdb.mem_cube.general import GeneralMemCube
 
 
 # Load a MemCube from a directory

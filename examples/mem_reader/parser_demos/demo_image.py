@@ -6,7 +6,7 @@ import copy
 from pathlib import Path
 
 from examples.mem_reader.samples import IMAGE_MESSAGE_CASES
-from memos.mem_reader.read_multi_modal.image_parser import ImageParser
+from memdb.mem_reader.read_multi_modal.image_parser import ImageParser
 
 from ._base import BaseParserDemo
 

@@ -4,8 +4,8 @@ Example demonstrating how to use VLLMKVCacheMemory with vLLM backend.
 This example shows how to use the new vLLM-compatible KV cache memory.
 """
 
-from memos.configs.memory import MemoryConfigFactory
-from memos.memories.factory import MemoryFactory
+from memdb.configs.memory import MemoryConfigFactory
+from memdb.memories.factory import MemoryFactory
 
 
 def main():
@@ -24,7 +24,7 @@ def main():
                     "api_base": "http://localhost:8088/v1",
                     "temperature": 0.7,
                     "max_tokens": 1024,
-                    "model_schema": "memos.configs.llm.VLLMLLMConfig",
+                    "model_schema": "memdb.configs.llm.VLLMLLMConfig",
                 },
             },
         },
@@ -39,8 +39,8 @@ def main():
     print("===== Extract VLLMKVCacheItem =====")
     system_prompt = [
         {"role": "system", "content": "You are a helpful AI assistant."},
-        {"role": "user", "content": "What is MemOS?"},
-        {"role": "assistant", "content": "MemOS is a memory operating system for LLMs."},
+        {"role": "user", "content": "What is MemDB?"},
+        {"role": "assistant", "content": "MemDB is a memory operating system for LLMs."},
     ]
 
     try:

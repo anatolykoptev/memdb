@@ -13,7 +13,7 @@ body:
           required: true
         - label: I have read the project documentation and confirmed this issue doesn't already exist | 我已阅读项目文档并确认此问题尚未存在
           required: true
-        - label: This issue is specific to MemOS and not a general software issue | 该问题是针对 MemOS 的，而不是一般软件问题
+        - label: This issue is specific to MemDB and not a general software issue | 该问题是针对 MemDB 的，而不是一般软件问题
           required: true
 
   - type: textarea
@@ -24,7 +24,7 @@ body:
       label: Problem Statement | 问题陈述
       placeholder: |
         Describe the problem you're trying to solve...
-        Example: "As a developer using MemOS, I find it difficult to..."
+        Example: "As a developer using MemDB, I find it difficult to..."
 
   - type: checkboxes
     id: contribution

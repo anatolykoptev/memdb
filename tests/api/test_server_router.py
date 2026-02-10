@@ -11,7 +11,7 @@ import pytest
 
 from fastapi.testclient import TestClient
 
-from memos.api.product_models import (
+from memdb.api.product_models import (
     APIADDRequest,
     APIChatCompleteRequest,
     APISearchRequest,
@@ -21,7 +21,7 @@ from memos.api.product_models import (
 )
 
 
-# Patch init_server so we can import server_api without starting the full MemOS stack,
+# Patch init_server so we can import server_api without starting the full MemDB stack,
 # and keep sklearn and other core dependencies untouched for other tests.
 @pytest.fixture(scope="module")
 def mock_init_server():
@@ -53,9 +53,9 @@ def mock_init_server():
         "deepsearch_agent": Mock(),
     }
 
-    with patch("memos.api.handlers.init_server", return_value=mock_components):
+    with patch("memdb.api.handlers.init_server", return_value=mock_components):
         # Import after patching
-        from memos.api import server_api
+        from memdb.api import server_api
 
         yield server_api.app
 
@@ -70,11 +70,11 @@ def client(mock_init_server):
 def mock_handlers():
     """Mock all handlers used by server_router."""
     with (
-        patch("memos.api.routers.server_router.search_handler") as mock_search,
-        patch("memos.api.routers.server_router.add_handler") as mock_add,
-        patch("memos.api.routers.server_router.chat_handler") as mock_chat,
-        patch("memos.api.routers.server_router.handlers.suggestion_handler") as mock_suggestion,
-        patch("memos.api.routers.server_router.handlers.memory_handler") as mock_memory,
+        patch("memdb.api.routers.server_router.search_handler") as mock_search,
+        patch("memdb.api.routers.server_router.add_handler") as mock_add,
+        patch("memdb.api.routers.server_router.chat_handler") as mock_chat,
+        patch("memdb.api.routers.server_router.handlers.suggestion_handler") as mock_suggestion,
+        patch("memdb.api.routers.server_router.handlers.memory_handler") as mock_memory,
     ):
         # Set up default return values
         mock_search.handle_search_memories.return_value = SearchResponse(

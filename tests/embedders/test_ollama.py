@@ -2,8 +2,8 @@ import unittest
 
 from unittest.mock import patch
 
-from memos.configs.embedder import EmbedderConfigFactory
-from memos.embedders.factory import EmbedderFactory, OllamaEmbedder
+from memdb.configs.embedder import EmbedderConfigFactory
+from memdb.embedders.factory import EmbedderFactory, OllamaEmbedder
 
 
 class TestEmbedderFactory(unittest.TestCase):

@@ -1,4 +1,4 @@
-from memos.memories.activation.base import BaseActMemory
+from memdb.memories.activation.base import BaseActMemory
 from tests.utils import check_module_base_class
 
 

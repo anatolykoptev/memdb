@@ -29,7 +29,7 @@ def ingest_session(session, date, user_id, session_id, frame, client):
                 }
             )
         client.add(messages, user_id, batch_size=2)
-    elif "memos-api" in frame:
+    elif "memdb-api" in frame:
         for msg in session:
             messages.append(
                 {
@@ -76,11 +76,11 @@ def ingest_conv(lme_df, version, conv_idx, frame, success_records, f):
 
         client = Mem0Client(enable_graph="graph" in frame)
         client.client.delete_all(user_id=user_id)
-    elif frame == "memos-api":
+    elif frame == "memdb-api":
         from utils.client import MemosApiClient
 
         client = MemosApiClient()
-    elif frame == "memos-api-online":
+    elif frame == "memdb-api-online":
         from utils.client import MemosApiOnlineClient
 
         client = MemosApiOnlineClient()
@@ -174,13 +174,13 @@ if __name__ == "__main__":
         choices=[
             "mem0",
             "mem0_graph",
-            "memos-api",
-            "memos-api-online",
+            "memdb-api",
+            "memdb-api-online",
             "memobase",
             "memu",
             "supermemory",
         ],
-        default="memos-api",
+        default="memdb-api",
     )
     parser.add_argument(
         "--version", type=str, default="default", help="Version of the evaluation framework."

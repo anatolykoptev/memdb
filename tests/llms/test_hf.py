@@ -6,9 +6,9 @@ import torch
 
 from transformers import DynamicCache
 
-from memos.configs.llm import HFLLMConfig, LLMConfigFactory
-from memos.llms.factory import LLMFactory
-from memos.llms.hf import HFLLM
+from memdb.configs.llm import HFLLMConfig, LLMConfigFactory
+from memdb.llms.factory import LLMFactory
+from memdb.llms.hf import HFLLM
 
 
 @patch("transformers.AutoModelForCausalLM", MagicMock())

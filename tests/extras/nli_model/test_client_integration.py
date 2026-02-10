@@ -7,9 +7,9 @@ from unittest.mock import MagicMock, patch
 import requests
 import uvicorn
 
-from memos.extras.nli_model.client import NLIClient
-from memos.extras.nli_model.server.serve import app
-from memos.extras.nli_model.types import NLIResult
+from memdb.extras.nli_model.client import NLIClient
+from memdb.extras.nli_model.server.serve import app
+from memdb.extras.nli_model.types import NLIResult
 
 
 # We need to mock the NLIHandler to avoid loading the heavy model
@@ -33,7 +33,7 @@ class TestNLIClientIntegration(unittest.TestCase):
         # But lifespan sets it on startup.
 
         # Let's patch NLIHandler class in serve.py so when lifespan instantiates it, it gets our mock
-        cls.handler_patcher = patch("memos.extras.nli_model.server.serve.NLIHandler")
+        cls.handler_patcher = patch("memdb.extras.nli_model.server.serve.NLIHandler")
         cls.MockHandlerClass = cls.handler_patcher.start()
         cls.MockHandlerClass.return_value = cls.mock_handler
 

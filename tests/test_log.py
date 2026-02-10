@@ -3,7 +3,7 @@ import os
 
 from dotenv import load_dotenv
 
-from memos import log
+from memdb import log
 
 
 load_dotenv()
@@ -15,10 +15,10 @@ def generate_trace_id() -> str:
 
 
 def test_setup_logfile_creates_file(tmp_path, monkeypatch):
-    monkeypatch.setattr("memos.settings.MEMOS_DIR", tmp_path)
+    monkeypatch.setattr("memdb.settings.MEMDB_DIR", tmp_path)
     path = log._setup_logfile()
     assert path.exists()
-    assert path.name == "memos.log"
+    assert path.name == "memdb.log"
 
 
 def test_get_logger_returns_logger():

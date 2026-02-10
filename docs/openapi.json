@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "MemOS Server REST APIs",
-    "description": "A REST API for managing multiple users with MemOS Server.",
+    "title": "MemDB Server REST APIs",
+    "description": "A REST API for managing multiple users with MemDB Server.",
     "version": "1.0.1"
   },
   "paths": {
@@ -347,8 +347,8 @@
         "tags": [
           "Server API"
         ],
-        "summary": "Chat with MemOS (Complete Response)",
-        "description": "Chat with MemOS for a specific user. Returns complete response (non-streaming).\n\nThis endpoint uses the class-based ChatHandler.",
+        "summary": "Chat with MemDB (Complete Response)",
+        "description": "Chat with MemDB for a specific user. Returns complete response (non-streaming).\n\nThis endpoint uses the class-based ChatHandler.",
         "operationId": "chat_complete_product_chat_complete_post",
         "requestBody": {
           "content": {
@@ -387,8 +387,8 @@
         "tags": [
           "Server API"
         ],
-        "summary": "Chat with MemOS",
-        "description": "Chat with MemOS for a specific user. Returns SSE stream.\n\nThis endpoint uses the class-based ChatHandler which internally\ncomposes SearchHandler and AddHandler for a clean architecture.",
+        "summary": "Chat with MemDB",
+        "description": "Chat with MemDB for a specific user. Returns SSE stream.\n\nThis endpoint uses the class-based ChatHandler which internally\ncomposes SearchHandler and AddHandler for a clean architecture.",
         "operationId": "chat_stream_product_chat_stream_post",
         "requestBody": {
           "content": {
@@ -427,8 +427,8 @@
         "tags": [
           "Server API"
         ],
-        "summary": "Chat with MemOS playground",
-        "description": "Chat with MemOS for a specific user. Returns SSE stream.\n\nThis endpoint uses the class-based ChatHandler which internally\ncomposes SearchHandler and AddHandler for a clean architecture.",
+        "summary": "Chat with MemDB playground",
+        "description": "Chat with MemDB for a specific user. Returns SSE stream.\n\nThis endpoint uses the class-based ChatHandler which internally\ncomposes SearchHandler and AddHandler for a clean architecture.",
         "operationId": "chat_stream_playground_product_chat_stream_playground_post",
         "requestBody": {
           "content": {
@@ -1256,7 +1256,7 @@
           "moscube": {
             "type": "boolean",
             "title": "Moscube",
-            "description": "(Deprecated) Whether to use legacy MemOSCube pipeline",
+            "description": "(Deprecated) Whether to use legacy MemDBCube pipeline",
             "default": false
           }
         },
@@ -1606,7 +1606,7 @@
           "moscube": {
             "type": "boolean",
             "title": "Moscube",
-            "description": "(Deprecated / internal) Whether to use legacy MemOSCube path.",
+            "description": "(Deprecated / internal) Whether to use legacy MemDBCube path.",
             "default": false
           },
           "operation": {
@@ -2355,7 +2355,7 @@
           "moscube": {
             "type": "boolean",
             "title": "Moscube",
-            "description": "(Deprecated) Whether to use legacy MemOSCube pipeline.",
+            "description": "(Deprecated) Whether to use legacy MemDBCube pipeline.",
             "default": false
           },
           "mem_cube_id": {
@@ -2590,7 +2590,7 @@
           "moscube": {
             "type": "boolean",
             "title": "Moscube",
-            "description": "(Deprecated) Whether to use legacy MemOSCube pipeline.",
+            "description": "(Deprecated) Whether to use legacy MemDBCube pipeline.",
             "default": false
           },
           "mem_cube_id": {

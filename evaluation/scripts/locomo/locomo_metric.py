@@ -12,13 +12,13 @@ parser.add_argument(
     choices=[
         "mem0",
         "mem0_graph",
-        "memos-api",
-        "memos-api-online",
+        "memdb-api",
+        "memdb-api-online",
         "memobase",
         "memu",
         "supermemory",
     ],
-    default="memos-api",
+    default="memdb-api",
 )
 parser.add_argument(
     "--version",

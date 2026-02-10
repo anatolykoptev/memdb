@@ -2,7 +2,7 @@
 Textual Memory Internet Search Example
 =======================================
 
-This example demonstrates how to use MemOS's InternetRetrieverFactory to search
+This example demonstrates how to use MemDB's InternetRetrieverFactory to search
 the web and retrieve relevant information as memory items.
 
 **What you'll learn:**
@@ -43,11 +43,11 @@ Run this example:
 import json
 import os
 
-from memos import log
-from memos.configs.embedder import EmbedderConfigFactory
-from memos.configs.internet_retriever import InternetRetrieverConfigFactory
-from memos.embedders.factory import EmbedderFactory
-from memos.memories.textual.tree_text_memory.retrieve.internet_retriever_factory import (
+from memdb import log
+from memdb.configs.embedder import EmbedderConfigFactory
+from memdb.configs.internet_retriever import InternetRetrieverConfigFactory
+from memdb.embedders.factory import EmbedderFactory
+from memdb.memories.textual.tree_text_memory.retrieve.internet_retriever_factory import (
     InternetRetrieverFactory,
 )
 

@@ -2,7 +2,7 @@ import uuid
 
 from transformers import DynamicCache
 
-from memos.memories.activation.item import ActivationMemoryItem, KVCacheItem
+from memdb.memories.activation.item import ActivationMemoryItem, KVCacheItem
 
 
 class TestActivationMemoryItem:

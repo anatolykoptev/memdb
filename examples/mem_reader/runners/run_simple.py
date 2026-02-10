@@ -5,8 +5,8 @@ import time
 from examples.mem_reader.samples import SIMPLE_CHAT_SCENE
 from examples.mem_reader.settings import get_reader_config
 from examples.mem_reader.utils import print_memory_item
-from memos.configs.mem_reader import SimpleStructMemReaderConfig
-from memos.mem_reader.simple_struct import SimpleStructMemReader
+from memdb.configs.mem_reader import SimpleStructMemReaderConfig
+from memdb.mem_reader.simple_struct import SimpleStructMemReader
 
 
 def _print_memory_sets(title: str, memories):

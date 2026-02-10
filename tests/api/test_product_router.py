@@ -11,24 +11,24 @@ import pytest
 
 from fastapi.testclient import TestClient
 
-# Patch the MOS_PRODUCT_INSTANCE directly after import
-# Patch MOS_PRODUCT_INSTANCE and MOSProduct so we can test the FastAPI router
-# without initializing the full MemOS product stack.
-import memos.api.routers.product_router as pr_module
+# Patch the MEMDB_PRODUCT_INSTANCE directly after import
+# Patch MEMDB_PRODUCT_INSTANCE and MemDBProduct so we can test the FastAPI router
+# without initializing the full MemDB product stack.
+import memdb.api.routers.product_router as pr_module
 
 
 _mock_mos_instance = Mock()
-pr_module.MOS_PRODUCT_INSTANCE = _mock_mos_instance
+pr_module.MEMDB_PRODUCT_INSTANCE = _mock_mos_instance
 pr_module.get_mos_product_instance = lambda: _mock_mos_instance
-with patch("memos.mem_os.product.MOSProduct", return_value=_mock_mos_instance):
-    from memos.api import product_api
+with patch("memdb.mem_os.product.MemDBProduct", return_value=_mock_mos_instance):
+    from memdb.api import product_api
 
 
 @pytest.fixture(scope="module")
 def mock_mos_product_instance():
     """Mock get_mos_product_instance for all tests."""
     # Ensure the mock is set
-    pr_module.MOS_PRODUCT_INSTANCE = _mock_mos_instance
+    pr_module.MEMDB_PRODUCT_INSTANCE = _mock_mos_instance
     pr_module.get_mos_product_instance = lambda: _mock_mos_instance
     yield product_api.app, _mock_mos_instance
 
@@ -42,19 +42,19 @@ def client(mock_mos_product_instance):
 
 @pytest.fixture
 def mock_mos_product(mock_mos_product_instance):
-    """Get the mocked MOSProduct instance."""
+    """Get the mocked MemDBProduct instance."""
     _, mock_instance = mock_mos_product_instance
     # Ensure get_mos_product_instance returns this mock
-    import memos.api.routers.product_router as pr_module
+    import memdb.api.routers.product_router as pr_module
 
     pr_module.get_mos_product_instance = lambda: mock_instance
-    pr_module.MOS_PRODUCT_INSTANCE = mock_instance
+    pr_module.MEMDB_PRODUCT_INSTANCE = mock_instance
     return mock_instance
 
 
 @pytest.fixture(autouse=True)
 def setup_mock_mos_product(mock_mos_product):
-    """Set up default return values for MOSProduct methods."""
+    """Set up default return values for MemDBProduct methods."""
     # Set up default return values for methods
     mock_mos_product.search.return_value = {"text_mem": [], "act_mem": [], "para_mem": []}
     mock_mos_product.add.return_value = None
@@ -68,7 +68,7 @@ def setup_mock_mos_product(mock_mos_product):
     mock_mos_product.get_subgraph.return_value = default_memory_result
     mock_mos_product.get_suggestion_query.return_value = ["suggestion1", "suggestion2"]
     # Ensure get_mos_product_instance returns the mock
-    import memos.api.routers.product_router as pr_module
+    import memdb.api.routers.product_router as pr_module
 
     pr_module.get_mos_product_instance = lambda: mock_mos_product
 
@@ -97,7 +97,7 @@ class TestProductRouterSearch:
         assert data["code"] == 200
         assert isinstance(data["data"], dict)
 
-        # Verify MOSProduct.search was called with correct parameters
+        # Verify MemDBProduct.search was called with correct parameters
         mock_mos_product.search.assert_called_once()
         call_kwargs = mock_mos_product.search.call_args[1]
         assert call_kwargs["user_id"] == "test_user"
@@ -159,7 +159,7 @@ class TestProductRouterAdd:
         assert data["code"] == 200
         assert data["data"] is None  # SimpleResponse has None data
 
-        # Verify MOSProduct.add was called with correct parameters
+        # Verify MemDBProduct.add was called with correct parameters
         mock_mos_product.add.assert_called_once()
         call_kwargs = mock_mos_product.add.call_args[1]
         assert call_kwargs["user_id"] == "test_user"
@@ -214,7 +214,7 @@ class TestProductRouterChatComplete:
         assert "response" in data["data"]
         assert "references" in data["data"]
 
-        # Verify MOSProduct.chat was called with correct parameters
+        # Verify MemDBProduct.chat was called with correct parameters
         mock_mos_product.chat.assert_called_once()
         call_kwargs = mock_mos_product.chat.call_args[1]
         assert call_kwargs["user_id"] == "test_user"
@@ -265,7 +265,7 @@ class TestProductRouterChat:
         assert response.status_code == 200
         assert "text/event-stream" in response.headers["content-type"]
 
-        # Verify MOSProduct.chat_with_references was called
+        # Verify MemDBProduct.chat_with_references was called
         mock_mos_product.chat_with_references.assert_called_once()
         call_kwargs = mock_mos_product.chat_with_references.call_args[1]
         assert call_kwargs["user_id"] == "test_user"
@@ -307,7 +307,7 @@ class TestProductRouterSuggestions:
         assert isinstance(data["data"], dict)
         assert "query" in data["data"]
 
-        # Verify MOSProduct.get_suggestion_query was called
+        # Verify MemDBProduct.get_suggestion_query was called
         mock_mos_product.get_suggestion_query.assert_called_once()
         call_kwargs = mock_mos_product.get_suggestion_query.call_args[1]
         assert call_kwargs["user_id"] == "test_user"
@@ -368,7 +368,7 @@ class TestProductRouterGetAll:
         assert data["code"] == 200
         assert isinstance(data["data"], list)
 
-        # Verify MOSProduct.get_all was called
+        # Verify MemDBProduct.get_all was called
         mock_mos_product.get_all.assert_called_once()
         call_kwargs = mock_mos_product.get_all.call_args[1]
         assert call_kwargs["user_id"] == "test_user"

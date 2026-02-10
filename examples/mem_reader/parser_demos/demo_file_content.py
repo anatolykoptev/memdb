@@ -2,7 +2,7 @@
 
 from examples.mem_reader.builders import build_file_parser
 from examples.mem_reader.samples import FILE_CONTENT_PARTS, FILE_CONTENT_REAL_FILE_PART
-from memos.mem_reader.read_multi_modal.file_content_parser import FileContentParser
+from memdb.mem_reader.read_multi_modal.file_content_parser import FileContentParser
 
 from ._base import BaseParserDemo
 

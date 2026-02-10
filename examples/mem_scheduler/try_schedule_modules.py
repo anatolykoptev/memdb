@@ -4,14 +4,14 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from memos.api.routers.server_router import (
+from memdb.api.routers.server_router import (
     mem_scheduler,
 )
-from memos.log import get_logger
-from memos.mem_scheduler.analyzer.api_analyzer import DirectSearchMemoriesAnalyzer
-from memos.mem_scheduler.optimized_scheduler import OptimizedScheduler
-from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
-from memos.mem_scheduler.schemas.task_schemas import MEM_UPDATE_TASK_LABEL
+from memdb.log import get_logger
+from memdb.mem_scheduler.analyzer.api_analyzer import DirectSearchMemoriesAnalyzer
+from memdb.mem_scheduler.optimized_scheduler import OptimizedScheduler
+from memdb.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
+from memdb.mem_scheduler.schemas.task_schemas import MEM_UPDATE_TASK_LABEL
 
 
 FILE_PATH = Path(__file__).absolute()

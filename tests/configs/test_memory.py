@@ -1,4 +1,4 @@
-from memos.configs.memory import (
+from memdb.configs.memory import (
     BaseActMemoryConfig,
     BaseMemoryConfig,
     BaseParaMemoryConfig,

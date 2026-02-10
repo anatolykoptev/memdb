@@ -1,7 +1,7 @@
 import unittest
 
-from memos.configs.parser import MarkItDownParserConfig
-from memos.parsers.factory import MarkItDownParser
+from memdb.configs.parser import MarkItDownParserConfig
+from memdb.parsers.factory import MarkItDownParser
 
 
 class TestMarkItDownParser(unittest.TestCase):
@@ -12,7 +12,7 @@ class TestMarkItDownParser(unittest.TestCase):
         file_path = "./README.md"
         content = parser.parse(file_path)
 
-        self.assertIn("MemOS", content)
+        self.assertIn("MemDB", content)
 
     def test_parse_pdf_file(self):
         """Test parse a pdf file."""

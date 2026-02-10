@@ -13,7 +13,7 @@ These examples demonstrate old APIs that directly access MemCube internals (e.g.
 The new View architecture provides:
 - ✅ Unified API interface
 - ✅ Multi-cube support
-- ✅ Better integration with MemOS Server
+- ✅ Better integration with MemDB Server
 - ✅ Consistent result format with `cube_id` tracking
 
 ## Updated Examples
@@ -35,10 +35,10 @@ for item in items:
 ### New approach (recommended):
 ```python
 import json
-from memos.api.handlers import init_server
-from memos.api.product_models import APISearchRequest
-from memos.multi_mem_cube.single_cube import SingleCubeView
-from memos.log import get_logger
+from memdb.api.handlers import init_server
+from memdb.api.product_models import APISearchRequest
+from memdb.multi_mem_cube.single_cube import SingleCubeView
+from memdb.log import get_logger
 
 logger = get_logger(__name__)
 
@@ -78,4 +78,4 @@ for group in results.get("text_mem", []):
 
 ---
 
-For more information, see the [MemCube documentation](https://memos-doc.memoryos.ai/open_source/modules/mem_cube).
+For more information, see the [MemCube documentation](https://github.com/MemDBai/MemDB).

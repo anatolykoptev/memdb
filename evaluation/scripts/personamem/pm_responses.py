@@ -189,16 +189,16 @@ if __name__ == "__main__":
         "--lib",
         type=str,
         choices=[
-            "memos-api-online",
+            "memdb-api-online",
             "zep",
             "mem0",
             "mem0_graph",
-            "memos-api",
+            "memdb-api",
             "memobase",
             "memu",
             "supermemory",
         ],
-        default="memos-api",
+        default="memdb-api",
     )
     parser.add_argument(
         "--version", type=str, default="default", help="Version of the evaluation framework."

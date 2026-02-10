@@ -1,4 +1,4 @@
-from memos.llms.base import BaseLLM
+from memdb.llms.base import BaseLLM
 from tests.utils import check_module_base_class
 
 

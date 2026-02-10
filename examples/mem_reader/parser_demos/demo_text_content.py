@@ -1,7 +1,7 @@
 """Demo for TextContentParser."""
 
 from examples.mem_reader.samples import TEXT_CONTENT_PARTS
-from memos.mem_reader.read_multi_modal.text_content_parser import TextContentParser
+from memdb.mem_reader.read_multi_modal.text_content_parser import TextContentParser
 
 from ._base import BaseParserDemo
 

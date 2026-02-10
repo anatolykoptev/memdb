@@ -203,7 +203,7 @@ def search_query(client, query, metadata, frame, version, top_k=20):
         context, duration_ms = mem0_graph_search(
             client, query, speaker_a_user_id, speaker_b_user_id, top_k, speaker_a, speaker_b
         )
-    elif "memos-api" in frame:
+    elif "memdb-api" in frame:
         context, duration_ms = memos_api_search(
             client, query, speaker_a_user_id, speaker_b_user_id, top_k, speaker_a, speaker_b
         )
@@ -258,11 +258,11 @@ def process_user(conv_idx, locomo_df, frame, version, top_k=20, num_workers=1):
         from utils.client import Mem0Client
 
         client = Mem0Client(enable_graph="graph" in frame)
-    elif frame == "memos-api":
+    elif frame == "memdb-api":
         from utils.client import MemosApiClient
 
         client = MemosApiClient()
-    elif frame == "memos-api-online":
+    elif frame == "memdb-api-online":
         from utils.client import MemosApiOnlineClient
 
         client = MemosApiOnlineClient()
@@ -348,13 +348,13 @@ if __name__ == "__main__":
         choices=[
             "mem0",
             "mem0_graph",
-            "memos-api",
-            "memos-api-online",
+            "memdb-api",
+            "memdb-api-online",
             "memobase",
             "memu",
             "supermemory",
         ],
-        default="memos-api",
+        default="memdb-api",
     )
     parser.add_argument(
         "--version",

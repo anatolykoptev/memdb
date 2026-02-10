@@ -118,12 +118,12 @@ def process_user(lme_df, conv_idx, frame, version, top_k=20):
 
         client = MemobaseClient()
         context, duration_ms = memobase_search(client, question, user_id, top_k)
-    elif frame == "memos-api":
+    elif frame == "memdb-api":
         from utils.client import MemosApiClient
 
         client = MemosApiClient()
         context, duration_ms = memos_search(client, question, user_id, top_k)
-    elif frame == "memos-api-online":
+    elif frame == "memdb-api-online":
         from utils.client import MemosApiOnlineClient
 
         client = MemosApiOnlineClient()
@@ -226,13 +226,13 @@ if __name__ == "__main__":
         choices=[
             "mem0",
             "mem0_graph",
-            "memos-api",
-            "memos-api-online",
+            "memdb-api",
+            "memdb-api-online",
             "memobase",
             "memu",
             "supermemory",
         ],
-        default="memos-api",
+        default="memdb-api",
     )
     parser.add_argument(
         "--version", type=str, default="default", help="Version of the evaluation framework."

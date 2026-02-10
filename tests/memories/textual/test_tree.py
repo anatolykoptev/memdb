@@ -4,9 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from memos.configs.memory import TreeTextMemoryConfig
-from memos.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
-from memos.memories.textual.tree import TreeTextMemory
+from memdb.configs.memory import TreeTextMemoryConfig
+from memdb.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
+from memdb.memories.textual.tree import TreeTextMemory
 
 
 @pytest.fixture
@@ -49,10 +49,10 @@ def mock_config():
 @pytest.fixture
 def mock_tree_text_memory(mock_config):
     with (
-        patch("memos.llms.factory.LLMFactory.from_config"),
-        patch("memos.embedders.factory.EmbedderFactory.from_config"),
-        patch("memos.graph_dbs.factory.GraphStoreFactory.from_config"),
-        patch("memos.memories.textual.tree_text_memory.organize.manager.MemoryManager"),
+        patch("memdb.llms.factory.LLMFactory.from_config"),
+        patch("memdb.embedders.factory.EmbedderFactory.from_config"),
+        patch("memdb.graph_dbs.factory.GraphStoreFactory.from_config"),
+        patch("memdb.memories.textual.tree_text_memory.organize.manager.MemoryManager"),
     ):
         instance = TreeTextMemory(mock_config)
         yield instance

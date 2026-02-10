@@ -1,8 +1,8 @@
-name: memos-dev
+name: memdb-dev
 
 services:
-  memos:
-    container_name: memos-api-docker
+  memdb:
+    container_name: memdb-api
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -23,7 +23,7 @@ services:
       - ../src:/app/src
       - .:/app/docker
     networks:
-      - memos_network
+      - memdb_network
 
   neo4j:
     image: neo4j:5.26.4
@@ -44,7 +44,7 @@ services:
       - neo4j_data:/data
       - neo4j_logs:/logs
     networks:
-      - memos_network
+      - memdb_network
 
   qdrant:
     image: qdrant/qdrant:v1.15.3
@@ -59,7 +59,7 @@ services:
       QDRANT__SERVICE__HTTP_PORT: 6333
     restart: unless-stopped
     networks:
-      - memos_network
+      - memdb_network
 
 volumes:
   neo4j_data:
@@ -67,5 +67,5 @@ volumes:
   qdrant_data:
 
 networks:
-  memos_network:
+  memdb_network:
     driver: bridge

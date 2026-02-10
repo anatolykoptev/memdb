@@ -1,4 +1,4 @@
-from memos.chunkers.factory import ChunkerFactory
+from memdb.chunkers.factory import ChunkerFactory
 from tests.utils import check_module_factory_class
 
 

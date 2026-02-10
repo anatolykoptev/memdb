@@ -14,15 +14,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from memos.configs.mem_scheduler import SchedulerConfigFactory
-from memos.mem_cube.general import GeneralMemCube
-from memos.mem_scheduler.scheduler_factory import SchedulerFactory
-from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
-from memos.mem_scheduler.schemas.task_schemas import QUERY_TASK_LABEL
+from memdb.configs.mem_scheduler import SchedulerConfigFactory
+from memdb.mem_cube.general import GeneralMemCube
+from memdb.mem_scheduler.scheduler_factory import SchedulerFactory
+from memdb.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
+from memdb.mem_scheduler.schemas.task_schemas import QUERY_TASK_LABEL
 
 
 if TYPE_CHECKING:
-    from memos.mem_scheduler.general_scheduler import GeneralScheduler
+    from memdb.mem_scheduler.general_scheduler import GeneralScheduler
 
 
 FILE_PATH = Path(__file__).absolute()

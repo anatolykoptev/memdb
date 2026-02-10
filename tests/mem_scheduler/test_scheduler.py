@@ -5,26 +5,26 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from memos.configs.mem_scheduler import (
+from memdb.configs.mem_scheduler import (
     AuthConfig,
     GraphDBAuthConfig,
     OpenAIConfig,
     RabbitMQConfig,
     SchedulerConfigFactory,
 )
-from memos.llms.base import BaseLLM
-from memos.mem_cube.general import GeneralMemCube
-from memos.mem_scheduler.memory_manage_modules.retriever import SchedulerRetriever
-from memos.mem_scheduler.monitors.general_monitor import SchedulerGeneralMonitor
-from memos.mem_scheduler.scheduler_factory import SchedulerFactory
-from memos.mem_scheduler.schemas.message_schemas import (
+from memdb.llms.base import BaseLLM
+from memdb.mem_cube.general import GeneralMemCube
+from memdb.mem_scheduler.memory_manage_modules.retriever import SchedulerRetriever
+from memdb.mem_scheduler.monitors.general_monitor import SchedulerGeneralMonitor
+from memdb.mem_scheduler.scheduler_factory import SchedulerFactory
+from memdb.mem_scheduler.schemas.message_schemas import (
     ScheduleLogForWebItem,
 )
-from memos.mem_scheduler.schemas.task_schemas import (
+from memdb.mem_scheduler.schemas.task_schemas import (
     ANSWER_TASK_LABEL,
     QUERY_TASK_LABEL,
 )
-from memos.memories.textual.tree import TreeTextMemory
+from memdb.memories.textual.tree import TreeTextMemory
 
 
 FILE_PATH = Path(__file__).absolute()
@@ -87,7 +87,7 @@ class TestGeneralScheduler(unittest.TestCase):
         # Mock AuthConfig.from_local_env() to return our test config
         mock_auth_config = self._create_mock_auth_config()
         self.auth_config_patch = patch(
-            "memos.configs.mem_scheduler.AuthConfig.from_local_env", return_value=mock_auth_config
+            "memdb.configs.mem_scheduler.AuthConfig.from_local_env", return_value=mock_auth_config
         )
         self.auth_config_patch.start()
 
@@ -166,7 +166,7 @@ class TestGeneralScheduler(unittest.TestCase):
 
         from transformers import DynamicCache
 
-        from memos.memories.activation.kv import KVCacheMemory
+        from memdb.memories.activation.kv import KVCacheMemory
 
         # Mock the mem_cube with activation memory
         mock_kv_cache_memory = Mock(spec=KVCacheMemory)

@@ -6,11 +6,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from memos.configs.mem_cube import GeneralMemCubeConfig
-from memos.mem_cube.general import GeneralMemCube
-from memos.memories.activation.base import BaseActMemory
-from memos.memories.parametric.base import BaseParaMemory
-from memos.memories.textual.base import BaseTextMemory
+from memdb.configs.mem_cube import GeneralMemCubeConfig
+from memdb.mem_cube.general import GeneralMemCube
+from memdb.memories.activation.base import BaseActMemory
+from memdb.memories.parametric.base import BaseParaMemory
+from memdb.memories.textual.base import BaseTextMemory
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ def mem_cube():
             # Fallback for any other backend
             return MagicMock()
 
-    with patch("memos.memories.factory.MemoryFactory.from_config", side_effect=mock_from_config):
+    with patch("memdb.memories.factory.MemoryFactory.from_config", side_effect=mock_from_config):
         # Create the GeneralMemCube instance
         mem_cube = GeneralMemCube(mock_config)
 
@@ -67,7 +67,7 @@ def test_load_with_real_directory():
 def test_memory_interface_methods_called(mem_cube):
     """Test that the correct memory interface methods are called."""
     with (
-        patch("memos.mem_cube.general.get_json_file_model_schema") as mock_get_schema,
+        patch("memdb.mem_cube.general.get_json_file_model_schema") as mock_get_schema,
         tempfile.TemporaryDirectory() as test_dir,
     ):
         mock_get_schema.return_value = mem_cube.config.model_schema

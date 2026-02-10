@@ -1,4 +1,4 @@
-from memos.mem_chat.factory import MemChatFactory
+from memdb.mem_chat.factory import MemChatFactory
 from tests.utils import check_module_factory_class
 
 

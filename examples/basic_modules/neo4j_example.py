@@ -2,11 +2,11 @@ import os
 
 from datetime import datetime
 
-from memos.configs.embedder import EmbedderConfigFactory
-from memos.configs.graph_db import GraphDBConfigFactory
-from memos.embedders.factory import EmbedderFactory
-from memos.graph_dbs.factory import GraphStoreFactory
-from memos.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
+from memdb.configs.embedder import EmbedderConfigFactory
+from memdb.configs.graph_db import GraphDBConfigFactory
+from memdb.embedders.factory import EmbedderFactory
+from memdb.graph_dbs.factory import GraphStoreFactory
+from memdb.memories.textual.item import TextualMemoryItem, TreeNodeTextualMemoryMetadata
 
 
 embedder_config = EmbedderConfigFactory.model_validate(

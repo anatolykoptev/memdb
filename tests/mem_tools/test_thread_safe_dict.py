@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from memos.memos_tools.thread_safe_dict import SimpleThreadSafeDict, ThreadSafeDict
+from memdb.memdb_tools.thread_safe_dict import SimpleThreadSafeDict, ThreadSafeDict
 
 
 class TestThreadSafeDict:

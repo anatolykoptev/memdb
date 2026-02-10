@@ -1,0 +1,380 @@
+"""
+Default configuration utilities for MemDB.
+Provides simplified configuration generation for users.
+"""
+
+import logging
+from typing import Literal
+
+from memdb.configs.mem_cube import GeneralMemCubeConfig
+from memdb.configs.mem_os import MemDBConfig
+from memdb.mem_cube.general import GeneralMemCube
+
+logger = logging.getLogger(__name__)
+
+
+def get_default_config(
+    openai_api_key: str,
+    openai_api_base: str = "https://api.openai.com/v1",
+    text_mem_type: Literal["tree_text", "general_text"] = "general_text",
+    user_id: str = "default_user",
+    **kwargs,
+) -> MemDBConfig:
+    """
+    Generate a default MemDB configuration with minimal user input.
+
+    Args:
+        openai_api_key (str): OpenAI API key
+        openai_api_base (str): OpenAI API base URL, defaults to "https://api.openai.com/v1"
+        text_mem_type (str): Type of text memory, either "tree_text" or "general_text"
+        user_id (str): User ID for the configuration
+        **kwargs: Additional configuration overrides
+
+    Returns:
+        MemDBConfig: Complete MemDB configuration object
+
+    Example:
+        ```python
+        config = get_default_config(
+            openai_api_key="sk-...",
+            openai_api_base="https://api.openai.com/v1",
+            text_mem_type="general_text"
+        )
+        mos = MemDB(config)
+        ```
+    """
+
+    # Base OpenAI configuration
+    openai_config = {
+        "model_name_or_path": kwargs.get("model_name", "gpt-4o-mini"),
+        "temperature": kwargs.get("temperature", 0.8),
+        "max_tokens": kwargs.get("max_tokens", 1024),
+        "top_p": kwargs.get("top_p", 0.9),
+        "top_k": kwargs.get("top_k", 50),
+        "remove_think_prefix": True,
+        "api_key": openai_api_key,
+        "api_base": openai_api_base,
+    }
+
+    # Universal API embedder configuration (using OpenAI)
+    embedder_config = {
+        "backend": "universal_api",
+        "config": {
+            "provider": "openai",
+            "api_key": openai_api_key,
+            "model_name_or_path": kwargs.get("embedder_model", "text-embedding-3-large"),
+            "base_url": openai_api_base,
+        },
+    }
+
+    # Base configuration
+    config_dict = {
+        "user_id": user_id,
+        "chat_model": {
+            "backend": "openai",
+            "config": openai_config,
+        },
+        "mem_reader": {
+            "backend": "simple_struct",
+            "config": {
+                "llm": {
+                    "backend": "openai",
+                    "config": openai_config,
+                },
+                "embedder": embedder_config,
+                "chunker": {
+                    "backend": "sentence",
+                    "config": {
+                        "tokenizer_or_token_counter": "gpt2",
+                        "chunk_size": kwargs.get("chunk_size", 512),
+                        "chunk_overlap": kwargs.get("chunk_overlap", 128),
+                        "min_sentences_per_chunk": 1,
+                    },
+                },
+            },
+        },
+        "enable_textual_memory": True,
+        "enable_activation_memory": kwargs.get("enable_activation_memory", False),
+        "top_k": kwargs.get("top_k", 5),
+        "max_turns_window": kwargs.get("max_turns_window", 20),
+        "enable_mem_scheduler": kwargs.get("enable_mem_scheduler", False),
+    }
+
+    # Note: text_mem configuration is handled in get_default_cube_config
+    # MemDBConfig doesn't have text_mem field, it's only in MemCube config
+
+    # Add scheduler configuration if enabled
+    if config_dict.get("enable_mem_scheduler", False):
+        config_dict["mem_scheduler"] = {
+            "backend": "general_scheduler",
+            "config": {
+                "top_k": kwargs.get("scheduler_top_k", 10),
+                "top_n": kwargs.get("scheduler_top_n", 5),
+                "act_mem_update_interval": kwargs.get("scheduler_act_mem_update_interval", 300),
+                "context_window_size": kwargs.get("scheduler_context_window_size", 5),
+                "thread_pool_max_workers": kwargs.get("scheduler_thread_pool_max_workers", 10),
+                "consume_interval_seconds": kwargs.get("scheduler_consume_interval_seconds", 0.01),
+                "enable_parallel_dispatch": kwargs.get("scheduler_enable_parallel_dispatch", True),
+                "enable_activation_memory": True,
+            },
+        }
+
+    # Note: act_mem configuration belongs in MemCube config (get_default_cube_config),
+    # not in MemDBConfig which doesn't have an act_mem field.
+    # The enable_activation_memory flag above is sufficient for MemDBConfig.
+
+    return MemDBConfig(**config_dict)
+
+
+def get_default_cube_config(
+    openai_api_key: str,
+    openai_api_base: str = "https://api.openai.com/v1",
+    text_mem_type: Literal["tree_text", "general_text"] = "general_text",
+    user_id: str = "default_user",
+    **kwargs,
+) -> GeneralMemCubeConfig:
+    """
+    Generate a default MemCube configuration with minimal user input.
+
+    Args:
+        openai_api_key (str): OpenAI API key
+        openai_api_base (str): OpenAI API base URL, defaults to "https://api.openai.com/v1"
+        text_mem_type (str): Type of text memory, either "tree_text" or "general_text"
+        user_id (str): User ID for the configuration
+        **kwargs: Additional configuration overrides
+
+    Returns:
+        GeneralMemCubeConfig: Complete MemCube configuration object
+    """
+
+    # Base OpenAI configuration
+    openai_config = {
+        "model_name_or_path": kwargs.get("model_name", "gpt-4o-mini"),
+        "temperature": kwargs.get("temperature", 0.8),
+        "max_tokens": kwargs.get("max_tokens", 1024),
+        "top_p": kwargs.get("top_p", 0.9),
+        "top_k": kwargs.get("top_k", 50),
+        "remove_think_prefix": True,
+        "api_key": openai_api_key,
+        "api_base": openai_api_base,
+    }
+
+    # Universal API embedder configuration (using OpenAI)
+    embedder_config = {
+        "backend": "universal_api",
+        "config": {
+            "provider": "openai",
+            "api_key": openai_api_key,
+            "model_name_or_path": kwargs.get("embedder_model", "text-embedding-3-large"),
+            "base_url": openai_api_base,
+        },
+    }
+
+    # Configure text memory based on type
+    if text_mem_type == "tree_text":
+        graph_db_backend = kwargs.get("graph_db_backend", "neo4j").lower()
+
+        if graph_db_backend in ("polardb", "postgres"):
+            # PolarDB (Postgres + Apache AGE) configuration
+            user_name = f"memdb{user_id.replace('-', '').replace('_', '')}"
+            graph_db_config = {
+                "backend": "polardb",
+                "config": {
+                    "host": kwargs.get("polar_db_host", "localhost"),
+                    "port": int(kwargs.get("polar_db_port", 5432)),
+                    "user": kwargs.get("polar_db_user", "postgres"),
+                    "password": kwargs.get("polar_db_password", ""),
+                    "db_name": kwargs.get("polar_db_name", "memdb"),
+                    "user_name": user_name,
+                    "use_multi_db": kwargs.get("use_multi_db", False),
+                    "auto_create": kwargs.get("neo4j_auto_create", True),
+                    "embedding_dimension": int(kwargs.get("embedding_dimension", 1024)),
+                },
+            }
+        else:
+            # Neo4j configuration (default)
+            db_name = f"memdb{user_id.replace('-', '').replace('_', '')}"
+            if not kwargs.get("use_multi_db", False):
+                db_name = kwargs.get("neo4j_db_name", "neo4j")
+
+            neo4j_config = {
+                "uri": kwargs.get("neo4j_uri", "bolt://localhost:7687"),
+                "user": kwargs.get("neo4j_user", "neo4j"),
+                "db_name": db_name,
+                "password": kwargs.get("neo4j_password", "12345678"),
+                "auto_create": kwargs.get("neo4j_auto_create", True),
+                "use_multi_db": kwargs.get("use_multi_db", False),
+                "embedding_dimension": int(kwargs.get("embedding_dimension", 3072)),
+            }
+            if not kwargs.get("use_multi_db", False):
+                neo4j_config["user_name"] = f"memdb{user_id.replace('-', '').replace('_', '')}"
+            graph_db_config = {
+                "backend": "neo4j",
+                "config": neo4j_config,
+            }
+
+        text_mem_config = {
+            "backend": "tree_text",
+            "config": {
+                "extractor_llm": {"backend": "openai", "config": openai_config},
+                "dispatcher_llm": {"backend": "openai", "config": openai_config},
+                "graph_db": graph_db_config,
+                "embedder": embedder_config,
+                "reorganize": kwargs.get("enable_reorganize", False),
+            },
+        }
+
+    elif text_mem_type == "general_text":
+        # General text memory with file storage
+        text_mem_config = {
+            "backend": "general_text",
+            "config": {
+                "cube_id": kwargs.get("cube_id", f"{user_id}_cube"),
+                "memory_filename": kwargs.get("memory_filename", "textual_memory.json"),
+                "extractor_llm": {"backend": "openai", "config": openai_config},
+                "vector_db": {
+                    "backend": "qdrant",
+                    "config": {
+                        "collection_name": kwargs.get("collection_name", f"{user_id}_collection"),
+                        "vector_dimension": kwargs.get("vector_dimension", 3072),
+                        "distance_metric": "cosine",
+                        **({"host": kwargs["qdrant_host"]} if "qdrant_host" in kwargs else {}),
+                        **({"port": kwargs["qdrant_port"]} if "qdrant_port" in kwargs else {}),
+                    },
+                },
+                "embedder": embedder_config,
+            },
+        }
+
+    # Configure activation memory if enabled.
+    # KV cache activation memory requires a local HuggingFace/vLLM model (it
+    # extracts internal attention KV tensors via build_kv_cache), so it cannot
+    # work with remote API backends like OpenAI or Gemini.
+    # Only create act_mem when activation_memory_backend is explicitly provided.
+    act_mem_config = {}
+    if kwargs.get("enable_activation_memory", False):
+        extractor_backend = kwargs.get("activation_memory_backend")
+        if extractor_backend in ("huggingface", "huggingface_singleton", "vllm"):
+            act_mem_config = {
+                "backend": "kv_cache",
+                "config": {
+                    "memory_filename": kwargs.get(
+                        "activation_memory_filename", "activation_memory.pickle"
+                    ),
+                    "extractor_llm": {
+                        "backend": extractor_backend,
+                        "config": kwargs.get("activation_memory_llm_config", {}),
+                    },
+                },
+            }
+        else:
+            logger.info(
+                "Activation memory (kv_cache) requires a local model backend "
+                "(huggingface/vllm) via activation_memory_backend kwarg. "
+                "Skipping act_mem in MemCube config."
+            )
+
+    # Create MemCube configuration
+    cube_config_dict = {
+        "user_id": user_id,
+        "cube_id": kwargs.get("cube_id", f"{user_id}_default_cube"),
+        "text_mem": text_mem_config,
+        "act_mem": act_mem_config,
+        "para_mem": {},  # Empty parametric memory by default
+    }
+
+    return GeneralMemCubeConfig.model_validate(cube_config_dict)
+
+
+def get_default(
+    openai_api_key: str,
+    openai_api_base: str = "https://api.openai.com/v1",
+    text_mem_type: Literal["tree_text", "general_text"] = "general_text",
+    user_id: str = "default_user",
+    **kwargs,
+) -> tuple[MemDBConfig, GeneralMemCube]:
+    """
+    Generate both MemDB configuration and default MemCube with minimal user input.
+
+    This is the main convenience function for getting started with MemDB.
+
+    Args:
+        openai_api_key (str): OpenAI API key
+        openai_api_base (str): OpenAI API base URL, defaults to "https://api.openai.com/v1"
+        text_mem_type (str): Type of text memory, either "tree_text" or "general_text"
+        user_id (str): User ID for the configuration
+        **kwargs: Additional configuration overrides
+
+    Returns:
+        Tuple[MemDBConfig, GeneralMemCube]: Complete MemDB configuration and MemCube instance
+
+    Example:
+        ```python
+        mos_config, default_cube = get_default(
+            openai_api_key="sk-...",
+            text_mem_type="general_text"
+        )
+        memory = MemDB(mos_config)
+        memory.register_mem_cube(default_cube)
+        ```
+    """
+
+    # Generate MemDB configuration
+    mos_config = get_default_config(
+        openai_api_key=openai_api_key,
+        openai_api_base=openai_api_base,
+        text_mem_type=text_mem_type,
+        user_id=user_id,
+        **kwargs,
+    )
+
+    # Generate MemCube configuration
+    cube_config = get_default_cube_config(
+        openai_api_key=openai_api_key,
+        openai_api_base=openai_api_base,
+        text_mem_type=text_mem_type,
+        user_id=user_id,
+        **kwargs,
+    )
+
+    # Create MemCube instance
+    default_cube = GeneralMemCube(cube_config)
+
+    return mos_config, default_cube
+
+
+def get_simple_config(
+    openai_api_key: str,
+    openai_api_base: str = "https://api.openai.com/v1",
+    text_mem_type: Literal["tree_text", "general_text"] = "general_text",
+    user_id: str = "default_user",
+) -> MemDBConfig:
+    """
+    Get a minimal configuration with only essential parameters.
+
+    This is the simplest way to get started with MemDB.
+
+    Args:
+        openai_api_key (str): OpenAI API key
+        openai_api_base (str): OpenAI API base URL
+        text_mem_type (str): Type of text memory
+        user_id (str): User ID
+
+    Returns:
+        MemDBConfig: Basic MemDB configuration
+
+    Example:
+        ```python
+        config = get_simple_config(
+            openai_api_key="sk-...",
+            text_mem_type="general_text"
+        )
+        mos = MemDB(config)
+        ```
+    """
+    return get_default_config(
+        openai_api_key=openai_api_key,
+        openai_api_base=openai_api_base,
+        text_mem_type=text_mem_type,
+        user_id=user_id,
+    )

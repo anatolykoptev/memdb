@@ -1,8 +1,8 @@
 import time
 
-from memos import log
-from memos.configs.memory import PreferenceTextMemoryConfig
-from memos.memories.textual.preference import PreferenceTextMemory
+from memdb import log
+from memdb.configs.memory import PreferenceTextMemoryConfig
+from memdb.memories.textual.preference import PreferenceTextMemory
 
 
 logger = log.get_logger(__name__)

@@ -2,7 +2,7 @@
 Tree Textual Memory Relation & Reasoning Detector Example
 ==========================================================
 
-This example demonstrates how to use MemOS's RelationAndReasoningDetector to
+This example demonstrates how to use MemDB's RelationAndReasoningDetector to
 automatically discover relationships between memories and infer new knowledge.
 
 **What you'll learn:**
@@ -28,16 +28,16 @@ import json
 import os
 import uuid
 
-from memos import log
-from memos.configs.embedder import EmbedderConfigFactory
-from memos.configs.graph_db import GraphDBConfigFactory
-from memos.configs.llm import LLMConfigFactory
-from memos.embedders.factory import EmbedderFactory
-from memos.graph_dbs.factory import GraphStoreFactory
-from memos.graph_dbs.item import GraphDBNode
-from memos.llms.factory import LLMFactory
-from memos.memories.textual.item import TreeNodeTextualMemoryMetadata
-from memos.memories.textual.tree_text_memory.organize.relation_reason_detector import (
+from memdb import log
+from memdb.configs.embedder import EmbedderConfigFactory
+from memdb.configs.graph_db import GraphDBConfigFactory
+from memdb.configs.llm import LLMConfigFactory
+from memdb.embedders.factory import EmbedderFactory
+from memdb.graph_dbs.factory import GraphStoreFactory
+from memdb.graph_dbs.item import GraphDBNode
+from memdb.llms.factory import LLMFactory
+from memdb.memories.textual.item import TreeNodeTextualMemoryMetadata
+from memdb.memories.textual.tree_text_memory.organize.relation_reason_detector import (
     RelationAndReasoningDetector,
 )
 

@@ -9,28 +9,28 @@ import os
 
 from typing import Any
 
-from memos.api.config import APIConfig
-from memos.configs.embedder import EmbedderConfigFactory
-from memos.configs.graph_db import GraphDBConfigFactory
-from memos.configs.internet_retriever import InternetRetrieverConfigFactory
-from memos.configs.llm import LLMConfigFactory
-from memos.configs.mem_agent import MemAgentConfigFactory
-from memos.configs.mem_reader import MemReaderConfigFactory
-from memos.configs.reranker import RerankerConfigFactory
-from memos.embedders.factory import EmbedderFactory
-from memos.graph_dbs.factory import GraphStoreFactory
-from memos.llms.factory import LLMFactory
-from memos.log import get_logger
-from memos.mem_agent.deepsearch_agent import DeepSearchMemAgent
-from memos.mem_agent.factory import MemAgentFactory
-from memos.mem_cube.navie import NaiveMemCube
-from memos.mem_reader.factory import MemReaderFactory
-from memos.memories.textual.simple_tree import SimpleTreeTextMemory
-from memos.memories.textual.tree_text_memory.organize.manager import MemoryManager
-from memos.memories.textual.tree_text_memory.retrieve.internet_retriever_factory import (
+from memdb.api.config import APIConfig
+from memdb.configs.embedder import EmbedderConfigFactory
+from memdb.configs.graph_db import GraphDBConfigFactory
+from memdb.configs.internet_retriever import InternetRetrieverConfigFactory
+from memdb.configs.llm import LLMConfigFactory
+from memdb.configs.mem_agent import MemAgentConfigFactory
+from memdb.configs.mem_reader import MemReaderConfigFactory
+from memdb.configs.reranker import RerankerConfigFactory
+from memdb.embedders.factory import EmbedderFactory
+from memdb.graph_dbs.factory import GraphStoreFactory
+from memdb.llms.factory import LLMFactory
+from memdb.log import get_logger
+from memdb.mem_agent.deepsearch_agent import DeepSearchMemAgent
+from memdb.mem_agent.factory import MemAgentFactory
+from memdb.mem_cube.navie import NaiveMemCube
+from memdb.mem_reader.factory import MemReaderFactory
+from memdb.memories.textual.simple_tree import SimpleTreeTextMemory
+from memdb.memories.textual.tree_text_memory.organize.manager import MemoryManager
+from memdb.memories.textual.tree_text_memory.retrieve.internet_retriever_factory import (
     InternetRetrieverFactory,
 )
-from memos.reranker.factory import RerankerFactory
+from memdb.reranker.factory import RerankerFactory
 
 
 logger = get_logger(__name__)
@@ -43,7 +43,7 @@ def build_minimal_components():
     This function creates all necessary components using APIConfig methods,
     similar to config_builders.py but inline for easier customization.
     """
-    logger.info("Initializing simplified MemOS components...")
+    logger.info("Initializing simplified MemDB components...")
 
     # Build component configurations using APIConfig methods (like config_builders.py)
 

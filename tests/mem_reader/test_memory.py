@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from memos.mem_reader.memory import Memory
+from memdb.mem_reader.memory import Memory
 
 
 def test_memory_initialization():

@@ -12,10 +12,10 @@ load_dotenv()
 
 # Configuration
 # This points to the Server API base URL (e.g., started via server_api.py)
-API_BASE_URL = os.getenv("MEMOS_API_BASE_URL", "http://localhost:8001/product")
+API_BASE_URL = os.getenv("MEMDB_API_BASE_URL", "http://localhost:8001/product")
 
 # Create MCP Server
-mcp = FastMCP("MemOS MCP via Server API")
+mcp = FastMCP("MemDB MCP via Server API")
 
 
 @mcp.tool()

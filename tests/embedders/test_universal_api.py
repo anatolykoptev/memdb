@@ -2,12 +2,12 @@ import unittest
 
 from unittest.mock import MagicMock, patch
 
-from memos.configs.embedder import UniversalAPIEmbedderConfig
-from memos.embedders.universal_api import UniversalAPIEmbedder
+from memdb.configs.embedder import UniversalAPIEmbedderConfig
+from memdb.embedders.universal_api import UniversalAPIEmbedder
 
 
 class TestUniversalAPIEmbedder(unittest.TestCase):
-    @patch("memos.embedders.universal_api.OpenAIClient")
+    @patch("memdb.embedders.universal_api.OpenAIClient")
     def test_embed_single_text(self, mock_openai_client):
         """Test embedding a single text with OpenAI provider."""
         # Mock the embeddings.create return value
@@ -39,7 +39,7 @@ class TestUniversalAPIEmbedder(unittest.TestCase):
 
         self.assertEqual(len(result[0]), 4)
 
-    @patch("memos.embedders.universal_api.OpenAIClient")
+    @patch("memdb.embedders.universal_api.OpenAIClient")
     def test_embed_batch_text(self, mock_openai_client):
         """Test embedding multiple texts at once with OpenAI provider."""
         # Mock response for multiple texts

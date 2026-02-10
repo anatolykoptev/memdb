@@ -1,4 +1,4 @@
-from memos.mem_reader.base import BaseMemReader
+from memdb.mem_reader.base import BaseMemReader
 from tests.utils import check_module_base_class
 
 

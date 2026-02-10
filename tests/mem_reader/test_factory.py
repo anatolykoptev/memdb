@@ -1,6 +1,6 @@
-from memos.configs.mem_reader import MemReaderConfigFactory
-from memos.mem_reader.factory import MemReaderFactory
-from memos.mem_reader.simple_struct import SimpleStructMemReader
+from memdb.configs.mem_reader import MemReaderConfigFactory
+from memdb.mem_reader.factory import MemReaderFactory
+from memdb.mem_reader.simple_struct import SimpleStructMemReader
 from tests.utils import check_module_factory_class
 
 

@@ -1,4 +1,4 @@
-from memos.mem_cube.base import BaseMemCube
+from memdb.mem_cube.base import BaseMemCube
 from tests.utils import check_module_base_class
 
 

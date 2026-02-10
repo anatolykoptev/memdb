@@ -1,4 +1,4 @@
-from memos.configs.embedder import (
+from memdb.configs.embedder import (
     BaseEmbedderConfig,
     EmbedderConfigFactory,
     OllamaEmbedderConfig,

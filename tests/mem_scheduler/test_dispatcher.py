@@ -5,21 +5,21 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from memos.configs.mem_scheduler import (
+from memdb.configs.mem_scheduler import (
     AuthConfig,
     GraphDBAuthConfig,
     OpenAIConfig,
     RabbitMQConfig,
     SchedulerConfigFactory,
 )
-from memos.llms.base import BaseLLM
-from memos.mem_cube.general import GeneralMemCube
-from memos.mem_scheduler.scheduler_factory import SchedulerFactory
-from memos.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
-from memos.mem_scheduler.schemas.task_schemas import RunningTaskItem
-from memos.mem_scheduler.task_schedule_modules.dispatcher import SchedulerDispatcher
-from memos.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
-from memos.memories.textual.tree import TreeTextMemory
+from memdb.llms.base import BaseLLM
+from memdb.mem_cube.general import GeneralMemCube
+from memdb.mem_scheduler.scheduler_factory import SchedulerFactory
+from memdb.mem_scheduler.schemas.message_schemas import ScheduleMessageItem
+from memdb.mem_scheduler.schemas.task_schemas import RunningTaskItem
+from memdb.mem_scheduler.task_schedule_modules.dispatcher import SchedulerDispatcher
+from memdb.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
+from memdb.memories.textual.tree import TreeTextMemory
 
 
 FILE_PATH = Path(__file__).absolute()
@@ -68,7 +68,7 @@ class TestSchedulerDispatcher(unittest.TestCase):
         # Mock AuthConfig.from_local_env() to return our test config
         mock_auth_config = self._create_mock_auth_config()
         self.auth_config_patch = patch(
-            "memos.configs.mem_scheduler.AuthConfig.from_local_env", return_value=mock_auth_config
+            "memdb.configs.mem_scheduler.AuthConfig.from_local_env", return_value=mock_auth_config
         )
         self.auth_config_patch.start()
 
@@ -120,7 +120,7 @@ class TestSchedulerDispatcher(unittest.TestCase):
 
         # Mock the MemoryFilter logger since that's where the actual logging happens
         self.logger_info_patch = patch(
-            "memos.mem_scheduler.memory_manage_modules.memory_filter.logger.info"
+            "memdb.mem_scheduler.memory_manage_modules.memory_filter.logger.info"
         )
         self.mock_logger_info = self.logger_info_patch.start()
 
@@ -158,7 +158,7 @@ class TestSchedulerDispatcher(unittest.TestCase):
         # Create a new dispatcher with parallel dispatch disabled
         serial_dispatcher = SchedulerDispatcher(
             max_workers=2,
-            memos_message_queue=self.dispatcher.memos_message_queue,
+            memdb_message_queue=self.dispatcher.memdb_message_queue,
             enable_parallel_dispatch=False,
             metrics=MagicMock(),
         )
@@ -364,7 +364,7 @@ class TestSchedulerDispatcher(unittest.TestCase):
         )
 
         # Mock logger to capture log messages
-        with patch("memos.mem_scheduler.monitors.dispatcher_monitor.logger"):
+        with patch("memdb.mem_scheduler.monitors.dispatcher_monitor.logger"):
             # Simulate stuck task detection by directly calling the logging part
             # We'll test the logging format by checking what would be logged
             task_info = stuck_task.get_execution_info()

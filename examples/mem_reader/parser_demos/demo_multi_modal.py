@@ -1,7 +1,7 @@
 """Demo for MultiModalParser."""
 
 from examples.mem_reader.builders import build_file_parser
-from memos.mem_reader.read_multi_modal.multi_modal_parser import MultiModalParser
+from memdb.mem_reader.read_multi_modal.multi_modal_parser import MultiModalParser
 
 from ._base import BaseParserDemo
 

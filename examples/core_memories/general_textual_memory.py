@@ -1,8 +1,8 @@
 import os
 import pprint
 
-from memos.configs.memory import MemoryConfigFactory
-from memos.memories.factory import MemoryFactory
+from memdb.configs.memory import MemoryConfigFactory
+from memdb.memories.factory import MemoryFactory
 
 
 # Initialize the memory configuration
@@ -56,9 +56,9 @@ example_memories = [
         },
     },
     {
-        "memory": "MemOS is awesome!",
+        "memory": "MemDB is awesome!",
         "metadata": {
-            "key": "MemOS",
+            "key": "MemDB",
             "source": "conversation",
             "tags": ["awesome"],
             "updated_at": "2025-05-19T00:00:00",

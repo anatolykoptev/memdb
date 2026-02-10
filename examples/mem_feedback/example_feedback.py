@@ -9,9 +9,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.
 
 def init_components():
     """
-    Initialize MemOS core components.
+    Initialize MemDB core components.
 
-    This function is responsible for building and configuring all basic components required for MemOS operation, including:
+    This function is responsible for building and configuring all basic components required for MemDB operation, including:
     1. LLM (Large Language Model): Model responsible for natural language understanding and generation (e.g., GPT-4o).
     2. Embedder: Responsible for converting text into vector representations for semantic search and similarity calculation.
     3. GraphDB (Neo4j): Graph database for persistent storage of memory nodes and their relationships.
@@ -25,21 +25,21 @@ def init_components():
         tuple: (feedback_server, memory_manager, embedder)
     """
     # Lazy import to avoid E402 (module level import not at top of file)
-    from memos.configs.embedder import EmbedderConfigFactory
-    from memos.configs.graph_db import GraphDBConfigFactory
-    from memos.configs.llm import LLMConfigFactory
-    from memos.configs.mem_reader import MemReaderConfigFactory
-    from memos.configs.reranker import RerankerConfigFactory
-    from memos.embedders.factory import EmbedderFactory
-    from memos.graph_dbs.factory import GraphStoreFactory
-    from memos.llms.factory import LLMFactory
-    from memos.mem_feedback.simple_feedback import SimpleMemFeedback
-    from memos.mem_reader.factory import MemReaderFactory
-    from memos.memories.textual.tree_text_memory.organize.manager import MemoryManager
-    from memos.memories.textual.tree_text_memory.retrieve.searcher import Searcher
-    from memos.reranker.factory import RerankerFactory
+    from memdb.configs.embedder import EmbedderConfigFactory
+    from memdb.configs.graph_db import GraphDBConfigFactory
+    from memdb.configs.llm import LLMConfigFactory
+    from memdb.configs.mem_reader import MemReaderConfigFactory
+    from memdb.configs.reranker import RerankerConfigFactory
+    from memdb.embedders.factory import EmbedderFactory
+    from memdb.graph_dbs.factory import GraphStoreFactory
+    from memdb.llms.factory import LLMFactory
+    from memdb.mem_feedback.simple_feedback import SimpleMemFeedback
+    from memdb.mem_reader.factory import MemReaderFactory
+    from memdb.memories.textual.tree_text_memory.organize.manager import MemoryManager
+    from memdb.memories.textual.tree_text_memory.retrieve.searcher import Searcher
+    from memdb.reranker.factory import RerankerFactory
 
-    print("Initializing MemOS Components...")
+    print("Initializing MemDB Components...")
 
     # 1. LLM: Configure Large Language Model, using OpenAI compatible interface
     llm_config = LLMConfigFactory.model_validate(
@@ -165,7 +165,7 @@ def main():
     load_dotenv()
 
     # Lazy import to avoid E402
-    from memos.mem_feedback.utils import make_mem_item
+    from memdb.mem_feedback.utils import make_mem_item
 
     feedback_server, memory_manager, embedder = init_components()
     print("-" * 50)

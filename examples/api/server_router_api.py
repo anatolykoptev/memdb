@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-MemOS Product API: /product/add end-to-end examples.
+MemDB Product API: /product/add end-to-end examples.
 
-This script demonstrates how to call the MemOS Product Add API
+This script demonstrates how to call the MemDB Product Add API
 (`/product/add`, mapped to `APIADDRequest`) with ALL supported
 message shapes and key options, including:
 
@@ -19,7 +19,7 @@ It also tests the following features:
 Each example sends a real POST request.
 
 NOTE:
-- This script assumes your MemOS server is running and router is mounted at `/product`.
+- This script assumes your MemDB server is running and router is mounted at `/product`.
 - You may need to adjust BASE_URL, USER_ID, MEM_CUBE_ID to fit your environment.
 - Also, the environment variable `MEM_READER_BACKEND=multimodal_struct` is required.
 - If you want to test simple_struct memreader, you can go to examples/mem_reader/run_simple.py

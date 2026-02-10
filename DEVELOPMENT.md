@@ -2,13 +2,13 @@
 
 ## 🎯 Основной репозиторий для доработок
 
-**Используйте:** `/home/krolik/MemOSina`
+**Используйте:** `/home/krolik/MemDB`
 
 ## 📋 Workflow для изменений
 
 ### 1. Внести изменения локально
 ```bash
-cd /home/krolik/MemOSina
+cd /home/krolik/MemDB
 git checkout -b feature/my-feature
 # Делайте изменения в коде
 ```
@@ -36,11 +36,11 @@ GitHub Actions выполнит все проверки:
 ### 4. Обновить krolik-server
 После пуша в GitHub:
 ```bash
-cd ~/krolik-server/services/memos-core
+cd ~/krolik-server/services/memdb-core
 git pull origin main  # или нужную ветку
 cd ../..
-docker compose build --no-cache memos-api memos-mcp
-docker compose restart memos-api memos-mcp
+docker compose build --no-cache memdb-api memdb-mcp
+docker compose restart memdb-api memdb-mcp
 ```
 
 ## 🔒 Branch Protection (main ветка)
@@ -58,8 +58,8 @@ docker compose restart memos-api memos-mcp
 # Установить pre-commit
 pip install --user pre-commit
 
-# В директории MemOSina
-cd /home/krolik/MemOSina
+# В директории MemDB
+cd /home/krolik/MemDB
 pre-commit install
 
 # Запустить вручную
@@ -69,7 +69,7 @@ pre-commit run --all-files
 ### Ручная проверка с Ruff
 ```bash
 # В контейнере или локально
-cd /home/krolik/MemOSina
+cd /home/krolik/MemDB
 
 # Проверка стиля
 ruff check .
@@ -87,7 +87,7 @@ ruff format .
 ## 📊 Проверка статуса CI
 
 ```bash
-cd /home/krolik/MemOSina
+cd /home/krolik/MemDB
 
 # Список последних запусков
 gh run list --limit 10
@@ -99,13 +99,13 @@ gh run list --branch feature/my-feature
 gh run view --log
 ```
 
-## 🔄 Синхронизация с upstream MemOS
+## 🔄 Синхронизация с upstream MemDB
 
 ```bash
-cd /home/krolik/MemOSina
+cd /home/krolik/MemDB
 
 # Добавить upstream remote (если еще нет)
-git remote add upstream https://github.com/MemTensor/MemOS.git
+git remote add upstream https://github.com/MemDBai/MemDB.git
 
 # Получить обновления
 git fetch upstream
@@ -126,17 +126,17 @@ git push origin main
 
 ```
 /home/krolik/
-├── MemOSina/              ⭐ ОСНОВНОЙ - все доработки здесь
+├── MemDB/              ⭐ ОСНОВНОЙ - все доработки здесь
 │   ├── .github/workflows/ - CI/CD конфигурация
-│   ├── src/memos/         - Исходный код с патчами
+│   ├── src/memdb/         - Исходный код с патчами
 │   └── tests/             - Тесты
 │
-├── memos-pr-work/         🔧 Для создания PR в upstream
+├── memdb-pr-work/         🔧 Для создания PR в upstream
 │   └── (ветки для PR: fix/*, feat/*)
 │
 └── krolik-server/
     ├── services/
-    │   └── memos-core/    📦 Git submodule → MemOSina
+    │   └── memdb-core/    📦 Git submodule → MemDB
     └── docker-compose.yml
 ```
 
@@ -148,7 +148,7 @@ git push origin main
 - ✅ Unit тесты
 - ✅ Проверка зависимостей
 
-**Ваш форк теперь такой же качественный, как upstream MemOS!**
+**Ваш форк теперь такой же качественный, как upstream MemDB!**
 
 ## 🚀 Quick Reference
 
@@ -157,12 +157,12 @@ git push origin main
 | Создать ветку | `git checkout -b feature/name` |
 | Запушить изменения | `git push origin feature/name` |
 | Проверить CI | `gh run list --branch feature/name` |
-| Обновить submodule | `cd ~/krolik-server/services/memos-core && git pull` |
-| Пересобрать контейнеры | `docker compose build --no-cache memos-api memos-mcp` |
-| Перезапустить сервисы | `docker compose restart memos-api memos-mcp` |
+| Обновить submodule | `cd ~/krolik-server/services/memdb-core && git pull` |
+| Пересобрать контейнеры | `docker compose build --no-cache memdb-api memdb-mcp` |
+| Перезапустить сервисы | `docker compose restart memdb-api memdb-mcp` |
 | Проверить код Ruff | `ruff check . && ruff format --check .` |
 
 ---
 
-**Все изменения делайте в `/home/krolik/MemOSina`**
+**Все изменения делайте в `/home/krolik/MemDB`**
 **CI/CD гарантирует качество перед попаданием в upstream!**

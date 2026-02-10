@@ -6,12 +6,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from memos.configs.mem_agent import DeepSearchAgentConfig
-from memos.mem_agent.deepsearch_agent import (
+from memdb.configs.mem_agent import DeepSearchAgentConfig
+from memdb.mem_agent.deepsearch_agent import (
     DeepSearchMemAgent,
     JSONResponseParser,
 )
-from memos.memories.textual.item import TextualMemoryItem, TextualMemoryMetadata
+from memdb.memories.textual.item import TextualMemoryItem, TextualMemoryMetadata
 
 
 class TestJSONResponseParser:

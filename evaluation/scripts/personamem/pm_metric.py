@@ -357,15 +357,15 @@ if __name__ == "__main__":
             "zep",
             "mem0",
             "mem0_graph",
-            "memos-api",
-            "memos-api-online",
+            "memdb-api",
+            "memdb-api-online",
             "memobase",
             "memu",
             "supermemory",
         ],
         required=True,
         help="Memory library to evaluate",
-        default="memos-api",
+        default="memdb-api",
     )
     parser.add_argument(
         "--version", type=str, default="default", help="Evaluation framework version"

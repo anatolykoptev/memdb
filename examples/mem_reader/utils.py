@@ -5,7 +5,7 @@ import pprint
 
 from typing import Any
 
-from memos.memories.textual.item import TextualMemoryItem
+from memdb.memories.textual.item import TextualMemoryItem
 
 
 def _truncate(s: str, max_len: int | None) -> str:

@@ -2,9 +2,9 @@ import json
 
 from transformers import DynamicCache
 
-from memos.configs.memory import MemoryConfigFactory
-from memos.memories.activation.item import KVCacheItem
-from memos.memories.factory import MemoryFactory
+from memdb.configs.memory import MemoryConfigFactory
+from memdb.memories.activation.item import KVCacheItem
+from memdb.memories.factory import MemoryFactory
 
 
 def get_cache_info(cache):
@@ -86,8 +86,8 @@ if __name__ == "__main__":
 
     # 3. Extract a KVCacheItem (DynamicCache) from a prompt (uses HFLLM.build_kv_cache internally)
     prompt = [
-        {"role": "user", "content": "What is MemOS?"},
-        {"role": "assistant", "content": "MemOS is a memory operating system for LLMs."},
+        {"role": "user", "content": "What is MemDB?"},
+        {"role": "assistant", "content": "MemDB is a memory operating system for LLMs."},
     ]
     print("===== Extract KVCacheItem =====")
     cache_item = kv_mem.extract(prompt)

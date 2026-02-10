@@ -1,5 +1,5 @@
-from memos.chunkers import ChunkerFactory
-from memos.configs.chunker import ChunkerConfigFactory
+from memdb.chunkers import ChunkerFactory
+from memdb.configs.chunker import ChunkerConfigFactory
 
 
 def main():

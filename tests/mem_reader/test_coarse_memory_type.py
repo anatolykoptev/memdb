@@ -17,7 +17,7 @@ import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 
-from memos.mem_reader.simple_struct import coerce_scene_data
+from memdb.mem_reader.simple_struct import coerce_scene_data
 
 
 # ------------------------------------------------------------------------------

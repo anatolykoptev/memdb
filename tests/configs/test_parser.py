@@ -1,4 +1,4 @@
-from memos.configs.parser import BaseParserConfig, MarkItDownParserConfig, ParserConfigFactory
+from memdb.configs.parser import BaseParserConfig, MarkItDownParserConfig, ParserConfigFactory
 from tests.utils import (
     check_config_base_class,
     check_config_factory_class,

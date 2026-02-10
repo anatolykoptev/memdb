@@ -1,7 +1,7 @@
 import pytest
 
-from memos.memories.textual.tree_text_memory.retrieve.retrieval_mid_structs import ParsedTaskGoal
-from memos.memories.textual.tree_text_memory.retrieve.task_goal_parser import TaskGoalParser
+from memdb.memories.textual.tree_text_memory.retrieve.retrieval_mid_structs import ParsedTaskGoal
+from memdb.memories.textual.tree_text_memory.retrieve.task_goal_parser import TaskGoalParser
 
 
 class MockLLM:

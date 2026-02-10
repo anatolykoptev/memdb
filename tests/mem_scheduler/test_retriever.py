@@ -5,21 +5,21 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from memos.configs.mem_scheduler import (
+from memdb.configs.mem_scheduler import (
     AuthConfig,
     GraphDBAuthConfig,
     OpenAIConfig,
     RabbitMQConfig,
     SchedulerConfigFactory,
 )
-from memos.llms.base import BaseLLM
-from memos.mem_cube.general import GeneralMemCube
-from memos.mem_scheduler.scheduler_factory import SchedulerFactory
-from memos.mem_scheduler.utils.filter_utils import (
+from memdb.llms.base import BaseLLM
+from memdb.mem_cube.general import GeneralMemCube
+from memdb.mem_scheduler.scheduler_factory import SchedulerFactory
+from memdb.mem_scheduler.utils.filter_utils import (
     filter_too_short_memories,
     filter_vector_based_similar_memories,
 )
-from memos.memories.textual.tree import TextualMemoryItem, TreeTextMemory
+from memdb.memories.textual.tree import TextualMemoryItem, TreeTextMemory
 
 
 FILE_PATH = Path(__file__).absolute()
@@ -66,7 +66,7 @@ class TestSchedulerRetriever(unittest.TestCase):
         # Mock AuthConfig.from_local_env() to return our test config
         mock_auth_config = self._create_mock_auth_config()
         self.auth_config_patch = patch(
-            "memos.configs.mem_scheduler.AuthConfig.from_local_env", return_value=mock_auth_config
+            "memdb.configs.mem_scheduler.AuthConfig.from_local_env", return_value=mock_auth_config
         )
         self.auth_config_patch.start()
 
@@ -82,7 +82,7 @@ class TestSchedulerRetriever(unittest.TestCase):
 
         # Mock the MemoryFilter logger since that's where the actual logging happens
         self.logger_info_patch = patch(
-            "memos.mem_scheduler.memory_manage_modules.memory_filter.logger.info"
+            "memdb.mem_scheduler.memory_manage_modules.memory_filter.logger.info"
         )
         self.mock_logger_info = self.logger_info_patch.start()
 

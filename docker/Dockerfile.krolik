@@ -1,6 +1,6 @@
-# MemOS with Krolik Security Extensions
-# 
-# This Dockerfile builds MemOS with authentication, rate limiting, and admin API.
+# MemDB with Krolik Security Extensions
+#
+# This Dockerfile builds MemDB with authentication, rate limiting, and admin API.
 # It uses the overlay pattern to keep customizations separate from base code.
 
 FROM python:3.11-slim
@@ -17,14 +17,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
-RUN groupadd -r memos && useradd -r -g memos -u 1000 memos
+RUN groupadd -r memdb && useradd -r -g memdb -u 1000 memdb
 
 WORKDIR /app
 
 # Use official Hugging Face
 ENV HF_ENDPOINT=https://huggingface.co
 
-# Copy base MemOS source
+# Copy base MemDB source
 COPY src/ ./src/
 COPY pyproject.toml ./
 
@@ -43,17 +43,17 @@ RUN pip install --no-cache-dir \
     redis
 
 # Apply Krolik overlay (AFTER base install to allow easy updates)
-COPY overlays/krolik/ ./src/memos/
+COPY overlays/krolik/ ./src/memdb/
 
 # Create data directory
-RUN mkdir -p /data/memos && chown -R memos:memos /data/memos
-RUN chown -R memos:memos /app
+RUN mkdir -p /data/memdb && chown -R memdb:memdb /data/memdb
+RUN chown -R memdb:memdb /app
 
 # Set Python path
 ENV PYTHONPATH=/app/src
 
 # Switch to non-root user
-USER memos
+USER memdb
 
 EXPOSE 8000
 
@@ -62,4 +62,4 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=60s \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Use extended entry point with security features
-CMD ["gunicorn", "memos.api.server_api_ext:app", "--preload", "-w", "2", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "120"]
+CMD ["gunicorn", "memdb.api.server_api_ext:app", "--preload", "-w", "2", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--timeout", "120"]

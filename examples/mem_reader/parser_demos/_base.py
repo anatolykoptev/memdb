@@ -4,7 +4,7 @@ from typing import Any
 
 from examples.mem_reader.builders import build_llm_and_embedder
 from examples.mem_reader.utils import pretty_print_dict
-from memos.memories.textual.item import SourceMessage
+from memdb.memories.textual.item import SourceMessage
 
 
 class BaseParserDemo:

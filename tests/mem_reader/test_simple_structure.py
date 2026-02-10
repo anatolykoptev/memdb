@@ -2,13 +2,13 @@ import unittest
 
 from unittest.mock import MagicMock, patch
 
-from memos.chunkers import ChunkerFactory
-from memos.configs.mem_reader import SimpleStructMemReaderConfig
-from memos.embedders.factory import EmbedderFactory
-from memos.llms.factory import LLMFactory
-from memos.mem_reader.simple_struct import SimpleStructMemReader
-from memos.mem_reader.utils import parse_json_result
-from memos.memories.textual.item import TextualMemoryItem
+from memdb.chunkers import ChunkerFactory
+from memdb.configs.mem_reader import SimpleStructMemReaderConfig
+from memdb.embedders.factory import EmbedderFactory
+from memdb.llms.factory import LLMFactory
+from memdb.mem_reader.simple_struct import SimpleStructMemReader
+from memdb.mem_reader.utils import parse_json_result
+from memdb.memories.textual.item import TextualMemoryItem
 
 
 class TestSimpleStructMemReader(unittest.TestCase):
