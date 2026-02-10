@@ -188,7 +188,7 @@ func (p *Postgres) GetAllMemories(ctx context.Context, graphName, userName, memo
 
 	var results []map[string]any
 	for rows.Next() {
-		var id int64
+		var id string
 		var propsJSON []byte
 		if err := rows.Scan(&id, &propsJSON); err != nil {
 			return nil, 0, err
