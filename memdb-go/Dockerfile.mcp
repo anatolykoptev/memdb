@@ -1,0 +1,25 @@
+# ─── Build stage ─────────────────────────────────────────────────────
+# MCP server: pure Go (CGO_ENABLED=0), no ONNX/tokenizer dependencies.
+# Uses VoyageAI HTTP API for embeddings, much simpler build.
+FROM golang:1.26rc3 AS builder
+
+WORKDIR /app
+
+COPY go.mod go.sum* ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /memdb-mcp ./cmd/mcp-server
+
+# ─── Runtime stage ───────────────────────────────────────────────────
+FROM debian:trixie-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /memdb-mcp /usr/local/bin/memdb-mcp
+
+EXPOSE 8001
+
+ENTRYPOINT ["memdb-mcp"]

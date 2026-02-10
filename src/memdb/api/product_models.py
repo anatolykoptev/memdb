@@ -355,11 +355,11 @@ class APISearchRequest(BaseRequest):
     )
 
     search_tool_memory: bool = Field(
-        True,
+        False,
         description=(
             "Whether to retrieve tool memories along with general memories. "
             "If enabled, the system will automatically recall tool memories "
-            "relevant to the query. Default: True."
+            "relevant to the query. Default: False."
         ),
     )
 
