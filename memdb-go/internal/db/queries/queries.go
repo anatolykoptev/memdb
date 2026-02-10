@@ -67,6 +67,23 @@ DELETE FROM %[1]s."Memory"
 WHERE properties->>'id' = ANY($1)
   AND properties->>'user_name' = $2`
 
+// --- Update ---
+
+// UpdateMemoryContent updates the memory text in a node's properties JSONB.
+// Args: $1 = memory_id (properties->>'id'), $2 = new content (text)
+const UpdateMemoryContent = `
+UPDATE %[1]s."Memory"
+SET properties = jsonb_set(properties, '{memory}', to_jsonb($2::text))
+WHERE properties->>'id' = $1
+  AND properties->>'status' = 'activated'`
+
+// DeleteAllByUser deletes all activated memories for a user.
+// Args: $1 = user_name (text)
+const DeleteAllByUser = `
+DELETE FROM %[1]s."Memory"
+WHERE properties->>'user_name' = $1
+  AND properties->>'status' = 'activated'`
+
 // --- User Names by Memory IDs ---
 
 // GetUserNamesByPropertyIDs maps property IDs to user names.

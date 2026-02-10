@@ -249,6 +249,28 @@ func (p *Postgres) GetUserNamesByMemoryIDs(ctx context.Context, memoryIDs []stri
 	return result, rows.Err()
 }
 
+// UpdateMemoryContent updates the memory text for a given memory node.
+// Returns true if a row was updated, false if the memory was not found.
+func (p *Postgres) UpdateMemoryContent(ctx context.Context, memoryID, content string) (bool, error) {
+	q := fmt.Sprintf(queries.UpdateMemoryContent, graphName)
+	tag, err := p.pool.Exec(ctx, q, memoryID, content)
+	if err != nil {
+		return false, fmt.Errorf("update memory: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// DeleteAllByUser deletes all activated memories for a user.
+// Returns the number of rows deleted.
+func (p *Postgres) DeleteAllByUser(ctx context.Context, userName string) (int64, error) {
+	q := fmt.Sprintf(queries.DeleteAllByUser, graphName)
+	tag, err := p.pool.Exec(ctx, q, userName)
+	if err != nil {
+		return 0, fmt.Errorf("delete all by user: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // VectorSearchResult holds a single result from vector or fulltext search.
 type VectorSearchResult struct {
 	ID         string  // AGE node ID (text)
