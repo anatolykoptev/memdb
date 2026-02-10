@@ -124,3 +124,9 @@ func (v *VoyageClient) Embed(ctx context.Context, texts []string) ([][]float32, 
 
 	return embeddings, nil
 }
+
+// Dimension returns the embedding vector dimension (1024 for voyage-4-lite).
+func (v *VoyageClient) Dimension() int { return 1024 }
+
+// Close is a no-op for the HTTP-based VoyageAI client.
+func (v *VoyageClient) Close() error { return nil }

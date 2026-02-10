@@ -24,7 +24,7 @@ type Handler struct {
 	postgres *db.Postgres          // nil = not initialized, fall back to proxy
 	qdrant   *db.Qdrant            // nil = not initialized
 	redis    *db.Redis             // nil = not initialized
-	embedder *embedder.VoyageClient // nil = native search disabled
+	embedder embedder.Embedder // nil = native search disabled
 }
 
 // NewHandler creates a new Handler with the given dependencies.
@@ -43,13 +43,20 @@ func (h *Handler) SetDBClients(pg *db.Postgres, qd *db.Qdrant, rd *db.Redis) {
 	h.redis = rd
 }
 
-// SetEmbedder sets the VoyageAI embedding client for native search.
-func (h *Handler) SetEmbedder(e *embedder.VoyageClient) {
+// SetEmbedder sets the embedding client for native search.
+func (h *Handler) SetEmbedder(e embedder.Embedder) {
 	h.embedder = e
 }
 
-// Close releases all database connections held by the handler.
+// Close releases all database connections and resources held by the handler.
 func (h *Handler) Close() {
+	if h.embedder != nil {
+		if err := h.embedder.Close(); err != nil {
+			h.logger.Error("embedder close error", slog.Any("error", err))
+		} else {
+			h.logger.Info("embedder closed")
+		}
+	}
 	if h.postgres != nil {
 		h.postgres.Close()
 		h.logger.Info("postgres connection closed")

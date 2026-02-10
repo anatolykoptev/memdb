@@ -37,11 +37,26 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	// Initialize database clients for Phase 2 native handlers (non-fatal)
 	initDBClients(cfg, h, logger)
 
-	// Initialize VoyageAI embedder for native search (non-fatal)
-	if cfg.VoyageAPIKey != "" {
-		emb := embedder.NewVoyageClient(cfg.VoyageAPIKey, cfg.EmbedderModel, logger)
-		h.SetEmbedder(emb)
-		logger.Info("voyage embedder initialized", slog.String("model", cfg.EmbedderModel))
+	// Initialize embedder for native search (non-fatal)
+	switch cfg.EmbedderType {
+	case "voyage":
+		if cfg.VoyageAPIKey != "" {
+			emb := embedder.NewVoyageClient(cfg.VoyageAPIKey, cfg.EmbedderModel, logger)
+			h.SetEmbedder(emb)
+			logger.Info("voyage embedder initialized", slog.String("model", cfg.EmbedderModel))
+		}
+	default: // "onnx"
+		if cfg.ONNXModelDir != "" {
+			emb, err := embedder.NewONNXEmbedder(cfg.ONNXModelDir, logger)
+			if err != nil {
+				logger.Error("onnx embedder init failed", slog.Any("error", err))
+			} else {
+				h.SetEmbedder(emb)
+				logger.Info("onnx embedder initialized",
+					slog.String("model_dir", cfg.ONNXModelDir),
+					slog.Int("dimension", emb.Dimension()))
+			}
+		}
 	}
 
 	// Create router using Go 1.22+ stdlib ServeMux
@@ -50,6 +65,9 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	// ─── Health endpoints (native Go, no proxy) ─────────────────────────
 	mux.HandleFunc("GET /health", h.Health)
 	mux.HandleFunc("GET /ready", h.ReadinessCheck)
+
+	// ─── OpenAI-compatible embeddings (internal, no auth) ────────────────
+	mux.HandleFunc("POST /v1/embeddings", h.OpenAIEmbeddings)
 
 	// ─── Server Router Endpoints (server_router.py — deployed) ─────────
 
