@@ -1,0 +1,9 @@
+{
+  "query": "What do you know about my programming experience?",
+  "user_id": "memos",
+  "readable_cube_ids": ["memos"],
+  "writable_cube_ids": ["memos"],
+  "top_k": 5,
+  "dedup": "mmr",
+  "add_message_on_answer": false
+}

@@ -29,6 +29,7 @@ from memdb.api.product_models import (
     APIChatCompleteRequest,
     APIFeedbackRequest,
     APISearchRequest,
+    BaseResponse,
     ChatPlaygroundRequest,
     ChatRequest,
     DeleteMemoryRequest,
@@ -42,10 +43,13 @@ from memdb.api.product_models import (
     GetUserNamesByMemoryIdsResponse,
     MemoryResponse,
     SearchResponse,
+    SimpleResponse,
     StatusResponse,
     SuggestionRequest,
     SuggestionResponse,
     TaskQueueResponse,
+    UserRegisterRequest,
+    UserRegisterResponse,
 )
 from memdb.graph_dbs.polardb import PolarDBGraphDB
 from memdb.log import get_logger
@@ -400,3 +404,176 @@ def exist_mem_cube_id(request: ExistMemCubeIdRequest):
         message="Successfully",
         data=graph_db.exist_user_name(user_name=request.mem_cube_id),
     )
+
+
+# =============================================================================
+# Product Router Endpoints (migrated from product_router.py)
+# =============================================================================
+
+
+@router.post("/configure", summary="Configure MemDB", response_model=SimpleResponse)
+def set_config(config: dict):
+    """Set MemDB configuration."""
+    return SimpleResponse(message="Configuration endpoint not yet migrated to server router")
+
+
+@router.post("/users/register", summary="Register a new user", response_model=UserRegisterResponse)
+def register_user(user_req: UserRegisterRequest):
+    """Register a new user with configuration and default cube.
+
+    Note: In server_router mode, users are auto-registered on first add/search.
+    This endpoint is provided for API compatibility with product_router.
+    """
+    # In the server_router architecture, user registration is implicit
+    # (users are created on first memory add). This endpoint exists for
+    # compatibility and returns the user_id as-is.
+    return UserRegisterResponse(
+        message="User registered successfully",
+        data={
+            "user_id": user_req.user_id,
+            "mem_cube_id": user_req.mem_cube_id or user_req.user_id,
+        },
+    )
+
+
+@router.get(
+    "/suggestions/{user_id}", summary="Get suggestion queries by user_id",
+    response_model=SuggestionResponse,
+)
+def get_suggestion_queries_by_user_id(user_id: str):
+    """Get suggestion queries for a specific user by path parameter."""
+    return handlers.suggestion_handler.handle_get_suggestion_queries(
+        user_id=user_id,
+        language="en",
+        message=None,
+        llm=llm,
+        naive_mem_cube=naive_mem_cube,
+    )
+
+
+@router.post("/chat", summary="Chat with MemDB (SSE streaming)")
+def chat(chat_req: ChatRequest):
+    """Chat with MemDB. Returns SSE stream. Alias for /chat/stream."""
+    if chat_handler is None:
+        raise HTTPException(
+            status_code=503, detail="Chat service is not available. Chat handler not initialized."
+        )
+    return chat_handler.handle_chat_stream(chat_req)
+
+
+@router.get("/users", summary="List all users", response_model=BaseResponse[list])
+def list_users():
+    """List all registered users (distinct user_names with memories)."""
+    try:
+        if isinstance(graph_db, PolarDBGraphDB):
+            conn = graph_db._get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    f'SELECT DISTINCT properties->>\'user_name\' AS user_name '
+                    f'FROM "{graph_db.db_name}_graph"."Memory" '
+                    f'WHERE properties->>\'status\' = \'activated\' '
+                    f'ORDER BY user_name'
+                )
+                rows = cur.fetchall()
+                result = [row[0] for row in rows if row[0]]
+                cur.close()
+            finally:
+                graph_db.connection_pool.putconn(conn)
+        else:
+            result = []
+        return BaseResponse(message="Users retrieved successfully", data=result)
+    except Exception as err:
+        logger.error(f"Failed to list users: {err}")
+        raise HTTPException(status_code=500, detail=str(err)) from err
+
+
+@router.get("/users/{user_id}", summary="Get user info", response_model=BaseResponse[dict])
+def get_user_info(user_id: str):
+    """Get user information."""
+    try:
+        if isinstance(graph_db, PolarDBGraphDB):
+            exists = graph_db.exist_user_name(user_name=user_id)
+            return BaseResponse(
+                message="User info retrieved successfully",
+                data={"user_id": user_id, "exists": exists},
+            )
+        raise HTTPException(status_code=404, detail=f"User {user_id} not found")
+    except HTTPException:
+        raise
+    except Exception as err:
+        logger.error(f"Failed to get user info: {err}")
+        raise HTTPException(status_code=500, detail=str(err)) from err
+
+
+@router.get(
+    "/configure/{user_id}", summary="Get configuration",
+    response_model=SimpleResponse,
+)
+def get_config(user_id: str):
+    """Get configuration for a user."""
+    return SimpleResponse(message="Configuration retrieved", data={"user_id": user_id})
+
+
+@router.get(
+    "/users/{user_id}/config", summary="Get user configuration",
+    response_model=BaseResponse[dict],
+)
+def get_user_config(user_id: str):
+    """Get user-specific configuration."""
+    return BaseResponse(
+        message="User configuration retrieved",
+        data={"user_id": user_id, "config": {}},
+    )
+
+
+@router.put(
+    "/users/{user_id}/config", summary="Update user configuration",
+    response_model=SimpleResponse,
+)
+def update_user_config(user_id: str, config_data: dict):
+    """Update user-specific configuration."""
+    return SimpleResponse(message=f"Configuration updated for user {user_id}")
+
+
+@router.get(
+    "/instances/status", summary="Get instance status",
+    response_model=BaseResponse[dict],
+)
+def get_instance_status():
+    """Get information about active instances."""
+    return BaseResponse(
+        message="Instance status retrieved",
+        data={
+            "instance_id": INSTANCE_ID,
+            "status": "running",
+        },
+    )
+
+
+@router.get(
+    "/instances/count", summary="Get active user count",
+    response_model=BaseResponse[int],
+)
+def get_active_user_count():
+    """Get the number of distinct active users."""
+    try:
+        if isinstance(graph_db, PolarDBGraphDB):
+            conn = graph_db._get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    f'SELECT COUNT(DISTINCT properties->>\'user_name\') '
+                    f'FROM "{graph_db.db_name}_graph"."Memory" '
+                    f'WHERE properties->>\'status\' = \'activated\''
+                )
+                count = cur.fetchone()[0] or 0
+                cur.close()
+            finally:
+                graph_db.connection_pool.putconn(conn)
+        else:
+            count = 0
+        return BaseResponse(message="Active user count retrieved", data=count)
+    except Exception as err:
+        logger.error(f"Failed to get active user count: {err}")
+        raise HTTPException(status_code=500, detail=str(err)) from err

@@ -1,0 +1,4 @@
+results/*.bin
+results/*.txt
+results/*.html
+results/*.json

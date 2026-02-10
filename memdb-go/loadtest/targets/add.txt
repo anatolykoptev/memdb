@@ -1,0 +1,5 @@
+POST http://localhost:8080/product/add
+Content-Type: application/json
+X-Service-Secret: ${SERVICE_SECRET}
+@add-body.json
+
