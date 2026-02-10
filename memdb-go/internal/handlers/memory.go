@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 )
 
 // NativeGetMemory handles GET /product/get_memory/{memory_id} natively via PostgreSQL.
@@ -24,13 +26,23 @@ func (h *Handler) NativeGetMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.postgres.GetMemoryByID(r.Context(), memoryID)
+	ctx := r.Context()
+	cacheKey := cachePrefix + "memory:" + memoryID
+
+	// Check cache
+	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(cached)
+		return
+	}
+
+	result, err := h.postgres.GetMemoryByID(ctx, memoryID)
 	if err != nil {
 		h.logger.Debug("native get_memory failed, falling back to proxy",
 			slog.String("memory_id", memoryID),
 			slog.Any("error", err),
 		)
-		// Fall back to proxy on any DB error
 		h.ProxyToProduct(w, r)
 		return
 	}
@@ -52,11 +64,16 @@ func (h *Handler) NativeGetMemory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"code":    200,
 		"message": "ok",
 		"data":    result,
-	})
+	}
+	if encoded, err := json.Marshal(resp); err == nil {
+		h.cacheSet(ctx, cacheKey, encoded, 120*time.Second)
+	}
+
+	h.writeJSON(w, http.StatusOK, resp)
 }
 
 // NativeGetMemoryByIDs handles POST /product/get_memory_by_ids natively via PostgreSQL.
@@ -82,19 +99,38 @@ func (h *Handler) NativeGetMemoryByIDs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	results, err := h.postgres.GetMemoryByIDs(r.Context(), *req.MemoryIDs)
-	if err != nil {
-		h.logger.Debug("native get_memory_by_ids failed, falling back to proxy",
-			slog.Any("error", err),
-		)
-		// Fall back to proxy — restore body
-		h.proxyWithBody(w, r, body)
-		return
+	ctx := r.Context()
+	ids := *req.MemoryIDs
+
+	// Check per-ID cache, collect misses
+	cached := make(map[string][]byte, len(ids))
+	var missingIDs []string
+	for _, id := range ids {
+		key := cachePrefix + "memory:" + id
+		if val := h.cacheGet(ctx, key); val != nil {
+			cached[id] = val
+		} else {
+			missingIDs = append(missingIDs, id)
+		}
 	}
 
-	// Parse properties JSON for each result
-	parsed := make([]map[string]any, 0, len(results))
-	for _, result := range results {
+	// Fetch missing from DB
+	var dbResults []map[string]any
+	if len(missingIDs) > 0 {
+		var err error
+		dbResults, err = h.postgres.GetMemoryByIDs(ctx, missingIDs)
+		if err != nil {
+			h.logger.Debug("native get_memory_by_ids failed, falling back to proxy",
+				slog.Any("error", err),
+			)
+			h.proxyWithBody(w, r, body)
+			return
+		}
+	}
+
+	// Build result: merge cached + fresh, preserving request order
+	dbByID := make(map[string]map[string]any, len(dbResults))
+	for _, result := range dbResults {
 		entry := map[string]any{"memory_id": result["memory_id"]}
 		if propsStr, ok := result["properties"].(string); ok {
 			var props map[string]any
@@ -104,7 +140,31 @@ func (h *Handler) NativeGetMemoryByIDs(w http.ResponseWriter, r *http.Request) {
 				entry["properties"] = propsStr
 			}
 		}
-		parsed = append(parsed, entry)
+		if mid, ok := result["memory_id"].(string); ok {
+			dbByID[mid] = entry
+			// Cache individual results
+			resp := map[string]any{"code": 200, "message": "ok", "data": entry}
+			if encoded, err := json.Marshal(resp); err == nil {
+				h.cacheSet(ctx, cachePrefix+"memory:"+mid, encoded, 120*time.Second)
+			}
+		}
+	}
+
+	parsed := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		if raw, ok := cached[id]; ok {
+			// Decode cached single-memory response to extract data
+			var resp map[string]any
+			if json.Unmarshal(raw, &resp) == nil {
+				if data, ok := resp["data"].(map[string]any); ok {
+					parsed = append(parsed, data)
+					continue
+				}
+			}
+		}
+		if entry, ok := dbByID[id]; ok {
+			parsed = append(parsed, entry)
+		}
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
@@ -183,8 +243,18 @@ func (h *Handler) NativeGetAll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dbType := memoryTypeToDBType[*req.MemoryType]
+	ctx := r.Context()
+	cacheKey := fmt.Sprintf("%sget_all:%s:%s:%d:%d", cachePrefix, *req.UserID, *req.MemoryType, page, pageSize)
 
-	results, total, err := h.postgres.GetAllMemories(r.Context(), *req.UserID, dbType, page, pageSize)
+	// Check cache
+	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(cached)
+		return
+	}
+
+	results, total, err := h.postgres.GetAllMemories(ctx, *req.UserID, dbType, page, pageSize)
 	if err != nil {
 		h.logger.Debug("native get_all failed, falling back to proxy",
 			slog.Any("error", err),
@@ -208,14 +278,19 @@ func (h *Handler) NativeGetAll(w http.ResponseWriter, r *http.Request) {
 		memories = append(memories, entry)
 	}
 
-	h.writeJSON(w, http.StatusOK, map[string]any{
+	resp := map[string]any{
 		"code":    200,
 		"message": "ok",
 		"data": map[string]any{
 			"memories": memories,
 			"total":    total,
 		},
-	})
+	}
+	if encoded, err := json.Marshal(resp); err == nil {
+		h.cacheSet(ctx, cacheKey, encoded, 30*time.Second)
+	}
+
+	h.writeJSON(w, http.StatusOK, resp)
 }
 
 // deleteNativeRequest extends deleteRequest with user_id for native handling.
@@ -266,7 +341,8 @@ func (h *Handler) NativeDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deleted, err := h.postgres.DeleteByPropertyIDs(r.Context(), *req.MemoryIDs, *req.UserID)
+	ctx := r.Context()
+	deleted, err := h.postgres.DeleteByPropertyIDs(ctx, *req.MemoryIDs, *req.UserID)
 	if err != nil {
 		h.logger.Debug("native delete failed, falling back to proxy",
 			slog.Any("error", err),
@@ -285,6 +361,15 @@ func (h *Handler) NativeDelete(w http.ResponseWriter, r *http.Request) {
 				)
 			}
 		}
+	}
+
+	// Invalidate caches: get_all pages for this user, users list/count, individual memories
+	h.cacheInvalidate(ctx,
+		cachePrefix+"get_all:"+*req.UserID+":*",
+		cachePrefix+"users:*",
+	)
+	for _, id := range *req.MemoryIDs {
+		h.cacheInvalidate(ctx, cachePrefix+"memory:"+id)
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
