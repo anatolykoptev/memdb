@@ -15,7 +15,8 @@ package queries
 const VectorSearch = `
 SELECT id::text,
        properties::text,
-       (1 - (embedding <=> $1::vector(1024))) AS score
+       (1 - (embedding <=> $1::vector(1024))) AS score,
+       embedding::text
 FROM %[1]s."Memory"
 WHERE properties->>'status' = 'activated'
   AND properties->>'user_name' = $2

@@ -273,9 +273,11 @@ func (p *Postgres) DeleteAllByUser(ctx context.Context, userName string) (int64,
 
 // VectorSearchResult holds a single result from vector or fulltext search.
 type VectorSearchResult struct {
-	ID         string  // AGE node ID (text)
-	Properties string  // raw JSON properties
-	Score      float64 // similarity/rank score
+	ID           string    // AGE node ID (text)
+	Properties   string    // raw JSON properties
+	Score        float64   // similarity/rank score
+	EmbeddingStr string    // raw embedding vector as text (e.g. "[0.1,0.2,...]"), empty for fulltext
+	Embedding    []float32 // parsed embedding vector, nil for fulltext
 }
 
 // FormatVector formats a float32 slice as a pgvector string literal: '[0.1,0.2,...]'.
@@ -292,6 +294,26 @@ func FormatVector(vec []float32) string {
 	return b.String()
 }
 
+// ParseVectorString parses a pgvector text representation "[0.1,0.2,...]" into []float32.
+// Returns nil on empty or malformed input.
+func ParseVectorString(s string) []float32 {
+	if len(s) < 3 || s[0] != '[' || s[len(s)-1] != ']' {
+		return nil
+	}
+	inner := s[1 : len(s)-1]
+	parts := strings.Split(inner, ",")
+	vec := make([]float32, 0, len(parts))
+	for _, p := range parts {
+		var f float64
+		_, err := fmt.Sscanf(strings.TrimSpace(p), "%g", &f)
+		if err != nil {
+			return nil
+		}
+		vec = append(vec, float32(f))
+	}
+	return vec
+}
+
 // VectorSearch performs cosine similarity search across multiple memory types.
 // Returns results sorted by similarity score (descending).
 func (p *Postgres) VectorSearch(ctx context.Context, vector []float32, userName string, memoryTypes []string, limit int) ([]VectorSearchResult, error) {
@@ -306,9 +328,10 @@ func (p *Postgres) VectorSearch(ctx context.Context, vector []float32, userName 
 	var results []VectorSearchResult
 	for rows.Next() {
 		var r VectorSearchResult
-		if err := rows.Scan(&r.ID, &r.Properties, &r.Score); err != nil {
+		if err := rows.Scan(&r.ID, &r.Properties, &r.Score, &r.EmbeddingStr); err != nil {
 			return nil, fmt.Errorf("vector search scan: %w", err)
 		}
+		r.Embedding = ParseVectorString(r.EmbeddingStr)
 		results = append(results, r)
 	}
 	return results, rows.Err()

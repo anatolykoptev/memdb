@@ -49,7 +49,7 @@ func RegisterSearchTool(server *mcp.Server, pg *db.Postgres, qd *db.Qdrant, emb 
 		if input.TopK > 0 {
 			topK = input.TopK
 		}
-		relativity := 0.85
+		relativity := 0.90
 		if input.Relativity > 0 {
 			relativity = input.Relativity
 		}
