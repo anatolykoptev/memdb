@@ -48,7 +48,7 @@ RUN CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/local/lib" \
     go build -ldflags="-s -w" -o /memdb-reembed ./cmd/reembed
 
 # ─── Runtime stage ───────────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates tzdata && \
