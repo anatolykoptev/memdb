@@ -224,6 +224,7 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 
 	// Step 4: Format memory items
 	formatted := make([]map[string]any, 0, len(merged))
+	embeddingByID := make(map[string][]float32, len(merged)) // side map for dedup
 	for _, m := range merged {
 		props := parseProperties(m.Properties)
 		if props == nil {
@@ -233,6 +234,12 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 		// Inject relativity score into metadata
 		if meta, ok := item["metadata"].(map[string]any); ok {
 			meta["relativity"] = m.Score
+		}
+		// Store embedding for dedup (not in response metadata)
+		if m.Embedding != nil {
+			if id, ok := item["id"].(string); ok {
+				embeddingByID[id] = m.Embedding
+			}
 		}
 		formatted = append(formatted, item)
 	}
@@ -249,15 +256,15 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 	// Step 6: Apply dedup
 	switch dedup {
 	case "sim":
-		items := toSearchItems(formatted, queryVec, "text")
+		items := toSearchItems(formatted, embeddingByID, "text")
 		items = search.DedupSim(items, topK)
 		formatted = fromSearchItems(items)
 		// Strip embeddings after dedup
 		stripEmbeddings(formatted)
 		stripEmbeddings(prefFormatted)
 	case "mmr":
-		allItems := toSearchItems(formatted, queryVec, "text")
-		prefItems := toSearchItems(prefFormatted, queryVec, "preference")
+		allItems := toSearchItems(formatted, embeddingByID, "text")
+		prefItems := toSearchItems(prefFormatted, nil, "preference")
 		allItems = append(allItems, prefItems...)
 		textOut, prefOut := search.DedupMMR(allItems, topK, prefTopK)
 		formatted = fromSearchItems(textOut)
@@ -318,6 +325,7 @@ type mergedResult struct {
 	ID         string
 	Properties string
 	Score      float64
+	Embedding  []float32 // from VectorSearch, nil for fulltext-only items
 }
 
 // mergeResults merges vector and fulltext results by node ID, keeping highest score.
@@ -333,7 +341,7 @@ func mergeResults(vector, fulltext []db.VectorSearchResult) []mergedResult {
 				existing.Score = normalizedScore
 			}
 		} else {
-			byID[r.ID] = &mergedResult{ID: r.ID, Properties: r.Properties, Score: normalizedScore}
+			byID[r.ID] = &mergedResult{ID: r.ID, Properties: r.Properties, Score: normalizedScore, Embedding: r.Embedding}
 			order = append(order, r.ID)
 		}
 	}
@@ -393,30 +401,23 @@ func filterByRelativity(items []map[string]any, threshold float64) []map[string]
 }
 
 // toSearchItems converts formatted memory items to SearchItem slice for dedup.
-func toSearchItems(items []map[string]any, queryVec []float32, memType string) []search.SearchItem {
+// embeddingByID provides real DB embeddings for MMR diversification.
+func toSearchItems(items []map[string]any, embeddingByID map[string][]float32, memType string) []search.SearchItem {
 	result := make([]search.SearchItem, 0, len(items))
 	for _, item := range items {
 		memory, _ := item["memory"].(string)
 		meta, _ := item["metadata"].(map[string]any)
 		score := 0.0
-		var embedding []float32
 		if meta != nil {
 			if s, ok := meta["relativity"].(float64); ok {
 				score = s
 			}
-			// Try to get embedding from metadata
-			if emb, ok := meta["embedding"].([]any); ok && len(emb) > 0 {
-				embedding = make([]float32, len(emb))
-				for i, v := range emb {
-					if f, ok := v.(float64); ok {
-						embedding[i] = float32(f)
-					}
-				}
-			}
 		}
-		// If no embedding available, leave nil — CosineSimilarityMatrix
-		// treats nil embeddings as similarity=0 (unknown), which is safer
-		// than using queryVec (which would make all items appear identical).
+		// Use real DB embedding for dedup (not from metadata response)
+		var embedding []float32
+		if id, ok := item["id"].(string); ok && embeddingByID != nil {
+			embedding = embeddingByID[id]
+		}
 		result = append(result, search.SearchItem{
 			Memory:     memory,
 			Score:      score,
