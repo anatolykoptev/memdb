@@ -55,3 +55,28 @@ func (q *Qdrant) Ping(ctx context.Context) error {
 func (q *Qdrant) Close() error {
 	return q.client.Close()
 }
+
+// DeleteByIDs deletes points with the given string IDs from a collection.
+func (q *Qdrant) DeleteByIDs(ctx context.Context, collection string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	pointIDs := make([]*qdrant.PointId, len(ids))
+	for i, id := range ids {
+		pointIDs[i] = qdrant.NewID(id)
+	}
+
+	wait := true
+	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: collection,
+		Points:         qdrant.NewPointsSelectorIDs(pointIDs),
+		Wait:           &wait,
+	})
+	return err
+}
+
+// ListCollections returns the names of all Qdrant collections.
+func (q *Qdrant) ListCollections(ctx context.Context) ([]string, error) {
+	return q.client.ListCollections(ctx)
+}
