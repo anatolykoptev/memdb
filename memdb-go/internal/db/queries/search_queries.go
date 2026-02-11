@@ -94,17 +94,20 @@ LIMIT $4`
 
 // GetWorkingMemory returns all activated WorkingMemory items for a user.
 // No vector/fulltext search — just a filtered SELECT ordered by recency.
+// Returns embeddings so callers can compute cosine similarity vs query.
 //
 // Args: $1 = user_name (text),
 //
 //	$2 = limit (int)
 const GetWorkingMemory = `
 SELECT id::text,
-       properties::text
+       properties::text,
+       embedding::text
 FROM %[1]s."Memory"
 WHERE properties->>'status' = 'activated'
   AND properties->>'user_name' = $1
   AND properties->>'memory_type' = 'WorkingMemory'
+  AND embedding IS NOT NULL
 ORDER BY (properties->>'updated_at') DESC NULLS LAST,
          (properties->>'created_at') DESC NULLS LAST
 LIMIT $2`

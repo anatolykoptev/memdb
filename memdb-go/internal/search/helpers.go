@@ -284,19 +284,42 @@ func MergeGraphIntoResults(existing []MergedResult, graph []db.GraphRecallResult
 	return existing
 }
 
-// FormatWorkingMemory formats WorkingMemory results with score=1.0.
-func FormatWorkingMemory(items []db.VectorSearchResult, includeEmbedding bool) []map[string]any {
-	formatted := make([]map[string]any, 0, len(items))
-	for _, r := range items {
-		props := ParseProperties(r.Properties)
-		if props == nil {
-			continue
-		}
-		item := FormatMemoryItem(props, includeEmbedding)
-		if meta, ok := item["metadata"].(map[string]any); ok {
-			meta["relativity"] = 1.0
-		}
-		formatted = append(formatted, item)
+// MergeWorkingMemIntoResults merges WorkingMemory items into an existing merged slice.
+// Computes actual cosine similarity against queryVec for proper relevance scoring.
+// Items without embeddings get WorkingMemBaseScore as a fallback.
+// If an ID already exists, the higher score is kept.
+func MergeWorkingMemIntoResults(existing []MergedResult, wm []db.VectorSearchResult, queryVec []float32) []MergedResult {
+	byID := make(map[string]int, len(existing))
+	for i, r := range existing {
+		byID[r.ID] = i
 	}
-	return formatted
+
+	for _, w := range wm {
+		score := WorkingMemBaseScore
+		if len(w.Embedding) > 0 && len(queryVec) > 0 {
+			rawCosine := CosineSimilarity(queryVec, w.Embedding)
+			score = (float64(rawCosine) + 1.0) / 2.0
+		}
+		if idx, ok := byID[w.ID]; ok {
+			if score > existing[idx].Score {
+				existing[idx].Score = score
+			}
+			if len(w.Embedding) > 0 && len(existing[idx].Embedding) == 0 {
+				existing[idx].Embedding = w.Embedding
+			}
+		} else {
+			existing = append(existing, MergedResult{
+				ID:         w.ID,
+				Properties: w.Properties,
+				Score:      score,
+				Embedding:  w.Embedding,
+			})
+			byID[w.ID] = len(existing) - 1
+		}
+	}
+
+	sort.SliceStable(existing, func(i, j int) bool {
+		return existing[i].Score > existing[j].Score
+	})
+	return existing
 }
