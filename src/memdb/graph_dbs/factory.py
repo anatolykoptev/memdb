@@ -6,7 +6,6 @@ from memdb.graph_dbs.nebular import NebulaGraphDB
 from memdb.graph_dbs.neo4j import Neo4jGraphDB
 from memdb.graph_dbs.neo4j_community import Neo4jCommunityGraphDB
 from memdb.graph_dbs.polardb import PolarDBGraphDB
-from memdb.graph_dbs.postgres import PostgresGraphDB
 
 
 class GraphStoreFactory(BaseGraphDB):
@@ -17,7 +16,6 @@ class GraphStoreFactory(BaseGraphDB):
         "neo4j-community": Neo4jCommunityGraphDB,
         "nebular": NebulaGraphDB,
         "polardb": PolarDBGraphDB,
-        "postgres": PostgresGraphDB,
     }
 
     @classmethod
