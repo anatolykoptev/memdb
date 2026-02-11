@@ -247,6 +247,12 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 		}
 	}
 
+	// Merge WorkingMemory into text pipeline — they get actual cosine similarity scores
+	// and participate in the full pipeline (rerank, relativity filter, dedup, trim)
+	if len(workingMemResults) > 0 {
+		textMerged = MergeWorkingMemIntoResults(textMerged, workingMemResults, queryVec)
+	}
+
 	// Step 5: Format per type — FormatMergedItems always builds the
 	// embeddingByID sidecar regardless of IncludeEmbedding (which only
 	// controls whether embedding appears in the JSON metadata output).
@@ -310,14 +316,6 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	skillFormatted = TrimSlice(skillFormatted, p.SkillTopK)
 	toolFormatted = TrimSlice(toolFormatted, p.ToolTopK)
 	prefFormatted = TrimSlice(prefFormatted, p.PrefTopK)
-
-	// Step 10b: Prepend WorkingMemory to text results (score=1.0, always on top)
-	if len(workingMemResults) > 0 {
-		wmFormatted := FormatWorkingMemory(workingMemResults, p.IncludeEmbedding)
-		wmFormatted = DedupByText(wmFormatted)
-		// Prepend: working memory comes first, then regular text results
-		textFormatted = append(wmFormatted, textFormatted...)
-	}
 
 	// Strip embeddings from response
 	StripEmbeddings(textFormatted)

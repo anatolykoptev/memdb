@@ -460,6 +460,7 @@ func (p *Postgres) GraphRecallByTags(ctx context.Context, userName string, memor
 }
 
 // GetWorkingMemory returns all activated WorkingMemory items for a user, ordered by recency.
+// Returns embeddings so callers can compute cosine similarity against the query vector.
 func (p *Postgres) GetWorkingMemory(ctx context.Context, userName string, limit int) ([]VectorSearchResult, error) {
 	q := fmt.Sprintf(queries.GetWorkingMemory, graphName)
 	rows, err := p.pool.Query(ctx, q, userName, limit)
@@ -471,10 +472,11 @@ func (p *Postgres) GetWorkingMemory(ctx context.Context, userName string, limit 
 	var results []VectorSearchResult
 	for rows.Next() {
 		var r VectorSearchResult
-		if err := rows.Scan(&r.ID, &r.Properties); err != nil {
+		var embStr string
+		if err := rows.Scan(&r.ID, &r.Properties, &embStr); err != nil {
 			return nil, fmt.Errorf("get working memory scan: %w", err)
 		}
-		r.Score = 1.0 // WorkingMemory always gets top score
+		r.Embedding = ParseVectorString(embStr)
 		results = append(results, r)
 	}
 	return results, rows.Err()

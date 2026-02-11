@@ -16,11 +16,12 @@ const (
 
 // Default limits for graph recall and working memory.
 const (
-	GraphRecallLimit    = 50 // max candidates from graph recall (before merge)
-	WorkingMemoryLimit  = 20 // max WorkingMemory items
-	GraphKeyScore       = 0.85
-	GraphTagBaseScore   = 0.70
-	GraphTagBonusPerTag = 0.05
+	GraphRecallLimit    = 50   // max candidates from graph recall (before merge)
+	WorkingMemoryLimit  = 20   // max WorkingMemory items
+	GraphKeyScore       = 0.85 // fixed score for key-based graph recall
+	GraphTagBaseScore   = 0.70 // base score for tag-based graph recall
+	GraphTagBonusPerTag = 0.05 // bonus per overlapping tag
+	WorkingMemBaseScore = 0.80 // fallback score for WorkingMemory without embedding
 )
 
 // Memory scopes — separated by type so each gets its own budget.
