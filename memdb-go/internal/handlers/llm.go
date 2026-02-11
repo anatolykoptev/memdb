@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,13 +11,17 @@ import (
 
 var llmProxyURL = "http://cliproxyapi:8317"
 var llmProxyAPIKey string
+var llmDefaultModel = "gemini-2.5-flash"
 
-// SetLLMProxy configures the upstream LLM proxy URL and API key (CLIProxyAPI).
-func SetLLMProxy(url, apiKey string) {
+// SetLLMProxy configures the upstream LLM proxy URL, API key, and default model.
+func SetLLMProxy(url, apiKey, defaultModel string) {
 	if url != "" {
 		llmProxyURL = url
 	}
 	llmProxyAPIKey = apiKey
+	if defaultModel != "" {
+		llmDefaultModel = defaultModel
+	}
 }
 
 // llmClient is a shared HTTP client for LLM proxy requests.
@@ -32,6 +37,15 @@ func (h *Handler) ProxyLLMComplete(w http.ResponseWriter, r *http.Request) {
 	body, ok := h.readBody(w, r)
 	if !ok {
 		return
+	}
+
+	// Inject default model if not specified by client
+	var req map[string]any
+	if json.Unmarshal(body, &req) == nil {
+		if _, hasModel := req["model"]; !hasModel || req["model"] == "" {
+			req["model"] = llmDefaultModel
+			body, _ = json.Marshal(req)
+		}
 	}
 
 	targetURL := llmProxyURL + "/v1/chat/completions"
