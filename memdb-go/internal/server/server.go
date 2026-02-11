@@ -12,6 +12,7 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
 	"github.com/MemDBai/MemDB/memdb-go/internal/handlers"
 	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
+	"github.com/MemDBai/MemDB/memdb-go/internal/search"
 	mw "github.com/MemDBai/MemDB/memdb-go/internal/server/middleware"
 )
 
@@ -35,29 +36,35 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	h := handlers.NewHandler(pythonClient, logger)
 
 	// Initialize database clients for Phase 2 native handlers (non-fatal)
-	initDBClients(cfg, h, logger)
+	pg, qd := initDBClients(cfg, h, logger)
 
 	// Initialize embedder for native search (non-fatal)
+	var emb embedder.Embedder
 	switch cfg.EmbedderType {
 	case "voyage":
 		if cfg.VoyageAPIKey != "" {
-			emb := embedder.NewVoyageClient(cfg.VoyageAPIKey, cfg.EmbedderModel, logger)
+			emb = embedder.NewVoyageClient(cfg.VoyageAPIKey, cfg.EmbedderModel, logger)
 			h.SetEmbedder(emb)
 			logger.Info("voyage embedder initialized", slog.String("model", cfg.EmbedderModel))
 		}
 	default: // "onnx"
 		if cfg.ONNXModelDir != "" {
-			emb, err := embedder.NewONNXEmbedder(cfg.ONNXModelDir, logger)
+			onnxEmb, err := embedder.NewONNXEmbedder(cfg.ONNXModelDir, logger)
 			if err != nil {
 				logger.Error("onnx embedder init failed", slog.Any("error", err))
 			} else {
+				emb = onnxEmb
 				h.SetEmbedder(emb)
 				logger.Info("onnx embedder initialized",
 					slog.String("model_dir", cfg.ONNXModelDir),
-					slog.Int("dimension", emb.Dimension()))
+					slog.Int("dimension", onnxEmb.Dimension()))
 			}
 		}
 	}
+
+	// Initialize unified search service
+	searchSvc := search.NewSearchService(pg, qd, emb, logger)
+	h.SetSearchService(searchSvc)
 
 	// Create router using Go 1.22+ stdlib ServeMux
 	mux := http.NewServeMux()
@@ -165,7 +172,8 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 
 // initDBClients connects to databases for native handlers.
 // All connections are optional — handlers fall back to proxy if nil.
-func initDBClients(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) {
+// Returns postgres and qdrant clients so the caller can pass them to SearchService.
+func initDBClients(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) (*db.Postgres, *db.Qdrant) {
 	ctx := context.Background()
 
 	var pg *db.Postgres
@@ -204,4 +212,6 @@ func initDBClients(cfg *config.Config, h *handlers.Handler, logger *slog.Logger)
 			slog.Bool("redis", rd != nil),
 		)
 	}
+
+	return pg, qd
 }
