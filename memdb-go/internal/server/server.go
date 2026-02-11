@@ -66,8 +66,8 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	searchSvc := search.NewSearchService(pg, qd, emb, logger)
 	h.SetSearchService(searchSvc)
 
-	// Configure LLM proxy URL (CLIProxyAPI)
-	handlers.SetLLMProxyURL(cfg.LLMProxyURL)
+	// Configure LLM proxy (CLIProxyAPI)
+	handlers.SetLLMProxy(cfg.LLMProxyURL, cfg.LLMProxyAPIKey)
 
 	// Create router using Go 1.22+ stdlib ServeMux
 	mux := http.NewServeMux()

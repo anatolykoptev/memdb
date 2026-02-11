@@ -9,12 +9,14 @@ import (
 )
 
 var llmProxyURL = "http://cliproxyapi:8317"
+var llmProxyAPIKey string
 
-// SetLLMProxyURL configures the upstream LLM proxy URL (CLIProxyAPI).
-func SetLLMProxyURL(url string) {
+// SetLLMProxy configures the upstream LLM proxy URL and API key (CLIProxyAPI).
+func SetLLMProxy(url, apiKey string) {
 	if url != "" {
 		llmProxyURL = url
 	}
+	llmProxyAPIKey = apiKey
 }
 
 // llmClient is a shared HTTP client for LLM proxy requests.
@@ -43,6 +45,9 @@ func (h *Handler) ProxyLLMComplete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxyReq.Header.Set("Content-Type", "application/json")
+	if llmProxyAPIKey != "" {
+		proxyReq.Header.Set("Authorization", "Bearer "+llmProxyAPIKey)
+	}
 
 	resp, err := llmClient.Do(proxyReq)
 	if err != nil {
