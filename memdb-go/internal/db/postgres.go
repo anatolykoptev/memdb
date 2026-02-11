@@ -360,3 +360,122 @@ func (p *Postgres) FulltextSearch(ctx context.Context, tsquery string, userName 
 	}
 	return results, rows.Err()
 }
+
+// VectorSearchWithCutoff performs VectorSearch with a temporal created_at cutoff.
+func (p *Postgres) VectorSearchWithCutoff(ctx context.Context, vector []float32, userName string, memoryTypes []string, limit int, cutoff string) ([]VectorSearchResult, error) {
+	vecStr := FormatVector(vector)
+	q := fmt.Sprintf(queries.VectorSearchWithCutoff, graphName)
+	rows, err := p.pool.Query(ctx, q, vecStr, userName, memoryTypes, limit, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("vector search with cutoff: %w", err)
+	}
+	defer rows.Close()
+
+	var results []VectorSearchResult
+	for rows.Next() {
+		var r VectorSearchResult
+		if err := rows.Scan(&r.ID, &r.Properties, &r.Score, &r.EmbeddingStr); err != nil {
+			return nil, fmt.Errorf("vector search with cutoff scan: %w", err)
+		}
+		r.Embedding = ParseVectorString(r.EmbeddingStr)
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// FulltextSearchWithCutoff performs FulltextSearch with a temporal created_at cutoff.
+func (p *Postgres) FulltextSearchWithCutoff(ctx context.Context, tsquery string, userName string, memoryTypes []string, limit int, cutoff string) ([]VectorSearchResult, error) {
+	if tsquery == "" {
+		return nil, nil
+	}
+	q := fmt.Sprintf(queries.FulltextSearchWithCutoff, graphName)
+	rows, err := p.pool.Query(ctx, q, tsquery, userName, memoryTypes, limit, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("fulltext search with cutoff: %w", err)
+	}
+	defer rows.Close()
+
+	var results []VectorSearchResult
+	for rows.Next() {
+		var r VectorSearchResult
+		if err := rows.Scan(&r.ID, &r.Properties, &r.Score); err != nil {
+			return nil, fmt.Errorf("fulltext search with cutoff scan: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// GraphRecallResult holds a single result from graph-based recall.
+type GraphRecallResult struct {
+	ID         string // AGE node ID (text)
+	Properties string // raw JSON properties
+	TagOverlap int    // number of overlapping tags (0 for key-based recall)
+}
+
+// GraphRecallByKey finds nodes where properties->>'key' matches any given key.
+func (p *Postgres) GraphRecallByKey(ctx context.Context, userName string, memoryTypes []string, keys []string, limit int) ([]GraphRecallResult, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	q := fmt.Sprintf(queries.GraphRecallByKey, graphName)
+	rows, err := p.pool.Query(ctx, q, userName, memoryTypes, keys, limit)
+	if err != nil {
+		return nil, fmt.Errorf("graph recall by key: %w", err)
+	}
+	defer rows.Close()
+
+	var results []GraphRecallResult
+	for rows.Next() {
+		var r GraphRecallResult
+		if err := rows.Scan(&r.ID, &r.Properties); err != nil {
+			return nil, fmt.Errorf("graph recall by key scan: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// GraphRecallByTags finds nodes with >= 2 overlapping tags.
+func (p *Postgres) GraphRecallByTags(ctx context.Context, userName string, memoryTypes []string, tags []string, limit int) ([]GraphRecallResult, error) {
+	if len(tags) < 2 {
+		return nil, nil
+	}
+	q := fmt.Sprintf(queries.GraphRecallByTags, graphName)
+	rows, err := p.pool.Query(ctx, q, userName, memoryTypes, tags, limit)
+	if err != nil {
+		return nil, fmt.Errorf("graph recall by tags: %w", err)
+	}
+	defer rows.Close()
+
+	var results []GraphRecallResult
+	for rows.Next() {
+		var r GraphRecallResult
+		if err := rows.Scan(&r.ID, &r.Properties, &r.TagOverlap); err != nil {
+			return nil, fmt.Errorf("graph recall by tags scan: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// GetWorkingMemory returns all activated WorkingMemory items for a user, ordered by recency.
+func (p *Postgres) GetWorkingMemory(ctx context.Context, userName string, limit int) ([]VectorSearchResult, error) {
+	q := fmt.Sprintf(queries.GetWorkingMemory, graphName)
+	rows, err := p.pool.Query(ctx, q, userName, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get working memory: %w", err)
+	}
+	defer rows.Close()
+
+	var results []VectorSearchResult
+	for rows.Next() {
+		var r VectorSearchResult
+		if err := rows.Scan(&r.ID, &r.Properties); err != nil {
+			return nil, fmt.Errorf("get working memory scan: %w", err)
+		}
+		r.Score = 1.0 // WorkingMemory always gets top score
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}

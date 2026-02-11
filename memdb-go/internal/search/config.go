@@ -14,10 +14,22 @@ const (
 	CacheTTL         = 30 * time.Second
 )
 
+// Default limits for graph recall and working memory.
+const (
+	GraphRecallLimit    = 50 // max candidates from graph recall (before merge)
+	WorkingMemoryLimit  = 20 // max WorkingMemory items
+	GraphKeyScore       = 0.85
+	GraphTagBaseScore   = 0.70
+	GraphTagBonusPerTag = 0.05
+)
+
 // Memory scopes — separated by type so each gets its own budget.
 var TextScopes = []string{"LongTermMemory", "UserMemory"}
 var SkillScopes = []string{"SkillMemory"}
 var ToolScopes = []string{"ToolSchemaMemory", "ToolTrajectoryMemory"}
+
+// GraphRecallScopes are the scopes searched by graph-based recall (key/tag match).
+var GraphRecallScopes = []string{"LongTermMemory", "UserMemory", "SkillMemory"}
 
 // PrefCollections are the Qdrant collections for preference memory.
 var PrefCollections = []string{"explicit_preference", "implicit_preference"}
