@@ -57,8 +57,9 @@ type Config struct {
 	EnableChatAPI bool `json:"enable_chat_api"`
 
 	// LLM proxy (CLIProxyAPI — internal Gemini proxy)
-	LLMProxyURL    string `json:"llm_proxy_url"`
-	LLMProxyAPIKey string `json:"llm_proxy_api_key"`
+	LLMProxyURL      string `json:"llm_proxy_url"`
+	LLMProxyAPIKey   string `json:"llm_proxy_api_key"`
+	LLMDefaultModel  string `json:"llm_default_model"`
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -100,8 +101,9 @@ func Load() *Config {
 
 		EnableChatAPI: envBool("ENABLE_CHAT_API", false),
 
-		LLMProxyURL:    envStr("MEMDB_LLM_PROXY_URL", "http://cliproxyapi:8317"),
-		LLMProxyAPIKey: envStr("CLI_PROXY_API_KEY", ""),
+		LLMProxyURL:     envStr("MEMDB_LLM_PROXY_URL", "http://cliproxyapi:8317"),
+		LLMProxyAPIKey:  envStr("CLI_PROXY_API_KEY", ""),
+		LLMDefaultModel: envStr("MEMDB_LLM_MODEL", "gemini-2.5-flash"),
 	}
 }
 
