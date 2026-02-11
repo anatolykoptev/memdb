@@ -66,6 +66,9 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	searchSvc := search.NewSearchService(pg, qd, emb, logger)
 	h.SetSearchService(searchSvc)
 
+	// Configure LLM proxy URL (CLIProxyAPI)
+	handlers.SetLLMProxyURL(cfg.LLMProxyURL)
+
 	// Create router using Go 1.22+ stdlib ServeMux
 	mux := http.NewServeMux()
 
@@ -87,6 +90,9 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	mux.HandleFunc("POST /product/chat/complete", h.ValidatedChatComplete)
 	mux.HandleFunc("POST /product/chat/stream", h.ValidatedChatStream)
 	mux.HandleFunc("POST /product/chat/stream/playground", h.ProxyToProduct)
+
+	// LLM proxy — direct CLIProxyAPI (no memory retrieval)
+	mux.HandleFunc("POST /product/llm/complete", h.ProxyLLMComplete)
 
 	// Suggestions
 	mux.HandleFunc("POST /product/suggestions", h.ProxyToProduct)
