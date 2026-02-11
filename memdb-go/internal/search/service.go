@@ -67,9 +67,19 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	}
 	queryVec := embeddings[0]
 
-	// Step 2: Tokenize for fulltext
+	// Step 2: Tokenize for fulltext + temporal detection
 	tokens := TokenizeMixed(p.Query)
 	tsquery := BuildTSQuery(tokens)
+	temporalCutoff := DetectTemporalCutoff(p.Query)
+	hasCutoff := !temporalCutoff.IsZero()
+	var cutoffISO string
+	if hasCutoff {
+		cutoffISO = temporalCutoff.Format("2006-01-02T15:04:05+00:00")
+		s.logger.Debug("temporal scope detected",
+			slog.String("cutoff", cutoffISO),
+			slog.String("query", p.Query),
+		)
+	}
 
 	// Inflate top_k for dedup modes
 	textK := p.TopK
@@ -90,24 +100,34 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	var skillVec, skillFT []db.VectorSearchResult
 	var toolVec, toolFT []db.VectorSearchResult
 	var prefResults []db.QdrantSearchResult
+	var graphKeyResults, graphTagResults []db.GraphRecallResult
+	var workingMemResults []db.VectorSearchResult
 
-	// Text: vector search (LTM + User)
+	// Text: vector search (LTM + User) — with temporal cutoff if detected
 	g.Go(func() error {
 		var err error
-		textVec, err = s.postgres.VectorSearch(gctx, queryVec, p.UserName, TextScopes, textK)
+		if hasCutoff {
+			textVec, err = s.postgres.VectorSearchWithCutoff(gctx, queryVec, p.UserName, TextScopes, textK, cutoffISO)
+		} else {
+			textVec, err = s.postgres.VectorSearch(gctx, queryVec, p.UserName, TextScopes, textK)
+		}
 		return err
 	})
 
-	// Text: fulltext search
+	// Text: fulltext search — with temporal cutoff if detected
 	if tsquery != "" {
 		g.Go(func() error {
 			var err error
-			textFT, err = s.postgres.FulltextSearch(gctx, tsquery, p.UserName, TextScopes, textK)
+			if hasCutoff {
+				textFT, err = s.postgres.FulltextSearchWithCutoff(gctx, tsquery, p.UserName, TextScopes, textK, cutoffISO)
+			} else {
+				textFT, err = s.postgres.FulltextSearch(gctx, tsquery, p.UserName, TextScopes, textK)
+			}
 			return err
 		})
 	}
 
-	// Skill: vector + fulltext
+	// Skill: vector + fulltext (no temporal cutoff — skills are timeless)
 	if p.IncludeSkill && p.SkillTopK > 0 {
 		g.Go(func() error {
 			var err error
@@ -123,7 +143,7 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 		}
 	}
 
-	// Tool: vector + fulltext
+	// Tool: vector + fulltext (no temporal cutoff)
 	if p.IncludeTool && p.ToolTopK > 0 {
 		g.Go(func() error {
 			var err error
@@ -157,6 +177,43 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 		})
 	}
 
+	// Graph recall by key (tokens become candidate keys)
+	if len(tokens) > 0 {
+		g.Go(func() error {
+			var err error
+			graphKeyResults, err = s.postgres.GraphRecallByKey(gctx, p.UserName, GraphRecallScopes, tokens, GraphRecallLimit)
+			if err != nil {
+				s.logger.Debug("graph recall by key failed", slog.Any("error", err))
+				return nil // non-fatal
+			}
+			return nil
+		})
+	}
+
+	// Graph recall by tags (tokens become candidate tags)
+	if len(tokens) >= 2 {
+		g.Go(func() error {
+			var err error
+			graphTagResults, err = s.postgres.GraphRecallByTags(gctx, p.UserName, GraphRecallScopes, tokens, GraphRecallLimit)
+			if err != nil {
+				s.logger.Debug("graph recall by tags failed", slog.Any("error", err))
+				return nil // non-fatal
+			}
+			return nil
+		})
+	}
+
+	// Working memory: all activated items (no search, just retrieval)
+	g.Go(func() error {
+		var err error
+		workingMemResults, err = s.postgres.GetWorkingMemory(gctx, p.UserName, WorkingMemoryLimit)
+		if err != nil {
+			s.logger.Debug("working memory retrieval failed", slog.Any("error", err))
+			return nil // non-fatal
+		}
+		return nil
+	})
+
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
@@ -165,6 +222,30 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	textMerged := MergeVectorAndFulltext(textVec, textFT)
 	skillMerged := MergeVectorAndFulltext(skillVec, skillFT)
 	toolMerged := MergeVectorAndFulltext(toolVec, toolFT)
+
+	// Merge graph recall results into text and skill buckets
+	graphAll := append(graphKeyResults, graphTagResults...)
+	if len(graphAll) > 0 {
+		// Split graph results by scope into text vs skill
+		var graphText, graphSkill []db.GraphRecallResult
+		for _, g := range graphAll {
+			props := ParseProperties(g.Properties)
+			if props == nil {
+				continue
+			}
+			mtype, _ := props["memory_type"].(string)
+			switch mtype {
+			case "SkillMemory":
+				graphSkill = append(graphSkill, g)
+			default:
+				graphText = append(graphText, g)
+			}
+		}
+		textMerged = MergeGraphIntoResults(textMerged, graphText)
+		if p.IncludeSkill && p.SkillTopK > 0 {
+			skillMerged = MergeGraphIntoResults(skillMerged, graphSkill)
+		}
+	}
 
 	// Step 5: Format per type — FormatMergedItems always builds the
 	// embeddingByID sidecar regardless of IncludeEmbedding (which only
@@ -229,6 +310,14 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	skillFormatted = TrimSlice(skillFormatted, p.SkillTopK)
 	toolFormatted = TrimSlice(toolFormatted, p.ToolTopK)
 	prefFormatted = TrimSlice(prefFormatted, p.PrefTopK)
+
+	// Step 10b: Prepend WorkingMemory to text results (score=1.0, always on top)
+	if len(workingMemResults) > 0 {
+		wmFormatted := FormatWorkingMemory(workingMemResults, p.IncludeEmbedding)
+		wmFormatted = DedupByText(wmFormatted)
+		// Prepend: working memory comes first, then regular text results
+		textFormatted = append(wmFormatted, textFormatted...)
+	}
 
 	// Strip embeddings from response
 	StripEmbeddings(textFormatted)
