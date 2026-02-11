@@ -15,16 +15,18 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
 	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
 	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
+	"github.com/MemDBai/MemDB/memdb-go/internal/search"
 )
 
 // Handler holds shared dependencies for all HTTP handlers.
 type Handler struct {
-	python   *rpc.PythonClient
-	logger   *slog.Logger
-	postgres *db.Postgres          // nil = not initialized, fall back to proxy
-	qdrant   *db.Qdrant            // nil = not initialized
-	redis    *db.Redis             // nil = not initialized
-	embedder embedder.Embedder // nil = native search disabled
+	python        *rpc.PythonClient
+	logger        *slog.Logger
+	postgres      *db.Postgres          // nil = not initialized, fall back to proxy
+	qdrant        *db.Qdrant            // nil = not initialized
+	redis         *db.Redis             // nil = not initialized
+	embedder      embedder.Embedder     // nil = native search disabled
+	searchService *search.SearchService // nil = search falls back to proxy
 }
 
 // NewHandler creates a new Handler with the given dependencies.
@@ -46,6 +48,11 @@ func (h *Handler) SetDBClients(pg *db.Postgres, qd *db.Qdrant, rd *db.Redis) {
 // SetEmbedder sets the embedding client for native search.
 func (h *Handler) SetEmbedder(e embedder.Embedder) {
 	h.embedder = e
+}
+
+// SetSearchService sets the unified search service for native search handlers.
+func (h *Handler) SetSearchService(svc *search.SearchService) {
+	h.searchService = svc
 }
 
 // Close releases all database connections and resources held by the handler.

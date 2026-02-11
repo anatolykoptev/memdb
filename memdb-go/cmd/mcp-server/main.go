@@ -22,6 +22,7 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
 	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
 	"github.com/MemDBai/MemDB/memdb-go/internal/mcptools"
+	"github.com/MemDBai/MemDB/memdb-go/internal/search"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -72,14 +73,32 @@ func main() {
 		}
 	}
 
-	// Initialize embedder
+	// Initialize embedder (same logic as REST API gateway)
 	var emb embedder.Embedder
-	if cfg.VoyageAPIKey != "" {
-		emb = embedder.NewVoyageClient(cfg.VoyageAPIKey, cfg.EmbedderModel, logger)
-		logger.Info("voyage embedder initialized", slog.String("model", cfg.EmbedderModel))
-	} else {
-		logger.Error("VOYAGE_API_KEY not set, search tool will not work")
-		os.Exit(1)
+	switch cfg.EmbedderType {
+	case "voyage":
+		if cfg.VoyageAPIKey != "" {
+			emb = embedder.NewVoyageClient(cfg.VoyageAPIKey, cfg.EmbedderModel, logger)
+			logger.Info("voyage embedder initialized", slog.String("model", cfg.EmbedderModel))
+		} else {
+			logger.Error("VOYAGE_API_KEY not set for voyage embedder")
+			os.Exit(1)
+		}
+	default: // "onnx"
+		if cfg.ONNXModelDir != "" {
+			onnxEmb, err := embedder.NewONNXEmbedder(cfg.ONNXModelDir, logger)
+			if err != nil {
+				logger.Error("onnx embedder init failed", slog.Any("error", err))
+				os.Exit(1)
+			}
+			emb = onnxEmb
+			logger.Info("onnx embedder initialized",
+				slog.String("model_dir", cfg.ONNXModelDir),
+				slog.Int("dimension", onnxEmb.Dimension()))
+		} else {
+			logger.Error("MEMDB_ONNX_MODEL_DIR not set")
+			os.Exit(1)
+		}
 	}
 
 	// Create MCP server
@@ -88,8 +107,11 @@ func main() {
 		Version: "1.0.0",
 	}, nil)
 
+	// Create search service
+	searchSvc := search.NewSearchService(pg, qd, emb, logger)
+
 	// Register native tools
-	mcptools.RegisterSearchTool(server, pg, qd, emb, logger)
+	mcptools.RegisterSearchTool(server, searchSvc, logger)
 	mcptools.RegisterMemoryTools(server, pg, logger)
 	mcptools.RegisterUserTools(server, pg, logger)
 

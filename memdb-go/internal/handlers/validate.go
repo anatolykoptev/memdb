@@ -34,6 +34,11 @@ type searchRequest struct {
 	InternetSearch   *bool     `json:"internet_search,omitempty"`
 	ReadableCubeIDs  *[]string `json:"readable_cube_ids,omitempty"`
 	IncludeEmbedding *bool     `json:"include_embedding,omitempty"`
+
+	// Per-type gating
+	IncludeSkillMemory *bool `json:"include_skill_memory,omitempty"`
+	IncludePreference  *bool `json:"include_preference,omitempty"`
+	SearchToolMemory   *bool `json:"search_tool_memory,omitempty"`
 }
 
 // addRequest validates POST /product/add.
