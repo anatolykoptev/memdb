@@ -239,6 +239,55 @@ func StripEmbeddings(items []map[string]any) {
 	}
 }
 
+// CapWorkingMemScores caps metadata.relativity for WorkingMemory items to
+// prevent them from dominating text results with a perfect 1.00 score.
+func CapWorkingMemScores(items []map[string]any) {
+	for _, item := range items {
+		meta, _ := item["metadata"].(map[string]any)
+		if meta == nil {
+			continue
+		}
+		mtype, _ := meta["memory_type"].(string)
+		if mtype != "WorkingMemory" {
+			continue
+		}
+		score, _ := meta["relativity"].(float64)
+		if score > WorkingMemMaxScore {
+			meta["relativity"] = WorkingMemMaxScore
+		}
+	}
+}
+
+// CrossSourceDedupByText removes items from secondary slices that have
+// identical text (case-insensitive) to items already in the primary (text_mem).
+// text_mem has the highest priority; duplicates are removed from skill/tool/pref.
+func CrossSourceDedupByText(text, skill, tool, pref []map[string]any) ([]map[string]any, []map[string]any, []map[string]any) {
+	seen := make(map[string]bool, len(text))
+	for _, item := range text {
+		mem, _ := item["memory"].(string)
+		key := strings.TrimSpace(strings.ToLower(mem))
+		if key != "" {
+			seen[key] = true
+		}
+	}
+	dedup := func(items []map[string]any) []map[string]any {
+		result := make([]map[string]any, 0, len(items))
+		for _, item := range items {
+			mem, _ := item["memory"].(string)
+			key := strings.TrimSpace(strings.ToLower(mem))
+			if key != "" && seen[key] {
+				continue
+			}
+			if key != "" {
+				seen[key] = true
+			}
+			result = append(result, item)
+		}
+		return result
+	}
+	return dedup(skill), dedup(tool), dedup(pref)
+}
+
 // TrimSlice trims a slice to at most n items.
 func TrimSlice(items []map[string]any, n int) []map[string]any {
 	if len(items) > n {
@@ -299,6 +348,9 @@ func MergeWorkingMemIntoResults(existing []MergedResult, wm []db.VectorSearchRes
 		if len(w.Embedding) > 0 && len(queryVec) > 0 {
 			rawCosine := CosineSimilarity(queryVec, w.Embedding)
 			score = (float64(rawCosine) + 1.0) / 2.0
+			if score > WorkingMemMaxScore {
+				score = WorkingMemMaxScore
+			}
 		}
 		if idx, ok := byID[w.ID]; ok {
 			if score > existing[idx].Score {

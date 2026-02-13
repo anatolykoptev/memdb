@@ -22,6 +22,7 @@ const (
 	GraphTagBaseScore   = 0.70 // base score for tag-based graph recall
 	GraphTagBonusPerTag = 0.05 // bonus per overlapping tag
 	WorkingMemBaseScore = 0.80 // fallback score for WorkingMemory without embedding
+	WorkingMemMaxScore  = 0.92 // cap for WorkingMemory — prevents 1.00 domination
 )
 
 // Memory scopes — separated by type so each gets its own budget.
