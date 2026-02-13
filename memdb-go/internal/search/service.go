@@ -266,10 +266,14 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	skillFormatted = ReRankByCosine(queryVec, skillFormatted, skillEmbByID)
 	toolFormatted = ReRankByCosine(queryVec, toolFormatted, toolEmbByID)
 
-	// Step 7: Relativity threshold — Python only filters text_mem and pref_mem
-	// (skill_mem and tool_mem are NOT filtered by relativity in Python's search_handler)
+	// Cap WorkingMemory scores after rerank to prevent 1.00 domination
+	CapWorkingMemScores(textFormatted)
+
+	// Step 7: Relativity threshold — filter all memory types for consistent quality
 	if p.Relativity > 0 {
 		textFormatted = FilterByRelativity(textFormatted, p.Relativity)
+		skillFormatted = FilterByRelativity(skillFormatted, p.Relativity)
+		toolFormatted = FilterByRelativity(toolFormatted, p.Relativity)
 		// Pref scores are naturally lower; apply a softer threshold.
 		prefThreshold := p.Relativity - 0.10
 		if prefThreshold > 0 {
@@ -311,7 +315,11 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 		prefFormatted = DedupByText(prefFormatted)
 	}
 
-	// Step 10: Trim each type to its budget
+	// Step 10: Cross-source dedup — remove items from skill/tool/pref that
+	// duplicate text already in text_mem (text has highest priority).
+	skillFormatted, toolFormatted, prefFormatted = CrossSourceDedupByText(textFormatted, skillFormatted, toolFormatted, prefFormatted)
+
+	// Step 11: Trim each type to its budget
 	textFormatted = TrimSlice(textFormatted, p.TopK)
 	skillFormatted = TrimSlice(skillFormatted, p.SkillTopK)
 	toolFormatted = TrimSlice(toolFormatted, p.ToolTopK)
