@@ -101,7 +101,6 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	var toolVec, toolFT []db.VectorSearchResult
 	var prefResults []db.QdrantSearchResult
 	var graphKeyResults, graphTagResults []db.GraphRecallResult
-	var workingMemResults []db.VectorSearchResult
 
 	// Text: vector search (LTM + User) — with temporal cutoff if detected
 	g.Go(func() error {
@@ -203,17 +202,6 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 		})
 	}
 
-	// Working memory: all activated items (no search, just retrieval)
-	g.Go(func() error {
-		var err error
-		workingMemResults, err = s.postgres.GetWorkingMemory(gctx, p.UserName, WorkingMemoryLimit)
-		if err != nil {
-			s.logger.Debug("working memory retrieval failed", slog.Any("error", err))
-			return nil // non-fatal
-		}
-		return nil
-	})
-
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
@@ -247,12 +235,6 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 		}
 	}
 
-	// Merge WorkingMemory into text pipeline — they get actual cosine similarity scores
-	// and participate in the full pipeline (rerank, relativity filter, dedup, trim)
-	if len(workingMemResults) > 0 {
-		textMerged = MergeWorkingMemIntoResults(textMerged, workingMemResults, queryVec)
-	}
-
 	// Step 5: Format per type — FormatMergedItems always builds the
 	// embeddingByID sidecar regardless of IncludeEmbedding (which only
 	// controls whether embedding appears in the JSON metadata output).
@@ -265,9 +247,6 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	textFormatted = ReRankByCosine(queryVec, textFormatted, textEmbByID)
 	skillFormatted = ReRankByCosine(queryVec, skillFormatted, skillEmbByID)
 	toolFormatted = ReRankByCosine(queryVec, toolFormatted, toolEmbByID)
-
-	// Cap WorkingMemory scores after rerank to prevent 1.00 domination
-	CapWorkingMemScores(textFormatted)
 
 	// Step 7: Relativity threshold — filter all memory types for consistent quality
 	if p.Relativity > 0 {
