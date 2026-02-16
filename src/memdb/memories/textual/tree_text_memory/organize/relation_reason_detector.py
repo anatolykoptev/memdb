@@ -1,7 +1,7 @@
 import json
 import traceback
 
-from memdb.embedders.factory import OllamaEmbedder
+from memdb.embedders.base import BaseEmbedder
 from memdb.graph_dbs.item import GraphDBNode
 from memdb.graph_dbs.base import BaseGraphDB
 from memdb.llms.base import BaseLLM
@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 
 
 class RelationAndReasoningDetector:
-    def __init__(self, graph_store: BaseGraphDB, llm: BaseLLM, embedder: OllamaEmbedder):
+    def __init__(self, graph_store: BaseGraphDB, llm: BaseLLM, embedder: BaseEmbedder):
         self.graph_store = graph_store
         self.llm = llm
         self.embedder = embedder

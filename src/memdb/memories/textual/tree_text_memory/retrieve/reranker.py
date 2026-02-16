@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from memdb.embedders.factory import OllamaEmbedder
+from memdb.embedders.base import BaseEmbedder
 from memdb.llms.factory import AzureLLM, OllamaLLM, OpenAILLM
 from memdb.log import get_logger
 from memdb.memories.textual.item import TextualMemoryItem
@@ -62,7 +62,7 @@ class MemoryReranker:
     Rank retrieved memory cards by structural priority and contextual similarity.
     """
 
-    def __init__(self, llm: OpenAILLM | OllamaLLM | AzureLLM, embedder: OllamaEmbedder):
+    def __init__(self, llm: OpenAILLM | OllamaLLM | AzureLLM, embedder: BaseEmbedder):
         self.llm = llm
         self.embedder = embedder
 

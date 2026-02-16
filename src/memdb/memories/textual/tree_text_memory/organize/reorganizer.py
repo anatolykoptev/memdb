@@ -11,7 +11,7 @@ import numpy as np
 
 from memdb.context.context import ContextThread, ContextThreadPoolExecutor
 from memdb.dependency import require_python_package
-from memdb.embedders.factory import OllamaEmbedder
+from memdb.embedders.base import BaseEmbedder
 from memdb.graph_dbs.item import GraphDBEdge, GraphDBNode
 from memdb.graph_dbs.base import BaseGraphDB
 from memdb.llms.base import BaseLLM
@@ -78,7 +78,7 @@ def extract_first_to_last_brace(text: str):
 
 class GraphStructureReorganizer:
     def __init__(
-        self, graph_store: BaseGraphDB, llm: BaseLLM, embedder: OllamaEmbedder, is_reorganize: bool
+        self, graph_store: BaseGraphDB, llm: BaseLLM, embedder: BaseEmbedder, is_reorganize: bool
     ):
         self.queue = PriorityQueue()  # Min-heap
         self.graph_store = graph_store

@@ -1,7 +1,7 @@
 import concurrent.futures
 
 from memdb.context.context import ContextThreadPoolExecutor
-from memdb.embedders.factory import OllamaEmbedder
+from memdb.embedders.base import BaseEmbedder
 from memdb.graph_dbs.base import BaseGraphDB
 from memdb.log import get_logger
 from memdb.memories.textual.item import TextualMemoryItem
@@ -20,7 +20,7 @@ class GraphMemoryRetriever:
     def __init__(
         self,
         graph_store: BaseGraphDB,
-        embedder: OllamaEmbedder,
+        embedder: BaseEmbedder,
         bm25_retriever: EnhancedBM25 | None = None,
         include_embedding: bool = False,
     ):

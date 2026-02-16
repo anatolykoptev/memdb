@@ -6,7 +6,7 @@ from concurrent.futures import as_completed
 from datetime import datetime
 
 from memdb.context.context import ContextThreadPoolExecutor
-from memdb.embedders.factory import OllamaEmbedder
+from memdb.embedders.base import BaseEmbedder
 from memdb.graph_dbs.base import BaseGraphDB
 from memdb.llms.factory import AzureLLM, OllamaLLM, OpenAILLM
 from memdb.log import get_logger
@@ -55,7 +55,7 @@ class MemoryManager:
     def __init__(
         self,
         graph_store: BaseGraphDB,
-        embedder: OllamaEmbedder,
+        embedder: BaseEmbedder,
         llm: OpenAILLM | OllamaLLM | AzureLLM,
         memory_size: dict | None = None,
         threshold: float | None = 0.80,

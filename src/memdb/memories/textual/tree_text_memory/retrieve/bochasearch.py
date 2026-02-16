@@ -10,7 +10,7 @@ import requests
 
 from memdb.context.context import ContextThreadPoolExecutor
 from memdb.dependency import require_python_package
-from memdb.embedders.factory import OllamaEmbedder
+from memdb.embedders.base import BaseEmbedder
 from memdb.log import get_logger
 from memdb.mem_reader.base import BaseMemReader
 from memdb.mem_reader.read_multi_modal import detect_lang
@@ -140,7 +140,7 @@ class BochaAISearchRetriever:
     def __init__(
         self,
         access_key: str,
-        embedder: OllamaEmbedder,
+        embedder: BaseEmbedder,
         reader: BaseMemReader,
         max_results: int = 20,
     ):
