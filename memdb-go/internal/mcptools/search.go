@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/search"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // RegisterSearchTool registers the search_memories MCP tool.
-func RegisterSearchTool(server *mcp.Server, svc *search.SearchService, logger *slog.Logger) {
+// It proxies to memdb-go /product/search instead of running ONNX locally.
+func RegisterSearchTool(server *mcp.Server, memdbGoURL string, serviceSecret string, logger *slog.Logger) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "search_memories",
 		Description: "Perform semantic search through memories in accessible cubes. Returns text_mem, skill_mem, pref_mem, and tool_mem categories.",
@@ -26,12 +26,8 @@ func RegisterSearchTool(server *mcp.Server, svc *search.SearchService, logger *s
 		if userName == "" {
 			userName = "memos"
 		}
-		cubeID := userName
-		if len(input.CubeIDs) > 0 {
-			cubeID = input.CubeIDs[0]
-		}
 
-		topK := search.DefaultTextTopK
+		topK := 6
 		if input.TopK > 0 {
 			topK = input.TopK
 		}
@@ -44,24 +40,20 @@ func RegisterSearchTool(server *mcp.Server, svc *search.SearchService, logger *s
 			dedup = input.Dedup
 		}
 
-		output, err := svc.Search(ctx, search.SearchParams{
-			Query:        input.Query,
-			UserName:     userName,
-			CubeID:       cubeID,
-			TopK:         topK,
-			SkillTopK:    search.DefaultSkillTopK,
-			PrefTopK:     search.DefaultPrefTopK,
-			ToolTopK:     search.DefaultToolTopK,
-			Dedup:        dedup,
-			Relativity:   relativity,
-			IncludeSkill: true,
-			IncludePref:  true,
-			IncludeTool:  true,
-		})
+		proxyInput := SearchMemoriesProxyInput{
+			Query:      input.Query,
+			UserID:     userName,
+			TopK:       topK,
+			Relativity: relativity,
+			Dedup:      dedup,
+			CubeIDs:    input.CubeIDs,
+		}
+
+		result, err := proxyCall(ctx, memdbGoURL, "/product/search", serviceSecret, "search_memories", proxyInput, logger)
 		if err != nil {
 			return nil, TextResult{}, fmt.Errorf("search failed: %w", err)
 		}
 
-		return nil, TextResult{Result: output.Result}, nil
+		return nil, result, nil
 	})
 }

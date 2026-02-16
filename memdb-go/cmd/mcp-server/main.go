@@ -1,12 +1,12 @@
-// MemDB MCP Server — Streamable HTTP transport.
+// MemDB MCP Server — Streamable HTTP + STDIO transport.
 //
-// Exposes MemDB memory operations as MCP tools, reusing the same
-// internal packages (db, embedder, search) as the REST API gateway.
+// Exposes MemDB memory operations as MCP tools.
+// Search is proxied to memdb-go (which runs ONNX locally).
+// Memory CRUD and user tools use Postgres directly.
 //
-// Native tools: search_memories, get_memory, update_memory, delete_memory,
-//   delete_all_memories, create_user, get_user_info (6 native + 2 new SQL)
-// Proxied tools: add_memory, chat, clear_chat_history, cube mgmt, scheduler
-//   (9 tools forwarded to Python backend)
+// Usage:
+//   memdb-mcp          # HTTP mode on MEMDB_MCP_PORT (default 8001)
+//   memdb-mcp --stdio  # STDIO mode for direct integration (e.g. Claude Code)
 package main
 
 import (
@@ -20,28 +20,31 @@ import (
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/config"
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
-	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
 	"github.com/MemDBai/MemDB/memdb-go/internal/mcptools"
-	"github.com/MemDBai/MemDB/memdb-go/internal/search"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func main() {
+	stdioMode := hasFlag("--stdio")
 	cfg := config.Load()
 
-	// Override port for MCP server (default 8001, separate from REST gateway on 8080)
 	port := os.Getenv("MEMDB_MCP_PORT")
 	if port == "" {
 		port = "8001"
 	}
 
-	// Logging
+	// In STDIO mode all logs go to stderr so stdout stays clean for JSON-RPC.
+	logDst := os.Stdout
+	if stdioMode {
+		logDst = os.Stderr
+	}
+
 	var logHandler slog.Handler
 	opts := &slog.HandlerOptions{Level: parseLogLevel(cfg.LogLevel)}
 	if cfg.LogFormat == "json" {
-		logHandler = slog.NewJSONHandler(os.Stdout, opts)
+		logHandler = slog.NewJSONHandler(logDst, opts)
 	} else {
-		logHandler = slog.NewTextHandler(os.Stdout, opts)
+		logHandler = slog.NewTextHandler(logDst, opts)
 	}
 	logger := slog.New(logHandler)
 	slog.SetDefault(logger)
@@ -49,88 +52,85 @@ func main() {
 	logger.Info("starting memdb-mcp",
 		slog.String("port", port),
 		slog.String("python_backend", cfg.PythonBackendURL),
+		slog.String("memdb_go_url", cfg.MemDBGoURL),
+		slog.Bool("stdio", stdioMode),
 	)
 
 	ctx := context.Background()
 
-	// Initialize DB clients
+	// Only Postgres is needed (for memory CRUD and user tools).
 	var pg *db.Postgres
 	if cfg.PostgresURL != "" {
 		var err error
 		pg, err = db.NewPostgres(ctx, cfg.PostgresURL, logger)
 		if err != nil {
 			logger.Error("postgres init failed", slog.Any("error", err))
-			os.Exit(1) // MCP server requires postgres for native tools
-		}
-	}
-
-	var qd *db.Qdrant
-	if cfg.QdrantAddr != "" {
-		var err error
-		qd, err = db.NewQdrant(ctx, cfg.QdrantAddr, logger)
-		if err != nil {
-			logger.Warn("qdrant unavailable, pref search disabled", slog.Any("error", err))
-		}
-	}
-
-	// Initialize embedder (same logic as REST API gateway)
-	var emb embedder.Embedder
-	switch cfg.EmbedderType {
-	case "voyage":
-		if cfg.VoyageAPIKey != "" {
-			emb = embedder.NewVoyageClient(cfg.VoyageAPIKey, cfg.EmbedderModel, logger)
-			logger.Info("voyage embedder initialized", slog.String("model", cfg.EmbedderModel))
-		} else {
-			logger.Error("VOYAGE_API_KEY not set for voyage embedder")
-			os.Exit(1)
-		}
-	default: // "onnx"
-		if cfg.ONNXModelDir != "" {
-			onnxEmb, err := embedder.NewONNXEmbedder(cfg.ONNXModelDir, logger)
-			if err != nil {
-				logger.Error("onnx embedder init failed", slog.Any("error", err))
-				os.Exit(1)
-			}
-			emb = onnxEmb
-			logger.Info("onnx embedder initialized",
-				slog.String("model_dir", cfg.ONNXModelDir),
-				slog.Int("dimension", onnxEmb.Dimension()))
-		} else {
-			logger.Error("MEMDB_ONNX_MODEL_DIR not set")
 			os.Exit(1)
 		}
 	}
 
-	// Create MCP server
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "memdb-mcp",
 		Version: "1.0.0",
 	}, nil)
 
-	// Create search service
-	searchSvc := search.NewSearchService(pg, qd, emb, logger)
-
-	// Register native tools
-	mcptools.RegisterSearchTool(server, searchSvc, logger)
+	// Search is proxied to memdb-go (which has the ONNX embedder).
+	memdbGoURL := cfg.MemDBGoURL
+	if memdbGoURL == "" {
+		// Fallback: use python backend if memdb-go URL not set.
+		memdbGoURL = cfg.PythonBackendURL
+		logger.Warn("MEMDB_GO_URL not set, search will proxy to python backend")
+	}
+	mcptools.RegisterSearchTool(server, memdbGoURL, cfg.InternalServiceSecret, logger)
 	mcptools.RegisterMemoryTools(server, pg, logger)
 	mcptools.RegisterUserTools(server, pg, logger)
-
-	// Register proxy tools (forwarded to Python backend)
 	mcptools.RegisterProxyTools(server, cfg.PythonBackendURL, cfg.InternalServiceSecret, logger)
 
-	logger.Info("MCP tools registered",
-		slog.Int("native", 7),  // search + get + update + delete + delete_all + create_user + get_user_info
-		slog.Int("proxy", 9),   // add, chat, clear_chat, create_cube, register_cube, unregister_cube, share_cube, dump_cube, scheduler
-	)
+	logger.Info("MCP tools registered", slog.Int("native", 6), slog.Int("proxy", 10))
 
-	// Create Streamable HTTP handler
+	if stdioMode {
+		runStdio(ctx, server, logger, pg)
+	} else {
+		runHTTP(ctx, server, port, logger, pg)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// STDIO transport
+// ---------------------------------------------------------------------------
+
+func runStdio(ctx context.Context, server *mcp.Server, logger *slog.Logger, pg *db.Postgres) {
+	logger.Info("running in STDIO mode")
+
+	sigCtx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	session, err := server.Connect(sigCtx, &mcp.StdioTransport{}, nil)
+	if err != nil {
+		logger.Error("stdio connect failed", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	if err := session.Wait(); err != nil {
+		logger.Info("stdio session ended", slog.Any("reason", err))
+	} else {
+		logger.Info("stdio session ended")
+	}
+
+	cleanup(pg)
+}
+
+// ---------------------------------------------------------------------------
+// HTTP transport (default)
+// ---------------------------------------------------------------------------
+
+func runHTTP(ctx context.Context, server *mcp.Server, port string, logger *slog.Logger, pg *db.Postgres) {
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return server
 	}, &mcp.StreamableHTTPOptions{
-		Stateless: true, // No session state needed
+		Stateless: true,
 	})
 
-	// Health check endpoint alongside MCP
 	mux := http.NewServeMux()
 	mux.Handle("/mcp", handler)
 	mux.Handle("/mcp/", handler)
@@ -146,7 +146,6 @@ func main() {
 		WriteTimeout: 120 * time.Second,
 	}
 
-	// Graceful shutdown
 	sigCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
@@ -163,23 +162,31 @@ func main() {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer shutdownCancel()
-
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("shutdown error", slog.Any("error", err))
 	}
 
-	// Cleanup
-	if emb != nil {
-		emb.Close()
-	}
+	cleanup(pg)
+	logger.Info("memdb-mcp shut down")
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+func cleanup(pg *db.Postgres) {
 	if pg != nil {
 		pg.Close()
 	}
-	if qd != nil {
-		qd.Close()
-	}
+}
 
-	logger.Info("memdb-mcp shut down")
+func hasFlag(name string) bool {
+	for _, arg := range os.Args[1:] {
+		if arg == name {
+			return true
+		}
+	}
+	return false
 }
 
 func parseLogLevel(level string) slog.Level {
