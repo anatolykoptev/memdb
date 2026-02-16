@@ -1,11 +1,6 @@
 from typing import Any
 
-from memdb.embedders.factory import (
-    ArkEmbedder,
-    OllamaEmbedder,
-    SenTranEmbedder,
-    UniversalAPIEmbedder,
-)
+from memdb.embedders.base import BaseEmbedder
 from memdb.llms.factory import AzureLLM, OllamaLLM, OpenAILLM
 from memdb.log import get_logger
 from memdb.memories.textual.item import PreferenceTextualMemoryMetadata, TextualMemoryItem
@@ -24,7 +19,7 @@ class SimplePreferenceTextMemory(PreferenceTextMemory):
         self,
         extractor_llm: OpenAILLM | OllamaLLM | AzureLLM,
         vector_db: MilvusVecDB | QdrantVecDB | QdrantMultiCollectionVecDB,
-        embedder: OllamaEmbedder | ArkEmbedder | SenTranEmbedder | UniversalAPIEmbedder,
+        embedder: BaseEmbedder,
         reranker,
         extractor,
         adder,

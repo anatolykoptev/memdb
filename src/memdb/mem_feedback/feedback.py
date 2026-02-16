@@ -12,7 +12,8 @@ from tenacity import retry, stop_after_attempt, wait_random_exponential
 from memdb.configs.memory import MemFeedbackConfig
 from memdb.context.context import ContextThreadPoolExecutor
 from memdb.dependency import require_python_package
-from memdb.embedders.factory import EmbedderFactory, OllamaEmbedder
+from memdb.embedders.base import BaseEmbedder
+from memdb.embedders.factory import EmbedderFactory
 from memdb.graph_dbs.factory import GraphStoreFactory, PolarDBGraphDB
 from memdb.llms.factory import AzureLLM, LLMFactory, OllamaLLM, OpenAILLM
 from memdb.log import get_logger
@@ -74,7 +75,7 @@ class MemFeedback(BaseMemFeedback):
         """
         self.config = config
         self.llm: OpenAILLM | OllamaLLM | AzureLLM = LLMFactory.from_config(config.extractor_llm)
-        self.embedder: OllamaEmbedder = EmbedderFactory.from_config(config.embedder)
+        self.embedder: BaseEmbedder = EmbedderFactory.from_config(config.embedder)
         self.graph_store: PolarDBGraphDB = GraphStoreFactory.from_config(config.graph_db)
         # Pass graph_store to mem_reader for recall operations (deduplication, conflict detection)
         self.mem_reader = MemReaderFactory.from_config(config.mem_reader, graph_db=self.graph_store)

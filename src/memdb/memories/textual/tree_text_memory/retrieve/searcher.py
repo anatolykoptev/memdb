@@ -1,7 +1,7 @@
 import traceback
 
 from memdb.context.context import ContextThreadPoolExecutor
-from memdb.embedders.factory import OllamaEmbedder
+from memdb.embedders.base import BaseEmbedder
 from memdb.graph_dbs.base import BaseGraphDB
 from memdb.llms.factory import AzureLLM, OllamaLLM, OpenAILLM
 from memdb.log import get_logger
@@ -40,7 +40,7 @@ class Searcher:
         self,
         dispatcher_llm: OpenAILLM | OllamaLLM | AzureLLM,
         graph_store: BaseGraphDB,
-        embedder: OllamaEmbedder,
+        embedder: BaseEmbedder,
         reranker: BaseReranker,
         bm25_retriever: EnhancedBM25 | None = None,
         internet_retriever: None = None,

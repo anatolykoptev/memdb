@@ -1,5 +1,5 @@
 from memdb import log
-from memdb.embedders.factory import OllamaEmbedder
+from memdb.embedders.base import BaseEmbedder
 from memdb.graph_dbs.factory import PolarDBGraphDB
 from memdb.llms.factory import AzureLLM, OllamaLLM, OpenAILLM
 from memdb.mem_feedback.feedback import MemFeedback
@@ -18,7 +18,7 @@ class SimpleMemFeedback(MemFeedback):
     def __init__(
         self,
         llm: OpenAILLM | OllamaLLM | AzureLLM,
-        embedder: OllamaEmbedder,
+        embedder: BaseEmbedder,
         graph_store: PolarDBGraphDB,
         memory_manager: MemoryManager,
         mem_reader: SimpleStructMemReader,

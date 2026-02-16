@@ -9,7 +9,7 @@ from datetime import datetime
 import requests
 
 from memdb.context.context import ContextThreadPoolExecutor
-from memdb.embedders.factory import OllamaEmbedder
+from memdb.embedders.base import BaseEmbedder
 from memdb.log import get_logger
 from memdb.mem_reader.base import BaseMemReader
 from memdb.memories.textual.item import (
@@ -118,7 +118,7 @@ class XinyuSearchRetriever:
         self,
         access_key: str,
         search_engine_id: str,
-        embedder: OllamaEmbedder,
+        embedder: BaseEmbedder,
         reader: BaseMemReader,
         max_results: int = 20,
     ):

@@ -6,7 +6,7 @@ from datetime import datetime
 
 import requests
 
-from memdb.embedders.factory import OllamaEmbedder
+from memdb.embedders.base import BaseEmbedder
 from memdb.memories.textual.item import (
     SourceMessage,
     TextualMemoryItem,
@@ -111,7 +111,7 @@ class InternetGoogleRetriever:
         self,
         api_key: str,
         search_engine_id: str,
-        embedder: OllamaEmbedder,
+        embedder: BaseEmbedder,
         max_results: int = 20,
         num_per_request: int = 10,
     ):

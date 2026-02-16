@@ -9,7 +9,8 @@ from typing import Any
 
 from memdb.configs.memory import TreeTextMemoryConfig
 from memdb.configs.reranker import RerankerConfigFactory
-from memdb.embedders.factory import EmbedderFactory, OllamaEmbedder
+from memdb.embedders.base import BaseEmbedder
+from memdb.embedders.factory import EmbedderFactory
 from memdb.graph_dbs.base import BaseGraphDB
 from memdb.graph_dbs.factory import GraphStoreFactory
 from memdb.llms.factory import AzureLLM, LLMFactory, OllamaLLM, OpenAILLM
@@ -47,7 +48,7 @@ class TreeTextMemory(BaseTextMemory):
         self.dispatcher_llm: OpenAILLM | OllamaLLM | AzureLLM = LLMFactory.from_config(
             config.dispatcher_llm
         )
-        self.embedder: OllamaEmbedder = EmbedderFactory.from_config(config.embedder)
+        self.embedder: BaseEmbedder = EmbedderFactory.from_config(config.embedder)
         self.graph_store: BaseGraphDB = GraphStoreFactory.from_config(config.graph_db)
 
         self.search_strategy = config.search_strategy

@@ -5,13 +5,8 @@ from datetime import datetime
 from typing import Any
 
 from memdb.configs.memory import PreferenceTextMemoryConfig
-from memdb.embedders.factory import (
-    ArkEmbedder,
-    EmbedderFactory,
-    OllamaEmbedder,
-    SenTranEmbedder,
-    UniversalAPIEmbedder,
-)
+from memdb.embedders.base import BaseEmbedder
+from memdb.embedders.factory import EmbedderFactory
 from memdb.llms.factory import AzureLLM, LLMFactory, OllamaLLM, OpenAILLM
 from memdb.log import get_logger
 from memdb.memories.textual.base import BaseTextMemory
@@ -40,9 +35,7 @@ class PreferenceTextMemory(BaseTextMemory):
             config.extractor_llm
         )
         self.vector_db: MilvusVecDB | QdrantVecDB | QdrantMultiCollectionVecDB = VecDBFactory.from_config(config.vector_db)
-        self.embedder: OllamaEmbedder | ArkEmbedder | SenTranEmbedder | UniversalAPIEmbedder = (
-            EmbedderFactory.from_config(config.embedder)
-        )
+        self.embedder: BaseEmbedder = EmbedderFactory.from_config(config.embedder)
         self.reranker = RerankerFactory.from_config(config.reranker)
 
         self.extractor = ExtractorFactory.from_config(

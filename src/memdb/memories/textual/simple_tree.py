@@ -14,7 +14,6 @@ from memdb.reranker.base import BaseReranker
 
 
 if TYPE_CHECKING:
-    from memdb.embedders.factory import OllamaEmbedder
     from memdb.llms.factory import AzureLLM, OllamaLLM, OpenAILLM
 
 
@@ -45,7 +44,7 @@ class SimpleTreeTextMemory(TreeTextMemory):
 
         self.extractor_llm: OpenAILLM | OllamaLLM | AzureLLM = llm
         self.dispatcher_llm: OpenAILLM | OllamaLLM | AzureLLM = llm
-        self.embedder: OllamaEmbedder = embedder
+        self.embedder: BaseEmbedder = embedder
         self.graph_store: BaseGraphDB = graph_db
         self.search_strategy = config.search_strategy
         self.bm25_retriever = (
