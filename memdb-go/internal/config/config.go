@@ -60,6 +60,9 @@ type Config struct {
 	LLMProxyURL      string `json:"llm_proxy_url"`
 	LLMProxyAPIKey   string `json:"llm_proxy_api_key"`
 	LLMDefaultModel  string `json:"llm_default_model"`
+
+	// MemDB Go API URL (used by MCP server to proxy search)
+	MemDBGoURL string `json:"memdb_go_url"`
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -104,6 +107,8 @@ func Load() *Config {
 		LLMProxyURL:     envStr("MEMDB_LLM_PROXY_URL", "http://cliproxyapi:8317"),
 		LLMProxyAPIKey:  envStr("CLI_PROXY_API_KEY", ""),
 		LLMDefaultModel: envStr("MEMDB_LLM_MODEL", "gemini-2.5-flash"),
+
+		MemDBGoURL: envStr("MEMDB_GO_URL", ""),
 	}
 }
 

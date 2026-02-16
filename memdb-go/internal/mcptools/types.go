@@ -68,3 +68,77 @@ type ProxyInput map[string]any
 type TextResult struct {
 	Result any `json:"result"`
 }
+
+// --- Proxy tool inputs (typed for proper JSON Schema generation) ---
+
+// AddMemoryProxyInput for the add_memory proxy tool.
+type AddMemoryProxyInput struct {
+	UserID        string `json:"user_id" jsonschema:"User ID"`
+	MemoryContent string `json:"memory_content,omitempty" jsonschema:"Direct text content to add as memory"`
+	DocPath       string `json:"doc_path,omitempty" jsonschema:"Path to a document file to process"`
+	MemCubeID     string `json:"mem_cube_id,omitempty" jsonschema:"Target cube ID"`
+	Source        string `json:"source,omitempty" jsonschema:"Source of the memory"`
+	SessionID     string `json:"session_id,omitempty" jsonschema:"Session ID"`
+}
+
+// ChatProxyInput for the chat proxy tool.
+type ChatProxyInput struct {
+	UserID       string `json:"user_id" jsonschema:"User ID for the chat session"`
+	Query        string `json:"query" jsonschema:"Chat query or question"`
+	MemCubeID    string `json:"mem_cube_id,omitempty" jsonschema:"Cube ID to use for chat"`
+	SystemPrompt string `json:"system_prompt,omitempty" jsonschema:"System prompt for chat"`
+}
+
+// ClearChatHistoryProxyInput for the clear_chat_history proxy tool.
+type ClearChatHistoryProxyInput struct {
+	UserID string `json:"user_id,omitempty" jsonschema:"User ID whose chat history to clear"`
+}
+
+// CreateCubeProxyInput for the create_cube proxy tool.
+type CreateCubeProxyInput struct {
+	CubeName string `json:"cube_name" jsonschema:"Human-readable name for the memory cube"`
+	OwnerID  string `json:"owner_id" jsonschema:"User ID of the cube owner"`
+	CubePath string `json:"cube_path,omitempty" jsonschema:"File system path for cube data"`
+	CubeID   string `json:"cube_id,omitempty" jsonschema:"Custom unique identifier for the cube"`
+}
+
+// RegisterCubeProxyInput for the register_cube proxy tool.
+type RegisterCubeProxyInput struct {
+	CubeNameOrPath string `json:"cube_name_or_path" jsonschema:"File path or name for the cube"`
+	CubeID         string `json:"cube_id,omitempty" jsonschema:"Custom identifier for the cube"`
+	UserID         string `json:"user_id,omitempty" jsonschema:"User ID to associate with the cube"`
+}
+
+// UnregisterCubeProxyInput for the unregister_cube proxy tool.
+type UnregisterCubeProxyInput struct {
+	CubeID string `json:"cube_id" jsonschema:"Unique identifier of the cube to unregister"`
+	UserID string `json:"user_id,omitempty" jsonschema:"User ID for access validation"`
+}
+
+// ShareCubeProxyInput for the share_cube proxy tool.
+type ShareCubeProxyInput struct {
+	CubeID       string `json:"cube_id" jsonschema:"Unique identifier of the cube to share"`
+	TargetUserID string `json:"target_user_id" jsonschema:"User ID to share the cube with"`
+}
+
+// DumpCubeProxyInput for the dump_cube proxy tool.
+type DumpCubeProxyInput struct {
+	DumpDir string `json:"dump_dir" jsonschema:"Directory path for cube export"`
+	UserID  string `json:"user_id,omitempty" jsonschema:"User ID for access validation"`
+	CubeID  string `json:"cube_id,omitempty" jsonschema:"Cube ID to export"`
+}
+
+// ControlSchedulerProxyInput for the control_memory_scheduler proxy tool.
+type ControlSchedulerProxyInput struct {
+	Action string `json:"action" jsonschema:"Action to perform: start or stop"`
+}
+
+// SearchMemoriesProxyInput for proxying search_memories to memdb-go /product/search.
+type SearchMemoriesProxyInput struct {
+	Query      string   `json:"query"`
+	UserID     string   `json:"user_id"`
+	TopK       int      `json:"top_k,omitempty"`
+	Relativity float64  `json:"relativity,omitempty"`
+	Dedup      string   `json:"dedup,omitempty"`
+	CubeIDs    []string `json:"readable_cube_ids,omitempty"`
+}
