@@ -41,11 +41,31 @@ type searchRequest struct {
 	SearchToolMemory   *bool `json:"search_tool_memory,omitempty"`
 }
 
-// addRequest validates POST /product/add.
+// addRequest validates POST /product/add (basic fields only, used by ValidatedAdd).
 type addRequest struct {
 	UserID    *string `json:"user_id"`
 	AsyncMode *string `json:"async_mode,omitempty"`
 	Mode      *string `json:"mode,omitempty"`
+}
+
+// fullAddRequest is the complete POST /product/add request for the native handler.
+type fullAddRequest struct {
+	UserID          *string        `json:"user_id"`
+	AsyncMode       *string        `json:"async_mode,omitempty"`
+	Mode            *string        `json:"mode,omitempty"`
+	Messages        []chatMessage  `json:"messages,omitempty"`
+	WritableCubeIDs []string       `json:"writable_cube_ids,omitempty"`
+	SessionID       *string        `json:"session_id,omitempty"`
+	CustomTags      []string       `json:"custom_tags,omitempty"`
+	Info            map[string]any `json:"info,omitempty"`
+	IsFeedback      *bool          `json:"is_feedback,omitempty"`
+}
+
+// chatMessage represents a single message in the add request.
+type chatMessage struct {
+	Role     string `json:"role"`
+	Content  string `json:"content"`
+	ChatTime string `json:"chat_time,omitempty"`
 }
 
 // feedbackRequest validates POST /product/feedback.

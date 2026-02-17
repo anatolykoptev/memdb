@@ -460,6 +460,77 @@ func (p *Postgres) GraphRecallByTags(ctx context.Context, userName string, memor
 	return results, rows.Err()
 }
 
+// --- Phase 3: Native add methods ---
+
+// MemoryInsertNode holds the data for inserting a single memory node.
+type MemoryInsertNode struct {
+	ID             string // properties->>'id' (UUID string)
+	PropertiesJSON []byte // marshaled JSONB
+	EmbeddingVec   string // "[0.1,0.2,...]" for pgvector cast
+}
+
+// InsertMemoryNodes inserts multiple memory nodes in a single transaction.
+// Uses pgx batch for efficiency: DELETE old + INSERT new for each node.
+// Each node produces two batch operations (DELETE + INSERT) = 2*len(nodes) results to consume.
+func (p *Postgres) InsertMemoryNodes(ctx context.Context, nodes []MemoryInsertNode) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+
+	delQ := fmt.Sprintf(queries.DeleteMemoryByPropID, graphName)
+	insQ := fmt.Sprintf(queries.InsertMemoryNode, graphName)
+
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	batch := &pgx.Batch{}
+	for _, n := range nodes {
+		batch.Queue(delQ, n.ID)
+		batch.Queue(insQ, n.ID, n.PropertiesJSON, n.EmbeddingVec)
+	}
+
+	br := tx.SendBatch(ctx, batch)
+	for range nodes {
+		// Consume DELETE result
+		if _, err := br.Exec(); err != nil {
+			br.Close()
+			return fmt.Errorf("delete before insert: %w", err)
+		}
+		// Consume INSERT result
+		if _, err := br.Exec(); err != nil {
+			br.Close()
+			return fmt.Errorf("insert node: %w", err)
+		}
+	}
+	if err := br.Close(); err != nil {
+		return fmt.Errorf("close batch: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// CheckContentHashExists checks whether an activated memory with the given content_hash exists for a user.
+func (p *Postgres) CheckContentHashExists(ctx context.Context, hash, userName string) (bool, error) {
+	q := fmt.Sprintf(queries.CheckContentHashExists, graphName)
+	var exists bool
+	err := p.pool.QueryRow(ctx, q, hash, userName).Scan(&exists)
+	return exists, err
+}
+
+// CleanupWorkingMemory deletes oldest WorkingMemory nodes beyond keepLatest for a user.
+// Returns the number of rows deleted.
+func (p *Postgres) CleanupWorkingMemory(ctx context.Context, userName string, keepLatest int) (int64, error) {
+	q := fmt.Sprintf(queries.CleanupOldestWorkingMemory, graphName)
+	tag, err := p.pool.Exec(ctx, q, userName, keepLatest)
+	if err != nil {
+		return 0, fmt.Errorf("cleanup working memory: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // GetWorkingMemory returns all activated WorkingMemory items for a user, ordered by recency.
 // Returns embeddings so callers can compute cosine similarity against the query vector.
 func (p *Postgres) GetWorkingMemory(ctx context.Context, userName string, limit int) ([]VectorSearchResult, error) {
