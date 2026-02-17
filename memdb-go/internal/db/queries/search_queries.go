@@ -79,8 +79,10 @@ SELECT id::text,
        tag_overlap
 FROM (
     SELECT id, properties,
-           (SELECT COUNT(*) FROM unnest($3::text[]) AS t(tag)
-            WHERE properties->'tags' @> to_jsonb(t.tag)) AS tag_overlap
+           array_length(
+               ARRAY(SELECT jsonb_array_elements_text(properties->'tags')) &
+               $3::text[], 1
+           ) AS tag_overlap
     FROM %[1]s."Memory"
     WHERE properties->>'status' = 'activated'
       AND properties->>'user_name' = $1
