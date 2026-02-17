@@ -199,7 +199,7 @@ class PolarDBGraphDBConfig(BaseConfig):
     )
     embedding_dimension: int = Field(default=1024, description="Dimension of vector embedding")
     maxconn: int = Field(
-        default=100,
+        default=10,
         description="Maximum number of connections in the connection pool",
     )
 

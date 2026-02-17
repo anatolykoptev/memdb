@@ -59,6 +59,7 @@ class OptimizedScheduler(GeneralScheduler):
         self.searcher = None
         self.reranker = None
         self.text_mem = None
+        self.go_client = None  # Set by component_init after init_mem_cube()
 
     def submit_memory_history_async_task(
         self,
@@ -104,14 +105,23 @@ class OptimizedScheduler(GeneralScheduler):
         mem_cube: NaiveMemCube,
         mode: SearchMode,
     ):
-        """Fine search memories function copied from server_router to avoid circular import"""
+        """Search memories — delegates to Go when go_client is available."""
+        if self.go_client is not None:
+            return self.go_client.search_text_items(
+                query=search_req.query,
+                user_name=user_context.mem_cube_id,
+                top_k=search_req.top_k,
+                mode="fast",
+                readable_cube_ids=[user_context.mem_cube_id],
+            )
+
+        # Fallback: direct DB search
         target_session_id = search_req.session_id
         if not target_session_id:
             target_session_id = "default_session"
         search_priority = {"session_id": search_req.session_id} if search_req.session_id else None
         search_filter = search_req.filter
 
-        # Create MemCube and perform search
         search_results = mem_cube.text_mem.search(
             query=search_req.query,
             user_name=user_context.mem_cube_id,
@@ -156,14 +166,11 @@ class OptimizedScheduler(GeneralScheduler):
                 for item in memories
             ]
 
-        # Get mem_cube for fast search
         target_session_id = search_req.session_id
         if not target_session_id:
             target_session_id = "default_session"
         search_priority = {"session_id": search_req.session_id} if search_req.session_id else None
         search_filter = search_req.filter
-
-        # Rerank Memories - reranker expects TextualMemoryItem objects
 
         info = {
             "user_id": search_req.user_id,
@@ -171,21 +178,33 @@ class OptimizedScheduler(GeneralScheduler):
             "chat_history": search_req.chat_history,
         }
 
-        raw_retrieved_memories = self.searcher.retrieve(
-            query=search_req.query,
-            user_name=user_context.mem_cube_id,
-            top_k=search_req.top_k,
-            mode=SearchMode.FINE,
-            manual_close_internet=not search_req.internet_search,
-            moscube=search_req.moscube,
-            search_filter=search_filter,
-            search_priority=search_priority,
-            info=info,
-            search_tool_memory=search_req.search_tool_memory,
-            tool_mem_top_k=search_req.tool_mem_top_k,
-        )
+        # Base retrieval — Go handles vector + fulltext + rerank + dedup
+        if self.go_client is not None:
+            raw_retrieved_memories = self.go_client.search_text_items(
+                query=search_req.query,
+                user_name=user_context.mem_cube_id,
+                top_k=search_req.top_k,
+                mode="fast",
+                include_tool=search_req.search_tool_memory,
+                tool_top_k=search_req.tool_mem_top_k,
+                readable_cube_ids=[user_context.mem_cube_id],
+            )
+        else:
+            raw_retrieved_memories = self.searcher.retrieve(
+                query=search_req.query,
+                user_name=user_context.mem_cube_id,
+                top_k=search_req.top_k,
+                mode=SearchMode.FINE,
+                manual_close_internet=not search_req.internet_search,
+                moscube=search_req.moscube,
+                search_filter=search_filter,
+                search_priority=search_priority,
+                info=info,
+                search_tool_memory=search_req.search_tool_memory,
+                tool_mem_top_k=search_req.tool_mem_top_k,
+            )
 
-        # Try to get pre-computed memories if available
+        # Merge with history memories from Redis (Python-only)
         history_memories = self.api_module.get_history_memories(
             user_id=search_req.user_id,
             mem_cube_id=user_context.mem_cube_id,
@@ -193,11 +212,10 @@ class OptimizedScheduler(GeneralScheduler):
         )
         logger.info(f"Found {len(history_memories)} history memories.")
 
-        # if history memories can directly answer
         sorted_history_memories = self.reranker.rerank(
-            query=search_req.query,  # Use search_req.query instead of undefined query
-            graph_results=history_memories,  # Pass TextualMemoryItem objects directly
-            top_k=search_req.top_k,  # Use search_req.top_k instead of undefined top_k
+            query=search_req.query,
+            graph_results=history_memories,
+            top_k=search_req.top_k,
             search_filter=search_filter,
         )
         logger.info(f"Reranked {len(sorted_history_memories)} history memories.")

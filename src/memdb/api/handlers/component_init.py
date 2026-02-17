@@ -341,9 +341,20 @@ def init_server() -> dict[str, Any]:
         mem_reader=mem_reader,
         redis_client=redis_client,
     )
+    # Initialize Go search client (Phase 2: route search through Go)
+    from memdb.clients.go_search_client import GoSearchClient
+
+    go_search_url = os.getenv("MEMDB_GO_URL")
+    go_client = GoSearchClient(base_url=go_search_url) if go_search_url else None
+    if go_client:
+        logger.info("GoSearchClient initialized → %s", go_search_url)
+    else:
+        logger.info("GoSearchClient disabled (MEMDB_GO_URL not set)")
+
     mem_scheduler.init_mem_cube(
         mem_cube=naive_mem_cube, searcher=searcher, feedback_server=feedback_server
     )
+    mem_scheduler.go_client = go_client
     logger.debug("Scheduler initialized")
 
     # Initialize SchedulerAPIModule
@@ -368,6 +379,7 @@ def init_server() -> dict[str, Any]:
         llm=llm,
         memory_retriever=tree_mem,
     )
+
     # Return all components as a dictionary for easy access and extension
     return {
         "graph_db": graph_db,
@@ -396,4 +408,5 @@ def init_server() -> dict[str, Any]:
         "deepsearch_agent": deepsearch_agent,
         "nli_client": nli_client,
         "memory_history_manager": memory_history_manager,
+        "go_client": go_client,
     }
