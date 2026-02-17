@@ -56,6 +56,16 @@ class SchemaMixin:
                     ON "{self.db_name}_graph"."Memory" USING GIN (properties);
                 """)
 
+                # B-tree index on frequently filtered JSONB fields
+                cursor.execute(f"""
+                    CREATE INDEX IF NOT EXISTS idx_memory_status_user_type
+                    ON "{self.db_name}_graph"."Memory" (
+                        (properties->>'status'),
+                        (properties->>'user_name'),
+                        (properties->>'memory_type')
+                    );
+                """)
+
                 # Create vector index for embedding field
                 try:
                     cursor.execute(f"""

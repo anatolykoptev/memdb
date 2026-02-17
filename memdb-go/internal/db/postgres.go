@@ -37,6 +37,7 @@ func NewPostgres(ctx context.Context, connStr string, logger *slog.Logger) (*Pos
 	cfg.MaxConns = 8
 	cfg.MinConns = 2
 	cfg.MaxConnLifetime = 30 * time.Minute
+	cfg.MaxConnLifetimeJitter = 5 * time.Minute // spread connection recycling to avoid thundering herd
 	cfg.MaxConnIdleTime = 5 * time.Minute
 
 	// Run LOAD 'age' and SET search_path on every new connection in the pool.
