@@ -173,6 +173,11 @@ class BaseHandler:
         """Get feedback server instance."""
         return self.deps.feedback_server
 
+    @property
+    def go_client(self):
+        """Get Go search client instance (Phase 2)."""
+        return getattr(self.deps, "go_client", None)
+
     def _validate_dependencies(self, *required_deps: str) -> None:
         """
         Validate that required dependencies are available.

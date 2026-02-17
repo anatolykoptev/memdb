@@ -1488,6 +1488,7 @@ class GeneralScheduler(BaseScheduler):
                     top_k=k_per_evidence,
                     method=self.search_method,
                     search_args=search_args,
+                    go_client=getattr(self, "go_client", None),
                 )
 
             logger.info(

@@ -34,7 +34,7 @@ func NewPostgres(ctx context.Context, connStr string, logger *slog.Logger) (*Pos
 	if err != nil {
 		return nil, fmt.Errorf("invalid postgres config: %w", err)
 	}
-	cfg.MaxConns = 20
+	cfg.MaxConns = 8
 	cfg.MinConns = 2
 	cfg.MaxConnLifetime = 30 * time.Minute
 	cfg.MaxConnIdleTime = 5 * time.Minute

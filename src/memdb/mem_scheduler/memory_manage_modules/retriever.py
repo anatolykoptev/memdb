@@ -1,6 +1,7 @@
 import time
 
 from concurrent.futures import as_completed
+from typing import Any
 
 from memdb.configs.mem_scheduler import BaseSchedulerConfig
 from memdb.context.context import ContextThreadPoolExecutor
@@ -247,20 +248,35 @@ class SchedulerRetriever(BaseSchedulerModule):
         top_k: int,
         method: str = TreeTextMemory_SEARCH_METHOD,
         search_args: dict | None = None,
+        go_client: Any | None = None,
     ) -> list[TextualMemoryItem]:
         """Search in text memory with the given query.
 
-        Args:
-            query: The search query string
-            top_k: Number of top results to return
-            method: Search method to use
-
-        Returns:
-            Search results or None if not implemented
+        When *go_client* is provided, delegates to Go for base retrieval.
+        Falls back to direct DB search otherwise.
         """
-        text_mem_base = mem_cube.text_mem
-        # Normalize default for mutable argument
         search_args = search_args or {}
+        search_tool_memory = search_args.get("search_tool_memory", False)
+        tool_mem_top_k = search_args.get("tool_mem_top_k", 6)
+        user_name = search_args.get("user_name", mem_cube_id)
+
+        # Phase 2: delegate to Go when available
+        if go_client is not None:
+            try:
+                return go_client.search_text_items(
+                    query=query,
+                    user_name=user_name,
+                    top_k=top_k,
+                    mode="fast",
+                    include_tool=search_tool_memory,
+                    tool_top_k=tool_mem_top_k,
+                    readable_cube_ids=[user_name],
+                )
+            except Exception as e:
+                logger.warning("[retriever.search] Go search failed, falling back: %s", e)
+
+        # Fallback: direct DB search
+        text_mem_base = mem_cube.text_mem
         try:
             if method in [TreeTextMemory_SEARCH_METHOD, TreeTextMemory_FINE_SEARCH_METHOD]:
                 assert isinstance(text_mem_base, TreeTextMemory)
@@ -272,11 +288,8 @@ class SchedulerRetriever(BaseSchedulerModule):
                 search_filter = search_args.get("filter")
                 search_source = search_args.get("source")
                 plugin = bool(search_source is not None and search_source == "plugin")
-                user_name = search_args.get("user_name", mem_cube_id)
                 internet_search = search_args.get("internet_search", False)
                 chat_history = search_args.get("chat_history")
-                search_tool_memory = search_args.get("search_tool_memory", False)
-                tool_mem_top_k = search_args.get("tool_mem_top_k", 6)
                 playground_search_goal_parser = search_args.get(
                     "playground_search_goal_parser", False
                 )

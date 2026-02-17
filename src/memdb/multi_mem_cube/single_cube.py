@@ -41,6 +41,7 @@ logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from memdb.api.product_models import APIADDRequest, APIFeedbackRequest, APISearchRequest
+    from memdb.clients.go_search_client import GoSearchClient
     from memdb.mem_cube.navie import NaiveMemCube
     from memdb.mem_reader.simple_struct import SimpleStructMemReader
     from memdb.mem_scheduler.optimized_scheduler import OptimizedScheduler
@@ -57,6 +58,7 @@ class SingleCubeView(MemCubeView):
     searcher: Any
     feedback_server: Any | None = None
     deepsearch_agent: Any | None = None
+    go_client: GoSearchClient | None = None
 
     @timed
     def add_memories(self, add_req: APIADDRequest) -> list[dict[str, Any]]:
@@ -324,29 +326,37 @@ class SingleCubeView(MemCubeView):
             "chat_history": search_req.chat_history,
         }
 
-        # Fine retrieve
-        raw_retrieved_memories = self.searcher.retrieve(
-            query=search_req.query,
-            user_name=user_context.mem_cube_id,
-            top_k=search_req.top_k,
-            mode=SearchMode.FINE,
-            manual_close_internet=not search_req.internet_search,
-            moscube=search_req.moscube,
-            search_filter=search_filter,
-            search_priority=search_priority,
-            info=info,
-        )
+        # Base retrieval — Go handles vector + fulltext + rerank + dedup
+        if self.go_client is not None:
+            raw_memories = self.go_client.search_text_items(
+                query=search_req.query,
+                user_name=user_context.mem_cube_id,
+                top_k=search_req.top_k,
+                dedup=search_req.dedup,
+                mode="fast",
+                readable_cube_ids=[user_context.mem_cube_id],
+            )
+        else:
+            raw_retrieved_memories = self.searcher.retrieve(
+                query=search_req.query,
+                user_name=user_context.mem_cube_id,
+                top_k=search_req.top_k,
+                mode=SearchMode.FINE,
+                manual_close_internet=not search_req.internet_search,
+                moscube=search_req.moscube,
+                search_filter=search_filter,
+                search_priority=search_priority,
+                info=info,
+            )
+            raw_memories = self.searcher.post_retrieve(
+                retrieved_results=raw_retrieved_memories,
+                top_k=search_req.top_k,
+                user_name=user_context.mem_cube_id,
+                info=info,
+                dedup=search_req.dedup,
+            )
 
-        # Post retrieve
-        raw_memories = self.searcher.post_retrieve(
-            retrieved_results=raw_retrieved_memories,
-            top_k=search_req.top_k,
-            user_name=user_context.mem_cube_id,
-            info=info,
-            dedup=search_req.dedup,
-        )
-
-        # Enhance with query
+        # LLM enhancement (Python-only)
         enhanced_memories, _ = self.mem_scheduler.retriever.enhance_memories_with_query(
             query_history=[search_req.query],
             memories=raw_memories,
@@ -412,22 +422,29 @@ class SingleCubeView(MemCubeView):
         search_req: APISearchRequest,
         user_context: UserContext,
     ) -> list[dict[str, Any]]:
-        """
-        Search preference memories.
-
-        Args:
-            search_req: Search request
-            user_context: User context
-
-        Returns:
-            List of formatted preference memory items
-            TODO: ADD CUBE ID IN PREFERENCE MEMORY
-        """
+        """Search preference memories — delegates to Go when available."""
         if os.getenv("ENABLE_PREFERENCE_MEMORY", "false").lower() != "true":
             return []
         if not search_req.include_preference:
             return []
 
+        if self.go_client is not None:
+            try:
+                results = self.go_client.search_pref_formatted(
+                    query=search_req.query,
+                    user_name=user_context.mem_cube_id,
+                    pref_top_k=search_req.pref_top_k,
+                )
+                self.logger.info(
+                    "[SEARCH:PREF:GO] results=%d, top_k=%d", len(results), search_req.pref_top_k
+                )
+                return results
+            except Exception as e:
+                self.logger.warning(
+                    "[SEARCH:PREF:GO] failed, falling back to Python: %s", e
+                )
+
+        # Fallback: direct Qdrant search
         logger.debug(f"search_req.filter for preference memory: {search_req.filter}")
         try:
             results = self.naive_mem_cube.pref_mem.search(
@@ -452,16 +469,24 @@ class SingleCubeView(MemCubeView):
         search_req: APISearchRequest,
         user_context: UserContext,
     ) -> list:
-        """
-        Fast search using vector database.
+        """Fast search — delegates to Go when go_client is available."""
+        if self.go_client is not None:
+            return self.go_client.search_formatted(
+                query=search_req.query,
+                user_name=user_context.mem_cube_id,
+                top_k=search_req.top_k,
+                dedup=search_req.dedup,
+                mode="fast",
+                include_skill=search_req.include_skill_memory,
+                include_pref=False,
+                include_tool=search_req.search_tool_memory,
+                include_embedding=search_req.dedup in ("sim", "mmr"),
+                skill_top_k=search_req.skill_mem_top_k,
+                tool_top_k=search_req.tool_mem_top_k,
+                readable_cube_ids=[user_context.mem_cube_id],
+            )
 
-        Args:
-            search_req: Search request
-            user_context: User context
-
-        Returns:
-            List of search results
-        """
+        # Fallback: direct DB search (when Go is unavailable)
         target_session_id = search_req.session_id or "default_session"
         search_priority = {"session_id": search_req.session_id} if search_req.session_id else None
         search_filter = search_req.filter or None

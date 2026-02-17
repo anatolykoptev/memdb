@@ -49,7 +49,7 @@ class ConnectionMixin:
             port = config.get("port")
             user = config.get("user")
             password = config.get("password")
-            maxconn = config.get("maxconn", 100)  # De
+            maxconn = config.get("maxconn", 10)
         else:
             self.db_name = config.db_name
             self.user_name = config.user_name
@@ -57,7 +57,7 @@ class ConnectionMixin:
             port = config.port
             user = config.user
             password = config.password
-            maxconn = config.maxconn if hasattr(config, "maxconn") else 100
+            maxconn = config.maxconn if hasattr(config, "maxconn") else 10
         """
         # Create connection
         self.connection = psycopg2.connect(
@@ -68,7 +68,7 @@ class ConnectionMixin:
 
         # Create connection pool
         self.connection_pool = psycopg2.pool.ThreadedConnectionPool(
-            minconn=5,
+            minconn=2,
             maxconn=maxconn,
             host=host,
             port=port,

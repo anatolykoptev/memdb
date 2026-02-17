@@ -48,6 +48,7 @@ services:
       - QDRANT_HOST=qdrant-docker
       - QDRANT_PORT=6333
       - NEO4J_URI=bolt://neo4j-docker:7687
+      - MEMDB_GO_URL=http://memdb-go-api:8080
     volumes:
       - ../src:/app/src
       - .:/app/docker

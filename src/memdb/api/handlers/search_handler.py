@@ -61,25 +61,36 @@ class SearchHandler(BaseHandler):
         # Use deepcopy to avoid modifying the original request object
         search_req_local = copy.deepcopy(search_req)
 
-        # Expand top_k for deduplication (5x to ensure enough candidates)
-        if search_req_local.dedup in ("sim", "mmr"):
-            search_req_local.top_k = search_req_local.top_k * 5
+        # When Go client handles fast/mix, it already does dedup + relativity +
+        # embedding stripping, so skip Python-side post-processing.
+        go_handles_dedup = (
+            self.go_client is not None
+            and search_req_local.mode in ("fast", "mixture")
+        )
 
-        # Search and deduplicate
+        if not go_handles_dedup:
+            # Expand top_k for deduplication (5x to ensure enough candidates)
+            if search_req_local.dedup in ("sim", "mmr"):
+                search_req_local.top_k = search_req_local.top_k * 5
+
+        # Search
         cube_view = self._build_cube_view(search_req_local)
         results = cube_view.search_memories(search_req_local)
-        if not search_req_local.relativity:
-            search_req_local.relativity = 0
-        self.logger.debug(f"[SearchHandler] Relativity filter: {search_req_local.relativity}")
-        results = self._apply_relativity_threshold(results, search_req_local.relativity)
 
-        if search_req_local.dedup == "sim":
-            results = self._dedup_text_memories(results, search_req.top_k)
-            self._strip_embeddings(results)
-        elif search_req_local.dedup == "mmr":
-            pref_top_k = getattr(search_req_local, "pref_top_k", 6)
-            results = self._mmr_dedup_text_memories(results, search_req.top_k, pref_top_k)
-            self._strip_embeddings(results)
+        if not go_handles_dedup:
+            # Python-side post-processing (only when Go didn't handle it)
+            if not search_req_local.relativity:
+                search_req_local.relativity = 0
+            self.logger.debug(f"[SearchHandler] Relativity filter: {search_req_local.relativity}")
+            results = self._apply_relativity_threshold(results, search_req_local.relativity)
+
+            if search_req_local.dedup == "sim":
+                results = self._dedup_text_memories(results, search_req.top_k)
+                self._strip_embeddings(results)
+            elif search_req_local.dedup == "mmr":
+                pref_top_k = getattr(search_req_local, "pref_top_k", 6)
+                results = self._mmr_dedup_text_memories(results, search_req.top_k, pref_top_k)
+                self._strip_embeddings(results)
 
         self.logger.debug(
             f"[SearchHandler] Final search results: count={len(results)} results={results}"
@@ -672,6 +683,7 @@ class SearchHandler(BaseHandler):
                 logger=self.logger,
                 searcher=searcher_to_use,
                 deepsearch_agent=self.deepsearch_agent,
+                go_client=self.go_client,
             )
         else:
             single_views = [
@@ -683,6 +695,7 @@ class SearchHandler(BaseHandler):
                     logger=self.logger,
                     searcher=searcher_to_use,
                     deepsearch_agent=self.deepsearch_agent,
+                    go_client=self.go_client,
                 )
                 for cube_id in cube_ids
             ]
