@@ -93,3 +93,43 @@ SELECT properties->>'id' AS property_id,
        properties->>'user_name' AS user_name
 FROM %[1]s."Memory"
 WHERE properties->>'id' = ANY($1)`
+
+// --- Insert / Dedup / Cleanup (Phase 3: native add) ---
+
+// DeleteMemoryByPropID deletes a memory node by its table id (which equals properties->>'id').
+// Used as the first half of an upsert (DELETE then INSERT).
+// Args: $1 = id (text, UUID)
+const DeleteMemoryByPropID = `
+DELETE FROM %[1]s."Memory" WHERE id = $1`
+
+// InsertMemoryNode inserts a new memory node with id, properties and embedding.
+// The table id column must match properties->>'id'.
+// Used as the second half of an upsert (DELETE then INSERT).
+// Args: $1 = id (text), $2 = properties (jsonb), $3 = embedding (text, cast to vector(1024))
+const InsertMemoryNode = `
+INSERT INTO %[1]s."Memory"(id, properties, embedding)
+VALUES ($1, $2::jsonb, $3::vector(1024))`
+
+// CheckContentHashExists checks whether an activated memory with the given content_hash exists for a user.
+// Args: $1 = content_hash (text), $2 = user_name (text)
+const CheckContentHashExists = `
+SELECT EXISTS(
+    SELECT 1 FROM %[1]s."Memory"
+    WHERE properties->'info'->>'content_hash' = $1
+      AND properties->>'user_name' = $2
+      AND properties->>'status' = 'activated'
+)`
+
+// CleanupOldestWorkingMemory deletes the oldest WorkingMemory nodes beyond a keep limit.
+// Keeps the N newest (by updated_at DESC) and deletes the rest.
+// Args: $1 = user_name (text), $2 = keep_count (int)
+const CleanupOldestWorkingMemory = `
+DELETE FROM %[1]s."Memory"
+WHERE id IN (
+    SELECT id FROM %[1]s."Memory"
+    WHERE properties->>'user_name' = $1
+      AND properties->>'memory_type' = 'WorkingMemory'
+      AND properties->>'status' = 'activated'
+    ORDER BY (properties->>'updated_at') DESC NULLS LAST
+    OFFSET $2
+)`

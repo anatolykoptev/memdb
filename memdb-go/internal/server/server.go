@@ -83,7 +83,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 
 	// Memory CRUD — native or validated
 	mux.HandleFunc("POST /product/get_all", h.NativeGetAll)
-	mux.HandleFunc("POST /product/add", h.ValidatedAdd)
+	mux.HandleFunc("POST /product/add", h.NativeAdd)
 	mux.HandleFunc("POST /product/search", h.NativeSearch)
 
 	// Chat — validated
