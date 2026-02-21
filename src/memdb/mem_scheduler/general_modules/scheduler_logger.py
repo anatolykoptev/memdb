@@ -34,9 +34,7 @@ logger = get_logger(__name__)
 
 class SchedulerLoggerModule(BaseSchedulerModule):
     def __init__(self):
-        """
-        Initialize RabbitMQ connection settings.
-        """
+        """Initialize scheduler logger module."""
         super().__init__()
 
     @log_exceptions(logger=logger)
