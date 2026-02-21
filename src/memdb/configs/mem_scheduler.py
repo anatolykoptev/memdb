@@ -68,6 +68,10 @@ class BaseSchedulerConfig(BaseConfig):
         default=DEFAULT_MAX_INTERNAL_MESSAGE_QUEUE_SIZE,
         description="Maximum size of internal message queue when not using Redis",
     )
+    disabled_handlers: list[str] | None = Field(
+        default=None,
+        description="List of handler labels to skip (e.g. ['mem_read'] to let Go handle them)",
+    )
     multi_task_running_timeout: int = Field(
         default=DEFAULT_MULTI_TASK_RUNNING_TIMEOUT,
         description="Default timeout for multi-task running operations in seconds",

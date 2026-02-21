@@ -152,9 +152,9 @@ func (h *Handler) canHandleNativeAdd(req *fullAddRequest) bool {
 	if h.postgres == nil || h.embedder == nil {
 		return false
 	}
-	// Don't handle async
+	// Async requires redis for XADD
 	if req.AsyncMode != nil && *req.AsyncMode == "async" {
-		return false
+		return h.redis != nil
 	}
 	// Don't handle feedback
 	if req.IsFeedback != nil && *req.IsFeedback {
@@ -188,8 +188,11 @@ func (h *Handler) proxyReason(req *fullAddRequest) string {
 	return "unknown"
 }
 
-// nativeAddForCube dispatches to fast or fine pipeline based on mode.
+// nativeAddForCube dispatches to async, fast, or fine pipeline based on mode.
 func (h *Handler) nativeAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
+	if req.AsyncMode != nil && *req.AsyncMode == "async" {
+		return h.nativeAsyncAddForCube(ctx, req, cubeID)
+	}
 	if req.Mode != nil && *req.Mode == "fine" {
 		return h.nativeFineAddForCube(ctx, req, cubeID)
 	}

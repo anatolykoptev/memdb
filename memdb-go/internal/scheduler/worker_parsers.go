@@ -58,7 +58,14 @@ func parseMemReadIDs(content string) []string {
 	if content == "" {
 		return nil
 	}
-	// Try JSON first.
+	// Try JSON array first (Go async add sends: ["uuid1","uuid2"]).
+	if content[0] == '[' {
+		var ids []string
+		if err := json.Unmarshal([]byte(content), &ids); err == nil && len(ids) > 0 {
+			return ids
+		}
+	}
+	// Try JSON object (Python sends: {"memory_ids": ["uuid1","uuid2"]}).
 	if content[0] == '{' {
 		var payload struct {
 			MemoryIDs    []string `json:"memory_ids"`

@@ -9,6 +9,7 @@ import (
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
 	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
+	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
 )
 
 const (
@@ -56,15 +57,23 @@ const (
 //  5. Soft-delete all remove_ids
 //  6. Evict remove_ids from Redis VSET hot cache
 type Reorganizer struct {
-	postgres *db.Postgres
-	embedder embedder.Embedder
-	wmCache  *db.WorkingMemoryCache // nil = VSET not configured
-	llmURL   string
-	llmKey   string
-	llmModel string
-	logger   *slog.Logger
-	http     *http.Client
+	postgres     *db.Postgres
+	embedder     embedder.Embedder
+	wmCache      *db.WorkingMemoryCache // nil = VSET not configured
+	llmURL       string
+	llmKey       string
+	llmModel     string
+	logger       *slog.Logger
+	http         *http.Client
+	llmExtractor *llm.LLMExtractor // for ExtractAndDedup (fine-level mem_read)
+	profiler     *Profiler         // for TriggerRefresh after mem_read
 }
+
+// SetLLMExtractor injects the LLM extractor for fine-level mem_read processing.
+func (r *Reorganizer) SetLLMExtractor(e *llm.LLMExtractor) { r.llmExtractor = e }
+
+// SetProfiler injects the profiler for background user profile refresh.
+func (r *Reorganizer) SetProfiler(p *Profiler) { r.profiler = p }
 
 // NewReorganizer creates a Reorganizer. llmURL/llmKey/llmModel must point to the
 // CLIProxyAPI (OpenAI-compatible) endpoint used by the rest of the system.
