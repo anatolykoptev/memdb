@@ -62,6 +62,7 @@ type voyageEmbedding struct {
 
 // Embed calls VoyageAI to embed one or more texts.
 // Returns embeddings in the same order as input texts.
+// Retries on 429/503 with exponential backoff.
 func (v *VoyageClient) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
@@ -77,52 +78,59 @@ func (v *VoyageClient) Embed(ctx context.Context, texts []string) ([][]float32, 
 		return nil, fmt.Errorf("voyage: marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, voyageEndpoint, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("voyage: create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+v.apiKey)
-
-	resp, err := v.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("voyage: http request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("voyage: read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("voyage: status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	var voyResp voyageResponse
-	if err := json.Unmarshal(respBody, &voyResp); err != nil {
-		return nil, fmt.Errorf("voyage: unmarshal response: %w", err)
-	}
-
-	if len(voyResp.Data) != len(texts) {
-		return nil, fmt.Errorf("voyage: expected %d embeddings, got %d", len(texts), len(voyResp.Data))
-	}
-
-	// Sort by index to ensure correct order
-	embeddings := make([][]float32, len(texts))
-	for _, d := range voyResp.Data {
-		if d.Index < 0 || d.Index >= len(texts) {
-			return nil, fmt.Errorf("voyage: invalid embedding index %d", d.Index)
+	embeddings, err := withRetry(ctx, defaultRetry, func() ([][]float32, int, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, voyageEndpoint, bytes.NewReader(bodyBytes))
+		if err != nil {
+			return nil, 0, fmt.Errorf("voyage: create request: %w", err)
 		}
-		embeddings[d.Index] = d.Embedding
-	}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+v.apiKey)
 
-	v.logger.Debug("voyage embed complete",
-		slog.Int("texts", len(texts)),
-		slog.Int("tokens", voyResp.Usage.TotalTokens),
-	)
+		resp, err := v.httpClient.Do(req)
+		if err != nil {
+			return nil, 0, fmt.Errorf("voyage: http request: %w", err)
+		}
+		defer resp.Body.Close()
 
-	return embeddings, nil
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, resp.StatusCode, fmt.Errorf("voyage: read response: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, resp.StatusCode, fmt.Errorf("voyage: status %d: %s", resp.StatusCode, string(respBody))
+		}
+
+		var voyResp voyageResponse
+		if err := json.Unmarshal(respBody, &voyResp); err != nil {
+			return nil, resp.StatusCode, fmt.Errorf("voyage: unmarshal response: %w", err)
+		}
+
+		if len(voyResp.Data) != len(texts) {
+			return nil, resp.StatusCode, fmt.Errorf("voyage: expected %d embeddings, got %d", len(texts), len(voyResp.Data))
+		}
+
+		out := make([][]float32, len(texts))
+		for _, d := range voyResp.Data {
+			if d.Index < 0 || d.Index >= len(texts) {
+				return nil, resp.StatusCode, fmt.Errorf("voyage: invalid embedding index %d", d.Index)
+			}
+			out[d.Index] = d.Embedding
+		}
+
+		v.logger.Debug("voyage embed complete",
+			slog.Int("texts", len(texts)),
+			slog.Int("tokens", voyResp.Usage.TotalTokens),
+		)
+		return out, resp.StatusCode, nil
+	})
+	return embeddings, err
+}
+
+// EmbedQuery embeds a single query string (search/retrieval use case).
+// Delegates to Embed — VoyageAI already handles query vs document via input_type.
+func (v *VoyageClient) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
+	return EmbedQueryViaEmbed(ctx, v, text)
 }
 
 // Dimension returns the embedding vector dimension (1024 for voyage-4-lite).

@@ -149,6 +149,7 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 		Query:            query,
 		UserName:         userName,
 		CubeID:           cubeID,
+		AgentID:          stringOrEmpty(req.AgentID),
 		TopK:             topK,
 		SkillTopK:        skillTopK,
 		PrefTopK:         prefTopK,

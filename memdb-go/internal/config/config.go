@@ -48,10 +48,14 @@ type Config struct {
 	DBRedisURL  string `json:"db_redis_url"` // separate from cache Redis DB
 
 	// Embedder
-	EmbedderType  string `json:"embedder_type"`   // "onnx" or "voyage"
+	EmbedderType  string `json:"embedder_type"`   // "onnx", "voyage", or "ollama"
 	ONNXModelDir  string `json:"onnx_model_dir"`  // path to ONNX model files
 	VoyageAPIKey  string `json:"voyage_api_key"`   // kept for rollback
-	EmbedderModel string `json:"embedder_model"`   // kept for rollback
+	EmbedderModel string `json:"embedder_model"`   // model name (voyage or ollama)
+	OllamaURL     string `json:"ollama_url"`       // Ollama server URL (e.g. http://ollama:11434)
+	OllamaDim     int    `json:"ollama_dim"`       // embedding dimension override (0 = use model default)
+	OllamaPrefix  string `json:"ollama_prefix"`    // client-side text prefix ("" = no prefix, raw text like ONNX)
+	OllamaQuery   string `json:"ollama_query"`     // client-side query prefix for EmbedQuery ("" = same as OllamaPrefix)
 
 	// API settings
 	EnableChatAPI bool `json:"enable_chat_api"`
@@ -60,6 +64,7 @@ type Config struct {
 	LLMProxyURL      string `json:"llm_proxy_url"`
 	LLMProxyAPIKey   string `json:"llm_proxy_api_key"`
 	LLMDefaultModel  string `json:"llm_default_model"`
+	LLMExtractModel  string `json:"llm_extract_model"` // model for fine-mode extraction (default: gemini-2.0-flash-lite)
 
 	// MemDB Go API URL (used by MCP server to proxy search)
 	MemDBGoURL string `json:"memdb_go_url"`
@@ -101,12 +106,17 @@ func Load() *Config {
 		ONNXModelDir:  envStr("MEMDB_ONNX_MODEL_DIR", "/models"),
 		VoyageAPIKey:  envStr("VOYAGE_API_KEY", ""),
 		EmbedderModel: envStr("MEMDB_EMBEDDER_MODEL", "voyage-4-lite"),
+		OllamaURL:     envStr("MEMDB_OLLAMA_URL", "http://localhost:11434"),
+		OllamaDim:     envInt("MEMDB_OLLAMA_DIM", 0),
+		OllamaPrefix:  envStr("MEMDB_OLLAMA_PREFIX", ""),
+		OllamaQuery:   envStr("MEMDB_OLLAMA_QUERY_PREFIX", ""),
 
 		EnableChatAPI: envBool("ENABLE_CHAT_API", false),
 
 		LLMProxyURL:     envStr("MEMDB_LLM_PROXY_URL", "http://cliproxyapi:8317"),
 		LLMProxyAPIKey:  envStr("CLI_PROXY_API_KEY", ""),
 		LLMDefaultModel: envStr("MEMDB_LLM_MODEL", "gemini-2.5-flash"),
+		LLMExtractModel: envStr("MEMDB_LLM_EXTRACT_MODEL", "gemini-2.0-flash-lite"),
 
 		MemDBGoURL: envStr("MEMDB_GO_URL", ""),
 	}
@@ -125,7 +135,6 @@ func (c *Config) String() string {
 func (c *Config) PortStr() string {
 	return strconv.Itoa(c.Port)
 }
-
 
 // --- helpers ---
 

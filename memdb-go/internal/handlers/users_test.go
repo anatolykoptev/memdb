@@ -172,35 +172,6 @@ func TestNativeUpdateUserConfig_EmptyBody(t *testing.T) {
 	}
 }
 
-func TestNativeUpdateUserConfig_ValidJSON(t *testing.T) {
-	h := testNativeHandler()
-	req := httptest.NewRequest("PUT", "/product/users/testuser/config",
-		strings.NewReader(`{"theme":"dark","lang":"en"}`))
-	req.SetPathValue("user_id", "testuser")
-	w := httptest.NewRecorder()
-
-	h.NativeUpdateUserConfig(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
-
-	var resp map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-	if resp["code"] != float64(200) {
-		t.Errorf("expected code=200, got %v", resp["code"])
-	}
-	data, _ := resp["data"].(map[string]any)
-	if data["user_id"] != "testuser" {
-		t.Errorf("expected user_id=testuser, got %v", data["user_id"])
-	}
-	cfg, _ := data["config"].(map[string]any)
-	if cfg["theme"] != "dark" {
-		t.Errorf("expected theme=dark, got %v", cfg["theme"])
-	}
-}
 
 // Integration tests with real Redis+Postgres would cover cache hit/miss paths
 // for NativeListUsers, NativeInstancesCount.

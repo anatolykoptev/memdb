@@ -14,8 +14,17 @@ import (
 // PythonClient proxies requests to the Python MemDB backend.
 type PythonClient struct {
 	baseURL    string
-	httpClient *http.Client
+	httpClient *http.Client // for regular (non-streaming) requests
+	sseClient  *http.Client // for SSE streams — no Timeout (streams are long-lived)
 	logger     *slog.Logger
+}
+
+// sharedTransport is reused by both HTTP clients to share the connection pool.
+var sharedTransport = &http.Transport{
+	MaxIdleConns:        100,
+	MaxIdleConnsPerHost: 100,
+	IdleConnTimeout:     90 * time.Second,
+	DisableCompression:  false,
 }
 
 // NewPythonClient creates a new HTTP proxy client to Python backend.
@@ -23,12 +32,13 @@ func NewPythonClient(baseURL string, logger *slog.Logger) *PythonClient {
 	return &PythonClient{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
-			Transport: &http.Transport{
-				MaxIdleConns:        100,
-				MaxIdleConnsPerHost: 100,
-				IdleConnTimeout:     90 * time.Second,
-			},
+			Timeout:   120 * time.Second,
+			Transport: sharedTransport,
+		},
+		// SSE client has NO Timeout — streams are terminated by ctx cancellation
+		// (client disconnect or server shutdown), not by a fixed deadline.
+		sseClient: &http.Client{
+			Transport: sharedTransport,
 		},
 		logger: logger,
 	}
@@ -61,8 +71,18 @@ func (c *PythonClient) ProxyRequest(ctx context.Context, w http.ResponseWriter, 
 		}
 	}
 
+	// Choose the right HTTP client before sending.
+	// SSE streams must use sseClient (no Timeout) — using httpClient would kill
+	// long-running streams after 120s. We detect SSE intent from the request:
+	//   1. Accept: text/event-stream — explicit client signal
+	//   2. Known SSE path suffixes (/stream, /wait/stream)
+	httpCli := c.httpClient
+	if isSSERequest(r) {
+		httpCli = c.sseClient
+	}
+
 	start := time.Now()
-	resp, err := c.httpClient.Do(proxyReq)
+	resp, err := httpCli.Do(proxyReq)
 	if err != nil {
 		c.logger.Error("proxy request failed",
 			slog.String("target", targetURL),
@@ -87,10 +107,10 @@ func (c *PythonClient) ProxyRequest(ctx context.Context, w http.ResponseWriter, 
 		}
 	}
 
-	// Check if this is an SSE stream and handle accordingly
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "text/event-stream" {
-		c.streamSSE(w, resp)
+	// Check if this is an SSE stream and handle accordingly.
+	// Use the context-aware scanner-based proxy for correct SSE framing.
+	if isSSEContentType(resp.Header.Get("Content-Type")) {
+		c.streamSSEProxy(ctx, w, resp)
 		return
 	}
 
@@ -98,34 +118,6 @@ func (c *PythonClient) ProxyRequest(ctx context.Context, w http.ResponseWriter, 
 	io.Copy(w, resp.Body)
 }
 
-// streamSSE handles Server-Sent Events streaming from the Python backend.
-func (c *PythonClient) streamSSE(w http.ResponseWriter, resp *http.Response) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		c.writeError(w, http.StatusInternalServerError, "streaming not supported")
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.WriteHeader(resp.StatusCode)
-
-	buf := make([]byte, 4096)
-	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			w.Write(buf[:n])
-			flusher.Flush()
-		}
-		if err != nil {
-			if err != io.EOF {
-				c.logger.Error("SSE stream error", slog.Any("error", err))
-			}
-			return
-		}
-	}
-}
 
 func (c *PythonClient) writeError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")

@@ -27,6 +27,9 @@ func NewRedis(ctx context.Context, redisURL string, logger *slog.Logger) (*Redis
 	}
 	opts.PoolSize = 10
 	opts.MinIdleConns = 2
+	// UnstableResp3 is required for Redis 8 VSET commands (VADD, VSIM, etc.)
+	// go-redis v9 marks VSET API as experimental and requires this flag.
+	opts.UnstableResp3 = true
 
 	client := redis.NewClient(opts)
 
@@ -54,4 +57,14 @@ func (r *Redis) Ping(ctx context.Context) error {
 // Close closes the Redis connection.
 func (r *Redis) Close() error {
 	return r.client.Close()
+}
+
+// Get retrieves a string value by key. Returns error if key is missing (redis.Nil).
+func (r *Redis) Get(ctx context.Context, key string) (string, error) {
+	return r.client.Get(ctx, key).Result()
+}
+
+// Set stores a string value with an optional TTL (0 = no expiry).
+func (r *Redis) Set(ctx context.Context, key, value string, ttl time.Duration) error {
+	return r.client.Set(ctx, key, value, ttl).Err()
 }

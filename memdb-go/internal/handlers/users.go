@@ -222,7 +222,6 @@ func (h *Handler) NativeGetConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // NativeGetUserConfig handles GET /product/users/{user_id}/config.
-// Stub: returns empty config.
 func (h *Handler) NativeGetUserConfig(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
 		h.ProxyToProduct(w, r)
@@ -230,18 +229,27 @@ func (h *Handler) NativeGetUserConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := r.PathValue("user_id")
+	config, err := h.postgres.GetUserConfig(r.Context(), userID)
+	if err != nil {
+		h.logger.Debug("native get_user_config failed", slog.Any("error", err))
+		h.ProxyToProduct(w, r)
+		return
+	}
+	if config == nil {
+		config = map[string]any{}
+	}
+
 	h.writeJSON(w, http.StatusOK, map[string]any{
 		"code":    200,
 		"message": "ok",
 		"data": map[string]any{
 			"user_id": userID,
-			"config":  map[string]any{},
+			"config":  config,
 		},
 	})
 }
 
 // NativeUpdateUserConfig handles PUT /product/users/{user_id}/config.
-// Stub: echoes back the config that was sent.
 func (h *Handler) NativeUpdateUserConfig(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
 		h.ProxyToProduct(w, r)
@@ -260,6 +268,15 @@ func (h *Handler) NativeUpdateUserConfig(w http.ResponseWriter, r *http.Request)
 		h.writeValidationError(w, []string{fmt.Sprintf("invalid JSON body: %s", err.Error())})
 		return
 	}
+
+	if err := h.postgres.UpdateUserConfig(r.Context(), userID, cfg); err != nil {
+		h.logger.Debug("native update_user_config failed", slog.Any("error", err))
+		h.proxyWithBody(w, r, body)
+		return
+	}
+
+	// Invalidate the fast cache
+	h.cacheDelete(r.Context(), cachePrefix+"config:"+userID)
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
 		"code":    200,

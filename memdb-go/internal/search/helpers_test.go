@@ -105,27 +105,39 @@ func TestMergeVectorAndFulltext_VectorOnly(t *testing.T) {
 	if len(merged) != 2 {
 		t.Fatalf("expected 2, got %d", len(merged))
 	}
-	// Score should be normalized: (0.8+1)/2 = 0.9
-	if merged[0].Score < 0.89 || merged[0].Score > 0.91 {
-		t.Errorf("expected score ~0.9, got %f", merged[0].Score)
+	// RRF: rank-1 item scores higher than rank-2 item, both in (0, 1]
+	if merged[0].Score <= 0 || merged[1].Score <= 0 {
+		t.Errorf("expected positive RRF scores, got %f and %f", merged[0].Score, merged[1].Score)
+	}
+	if merged[0].Score <= merged[1].Score {
+		t.Errorf("expected rank-1 score > rank-2 score, got %f <= %f", merged[0].Score, merged[1].Score)
+	}
+	// Highest ID should be "1" (rank 1 in vector list)
+	if merged[0].ID != "1" {
+		t.Errorf("expected ID '1' at rank 0, got %s", merged[0].ID)
 	}
 }
 
 func TestMergeVectorAndFulltext_Boost(t *testing.T) {
+	// Item "1" appears in both lists; item "2" only in vector.
+	// RRF: item in both lists should score higher than item in one list.
 	vec := []db.VectorSearchResult{
 		{ID: "1", Properties: `{"memory":"a"}`, Score: 0.8},
+		{ID: "2", Properties: `{"memory":"b"}`, Score: 0.7},
 	}
 	ft := []db.VectorSearchResult{
 		{ID: "1", Properties: `{"memory":"a"}`, Score: 2.0},
 	}
 	merged := MergeVectorAndFulltext(vec, ft)
-	if len(merged) != 1 {
-		t.Fatalf("expected 1, got %d", len(merged))
+	if len(merged) != 2 {
+		t.Fatalf("expected 2, got %d", len(merged))
 	}
-	// Vector score: (0.8+1)/2 = 0.9, fulltext boost: 2.0*0.5*0.5 = 0.5
-	// Total: 0.9 + 0.5 = 1.4
-	if merged[0].Score < 1.39 || merged[0].Score > 1.41 {
-		t.Errorf("expected score ~1.4, got %f", merged[0].Score)
+	// Item "1" appears in both lists so should have higher RRF score
+	if merged[0].ID != "1" {
+		t.Errorf("expected '1' (in both lists) at rank 0, got %s", merged[0].ID)
+	}
+	if merged[0].Score <= merged[1].Score {
+		t.Errorf("item in both lists should score higher: %f <= %f", merged[0].Score, merged[1].Score)
 	}
 }
 

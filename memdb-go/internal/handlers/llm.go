@@ -1,11 +1,15 @@
 package handlers
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -24,8 +28,11 @@ func SetLLMProxy(url, apiKey, defaultModel string) {
 	}
 }
 
-// llmClient is a shared HTTP client for LLM proxy requests.
+// llmClient is a shared HTTP client for non-streaming LLM proxy requests.
 var llmClient = &http.Client{Timeout: 120 * time.Second}
+
+// llmSSEClient has no Timeout — SSE streams are terminated by ctx cancellation.
+var llmSSEClient = &http.Client{}
 
 // ProxyLLMComplete forwards OpenAI-compatible chat completions to CLIProxyAPI.
 // This is a lightweight LLM proxy without memory retrieval (unlike /product/chat/complete
@@ -63,7 +70,26 @@ func (h *Handler) ProxyLLMComplete(w http.ResponseWriter, r *http.Request) {
 		proxyReq.Header.Set("Authorization", "Bearer "+llmProxyAPIKey)
 	}
 
-	resp, err := llmClient.Do(proxyReq)
+	// Detect streaming mode: client requested stream:true OR Accept: text/event-stream.
+	isStream := false
+	var reqMap map[string]any
+	if json.Unmarshal(body, &reqMap) == nil {
+		if v, ok := reqMap["stream"]; ok {
+			if b, ok := v.(bool); ok && b {
+				isStream = true
+			}
+		}
+	}
+	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		isStream = true
+	}
+
+	client := llmClient
+	if isStream {
+		client = llmSSEClient
+	}
+
+	resp, err := client.Do(proxyReq)
 	if err != nil {
 		h.logger.Error("llm proxy: request failed",
 			slog.String("target", targetURL),
@@ -74,12 +100,53 @@ func (h *Handler) ProxyLLMComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	// Pass through response headers and body
+	// Pass through response headers.
 	for key, values := range resp.Header {
 		for _, v := range values {
 			w.Header().Add(key, v)
 		}
 	}
+
+	// SSE streaming response — use scanner-based proxy.
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(resp.StatusCode)
+		h.streamSSELines(r.Context(), w, resp.Body)
+		return
+	}
+
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
+}
+
+// streamSSELines proxies an SSE body to the client using line-oriented scanning.
+// Guarantees SSE field boundaries are never split across reads.
+func (h *Handler) streamSSELines(ctx context.Context, w http.ResponseWriter, body io.Reader) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return
+	}
+
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), 512*1024)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				h.logger.Debug("llm sse: scanner error", slog.Any("error", err))
+			}
+			return
+		}
+
+		fmt.Fprintf(w, "%s\n", scanner.Text())
+		flusher.Flush()
+	}
 }

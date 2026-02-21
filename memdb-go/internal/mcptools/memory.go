@@ -23,7 +23,7 @@ func RegisterMemoryTools(server *mcp.Server, pg *db.Postgres, logger *slog.Logge
 			return nil, TextResult{}, fmt.Errorf("memory_id is required")
 		}
 
-		result, err := pg.GetMemoryByID(ctx, input.MemoryID)
+		result, err := pg.GetMemoryByPropertyID(ctx, input.MemoryID)
 		if err != nil {
 			return nil, TextResult{}, fmt.Errorf("get_memory failed: %w", err)
 		}

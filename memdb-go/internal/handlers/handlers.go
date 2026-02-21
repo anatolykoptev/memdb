@@ -4,7 +4,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -14,7 +13,9 @@ import (
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
 	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
+	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
 	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
+	"github.com/MemDBai/MemDB/memdb-go/internal/scheduler"
 	"github.com/MemDBai/MemDB/memdb-go/internal/search"
 )
 
@@ -22,11 +23,15 @@ import (
 type Handler struct {
 	python        *rpc.PythonClient
 	logger        *slog.Logger
-	postgres      *db.Postgres          // nil = not initialized, fall back to proxy
-	qdrant        *db.Qdrant            // nil = not initialized
-	redis         *db.Redis             // nil = not initialized
-	embedder      embedder.Embedder     // nil = native search disabled
-	searchService *search.SearchService // nil = search falls back to proxy
+	postgres      *db.Postgres             // nil = not initialized, fall back to proxy
+	qdrant        *db.Qdrant               // nil = not initialized
+	redis         *db.Redis                // nil = not initialized
+	wmCache       *db.WorkingMemoryCache   // nil = VSET disabled, use postgres for candidates
+	embedder      embedder.Embedder        // nil = native search disabled
+	searchService *search.SearchService    // nil = search falls back to proxy
+	llmExtractor  *llm.LLMExtractor        // nil = mode=fine falls back to proxy
+	profiler      *scheduler.Profiler      // nil = profile summaries disabled
+	tracker       *scheduler.TaskStatusTracker // nil = fall back to stream-based status
 }
 
 // NewHandler creates a new Handler with the given dependencies.
@@ -53,6 +58,37 @@ func (h *Handler) SetEmbedder(e embedder.Embedder) {
 // SetSearchService sets the unified search service for native search handlers.
 func (h *Handler) SetSearchService(svc *search.SearchService) {
 	h.searchService = svc
+}
+
+// SetLLMExtractor sets the LLM extractor for native fine-mode add.
+// When set, mode=fine requests are handled natively instead of proxied to Python.
+func (h *Handler) SetLLMExtractor(e *llm.LLMExtractor) {
+	h.llmExtractor = e
+}
+
+// SetProfiler sets the background user profile summarizer.
+// When set, profile summaries are triggered after fine-mode adds and injected into search results.
+func (h *Handler) SetProfiler(p *scheduler.Profiler) {
+	h.profiler = p
+}
+
+// SetTaskTracker sets the Redis-backed task status tracker.
+// When set, /scheduler/wait and /scheduler/wait/stream use memos:task_meta:{user_id}
+// (same schema as Python) instead of stream-based XLen/XPending heuristics.
+func (h *Handler) SetTaskTracker(t *scheduler.TaskStatusTracker) {
+	h.tracker = t
+}
+
+// SetWorkingMemoryCache sets the Redis VSET hot cache for WorkingMemory.
+// When set, fine-mode dedup candidate lookup uses VSET (HNSW in-memory) instead of pgvector.
+func (h *Handler) SetWorkingMemoryCache(c *db.WorkingMemoryCache) {
+	h.wmCache = c
+}
+
+// Embedder returns the configured embedder, or nil if not yet set.
+// Used by server.go to pass the embedder to the scheduler Reorganizer.
+func (h *Handler) Embedder() embedder.Embedder {
+	return h.embedder
 }
 
 // Close releases all database connections and resources held by the handler.
@@ -161,65 +197,6 @@ func (h *Handler) ProxyToProduct(w http.ResponseWriter, r *http.Request) {
 	h.python.ProxyRequest(r.Context(), w, r)
 }
 
-// --- Cache helpers ---
-
-// cachePrefix is the key namespace for DB-level cache (distinct from middleware's memdb:cache:).
-const cachePrefix = "memdb:db:"
-
-// cacheGet reads a value from Redis. Returns nil on miss, error, or if redis is nil.
-func (h *Handler) cacheGet(ctx context.Context, key string) []byte {
-	if h.redis == nil {
-		return nil
-	}
-	val, err := h.redis.Client().Get(ctx, key).Bytes()
-	if err != nil {
-		// redis.Nil is a normal cache miss; other errors are debug-logged
-		if err.Error() != "redis: nil" {
-			h.logger.Debug("cache get error", slog.String("key", key), slog.Any("error", err))
-		}
-		return nil
-	}
-	return val
-}
-
-// cacheSet stores a value with TTL. No-op if redis is nil. Errors are debug-logged.
-func (h *Handler) cacheSet(ctx context.Context, key string, value []byte, ttl time.Duration) {
-	if h.redis == nil {
-		return
-	}
-	if err := h.redis.Client().Set(ctx, key, value, ttl).Err(); err != nil {
-		h.logger.Debug("cache set error", slog.String("key", key), slog.Any("error", err))
-	}
-}
-
-// cacheInvalidate deletes keys matching the given patterns. Uses SCAN (production-safe).
-// No-op if redis is nil. Errors are debug-logged.
-func (h *Handler) cacheInvalidate(ctx context.Context, patterns ...string) {
-	if h.redis == nil {
-		return
-	}
-	client := h.redis.Client()
-	for _, pattern := range patterns {
-		var cursor uint64
-		for {
-			keys, next, err := client.Scan(ctx, cursor, pattern, 100).Result()
-			if err != nil {
-				h.logger.Debug("cache scan error", slog.String("pattern", pattern), slog.Any("error", err))
-				break
-			}
-			if len(keys) > 0 {
-				if err := client.Del(ctx, keys...).Err(); err != nil {
-					h.logger.Debug("cache del error", slog.Any("error", err))
-				}
-			}
-			cursor = next
-			if cursor == 0 {
-				break
-			}
-		}
-	}
-}
-
 // --- Helpers ---
 
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, data any) {
@@ -230,4 +207,9 @@ func (h *Handler) writeJSON(w http.ResponseWriter, status int, data any) {
 	if err := enc.Encode(data); err != nil {
 		h.logger.Error("failed to encode JSON response", slog.Any("error", err))
 	}
+}
+
+// parseJSONBody decodes the request body as JSON into dst.
+func parseJSONBody(r *http.Request, dst any) error {
+	return json.NewDecoder(r.Body).Decode(dst)
 }

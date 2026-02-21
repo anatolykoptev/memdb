@@ -29,7 +29,7 @@ RUN ORT_DIR=$(find /go/pkg/mod -path "*/onnxruntime_go*/test_data" -type d 2>/de
       cp "$ORT_DIR/onnxruntime_amd64.so" /ort-lib/libonnxruntime.so; \
     else \
       echo "WARNING: ONNX Runtime .so not found in Go module cache, downloading..."; \
-      ORT_VER="1.21.1"; \
+      ORT_VER="1.24.1"; \
       if [ "$TARGETARCH" = "arm64" ]; then ORT_ARCH="aarch64"; else ORT_ARCH="x64"; fi; \
       curl -L -o /tmp/ort.tgz \
         "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VER}/onnxruntime-linux-${ORT_ARCH}-${ORT_VER}.tgz" && \

@@ -1,0 +1,123 @@
+package handlers
+
+// types.go — typed request structs for all handler endpoints.
+// These mirror the generated OpenAPI types but only include fields we validate.
+// Using separate structs avoids coupling to oapi-codegen union types that are
+// difficult to unmarshal directly.
+
+import "encoding/json"
+
+// searchRequest validates POST /product/search.
+type searchRequest struct {
+	Query   *string `json:"query"`
+	UserID  *string `json:"user_id"`
+	AgentID *string `json:"agent_id,omitempty"`
+	TopK    *int    `json:"top_k,omitempty"`
+	Dedup  *string `json:"dedup,omitempty"`
+
+	Relativity   *float64 `json:"relativity,omitempty"`
+	PrefTopK     *int     `json:"pref_top_k,omitempty"`
+	ToolMemTopK  *int     `json:"tool_mem_top_k,omitempty"`
+	SkillMemTopK *int     `json:"skill_mem_top_k,omitempty"`
+
+	// Fields for native search handler proxy-fallback decisions
+	Mode             *string   `json:"mode,omitempty"`
+	InternetSearch   *bool     `json:"internet_search,omitempty"`
+	ReadableCubeIDs  *[]string `json:"readable_cube_ids,omitempty"`
+	IncludeEmbedding *bool     `json:"include_embedding,omitempty"`
+
+	// Per-type gating
+	IncludeSkillMemory *bool `json:"include_skill_memory,omitempty"`
+	IncludePreference  *bool `json:"include_preference,omitempty"`
+	SearchToolMemory   *bool `json:"search_tool_memory,omitempty"`
+}
+
+// addRequest validates POST /product/add (basic fields only, used by ValidatedAdd).
+type addRequest struct {
+	UserID    *string `json:"user_id"`
+	AgentID   *string `json:"agent_id,omitempty"`
+	AsyncMode *string `json:"async_mode,omitempty"`
+	Mode      *string `json:"mode,omitempty"`
+}
+
+// fullAddRequest is the complete POST /product/add request for the native handler.
+type fullAddRequest struct {
+	UserID          *string        `json:"user_id"`
+	AgentID         *string        `json:"agent_id,omitempty"`
+	AsyncMode       *string        `json:"async_mode,omitempty"`
+	Mode            *string        `json:"mode,omitempty"`
+	Messages        []chatMessage  `json:"messages,omitempty"`
+	WritableCubeIDs []string       `json:"writable_cube_ids,omitempty"`
+	SessionID       *string        `json:"session_id,omitempty"`
+	CustomTags      []string       `json:"custom_tags,omitempty"`
+	Info            map[string]any `json:"info,omitempty"`
+	IsFeedback      *bool          `json:"is_feedback,omitempty"`
+}
+
+// chatMessage represents a single message in the add request.
+type chatMessage struct {
+	Role     string `json:"role"`
+	Content  string `json:"content"`
+	ChatTime string `json:"chat_time,omitempty"`
+}
+
+// feedbackRequest validates POST /product/feedback.
+type feedbackRequest struct {
+	UserID          *string          `json:"user_id"`
+	AgentID         *string          `json:"agent_id,omitempty"`
+	FeedbackContent *string          `json:"feedback_content"`
+	History         *json.RawMessage `json:"history"`
+}
+
+// deleteRequest validates POST /product/delete_memory.
+type deleteRequest struct {
+	AgentID   *string                `json:"agent_id,omitempty"`
+	MemoryIDs *[]string              `json:"memory_ids"`
+	FileIDs   *[]string              `json:"file_ids"`
+	Filter    map[string]interface{} `json:"filter"`
+}
+
+// getAllRequest validates POST /product/get_all.
+type getAllRequest struct {
+	UserID     *string `json:"user_id"`
+	AgentID    *string `json:"agent_id,omitempty"`
+	MemoryType *string `json:"memory_type"`
+}
+
+// chatCompleteRequest validates POST /product/chat/complete.
+type chatCompleteRequest struct {
+	UserID  *string `json:"user_id"`
+	AgentID *string `json:"agent_id,omitempty"`
+	Query   *string `json:"query"`
+	TopK   *int    `json:"top_k,omitempty"`
+}
+
+// chatRequest validates POST /product/chat and POST /product/chat/stream.
+type chatRequest struct {
+	UserID  *string `json:"user_id"`
+	AgentID *string `json:"agent_id,omitempty"`
+	Query   *string `json:"query"`
+}
+
+// getMemoryRequest validates POST /product/get_memory.
+type getMemoryRequest struct {
+	MemCubeID          *string                `json:"mem_cube_id"`
+	UserID             *string                `json:"user_id,omitempty"`
+	AgentID            *string                `json:"agent_id,omitempty"`
+	IncludePreference  *bool                  `json:"include_preference,omitempty"`
+	IncludeToolMemory  *bool                  `json:"include_tool_memory,omitempty"`
+	IncludeSkillMemory *bool                  `json:"include_skill_memory,omitempty"`
+	Filter             map[string]interface{} `json:"filter,omitempty"`
+	Page               *int                   `json:"page,omitempty"`
+	PageSize           *int                   `json:"page_size,omitempty"`
+}
+
+// getMemoryByIDsRequest validates POST /product/get_memory_by_ids.
+type getMemoryByIDsRequest struct {
+	MemoryIDs *[]string `json:"memory_ids"`
+}
+
+// existMemCubeRequest validates POST /product/exist_mem_cube_id.
+type existMemCubeRequest struct {
+	MemCubeID *string `json:"mem_cube_id"`
+}
