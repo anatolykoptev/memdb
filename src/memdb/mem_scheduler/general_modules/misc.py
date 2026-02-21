@@ -31,7 +31,6 @@ class EnvConfigMixin(Generic[T]):
         If the class name ends with 'Config', that suffix is removed first.
 
         Examples:
-            RabbitMQConfig -> "RABBITMQ_"
             OpenAIConfig -> "OPENAI_"
             GraphDBAuthConfig -> "GRAPHDBAUTH_"
         """

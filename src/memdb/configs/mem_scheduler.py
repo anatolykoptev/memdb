@@ -160,33 +160,6 @@ class SchedulerConfigFactory(BaseConfig):
 
 
 # ************************* Auth *************************
-class RabbitMQConfig(
-    BaseConfig,
-    DictConversionMixin,
-    EnvConfigMixin,
-):
-    host_name: str = Field(default="", description="Endpoint for RabbitMQ instance access")
-    user_name: str = Field(default="", description="Static username for RabbitMQ instance")
-    password: str = Field(default="", description="Password for the static username")
-    virtual_host: str = Field(default="", description="Vhost name for RabbitMQ instance")
-    erase_on_connect: bool = Field(
-        default=True, description="Whether to clear connection state or buffers upon connecting"
-    )
-    port: int = Field(
-        default=5672,
-        description="Port number for RabbitMQ instance access",
-        ge=1,  # Port must be >= 1
-        le=65535,  # Port must be <= 65535
-    )
-    exchange_name: str = Field(
-        default="memdb-fanout",
-        description="Exchange name for RabbitMQ (e.g., memdb-fanout, memdb-memory-change)",
-    )
-    exchange_type: str = Field(
-        default="fanout", description="Exchange type for RabbitMQ (fanout or direct)"
-    )
-
-
 class GraphDBAuthConfig(BaseConfig, DictConversionMixin, EnvConfigMixin):
     uri: str = Field(
         default="bolt://localhost:7687",
@@ -211,7 +184,6 @@ class OpenAIConfig(BaseConfig, DictConversionMixin, EnvConfigMixin):
 
 
 class AuthConfig(BaseConfig, DictConversionMixin):
-    rabbitmq: RabbitMQConfig | None = None
     openai: OpenAIConfig | None = None
     graph_db: GraphDBAuthConfig | None = None
     default_config_path: ClassVar[str] = (
@@ -228,11 +200,6 @@ class AuthConfig(BaseConfig, DictConversionMixin):
 
         initialized_components = []
         failed_components = []
-
-        if self.rabbitmq is not None:
-            initialized_components.append("rabbitmq")
-        else:
-            failed_components.append("rabbitmq")
 
         if self.openai is not None:
             initialized_components.append("openai")
@@ -303,7 +270,7 @@ class AuthConfig(BaseConfig, DictConversionMixin):
     def from_local_env(cls) -> "AuthConfig":
         """Creates an AuthConfig instance by loading configuration from environment variables.
 
-        This method loads configuration for all nested components (RabbitMQ, OpenAI, GraphDB)
+        This method loads configuration for all nested components (OpenAI, GraphDB)
         from their respective environment variables using each component's specific prefix.
         If any component fails to initialize, it will be set to None and a warning will be logged.
 
@@ -315,23 +282,8 @@ class AuthConfig(BaseConfig, DictConversionMixin):
         """
         logger = logging.getLogger(__name__)
 
-        rabbitmq_config = None
         openai_config = None
         graph_db_config = None
-
-        # Try to initialize RabbitMQ config - check if any RabbitMQ env vars exist
-        try:
-            rabbitmq_prefix = RabbitMQConfig.get_env_prefix()
-            has_rabbitmq_env = any(key.startswith(rabbitmq_prefix) for key in os.environ)
-            if has_rabbitmq_env:
-                rabbitmq_config = RabbitMQConfig.from_env()
-                logger.info("Successfully initialized RabbitMQ configuration")
-            else:
-                logger.info(
-                    "No RabbitMQ environment variables found, skipping RabbitMQ initialization"
-                )
-        except (ValueError, Exception) as e:
-            logger.warning(f"Failed to initialize RabbitMQ config from environment: {e}")
 
         # Try to initialize OpenAI config - check if any OpenAI env vars exist
         try:
@@ -360,7 +312,6 @@ class AuthConfig(BaseConfig, DictConversionMixin):
             logger.warning(f"Failed to initialize GraphDB config from environment: {e}")
 
         return cls(
-            rabbitmq=rabbitmq_config,
             openai=openai_config,
             graph_db=graph_db_config,
         )

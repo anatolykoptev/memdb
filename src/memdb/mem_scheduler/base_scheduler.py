@@ -70,7 +70,6 @@ from memdb.mem_scheduler.utils.filter_utils import (
 from memdb.mem_scheduler.utils.misc_utils import group_messages_by_user_and_mem_cube
 from memdb.mem_scheduler.utils.monitor_event_utils import emit_monitor_event, to_iso
 from memdb.mem_scheduler.utils.status_tracker import TaskStatusTracker
-from memdb.mem_scheduler.webservice_modules.rabbitmq_service import RabbitMQSchedulerModule
 from memdb.mem_scheduler.webservice_modules.redis_service import RedisSchedulerModule
 from memdb.memories.activation.kv import KVCacheMemory
 from memdb.memories.activation.vllmkv import VLLMKVCacheItem, VLLMKVCacheMemory
@@ -93,7 +92,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLoggerModule):
+class BaseScheduler(RedisSchedulerModule, SchedulerLoggerModule):
     """Base class for all mem_scheduler."""
 
     def __init__(self, config: BaseSchedulerConfig):
@@ -186,7 +185,6 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         self._mem_cubes: dict[str, BaseMemCube] = {}
         self.auth_config_path: str | Path | None = self.config.get("auth_config_path", None)
         self.auth_config = None
-        self.rabbitmq_config = None
         self.feedback_server = None
 
     def init_mem_cube(
@@ -262,11 +260,6 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
                     self.auth_config = AuthConfig.from_local_env()
             except Exception:
                 pass
-
-            if self.auth_config is not None:
-                self.rabbitmq_config = self.auth_config.rabbitmq
-                if self.rabbitmq_config is not None:
-                    self.initialize_rabbitmq(config=self.rabbitmq_config)
 
             logger.debug("GeneralScheduler has been initialized")
         except Exception as e:
@@ -861,27 +854,13 @@ class BaseScheduler(RabbitMQSchedulerModule, RedisSchedulerModule, SchedulerLogg
         messages: ScheduleLogForWebItem | list[ScheduleLogForWebItem],
         additional_log_info: str | None = None,
     ) -> None:
-        """Submit log messages to the web log queue and optionally to RabbitMQ.
+        """Submit log messages to the web log queue.
 
         Args:
             messages: Single log message or list of log messages
         """
         if isinstance(messages, ScheduleLogForWebItem):
             messages = [messages]  # transform single message to list
-
-        for message in messages:
-            if self.rabbitmq_config is None:
-                return
-            try:
-                # Always call publish; the publisher now caches when offline and flushes after reconnect
-                self.rabbitmq_publish_message(message=message.to_dict())
-                logger.debug(
-                    f"_submit_web_logs: published item_id={message.item_id} label={message.label}"
-                )
-            except Exception as e:
-                logger.error(
-                    f"[DIAGNOSTIC] base_scheduler._submit_web_logs failed: {e}", exc_info=True
-                )
 
         logger.debug(
             f"{len(messages)} submitted. {self._web_log_message_queue.qsize()} in queue. additional_log_info: {additional_log_info}"
