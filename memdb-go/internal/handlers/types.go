@@ -52,6 +52,7 @@ type fullAddRequest struct {
 	CustomTags      []string       `json:"custom_tags,omitempty"`
 	Info            map[string]any `json:"info,omitempty"`
 	IsFeedback      *bool          `json:"is_feedback,omitempty"`
+	TaskID          *string        `json:"task_id,omitempty"`
 }
 
 // chatMessage represents a single message in the add request.

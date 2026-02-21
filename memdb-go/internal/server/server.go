@@ -80,9 +80,10 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	}
 	// Enable Memobase-style user profile summaries if both LLM and Redis are available.
 	// Profiler generates a paragraph profile from UserMemory nodes and caches it 1hr in Redis.
-	// TriggerRefresh is called fire-and-forget from add_fine after each add operation.
+	// TriggerRefresh is called fire-and-forget from add_fine and async worker after each add operation.
+	var profiler *scheduler.Profiler
 	if rd != nil && cfg.LLMProxyURL != "" {
-		profiler := scheduler.NewProfiler(pg, rd, cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel, logger)
+		profiler = scheduler.NewProfiler(pg, rd, cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel, logger)
 		searchSvc.Profiler = profiler
 		h.SetProfiler(profiler)
 		logger.Info("user profile summarizer initialized")
@@ -92,12 +93,14 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	// Configure LLM proxy (CLIProxyAPI)
 	handlers.SetLLMProxy(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel)
 
-	// Initialize LLM extractor for fine-mode native add (non-fatal if URL not set)
+	// Initialize LLM extractor for fine-mode native add (non-fatal if URL not set).
+	// Shared between HTTP handler (sync fine add) and scheduler worker (async mem_read).
+	var extractor *llm.LLMExtractor
 	if cfg.LLMProxyURL != "" {
 		// Prefer gemini-2.0-flash-lite for extraction (fast + cheap);
 		// falls back to configured default model if empty.
 		extractModel := cfg.LLMExtractModel
-		extractor := llm.NewLLMExtractor(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, extractModel)
+		extractor = llm.NewLLMExtractor(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, extractModel)
 		h.SetLLMExtractor(extractor)
 		logger.Info("llm extractor initialized",
 			slog.String("model", extractor.Model()),
@@ -116,6 +119,12 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 				cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMExtractModel,
 				logger,
 			)
+			if extractor != nil {
+				reorg.SetLLMExtractor(extractor)
+			}
+			if profiler != nil {
+				reorg.SetProfiler(profiler)
+			}
 			logger.Info("scheduler reorganizer initialized",
 				slog.String("model", cfg.LLMExtractModel),
 			)
@@ -240,4 +249,3 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 
 	return srv, cleanup
 }
-

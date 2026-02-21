@@ -47,15 +47,8 @@ func (r *Reorganizer) ProcessRawMemoryWithError(ctx context.Context, cubeID stri
 		return nil
 	}
 
-	nodes, err := r.postgres.GetMemoryByPropertyIDs(ctx, wmIDs, cubeID)
-	if err != nil {
-		return fmt.Errorf("mem_read: GetMemoryByPropertyIDs: %w", err)
-	}
-	if len(nodes) == 0 {
-		return nil
-	}
-
-	// Delegate per-node processing to the original (non-fatal) implementation.
+	// Delegate directly to ProcessRawMemory which handles all paths (fine + legacy).
+	// The fine path fetches full properties internally; no need to pre-check here.
 	r.ProcessRawMemory(ctx, cubeID, wmIDs)
 	return nil
 }

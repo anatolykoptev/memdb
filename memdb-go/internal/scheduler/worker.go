@@ -28,11 +28,12 @@ consumerName = "memdb_go_worker"
 readBatchSize = 10
 
 // blockDuration is how long XREADGROUP blocks waiting for new messages.
-// Kept short so scanInterval controls the effective poll rate.
-blockDuration = 2 * time.Second
+// Kept short so total scan cycle (N streams × blockDuration) stays under scanInterval.
+blockDuration = 100 * time.Millisecond
 
 // scanInterval is how often the worker re-scans Redis for new stream keys.
-scanInterval = 10 * time.Second
+// Kept short (2s) so async-submitted tasks are picked up quickly.
+scanInterval = 2 * time.Second
 
 // reclaimInterval is how often the worker checks for abandoned pending messages.
 reclaimInterval = 30 * time.Second

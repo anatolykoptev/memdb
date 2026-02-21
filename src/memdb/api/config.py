@@ -481,7 +481,9 @@ class APIConfig:
                 "config": {
                     "provider": provider,
                     "api_key": api_key,
-                    "model_name_or_path": os.getenv("MEMDB_EMBEDDER_MODEL", "text-embedding-3-large"),
+                    "model_name_or_path": os.getenv(
+                        "MEMDB_EMBEDDER_MODEL", "text-embedding-3-large"
+                    ),
                     "headers_extra": json.loads(os.getenv("MEMDB_EMBEDDER_HEADERS_EXTRA", "{}")),
                     "base_url": base_url,
                     "backup_client": os.getenv("MEMDB_EMBEDDER_BACKUP_CLIENT", "false").lower()
@@ -770,8 +772,17 @@ class APIConfig:
                     "MEMDB_SCHEDULER_ENABLE_ACTIVATION_MEMORY", "false"
                 ).lower()
                 == "true",
+                **APIConfig._scheduler_disabled_handlers(),
             },
         }
+
+    @staticmethod
+    def _scheduler_disabled_handlers() -> dict[str, Any]:
+        """Parse MEMDB_SCHEDULER_DISABLED_HANDLERS env var (comma-separated labels)."""
+        raw = os.getenv("MEMDB_SCHEDULER_DISABLED_HANDLERS", "")
+        if not raw.strip():
+            return {}
+        return {"disabled_handlers": [h.strip() for h in raw.split(",") if h.strip()]}
 
     @staticmethod
     def is_scheduler_enabled() -> bool:
