@@ -1,0 +1,90 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    # Complexity & size
+    - funlen
+    - gocognit
+    - cyclop
+    - nestif
+
+    # DRY
+    - dupl
+    - goconst
+
+    # Hardcode prevention
+    - mnd
+    - usestdlibvars
+
+    # Security
+    - gosec
+
+    # Code quality
+    - gocritic
+    - noctx
+    - bodyclose
+    - errorlint
+    - perfsprint
+
+  settings:
+    funlen:
+      lines: 100
+      statements: 60
+    gocognit:
+      min-complexity: 20
+    cyclop:
+      max-complexity: 15
+    nestif:
+      min-complexity: 5
+    dupl:
+      threshold: 150
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    mnd:
+      checks:
+        - argument
+        - case
+        - condition
+        - return
+      ignored-numbers:
+        - "0"
+        - "1"
+        - "2"
+        - "10"
+        - "100"
+        - "1000"
+      ignored-functions:
+        - "^math\\."
+        - "^time\\."
+        - "^strings\\.Repeat$"
+    gosec:
+      excludes:
+        - G104
+        - G304
+
+  exclusions:
+    presets:
+      - std-error-handling
+    paths:
+      # Generated code — never lint
+      - gen/
+    rules:
+      - path: _test\.go
+        linters:
+          - funlen
+          - mnd
+          - dupl
+          - gosec
+          - goconst
+          - gocognit
+          - cyclop
+      # CGO stubs
+      - path: onnx_stub\.go
+        linters:
+          - funlen
+          - gocognit
