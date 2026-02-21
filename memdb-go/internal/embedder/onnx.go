@@ -256,6 +256,12 @@ func (e *ONNXEmbedder) runInference(
 	return result, nil
 }
 
+// EmbedQuery embeds a single query string (search/retrieval use case).
+// Delegates to Embed — ONNX model handles query vs document identically.
+func (e *ONNXEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
+	return EmbedQueryViaEmbed(ctx, e, text)
+}
+
 // Dimension returns the embedding vector dimension (1024 for multilingual-e5-large).
 func (e *ONNXEmbedder) Dimension() int { return e.dim }
 

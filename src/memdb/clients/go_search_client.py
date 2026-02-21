@@ -38,11 +38,16 @@ class GoSearchClient:
             or os.getenv("MEMDB_GO_URL", DEFAULT_GO_URL)
         ).rstrip("/")
         self.timeout = timeout
+        headers: dict[str, str] = {}
+        service_secret = os.getenv("INTERNAL_SERVICE_SECRET", "")
+        if service_secret:
+            headers["X-Service-Secret"] = service_secret
         self._client = httpx.Client(
             base_url=self.base_url,
             timeout=httpx.Timeout(timeout),
+            headers=headers,
         )
-        logger.info("[GoSearchClient] initialized → %s (timeout=%ds)", self.base_url, timeout)
+        logger.info("[GoSearchClient] initialized → %s (timeout=%ds, auth=%s)", self.base_url, timeout, "yes" if service_secret else "no")
 
     # ------------------------------------------------------------------
     # Public API

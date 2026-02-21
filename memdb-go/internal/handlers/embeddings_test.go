@@ -19,6 +19,14 @@ func (m *mockEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 	return m.embedFn(ctx, texts)
 }
 
+func (m *mockEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
+	vecs, err := m.embedFn(ctx, []string{text})
+	if err != nil || len(vecs) == 0 {
+		return nil, err
+	}
+	return vecs[0], nil
+}
+
 func (m *mockEmbedder) Dimension() int {
 	if m.dim > 0 {
 		return m.dim

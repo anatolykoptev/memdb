@@ -20,5 +20,9 @@ func (e *ONNXEmbedder) Embed(_ context.Context, _ []string) ([][]float32, error)
 	return nil, fmt.Errorf("ONNX embedder not available: built without CGO")
 }
 
+func (e *ONNXEmbedder) EmbedQuery(_ context.Context, _ string) ([]float32, error) {
+	return nil, fmt.Errorf("ONNX embedder not available: built without CGO")
+}
+
 func (e *ONNXEmbedder) Dimension() int { return 0 }
 func (e *ONNXEmbedder) Close() error   { return nil }

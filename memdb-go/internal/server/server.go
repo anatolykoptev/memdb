@@ -8,17 +8,19 @@ import (
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/cache"
 	"github.com/MemDBai/MemDB/memdb-go/internal/config"
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
 	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
 	"github.com/MemDBai/MemDB/memdb-go/internal/handlers"
+	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
 	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
+	"github.com/MemDBai/MemDB/memdb-go/internal/scheduler"
 	"github.com/MemDBai/MemDB/memdb-go/internal/search"
 	mw "github.com/MemDBai/MemDB/memdb-go/internal/server/middleware"
 )
 
 // New creates a fully configured HTTP server and returns a cleanup function
 // that closes all database connections on shutdown.
-func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
+// ctx is used to control the lifetime of background workers (scheduler).
+func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	// Initialize cache client (non-fatal if unavailable)
 	var cacheClient *cache.Client
 	if cfg.CacheEnabled {
@@ -36,38 +38,98 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	h := handlers.NewHandler(pythonClient, logger)
 
 	// Initialize database clients for Phase 2 native handlers (non-fatal)
-	pg, qd := initDBClients(cfg, h, logger)
+	pg, qd, rd, wmCache := initDBClients(ctx, cfg, h, logger)
 
-	// Initialize embedder for native search (non-fatal)
+	// Initialize embedder via factory (non-fatal: server starts without embedder)
 	var emb embedder.Embedder
-	switch cfg.EmbedderType {
-	case "voyage":
-		if cfg.VoyageAPIKey != "" {
-			emb = embedder.NewVoyageClient(cfg.VoyageAPIKey, cfg.EmbedderModel, logger)
-			h.SetEmbedder(emb)
-			logger.Info("voyage embedder initialized", slog.String("model", cfg.EmbedderModel))
-		}
-	default: // "onnx"
-		if cfg.ONNXModelDir != "" {
-			onnxEmb, err := embedder.NewONNXEmbedder(cfg.ONNXModelDir, logger)
-			if err != nil {
-				logger.Error("onnx embedder init failed", slog.Any("error", err))
-			} else {
-				emb = onnxEmb
-				h.SetEmbedder(emb)
-				logger.Info("onnx embedder initialized",
-					slog.String("model_dir", cfg.ONNXModelDir),
-					slog.Int("dimension", onnxEmb.Dimension()))
-			}
-		}
+	embCfg := embedder.Config{
+		Type:         cfg.EmbedderType,
+		ONNXModelDir: cfg.ONNXModelDir,
+		VoyageAPIKey: cfg.VoyageAPIKey,
+		Model:        cfg.EmbedderModel,
+		OllamaURL:    cfg.OllamaURL,
+		OllamaDim:    cfg.OllamaDim,
+		OllamaPrefix: cfg.OllamaPrefix,
+		OllamaQuery:  cfg.OllamaQuery,
+	}
+	if e, err := embedder.New(embCfg, logger); err != nil {
+		logger.Warn("embedder init failed (native search disabled)", slog.Any("error", err))
+	} else {
+		emb = e
+		h.SetEmbedder(emb)
 	}
 
 	// Initialize unified search service
 	searchSvc := search.NewSearchService(pg, qd, emb, logger)
+	// Enable LLM reranker if CLIProxyAPI is configured (same endpoint as extractor)
+	if cfg.LLMProxyURL != "" {
+		searchSvc.LLMReranker = search.LLMRerankConfig{
+			APIURL: cfg.LLMProxyURL,
+			APIKey: cfg.LLMProxyAPIKey,
+			Model:  cfg.LLMDefaultModel,
+		}
+		// Enable iterative multi-stage retrieval (AdvancedSearcher port).
+		// NumStages=2 is fast mode (2 expansion rounds after first-pass recall).
+		// Per-request override available via SearchParams.NumStages.
+		searchSvc.Iterative = search.IterativeConfig{
+			APIURL:    cfg.LLMProxyURL,
+			APIKey:    cfg.LLMProxyAPIKey,
+			Model:     cfg.LLMDefaultModel,
+			NumStages: 2,
+		}
+	}
+	// Enable Memobase-style user profile summaries if both LLM and Redis are available.
+	// Profiler generates a paragraph profile from UserMemory nodes and caches it 1hr in Redis.
+	// TriggerRefresh is called fire-and-forget from add_fine after each add operation.
+	if rd != nil && cfg.LLMProxyURL != "" {
+		profiler := scheduler.NewProfiler(pg, rd, cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel, logger)
+		searchSvc.Profiler = profiler
+		h.SetProfiler(profiler)
+		logger.Info("user profile summarizer initialized")
+	}
 	h.SetSearchService(searchSvc)
 
 	// Configure LLM proxy (CLIProxyAPI)
 	handlers.SetLLMProxy(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel)
+
+	// Initialize LLM extractor for fine-mode native add (non-fatal if URL not set)
+	if cfg.LLMProxyURL != "" {
+		// Prefer gemini-2.0-flash-lite for extraction (fast + cheap);
+		// falls back to configured default model if empty.
+		extractModel := cfg.LLMExtractModel
+		extractor := llm.NewLLMExtractor(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, extractModel)
+		h.SetLLMExtractor(extractor)
+		logger.Info("llm extractor initialized",
+			slog.String("model", extractor.Model()),
+			slog.String("url", cfg.LLMProxyURL),
+		)
+	}
+
+	// Start scheduler Worker (after embedder is initialized).
+	// The Worker uses its own consumer group (memdb_go_scheduler), independent from
+	// Python's scheduler_group — both receive all messages in parallel via separate groups.
+	if rd != nil {
+		var reorg *scheduler.Reorganizer
+		if pg != nil && cfg.LLMProxyURL != "" {
+			reorg = scheduler.NewReorganizer(
+				pg, emb, wmCache,
+				cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMExtractModel,
+				logger,
+			)
+			logger.Info("scheduler reorganizer initialized",
+				slog.String("model", cfg.LLMExtractModel),
+			)
+		} else {
+			logger.Info("scheduler reorganizer disabled (postgres or LLM not configured)")
+		}
+		w := scheduler.NewWorker(rd.Client(), reorg, logger)
+		go w.Run(ctx)
+		logger.Info("scheduler worker started")
+		// Share the Worker's TaskStatusTracker with the HTTP handler so that
+		// /scheduler/wait and /scheduler/wait/stream read from memos:task_meta:{user_id}
+		// — the same Redis Hash written by the Worker and Python's dispatcher.
+		h.SetTaskTracker(scheduler.NewTaskStatusTracker(rd.Client()))
+	}
 
 	// Create router using Go 1.22+ stdlib ServeMux
 	mux := http.NewServeMux()
@@ -75,6 +137,9 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	// ─── Health endpoints (native Go, no proxy) ─────────────────────────
 	mux.HandleFunc("GET /health", h.Health)
 	mux.HandleFunc("GET /ready", h.ReadinessCheck)
+
+	// ─── OpenAPI spec + Swagger UI ───────────────────────────────────────
+	registerOpenAPIRoutes(mux)
 
 	// ─── OpenAI-compatible embeddings (internal, no auth) ────────────────
 	mux.HandleFunc("POST /v1/embeddings", h.OpenAIEmbeddings)
@@ -98,12 +163,12 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	mux.HandleFunc("POST /product/suggestions", h.ProxyToProduct)
 	mux.HandleFunc("GET /product/suggestions/{user_id}", h.ProxyToProduct)
 
-	// Scheduler
-	mux.HandleFunc("GET /product/scheduler/allstatus", h.ProxyToProduct)
-	mux.HandleFunc("GET /product/scheduler/status", h.ProxyToProduct)
-	mux.HandleFunc("GET /product/scheduler/task_queue_status", h.ProxyToProduct)
-	mux.HandleFunc("POST /product/scheduler/wait", h.ProxyToProduct)
-	mux.HandleFunc("GET /product/scheduler/wait/stream", h.ProxyToProduct)
+	// Scheduler — native Go (queries Redis Streams consumer group directly)
+	mux.HandleFunc("GET /product/scheduler/allstatus", h.NativeSchedulerAllStatus)
+	mux.HandleFunc("GET /product/scheduler/status", h.NativeSchedulerStatus)
+	mux.HandleFunc("GET /product/scheduler/task_queue_status", h.NativeSchedulerTaskQueueStatus)
+	mux.HandleFunc("POST /product/scheduler/wait", h.NativeSchedulerWait)
+	mux.HandleFunc("GET /product/scheduler/wait/stream", h.NativeSchedulerWaitStream)
 
 	// Memory (Server) — native with proxy fallback
 	mux.HandleFunc("POST /product/get_memory", h.NativePostGetMemory)
@@ -176,48 +241,3 @@ func New(cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
 	return srv, cleanup
 }
 
-// initDBClients connects to databases for native handlers.
-// All connections are optional — handlers fall back to proxy if nil.
-// Returns postgres and qdrant clients so the caller can pass them to SearchService.
-func initDBClients(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) (*db.Postgres, *db.Qdrant) {
-	ctx := context.Background()
-
-	var pg *db.Postgres
-	var qd *db.Qdrant
-	var rd *db.Redis
-
-	if cfg.PostgresURL != "" {
-		var err error
-		pg, err = db.NewPostgres(ctx, cfg.PostgresURL, logger)
-		if err != nil {
-			logger.Warn("postgres unavailable, native handlers will proxy", slog.Any("error", err))
-		}
-	}
-
-	if cfg.QdrantAddr != "" {
-		var err error
-		qd, err = db.NewQdrant(ctx, cfg.QdrantAddr, logger)
-		if err != nil {
-			logger.Warn("qdrant unavailable", slog.Any("error", err))
-		}
-	}
-
-	if cfg.DBRedisURL != "" {
-		var err error
-		rd, err = db.NewRedis(ctx, cfg.DBRedisURL, logger)
-		if err != nil {
-			logger.Warn("redis unavailable", slog.Any("error", err))
-		}
-	}
-
-	if pg != nil || qd != nil || rd != nil {
-		h.SetDBClients(pg, qd, rd)
-		logger.Info("native db clients initialized",
-			slog.Bool("postgres", pg != nil),
-			slog.Bool("qdrant", qd != nil),
-			slog.Bool("redis", rd != nil),
-		)
-	}
-
-	return pg, qd
-}

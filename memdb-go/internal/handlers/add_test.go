@@ -142,7 +142,7 @@ func TestBuildMemoryProperties_AllFieldsPresent(t *testing.T) {
 
 	props := buildMemoryProperties(
 		"test-uuid", "hello world", "LongTermMemory",
-		"memos", "session-1", "2026-02-16T10:00:00",
+		"memos", "", "session-1", "2026-02-16T10:00:00",
 		info, []string{"custom:tag"}, sources, "[working_binding:wm-uuid]",
 	)
 
@@ -201,7 +201,7 @@ func TestBuildMemoryProperties_SourcesSerialized(t *testing.T) {
 	}
 
 	props := buildMemoryProperties(
-		"id", "text", "LongTermMemory", "user", "", "now",
+		"id", "text", "LongTermMemory", "user", "", "", "now",
 		nil, nil, sources, "",
 	)
 
@@ -398,5 +398,8 @@ func (s *stubEmbedder) Embed(_ context.Context, texts []string) ([][]float32, er
 	}
 	return result, nil
 }
-func (s *stubEmbedder) Dimension() int    { return 1024 }
-func (s *stubEmbedder) Close() error      { return nil }
+func (s *stubEmbedder) EmbedQuery(_ context.Context, _ string) ([]float32, error) {
+	return make([]float32, 1024), nil
+}
+func (s *stubEmbedder) Dimension() int { return 1024 }
+func (s *stubEmbedder) Close() error   { return nil }

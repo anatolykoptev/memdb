@@ -65,13 +65,14 @@ func main() {
 		}
 	}
 
-	// Create HTTP server
-	srv, cleanup := server.New(cfg, logger)
-	defer cleanup()
-
-	// Graceful shutdown
+	// Graceful shutdown context — created before server.New() so background
+	// workers (scheduler) respect the same signal-driven cancellation.
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	// Create HTTP server
+	srv, cleanup := server.New(ctx, cfg, logger)
+	defer cleanup()
 
 	// Start server in goroutine
 	go func() {

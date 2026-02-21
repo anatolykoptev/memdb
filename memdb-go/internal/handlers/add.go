@@ -1,19 +1,23 @@
-// Package handlers — Phase 3: native fast-mode memory add.
-// mode="fast" is handled natively in Go; all other modes proxy to Python.
+// Package handlers — native memory add pipeline.
+//
+// File layout (Single Responsibility):
+//   add.go           — HTTP handler, validation, routing, shared helpers
+//   add_fast.go      — fast-mode pipeline (sliding-window → embed → dedup → insert)
+//   add_fine.go      — fine-mode pipeline (LLM extraction+dedup → embed → insert)
+//   add_windowing.go — sliding-window extraction of messages into text chunks
+//   add_props.go     — memory node property construction and source serialization
 package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
-
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
 )
 
 // --- Constants ---
@@ -32,14 +36,6 @@ const (
 	// maxCubeIDs is the upper bound on writable_cube_ids per add request.
 	maxCubeIDs = 20
 )
-
-// --- Extracted memory from windowing ---
-
-type extractedMemory struct {
-	Text       string
-	Sources    []map[string]any
-	MemoryType string // "LongTermMemory" or "UserMemory"
-}
 
 // --- Response types (Python-compatible) ---
 
@@ -156,10 +152,6 @@ func (h *Handler) canHandleNativeAdd(req *fullAddRequest) bool {
 	if h.postgres == nil || h.embedder == nil {
 		return false
 	}
-	// Only handle fast mode (nil defaults to fast)
-	if req.Mode != nil && *req.Mode != "fast" {
-		return false
-	}
 	// Don't handle async
 	if req.AsyncMode != nil && *req.AsyncMode == "async" {
 		return false
@@ -168,6 +160,11 @@ func (h *Handler) canHandleNativeAdd(req *fullAddRequest) bool {
 	if req.IsFeedback != nil && *req.IsFeedback {
 		return false
 	}
+	// mode=fine requires llmExtractor
+	if req.Mode != nil && *req.Mode == "fine" {
+		return h.llmExtractor != nil
+	}
+	// mode=fast (or nil) is always native
 	return true
 }
 
@@ -179,8 +176,8 @@ func (h *Handler) proxyReason(req *fullAddRequest) string {
 	if h.embedder == nil {
 		return "embedder nil"
 	}
-	if req.Mode != nil && *req.Mode != "fast" {
-		return "mode=" + *req.Mode
+	if req.Mode != nil && *req.Mode == "fine" && h.llmExtractor == nil {
+		return "mode=fine but llm extractor not configured"
 	}
 	if req.AsyncMode != nil && *req.AsyncMode == "async" {
 		return "async"
@@ -191,265 +188,129 @@ func (h *Handler) proxyReason(req *fullAddRequest) string {
 	return "unknown"
 }
 
-// nativeAddForCube processes fast-mode add for a single cube/user.
+// nativeAddForCube dispatches to fast or fine pipeline based on mode.
 func (h *Handler) nativeAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
-	memories := extractFastMemories(req.Messages)
-	if len(memories) == 0 {
-		return nil, nil
+	if req.Mode != nil && *req.Mode == "fine" {
+		return h.nativeFineAddForCube(ctx, req, cubeID)
 	}
+	return h.nativeFastAddForCube(ctx, req, cubeID)
+}
 
-	now := time.Now().UTC().Format("2006-01-02T15:04:05.000000")
-	sessionID := ""
-	if req.SessionID != nil {
-		sessionID = *req.SessionID
+// --- Shared helpers used by add_fast.go and add_fine.go ---
+
+// nowTimestamp returns the current UTC time in the Python-compatible format.
+func nowTimestamp() string {
+	return time.Now().UTC().Format("2006-01-02T15:04:05.000000")
+}
+
+// nowUnix returns the current Unix timestamp in seconds.
+func nowUnix() int64 {
+	return time.Now().Unix()
+}
+
+// stringOrEmpty dereferences a *string, returning "" if nil.
+func stringOrEmpty(s *string) string {
+	if s == nil {
+		return ""
 	}
-	info := req.Info
-	if info == nil {
-		info = map[string]any{}
+	return *s
+}
+
+// mapOrEmpty returns m if non-nil, otherwise an empty map.
+func mapOrEmpty(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
 	}
+	return m
+}
 
-	var allNodes []db.MemoryInsertNode
-	var items []addResponseItem
+// marshalProps marshals a properties map to JSON bytes for DB insertion.
+func marshalProps(props map[string]any) ([]byte, error) {
+	return json.Marshal(props)
+}
 
-	for _, mem := range memories {
-		// Content hash dedup (if client provided content_hash)
-		if contentHash, ok := info["content_hash"].(string); ok && contentHash != "" {
-			exists, err := h.postgres.CheckContentHashExists(ctx, contentHash, cubeID)
-			if err != nil {
-				h.logger.Debug("content hash check failed", slog.Any("error", err))
+// workingBinding returns the background field value linking an LTM node to its WM node.
+func workingBinding(wmID string) string {
+	return fmt.Sprintf("[working_binding:%s]", wmID)
+}
+
+// textHash computes a 16-byte SHA-256 content hash of the normalized text.
+// Used for exact-duplicate detection before insert (mirrors redis/agent-memory-server approach).
+// Normalization: lowercase + trim whitespace — avoids false negatives from capitalization.
+func textHash(text string) string {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	h := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(h[:16])
+}
+
+// cleanupWorkingMemory removes old WorkingMemory nodes beyond the cube's configured limit.
+// When VSET cache is active, also evicts deleted nodes from Redis VSET in a pipeline.
+// Non-fatal: logs on error.
+func (h *Handler) cleanupWorkingMemory(ctx context.Context, cubeID string) {
+	limit := h.getWorkingMemoryLimit(ctx, cubeID)
+	if h.wmCache != nil {
+		// Use RETURNING variant to get deleted IDs for VSET eviction.
+		deletedIDs, err := h.postgres.CleanupWorkingMemoryWithIDs(ctx, cubeID, limit)
+		if err != nil {
+			h.logger.Debug("working memory cleanup failed",
+				slog.String("cube_id", cubeID), slog.Any("error", err))
+			return
+		}
+		if len(deletedIDs) > 0 {
+			h.logger.Debug("cleaned up old working memory",
+				slog.Int("deleted", len(deletedIDs)), slog.String("cube_id", cubeID))
+			if err := h.wmCache.VRemBatch(ctx, cubeID, deletedIDs); err != nil {
+				h.logger.Debug("vset evict batch failed",
+					slog.String("cube_id", cubeID), slog.Any("error", err))
 			}
-			if exists {
-				h.logger.Debug("skipping duplicate by content_hash",
-					slog.String("hash", contentHash),
-				)
-				continue
-			}
 		}
-
-		// Generate embedding
-		embeddings, err := h.embedder.Embed(ctx, []string{mem.Text})
-		if err != nil {
-			return nil, fmt.Errorf("embed: %w", err)
-		}
-		if len(embeddings) == 0 || len(embeddings[0]) == 0 {
-			return nil, fmt.Errorf("embedder returned empty result")
-		}
-		embedding := embeddings[0]
-		embeddingStr := db.FormatVector(embedding)
-
-		// Cosine similarity dedup: search for similar existing memories
-		searchTypes := []string{"LongTermMemory", "UserMemory", "WorkingMemory"}
-		results, err := h.postgres.VectorSearch(ctx, embedding, cubeID, searchTypes, 1)
-		if err != nil {
-			h.logger.Debug("dedup vector search failed", slog.Any("error", err))
-			// Non-fatal: proceed without dedup
-		} else if len(results) > 0 && results[0].Score >= dedupThreshold {
-			h.logger.Debug("skipping duplicate by cosine similarity",
-				slog.Float64("score", results[0].Score),
-			)
-			continue
-		}
-
-		// Build WorkingMemory node
-		wmID := uuid.New().String()
-		wmProps := buildMemoryProperties(wmID, mem.Text, "WorkingMemory", cubeID, sessionID, now, info, req.CustomTags, mem.Sources, "")
-		wmJSON, err := json.Marshal(wmProps)
-		if err != nil {
-			return nil, fmt.Errorf("marshal wm properties: %w", err)
-		}
-
-		// Build LongTermMemory/UserMemory node
-		ltID := uuid.New().String()
-		background := fmt.Sprintf("[working_binding:%s]", wmID)
-		ltProps := buildMemoryProperties(ltID, mem.Text, mem.MemoryType, cubeID, sessionID, now, info, req.CustomTags, mem.Sources, background)
-		ltJSON, err := json.Marshal(ltProps)
-		if err != nil {
-			return nil, fmt.Errorf("marshal lt properties: %w", err)
-		}
-
-		allNodes = append(allNodes,
-			db.MemoryInsertNode{ID: wmID, PropertiesJSON: wmJSON, EmbeddingVec: embeddingStr},
-			db.MemoryInsertNode{ID: ltID, PropertiesJSON: ltJSON, EmbeddingVec: embeddingStr},
-		)
-
-		items = append(items, addResponseItem{
-			Memory:     mem.Text,
-			MemoryID:   ltID,
-			MemoryType: mem.MemoryType,
-			CubeID:     cubeID,
-		})
+		return
 	}
-
-	if len(allNodes) == 0 {
-		return items, nil
-	}
-
-	// Batch insert all nodes
-	if err := h.postgres.InsertMemoryNodes(ctx, allNodes); err != nil {
-		return nil, fmt.Errorf("insert nodes: %w", err)
-	}
-
-	// Cleanup old WorkingMemory beyond limit
-	deleted, err := h.postgres.CleanupWorkingMemory(ctx, cubeID, maxWorkingMemory)
+	// Fallback: no VSET, just delete from postgres.
+	deleted, err := h.postgres.CleanupWorkingMemory(ctx, cubeID, limit)
 	if err != nil {
-		h.logger.Debug("working memory cleanup failed", slog.Any("error", err))
+		h.logger.Debug("working memory cleanup failed",
+			slog.String("cube_id", cubeID), slog.Any("error", err))
 	} else if deleted > 0 {
 		h.logger.Debug("cleaned up old working memory",
-			slog.Int64("deleted", deleted),
-			slog.String("cube_id", cubeID),
-		)
+			slog.Int64("deleted", deleted), slog.String("cube_id", cubeID))
 	}
-
-	return items, nil
 }
 
-// --- Content extraction (sliding window) ---
-
-// extractFastMemories splits messages into sliding windows of ~1024 tokens.
-// Each window becomes one memory. User-only windows → UserMemory, mixed → LongTermMemory.
-func extractFastMemories(messages []chatMessage) []extractedMemory {
-	if len(messages) == 0 {
-		return nil
+// getWorkingMemoryLimit returns the per-cube WorkingMemory limit from configuration,
+// or defaults to maxWorkingMemory if not set or on error.
+func (h *Handler) getWorkingMemoryLimit(ctx context.Context, cubeID string) int {
+	if h.postgres == nil {
+		return maxWorkingMemory
 	}
 
-	// Format all messages into a single text block with per-message sources
-	type formattedMsg struct {
-		text   string
-		role   string
-		source map[string]any
+	cacheKey := cachePrefix + "config:" + cubeID
+	var config map[string]any
+
+	// 1. Try cache
+	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
+		if err := json.Unmarshal(cached, &config); err != nil {
+			return maxWorkingMemory
+		}
+	} else {
+		// 2. Fetch from DB
+		var err error
+		config, err = h.postgres.GetUserConfig(ctx, cubeID)
+		if err != nil || config == nil {
+			config = map[string]any{}
+		}
+		// Save back to cache
+		if encoded, err := json.Marshal(config); err == nil {
+			h.cacheSet(ctx, cacheKey, encoded, 5*time.Minute)
+		}
 	}
 
-	var formatted []formattedMsg
-	for _, msg := range messages {
-		chatTime := msg.ChatTime
-		if chatTime == "" {
-			chatTime = time.Now().UTC().Format("2006-01-02T15:04:05")
+	// 3. Extract memory_limits.WorkingMemory
+	if limits, ok := config["memory_limits"].(map[string]any); ok {
+		if wmLimit, ok := limits["WorkingMemory"].(float64); ok {
+			return int(wmLimit)
 		}
-		text := fmt.Sprintf("%s: [%s]: %s", msg.Role, chatTime, msg.Content)
-		source := map[string]any{
-			"role":      msg.Role,
-			"content":   msg.Content,
-			"chat_time": chatTime,
-		}
-		formatted = append(formatted, formattedMsg{text: text, role: msg.Role, source: source})
 	}
 
-	// Sliding window over formatted messages
-	var results []extractedMemory
-	start := 0
-
-	for start < len(formatted) {
-		var windowText strings.Builder
-		var windowSources []map[string]any
-		userOnly := true
-		end := start
-
-		for end < len(formatted) {
-			line := formatted[end].text + "\n"
-			if windowText.Len()+len(line) > windowChars && windowText.Len() > 0 {
-				break
-			}
-			windowText.WriteString(line)
-			windowSources = append(windowSources, formatted[end].source)
-			if formatted[end].role != "user" {
-				userOnly = false
-			}
-			end++
-		}
-
-		if windowText.Len() == 0 {
-			break
-		}
-
-		memType := "LongTermMemory"
-		if userOnly {
-			memType = "UserMemory"
-		}
-
-		results = append(results, extractedMemory{
-			Text:       strings.TrimSpace(windowText.String()),
-			Sources:    windowSources,
-			MemoryType: memType,
-		})
-
-		// Advance with overlap: move start forward so we lose ~(windowChars - overlapChars) chars
-		if end >= len(formatted) {
-			break
-		}
-
-		// Move start forward to create overlap
-		overlapTarget := windowText.Len() - overlapChars
-		charCount := 0
-		newStart := start
-		for newStart < end {
-			lineLen := len(formatted[newStart].text) + 1 // +1 for \n
-			charCount += lineLen
-			newStart++
-			if charCount >= overlapTarget {
-				break
-			}
-		}
-		if newStart == start {
-			newStart = start + 1 // ensure forward progress
-		}
-		start = newStart
-	}
-
-	return results
+	return maxWorkingMemory
 }
-
-// --- Properties construction ---
-
-// buildMemoryProperties constructs the JSONB properties dict matching the Python format.
-func buildMemoryProperties(
-	id, memory, memoryType, userName, sessionID, timestamp string,
-	info map[string]any, customTags []string,
-	sources []map[string]any, background string,
-) map[string]any {
-	tags := []string{"mode:fast"}
-	tags = append(tags, customTags...)
-
-	graphID := uuid.New().String()
-
-	props := map[string]any{
-		"id":               id,
-		"memory":           memory,
-		"memory_type":      memoryType,
-		"status":           "activated",
-		"user_name":        userName,
-		"user_id":          userName,
-		"session_id":       sessionID,
-		"created_at":       timestamp,
-		"updated_at":       timestamp,
-		"delete_time":      "",
-		"delete_record_id": "",
-		"tags":             tags,
-		"key":              "",
-		"usage":            []string{},
-		"sources":          serializeSources(sources),
-		"background":       background,
-		"confidence":       0.99,
-		"type":             "fact",
-		"info":             info,
-		"graph_id":         graphID,
-	}
-	return props
-}
-
-// serializeSources converts each source map to a JSON string, matching Python's format
-// where each element in the sources array is a JSON-serialized string.
-func serializeSources(sources []map[string]any) []string {
-	if len(sources) == 0 {
-		return []string{}
-	}
-	result := make([]string, 0, len(sources))
-	for _, src := range sources {
-		b, err := json.Marshal(src)
-		if err != nil {
-			continue
-		}
-		result = append(result, string(b))
-	}
-	return result
-}
-
