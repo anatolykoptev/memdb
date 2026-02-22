@@ -19,7 +19,7 @@ func TestProcessLLM_CanAnswer(t *testing.T) {
 				},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
 
@@ -47,7 +47,7 @@ func TestProcessLLM_NeedMore(t *testing.T) {
 				},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
 
@@ -67,7 +67,7 @@ func TestProcessLLM_NeedMore(t *testing.T) {
 func TestProcessLLM_Fallback(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// return bad json to force fallback
-		w.Write([]byte(`{ bad }`))
+		_, _ = w.Write([]byte(`{ bad }`))
 	}))
 	defer ts.Close()
 

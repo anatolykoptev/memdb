@@ -8,19 +8,28 @@
 package search
 
 import (
-"math"
-"sort"
-"strings"
+	"math"
+	"sort"
+	"strings"
+)
+
+const (
+	memTypePreference = "preference"
+	memTypeText       = "text"
+
+	// mmrInitialBucketCap is the initial capacity for per-bucket index maps in MMR state.
+	// 8 buckets covers typical cube counts without reallocation in most cases.
+	mmrInitialBucketCap = 8
 )
 
 // SearchItem represents a single memory search result for deduplication.
 type SearchItem struct {
-Memory     string         // memory text
-Score      float64        // relativity score
-MemType    string         // "text" or "preference"
-BucketIdx  int            // index in text_mem or pref_mem buckets
-Embedding  []float32      // embedding vector
-Properties map[string]any // full memory properties dict for response building
+	Memory     string         // memory text
+	Score      float64        // relativity score
+	MemType    string         // "text" or "preference"
+	BucketIdx  int            // index in text_mem or pref_mem buckets
+	Embedding  []float32      // embedding vector
+	Properties map[string]any // full memory properties dict for response building
 }
 
 // DedupSim performs similarity-based deduplication.
@@ -28,44 +37,44 @@ Properties map[string]any // full memory properties dict for response building
 // 0.92 cosine similarity with all already-selected items.
 // Returns up to targetK items.
 func DedupSim(items []SearchItem, targetK int) []SearchItem {
-if len(items) <= 1 {
-return items
-}
+	if len(items) <= 1 {
+		return items
+	}
 
-// Sort by score descending
-sorted := make([]SearchItem, len(items))
-copy(sorted, items)
-sort.SliceStable(sorted, func(i, j int) bool {
-return sorted[i].Score > sorted[j].Score
-})
+	// Sort by score descending
+	sorted := make([]SearchItem, len(items))
+	copy(sorted, items)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Score > sorted[j].Score
+	})
 
-// Compute similarity matrix
-simMatrix := CosineSimilarityMatrix(sorted)
+	// Compute similarity matrix
+	simMatrix := CosineSimilarityMatrix(sorted)
 
-const threshold float32 = 0.92
+	const threshold float32 = 0.92
 
-selected := make([]int, 0, targetK)
-for i := range sorted {
-if len(selected) >= targetK {
-break
-}
-unrelated := true
-for _, j := range selected {
-if simMatrix[i][j] > threshold {
-unrelated = false
-break
-}
-}
-if unrelated {
-selected = append(selected, i)
-}
-}
+	selected := make([]int, 0, targetK)
+	for i := range sorted {
+		if len(selected) >= targetK {
+			break
+		}
+		unrelated := true
+		for _, j := range selected {
+			if simMatrix[i][j] > threshold {
+				unrelated = false
+				break
+			}
+		}
+		if unrelated {
+			selected = append(selected, i)
+		}
+	}
 
-result := make([]SearchItem, len(selected))
-for i, idx := range selected {
-result[i] = sorted[idx]
-}
-return result
+	result := make([]SearchItem, len(selected))
+	for i, idx := range selected {
+		result[i] = sorted[idx]
+	}
+	return result
 }
 
 // DedupMMR performs MMR-based deduplication.
@@ -80,268 +89,316 @@ return result
 //
 // Returns separate text and preference item lists.
 func DedupMMR(items []SearchItem, textTopK, prefTopK int, queryVec []float32, lambda float64) (textItems, prefItems []SearchItem) {
-if len(items) <= 1 {
-if len(items) == 1 {
-if items[0].MemType == "preference" {
-return nil, items
-}
-return items, nil
-}
-return nil, nil
+	if len(items) == 0 {
+		return nil, nil
+	}
+	if len(items) == 1 {
+		if items[0].MemType == memTypePreference {
+			return nil, items
+		}
+		return items, nil
+	}
+
+	st := newMMRState(items, textTopK, prefTopK, queryVec, lambda)
+	st.phase1Prefill()
+	st.phase2MMR()
+	return st.phase3Collect()
 }
 
-// Precompute query cosine similarity for all items.
-// This is the relevance term in the MMR formula: sim(item, query).
-// Normalized to [0,1] to match the diversity term from simMatrix.
-querySimCache := make([]float64, len(items))
-for i, item := range items {
-if len(item.Embedding) > 0 && len(queryVec) > 0 {
-raw := CosineSimilarity(queryVec, item.Embedding)
-querySimCache[i] = (float64(raw) + 1.0) / 2.0
-} else {
-querySimCache[i] = item.Score // fallback: no embedding available
-}
+// --- MMR state and phases ---
+
+// mmrState holds all mutable state for the MMR algorithm, avoiding long parameter lists.
+type mmrState struct {
+	items     []SearchItem
+	textTopK  int
+	prefTopK  int
+	lambda    float64
+	simMatrix [][]float32
+	// relevance score cache: cosine(item, query), normalized to [0,1]
+	querySimCache []float64
+
+	// bucket indices: item position → bucket capacity
+	textBucketIndices map[int][]int
+	prefBucketIndices map[int][]int
+
+	// selection tracking
+	selectedGlobal       []int
+	textSelectedByBucket map[int][]int
+	prefSelectedByBucket map[int][]int
+	selectedTexts        map[string]struct{}
 }
 
-// Compute similarity matrix
-simMatrix := CosineSimilarityMatrix(items)
+// newMMRState precomputes all data structures required for the MMR phases.
+func newMMRState(items []SearchItem, textTopK, prefTopK int, queryVec []float32, lambda float64) *mmrState {
+	st := &mmrState{
+		items:                items,
+		textTopK:             textTopK,
+		prefTopK:             prefTopK,
+		lambda:               lambda,
+		simMatrix:            CosineSimilarityMatrix(items),
+		querySimCache:        make([]float64, len(items)),
+		textBucketIndices:    make(map[int][]int, mmrInitialBucketCap),
+		prefBucketIndices:    make(map[int][]int, mmrInitialBucketCap),
+		selectedGlobal:       make([]int, 0, textTopK+prefTopK),
+		textSelectedByBucket: make(map[int][]int, mmrInitialBucketCap),
+		prefSelectedByBucket: make(map[int][]int, mmrInitialBucketCap),
+		selectedTexts:        make(map[string]struct{}, textTopK+prefTopK),
+	}
 
-// Track per-bucket selections
-type bucketKey struct {
-memType   string
-bucketIdx int
-}
+	// Precompute relevance scores.
+	for i, item := range items {
+		if len(item.Embedding) > 0 && len(queryVec) > 0 {
+			raw := CosineSimilarity(queryVec, item.Embedding)
+			st.querySimCache[i] = (float64(raw) + 1.0) / 2.0
+		} else {
+			st.querySimCache[i] = item.Score
+		}
+	}
 
-// Indices of items per bucket for capacity checking
-textBucketIndices := map[int][]int{}
-prefBucketIndices := map[int][]int{}
-for i, item := range items {
-if item.MemType == "text" {
-textBucketIndices[item.BucketIdx] = append(textBucketIndices[item.BucketIdx], i)
-} else if item.MemType == "preference" {
-prefBucketIndices[item.BucketIdx] = append(prefBucketIndices[item.BucketIdx], i)
-}
-}
+	// Index items into type buckets.
+	for i, item := range items {
+		switch item.MemType {
+		case memTypeText:
+			st.textBucketIndices[item.BucketIdx] = append(st.textBucketIndices[item.BucketIdx], i)
+		case memTypePreference:
+			st.prefBucketIndices[item.BucketIdx] = append(st.prefBucketIndices[item.BucketIdx], i)
+		}
+	}
 
-selectedGlobal := make([]int, 0, textTopK+prefTopK)
-textSelectedByBucket := map[int][]int{}
-prefSelectedByBucket := map[int][]int{}
-selectedTexts := map[string]struct{}{}
-
-// Phase 1: Prefill top N by relevance
-prefillTopN := 2
-if prefTopK < prefillTopN {
-prefillTopN = prefTopK
-}
-if textTopK < prefillTopN {
-prefillTopN = textTopK
-}
-if len(prefBucketIndices) == 0 {
-// No preference memories, just use textTopK
-prefillTopN = 2
-if textTopK < prefillTopN {
-prefillTopN = textTopK
-}
-}
-
-// Order all items by query cosine similarity descending (same metric as Phase 2).
-// Previously used item.Score (mixed vector+fulltext); querySimCache is pure cosine(item,query).
-orderedByRelevance := make([]int, len(items))
-for i := range orderedByRelevance {
-orderedByRelevance[i] = i
-}
-sort.SliceStable(orderedByRelevance, func(i, j int) bool {
-return querySimCache[orderedByRelevance[i]] > querySimCache[orderedByRelevance[j]]
-})
-
-for _, idx := range orderedByRelevance {
-if len(selectedGlobal) >= prefillTopN {
-break
-}
-item := items[idx]
-memText := strings.TrimSpace(item.Memory)
-
-// Skip exact text duplicates
-if _, exists := selectedTexts[memText]; exists {
-continue
+	return st
 }
 
-// Skip if text-highly-similar to already selected
-if isTextHighlySimilar(idx, memText, selectedGlobal, simMatrix, items) {
-continue
+// phase1Prefill selects the top prefillTopN items by relevance, skipping exact and
+// near-duplicate texts. Fills selectedGlobal, *SelectedByBucket, and selectedTexts.
+func (st *mmrState) phase1Prefill() {
+	prefillTopN := st.computePrefillN()
+
+	orderedByRelevance := st.itemsOrderedByRelevance()
+	for _, idx := range orderedByRelevance {
+		if len(st.selectedGlobal) >= prefillTopN {
+			break
+		}
+		item := st.items[idx]
+		memText := strings.TrimSpace(item.Memory)
+
+		if _, exists := st.selectedTexts[memText]; exists {
+			continue
+		}
+		if isTextHighlySimilar(idx, memText, st.selectedGlobal, st.simMatrix, st.items) {
+			continue
+		}
+		st.trySelectItem(idx, memText)
+	}
 }
 
-// Check bucket capacity
-if item.MemType == "text" {
-if len(textSelectedByBucket[item.BucketIdx]) < textTopK {
-selectedGlobal = append(selectedGlobal, idx)
-textSelectedByBucket[item.BucketIdx] = append(textSelectedByBucket[item.BucketIdx], idx)
-selectedTexts[memText] = struct{}{}
-}
-} else if item.MemType == "preference" {
-if len(prefSelectedByBucket[item.BucketIdx]) < prefTopK {
-selectedGlobal = append(selectedGlobal, idx)
-prefSelectedByBucket[item.BucketIdx] = append(prefSelectedByBucket[item.BucketIdx], idx)
-selectedTexts[memText] = struct{}{}
-}
-}
-}
-
-// Phase 2: MMR selection for remaining slots
-lambdaRelevance := lambda
-const similarityThreshold float32 = 0.9
-alphaExponential := DefaultMMRAlpha
-
-remaining := map[int]struct{}{}
-selectedSet := map[int]struct{}{}
-for _, idx := range selectedGlobal {
-selectedSet[idx] = struct{}{}
-}
-for i := range items {
-if _, selected := selectedSet[i]; !selected {
-remaining[i] = struct{}{}
-}
+// computePrefillN returns the target prefill count for phase 1.
+func (st *mmrState) computePrefillN() int {
+	prefillTopN := 2
+	if st.prefTopK < prefillTopN {
+		prefillTopN = st.prefTopK
+	}
+	if st.textTopK < prefillTopN {
+		prefillTopN = st.textTopK
+	}
+	if len(st.prefBucketIndices) == 0 {
+		prefillTopN = 2
+		if st.textTopK < prefillTopN {
+			prefillTopN = st.textTopK
+		}
+	}
+	return prefillTopN
 }
 
-for len(remaining) > 0 {
-bestIdx := -1
-bestMMR := math.Inf(-1)
-
-for idx := range remaining {
-item := items[idx]
-
-// Check bucket capacity
-if item.MemType == "text" && len(textSelectedByBucket[item.BucketIdx]) >= textTopK {
-continue
-}
-if item.MemType == "preference" && len(prefSelectedByBucket[item.BucketIdx]) >= prefTopK {
-continue
+// itemsOrderedByRelevance returns item indices sorted by querySimCache descending.
+func (st *mmrState) itemsOrderedByRelevance() []int {
+	order := make([]int, len(st.items))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		return st.querySimCache[order[i]] > st.querySimCache[order[j]]
+	})
+	return order
 }
 
-// Skip exact text duplicates
-memText := strings.TrimSpace(item.Memory)
-if _, exists := selectedTexts[memText]; exists {
-continue
+// trySelectItem adds idx to the selection if its bucket has capacity.
+func (st *mmrState) trySelectItem(idx int, memText string) {
+	item := st.items[idx]
+	switch item.MemType {
+	case memTypeText:
+		if len(st.textSelectedByBucket[item.BucketIdx]) < st.textTopK {
+			st.selectedGlobal = append(st.selectedGlobal, idx)
+			st.textSelectedByBucket[item.BucketIdx] = append(st.textSelectedByBucket[item.BucketIdx], idx)
+			st.selectedTexts[memText] = struct{}{}
+		}
+	case memTypePreference:
+		if len(st.prefSelectedByBucket[item.BucketIdx]) < st.prefTopK {
+			st.selectedGlobal = append(st.selectedGlobal, idx)
+			st.prefSelectedByBucket[item.BucketIdx] = append(st.prefSelectedByBucket[item.BucketIdx], idx)
+			st.selectedTexts[memText] = struct{}{}
+		}
+	}
 }
 
-// Skip text-highly-similar
-if isTextHighlySimilar(idx, memText, selectedGlobal, simMatrix, items) {
-continue
+// phase2MMR runs the MMR greedy selection loop until all buckets are full.
+func (st *mmrState) phase2MMR() {
+	const similarityThreshold float32 = 0.9
+
+	remaining := st.buildRemainingSet()
+	for len(remaining) > 0 {
+		bestIdx := st.pickBestMMR(remaining, similarityThreshold)
+		if bestIdx == -1 {
+			break
+		}
+		st.commitSelection(bestIdx)
+		delete(remaining, bestIdx)
+
+		if st.allBucketsFull() {
+			break
+		}
+	}
 }
 
-// Real MMR: relevance = cosine(item, query) — same metric as diversity.
-relevance := querySimCache[idx]
-
-// Compute max similarity to already selected items
-var maxSim float32
-for _, j := range selectedGlobal {
-if simMatrix[idx][j] > maxSim {
-maxSim = simMatrix[idx][j]
-}
-}
-
-// Exponential penalty for similarity above threshold
-var diversity float64
-if maxSim > similarityThreshold {
-penaltyMultiplier := math.Exp(alphaExponential * float64(maxSim-similarityThreshold))
-diversity = float64(maxSim) * penaltyMultiplier
-} else {
-diversity = float64(maxSim)
+// buildRemainingSet returns a set of item indices not yet selected.
+func (st *mmrState) buildRemainingSet() map[int]struct{} {
+	selectedSet := make(map[int]struct{}, len(st.selectedGlobal))
+	for _, idx := range st.selectedGlobal {
+		selectedSet[idx] = struct{}{}
+	}
+	remaining := make(map[int]struct{}, len(st.items)-len(st.selectedGlobal))
+	for i := range st.items {
+		if _, selected := selectedSet[i]; !selected {
+			remaining[i] = struct{}{}
+		}
+	}
+	return remaining
 }
 
-mmrScore := lambdaRelevance*relevance - (1.0-lambdaRelevance)*diversity
+// pickBestMMR finds the candidate with the highest MMR score among remaining items.
+func (st *mmrState) pickBestMMR(remaining map[int]struct{}, similarityThreshold float32) int {
+	bestIdx := -1
+	bestMMR := math.Inf(-1)
 
-if mmrScore > bestMMR {
-bestMMR = mmrScore
-bestIdx = idx
-}
-}
+	for idx := range remaining {
+		item := st.items[idx]
+		if st.isBucketFull(item) {
+			continue
+		}
+		memText := strings.TrimSpace(item.Memory)
+		if _, exists := st.selectedTexts[memText]; exists {
+			continue
+		}
+		if isTextHighlySimilar(idx, memText, st.selectedGlobal, st.simMatrix, st.items) {
+			continue
+		}
 
-if bestIdx == -1 {
-break
-}
-
-item := items[bestIdx]
-memText := strings.TrimSpace(item.Memory)
-selectedGlobal = append(selectedGlobal, bestIdx)
-selectedTexts[memText] = struct{}{}
-
-if item.MemType == "text" {
-textSelectedByBucket[item.BucketIdx] = append(textSelectedByBucket[item.BucketIdx], bestIdx)
-} else if item.MemType == "preference" {
-prefSelectedByBucket[item.BucketIdx] = append(prefSelectedByBucket[item.BucketIdx], bestIdx)
-}
-
-delete(remaining, bestIdx)
-
-// Early termination: all buckets full
-textAllFull := true
-for bIdx, indices := range textBucketIndices {
-limit := textTopK
-if len(indices) < limit {
-limit = len(indices)
-}
-if len(textSelectedByBucket[bIdx]) < limit {
-textAllFull = false
-break
-}
-}
-prefAllFull := true
-for bIdx, indices := range prefBucketIndices {
-limit := prefTopK
-if len(indices) < limit {
-limit = len(indices)
-}
-if len(prefSelectedByBucket[bIdx]) < limit {
-prefAllFull = false
-break
-}
-}
-if textAllFull && prefAllFull {
-break
-}
+		mmrScore := st.computeMMRScore(idx, similarityThreshold)
+		if mmrScore > bestMMR {
+			bestMMR = mmrScore
+			bestIdx = idx
+		}
+	}
+	return bestIdx
 }
 
-// Phase 3: Re-sort selected items by original relevance score, then split by type
-// Collect text items sorted by relevance per bucket
-for bIdx, indices := range textSelectedByBucket {
-sort.SliceStable(indices, func(i, j int) bool {
-return items[indices[i]].Score > items[indices[j]].Score
-})
-textSelectedByBucket[bIdx] = indices
-}
-for bIdx, indices := range prefSelectedByBucket {
-sort.SliceStable(indices, func(i, j int) bool {
-return items[indices[i]].Score > items[indices[j]].Score
-})
-prefSelectedByBucket[bIdx] = indices
+// isBucketFull returns true if the item's bucket has reached its capacity.
+func (st *mmrState) isBucketFull(item SearchItem) bool {
+	switch item.MemType {
+	case memTypeText:
+		return len(st.textSelectedByBucket[item.BucketIdx]) >= st.textTopK
+	case memTypePreference:
+		return len(st.prefSelectedByBucket[item.BucketIdx]) >= st.prefTopK
+	}
+	return false
 }
 
-// Flatten bucket selections into output slices, preserving bucket order
-textItems = make([]SearchItem, 0)
-// Collect all text bucket indices and sort them for deterministic output
-textBucketKeys := make([]int, 0, len(textSelectedByBucket))
-for k := range textSelectedByBucket {
-textBucketKeys = append(textBucketKeys, k)
-}
-sort.Ints(textBucketKeys)
-for _, bIdx := range textBucketKeys {
-for _, idx := range textSelectedByBucket[bIdx] {
-textItems = append(textItems, items[idx])
-}
+// computeMMRScore calculates the MMR score for a single candidate item.
+func (st *mmrState) computeMMRScore(idx int, similarityThreshold float32) float64 {
+	relevance := st.querySimCache[idx]
+
+	var maxSim float32
+	for _, j := range st.selectedGlobal {
+		if st.simMatrix[idx][j] > maxSim {
+			maxSim = st.simMatrix[idx][j]
+		}
+	}
+
+	var diversity float64
+	if maxSim > similarityThreshold {
+		penaltyMultiplier := math.Exp(DefaultMMRAlpha * float64(maxSim-similarityThreshold))
+		diversity = float64(maxSim) * penaltyMultiplier
+	} else {
+		diversity = float64(maxSim)
+	}
+
+	return st.lambda*relevance - (1.0-st.lambda)*diversity
 }
 
-prefItems = make([]SearchItem, 0)
-prefBucketKeys := make([]int, 0, len(prefSelectedByBucket))
-for k := range prefSelectedByBucket {
-prefBucketKeys = append(prefBucketKeys, k)
-}
-sort.Ints(prefBucketKeys)
-for _, bIdx := range prefBucketKeys {
-for _, idx := range prefSelectedByBucket[bIdx] {
-prefItems = append(prefItems, items[idx])
-}
+// commitSelection adds bestIdx to all selection tracking structures.
+func (st *mmrState) commitSelection(bestIdx int) {
+	item := st.items[bestIdx]
+	memText := strings.TrimSpace(item.Memory)
+	st.selectedGlobal = append(st.selectedGlobal, bestIdx)
+	st.selectedTexts[memText] = struct{}{}
+	switch item.MemType {
+	case memTypeText:
+		st.textSelectedByBucket[item.BucketIdx] = append(st.textSelectedByBucket[item.BucketIdx], bestIdx)
+	case memTypePreference:
+		st.prefSelectedByBucket[item.BucketIdx] = append(st.prefSelectedByBucket[item.BucketIdx], bestIdx)
+	}
 }
 
-return textItems, prefItems
+// allBucketsFull returns true when every bucket has reached its capacity limit.
+func (st *mmrState) allBucketsFull() bool {
+	return st.bucketsFull(st.textBucketIndices, st.textSelectedByBucket, st.textTopK) &&
+		st.bucketsFull(st.prefBucketIndices, st.prefSelectedByBucket, st.prefTopK)
+}
+
+// bucketsFull checks whether all buckets in a given index map are at capacity.
+func (st *mmrState) bucketsFull(allIndices, selectedByBucket map[int][]int, topK int) bool {
+	for bIdx, indices := range allIndices {
+		limit := topK
+		if len(indices) < limit {
+			limit = len(indices)
+		}
+		if len(selectedByBucket[bIdx]) < limit {
+			return false
+		}
+	}
+	return true
+}
+
+// phase3Collect re-sorts each bucket by original score and flattens into output slices.
+func (st *mmrState) phase3Collect() (textItems, prefItems []SearchItem) {
+	sortBucketsByScore := func(selectedByBucket map[int][]int) {
+		for bIdx, indices := range selectedByBucket {
+			sort.SliceStable(indices, func(i, j int) bool {
+				return st.items[indices[i]].Score > st.items[indices[j]].Score
+			})
+			selectedByBucket[bIdx] = indices
+		}
+	}
+	sortBucketsByScore(st.textSelectedByBucket)
+	sortBucketsByScore(st.prefSelectedByBucket)
+
+	textItems = flattenBuckets(st.textSelectedByBucket, st.items)
+	prefItems = flattenBuckets(st.prefSelectedByBucket, st.items)
+	return textItems, prefItems
+}
+
+// flattenBuckets sorts bucket keys and collects items in deterministic order.
+func flattenBuckets(selectedByBucket map[int][]int, items []SearchItem) []SearchItem {
+	keys := make([]int, 0, len(selectedByBucket))
+	for k := range selectedByBucket {
+		keys = append(keys, k)
+	}
+	sort.Ints(keys)
+
+	out := make([]SearchItem, 0, len(items))
+	for _, bIdx := range keys {
+		for _, idx := range selectedByBucket[bIdx] {
+			out = append(out, items[idx])
+		}
+	}
+	return out
 }

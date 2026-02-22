@@ -12,6 +12,11 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
 )
 
+const (
+	feedbackLLMMaxTokens = 768 // max_tokens for feedback analysis LLM call
+	feedbackErrTruncLen  = 200 // max chars of LLM error output to include in error message
+)
+
 // feedbackAction is one action returned by the LLM feedback analysis.
 type feedbackAction struct {
 	ID      string `json:"id"`
@@ -66,32 +71,13 @@ func (r *Reorganizer) ProcessFeedback(ctx context.Context, cubeID string, ids []
 	for _, act := range actions {
 		switch act.Action {
 		case "update":
-			if act.NewText == "" {
-				continue
+			if r.applyFeedbackUpdate(ctx, cubeID, act, now, log) {
+				updated++
 			}
-			embs, err := r.embedder.Embed(ctx, []string{act.NewText})
-			if err != nil || len(embs) == 0 || len(embs[0]) == 0 {
-				log.Warn("mem_feedback: embed update failed", slog.String("id", act.ID), slog.Any("error", err))
-				continue
-			}
-			if err := r.postgres.UpdateMemoryNodeFull(ctx, act.ID, act.NewText, db.FormatVector(embs[0]), now); err != nil {
-				log.Warn("mem_feedback: update failed", slog.String("id", act.ID), slog.Any("error", err))
-				continue
-			}
-			if r.wmCache != nil {
-				_ = r.wmCache.VRem(ctx, cubeID, act.ID)
-			}
-			updated++
-
 		case "remove":
-			if _, err := r.postgres.DeleteByPropertyIDs(ctx, []string{act.ID}, cubeID); err != nil {
-				log.Warn("mem_feedback: delete failed", slog.String("id", act.ID), slog.Any("error", err))
-				continue
+			if r.applyFeedbackRemove(ctx, cubeID, act.ID, log) {
+				removed++
 			}
-			if r.wmCache != nil {
-				_ = r.wmCache.VRem(ctx, cubeID, act.ID)
-			}
-			removed++
 		}
 	}
 
@@ -127,7 +113,7 @@ func (r *Reorganizer) llmAnalyzeFeedback(ctx context.Context, feedbackContent st
 	callCtx, cancel := context.WithTimeout(ctx, reorganizerLLMTimeout)
 	defer cancel()
 
-	raw, err := r.callLLM(callCtx, msgs, 768)
+	raw, err := r.callLLM(callCtx, msgs, feedbackLLMMaxTokens)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +123,35 @@ func (r *Reorganizer) llmAnalyzeFeedback(ctx context.Context, feedbackContent st
 		Actions []feedbackAction `json:"actions"`
 	}
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		return nil, fmt.Errorf("feedback llm parse json (%s): %w", truncate(raw, 200), err)
+		return nil, fmt.Errorf("feedback llm parse json (%s): %w", truncate(raw, feedbackErrTruncLen), err)
 	}
 	return result.Actions, nil
+}
+
+// applyFeedbackUpdate embeds new text and updates a memory node. Returns true on success.
+func (r *Reorganizer) applyFeedbackUpdate(ctx context.Context, cubeID string, act feedbackAction, now string, log *slog.Logger) bool {
+	if act.NewText == "" {
+		return false
+	}
+	embs, err := r.embedder.Embed(ctx, []string{act.NewText})
+	if err != nil || len(embs) == 0 || len(embs[0]) == 0 {
+		log.Warn("mem_feedback: embed update failed", slog.String("id", act.ID), slog.Any("error", err))
+		return false
+	}
+	if err := r.postgres.UpdateMemoryNodeFull(ctx, act.ID, act.NewText, db.FormatVector(embs[0]), now); err != nil {
+		log.Warn("mem_feedback: update failed", slog.String("id", act.ID), slog.Any("error", err))
+		return false
+	}
+	r.evictVSet(ctx, cubeID, act.ID, "mem_feedback: vset evict after update failed (non-fatal)")
+	return true
+}
+
+// applyFeedbackRemove deletes a memory node. Returns true on success.
+func (r *Reorganizer) applyFeedbackRemove(ctx context.Context, cubeID, id string, log *slog.Logger) bool {
+	if _, err := r.postgres.DeleteByPropertyIDs(ctx, []string{id}, cubeID); err != nil {
+		log.Warn("mem_feedback: delete failed", slog.String("id", id), slog.Any("error", err))
+		return false
+	}
+	r.evictVSet(ctx, cubeID, id, "mem_feedback: vset evict after remove failed (non-fatal)")
+	return true
 }

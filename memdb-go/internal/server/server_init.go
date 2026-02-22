@@ -1,7 +1,7 @@
 package server
 
 // server_init.go — database client initialization for native handlers.
-// Covers: initDBClients (postgres, qdrant, redis, wmCache).
+// Covers: initDBClients (postgres, qdrant, redis, wmCache), initReorganizer.
 
 import (
 	"context"
@@ -9,7 +9,10 @@ import (
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/config"
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
+	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
 	"github.com/MemDBai/MemDB/memdb-go/internal/handlers"
+	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
+	"github.com/MemDBai/MemDB/memdb-go/internal/scheduler"
 )
 
 // initDBClients connects to databases for native handlers.
@@ -69,4 +72,35 @@ func initDBClients(ctx context.Context, cfg *config.Config, h *handlers.Handler,
 	}
 
 	return pg, qd, rd, wmCache
+}
+
+// initReorganizer creates and configures a Reorganizer if postgres and LLM are available.
+// Returns nil when prerequisites are missing — the scheduler Worker runs without reorganization.
+func initReorganizer(
+	_ context.Context,
+	cfg *config.Config,
+	pg *db.Postgres,
+	emb embedder.Embedder,
+	wmCache *db.WorkingMemoryCache,
+	extractor *llm.LLMExtractor,
+	profiler *scheduler.Profiler,
+	logger *slog.Logger,
+) *scheduler.Reorganizer {
+	if pg == nil || cfg.LLMProxyURL == "" {
+		logger.Info("scheduler reorganizer disabled (postgres or LLM not configured)")
+		return nil
+	}
+	reorgLLMClient := llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel, cfg.LLMFallbackModels, logger)
+	reorg := scheduler.NewReorganizer(pg, emb, wmCache, reorgLLMClient, logger)
+	if extractor != nil {
+		reorg.SetLLMExtractor(extractor)
+	}
+	if profiler != nil {
+		reorg.SetProfiler(profiler)
+	}
+	logger.Info("scheduler reorganizer initialized",
+		slog.String("model", cfg.LLMDefaultModel),
+		slog.Any("fallback_models", cfg.LLMFallbackModels),
+	)
+	return reorg
 }

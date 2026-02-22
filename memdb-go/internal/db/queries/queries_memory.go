@@ -348,3 +348,29 @@ WHERE a.properties->>'user_name' = $1
   AND 1 - (a.embedding <=> b.embedding) >= $2
 ORDER BY score DESC
 LIMIT $3`
+
+// --- Admin: raw memory detection ---
+
+// FindRawMemories returns activated LTM/UserMemory nodes that contain raw conversation
+// patterns (role: [timestamp]: content). Used by the admin reprocess endpoint.
+// Args: $1 = user_name, $2 = memory_types (text[]), $3 = limit
+const FindRawMemories = `
+SELECT properties->>'id'     AS prop_id,
+       properties->>'memory' AS memory
+FROM %[1]s."Memory"
+WHERE properties->>'user_name' = $1
+  AND properties->>'memory_type' = ANY($2)
+  AND properties->>'status' = 'activated'
+  AND position('assistant: [20' IN properties->>'memory') > 0
+ORDER BY (properties->>'created_at') ASC NULLS LAST
+LIMIT $3`
+
+// CountRawMemories returns the total count of raw conversation-window memories.
+// Args: $1 = user_name, $2 = memory_types (text[])
+const CountRawMemories = `
+SELECT COUNT(*)
+FROM %[1]s."Memory"
+WHERE properties->>'user_name' = $1
+  AND properties->>'memory_type' = ANY($2)
+  AND properties->>'status' = 'activated'
+  AND position('assistant: [20' IN properties->>'memory') > 0`

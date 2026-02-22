@@ -74,5 +74,5 @@ func withRetry[T any](ctx context.Context, cfg retryConfig, fn func() (T, int, e
 			delay = cfg.maxDelay
 		}
 	}
-	return zero, fmt.Errorf("unreachable")
+	return zero, errors.New("unreachable")
 }

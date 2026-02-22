@@ -15,7 +15,7 @@ package queries
 //	$4 = limit (int)
 const VectorSearch = `
 SELECT id::text,
-       properties::text,
+       (properties - 'sources')::text,
        1 - (embedding::halfvec(1024) <=> $1::halfvec(1024)) AS score,
        embedding::text
 FROM %[1]s."Memory"
@@ -38,7 +38,7 @@ LIMIT $4`
 //	$4 = limit (int)
 const FulltextSearch = `
 SELECT id::text,
-       properties::text,
+       (properties - 'sources')::text,
        ts_rank(properties_tsvector_zh, to_tsquery('simple', $1)) AS rank
 FROM %[1]s."Memory"
 WHERE properties_tsvector_zh @@ to_tsquery('simple', $1)
@@ -59,7 +59,7 @@ LIMIT $4`
 //	$4 = limit (int)
 const GraphRecallByKey = `
 SELECT id::text,
-       properties::text
+       (properties - 'sources')::text
 FROM %[1]s."Memory"
 WHERE properties->>'status' = 'activated'
   AND properties->>'user_name' = $1
@@ -79,7 +79,7 @@ LIMIT $4`
 //	$4 = limit (int)
 const GraphRecallByTags = `
 SELECT id::text,
-       properties::text,
+       (properties - 'sources')::text,
        tag_overlap
 FROM (
     SELECT id, properties,
@@ -111,7 +111,7 @@ LIMIT $4`
 //	$2 = limit (int)
 const GetWorkingMemory = `
 SELECT id::text,
-       properties::text,
+       (properties - 'sources')::text,
        embedding::text
 FROM %[1]s."Memory"
 WHERE properties->>'status' = 'activated'
@@ -133,7 +133,7 @@ LIMIT $2`
 //	$5 = cutoff ISO timestamp (text)
 const VectorSearchWithCutoff = `
 SELECT id::text,
-       properties::text,
+       (properties - 'sources')::text,
        1 - (embedding::halfvec(1024) <=> $1::halfvec(1024)) AS score,
        embedding::text
 FROM %[1]s."Memory"
@@ -156,7 +156,7 @@ LIMIT $4`
 //	$5 = cutoff ISO timestamp (text)
 const FulltextSearchWithCutoff = `
 SELECT id::text,
-       properties::text,
+       (properties - 'sources')::text,
        ts_rank(properties_tsvector_zh, to_tsquery('simple', $1)) AS rank
 FROM %[1]s."Memory"
 WHERE properties_tsvector_zh @@ to_tsquery('simple', $1)
@@ -211,7 +211,7 @@ WITH RECURSIVE bfs AS (
     AND m.properties->>'user_name' = $2
     AND m.properties->>'memory_type' = ANY($3)
 )
-SELECT DISTINCT m.id::text, m.properties::text
+SELECT DISTINCT m.id::text, (m.properties - 'sources')::text
 FROM %[1]s."Memory" m
 JOIN bfs ON m.id::text = bfs.node_id
 WHERE m.properties->>'status' = 'activated'
@@ -219,4 +219,3 @@ WHERE m.properties->>'status' = 'activated'
   AND m.properties->>'memory_type' = ANY($3)
 ORDER BY m.id::text
 LIMIT $5`
-

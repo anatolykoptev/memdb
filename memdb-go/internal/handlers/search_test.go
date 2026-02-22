@@ -19,7 +19,7 @@ func newMockPython(t *testing.T) (*httptest.Server, *rpc.PythonClient) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code":    200,
 			"message": "proxied",
 			"data":    map[string]any{},
@@ -87,7 +87,7 @@ func TestNativeSearch_NoEmbedder(t *testing.T) {
 	// embedder is nil by default
 
 	body := `{"query":"test","user_id":"memos","top_k":6}`
-	req := httptest.NewRequest("POST", "/product/search", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -108,7 +108,7 @@ func TestNativeSearch_NoPostgres(t *testing.T) {
 	// postgres remains nil
 
 	body := `{"query":"test","user_id":"memos","top_k":6}`
-	req := httptest.NewRequest("POST", "/product/search", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -133,7 +133,7 @@ func TestNativeSearch_FineMode(t *testing.T) {
 	// would proxy. For unit test purposes, we confirm the proxy behavior.
 
 	body := `{"query":"test","user_id":"memos","top_k":6,"mode":"fine"}`
-	req := httptest.NewRequest("POST", "/product/search", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -156,7 +156,7 @@ func TestNativeSearch_InternetSearch(t *testing.T) {
 	// check. The invariant is the same: internet_search=true always proxies.
 
 	body := `{"query":"test","user_id":"memos","top_k":6,"internet_search":true}`
-	req := httptest.NewRequest("POST", "/product/search", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -173,7 +173,7 @@ func TestNativeSearch_ValidationError(t *testing.T) {
 	h := &Handler{logger: discardLogger()}
 
 	body := `{"query":"","user_id":"memos","top_k":6}`
-	req := httptest.NewRequest("POST", "/product/search", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -188,7 +188,7 @@ func TestNativeSearch_MissingUserID(t *testing.T) {
 	h := &Handler{logger: discardLogger()}
 
 	body := `{"query":"test","top_k":6}`
-	req := httptest.NewRequest("POST", "/product/search", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 

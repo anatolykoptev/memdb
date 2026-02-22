@@ -127,6 +127,15 @@ func isSSERequest(r *http.Request) bool {
 	return strings.HasSuffix(p, "/stream") || strings.HasSuffix(p, "/stream/")
 }
 
+const (
+	// sseProxyScannerInitBuf is the initial scanner buffer size for SSE proxying (64 KB).
+	sseProxyScannerInitBuf = 64 * 1024
+
+	// sseProxyScannerMaxBuf is the max scanner buffer size for SSE proxying (512 KB).
+	// SSE data fields can be large (e.g. streaming LLM tokens).
+	sseProxyScannerMaxBuf = 512 * 1024
+)
+
 // streamSSEProxy proxies an SSE response from an upstream HTTP response to the client.
 //
 // Uses bufio.Scanner for line-oriented reading — guarantees SSE field boundaries
@@ -148,7 +157,7 @@ func (c *PythonClient) streamSSEProxy(ctx context.Context, w http.ResponseWriter
 
 	scanner := bufio.NewScanner(resp.Body)
 	// SSE lines can be long (large JSON data fields). Set a generous buffer.
-	scanner.Buffer(make([]byte, 64*1024), 512*1024)
+	scanner.Buffer(make([]byte, sseProxyScannerInitBuf), sseProxyScannerMaxBuf)
 
 	for {
 		select {

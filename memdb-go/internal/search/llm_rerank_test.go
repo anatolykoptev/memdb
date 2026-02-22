@@ -15,8 +15,8 @@ func TestLLMRerank_Basic(t *testing.T) {
 		calls++
 		// Decode request
 		var req map[string]any
-		json.NewDecoder(r.Body).Decode(&req)
-		
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
 		// Create mock response
 		resp := map[string]any{
 			"choices": []map[string]any{
@@ -27,7 +27,7 @@ func TestLLMRerank_Basic(t *testing.T) {
 				},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer ts.Close()
 
@@ -41,12 +41,12 @@ func TestLLMRerank_Basic(t *testing.T) {
 		{"id": "item1", "memory": "fact A", "metadata": map[string]any{}},
 		{"id": "item2", "memory": "fact B", "metadata": map[string]any{}},
 	}
-	
+
 	ctx := context.Background()
 
 	// Call 1
 	res := LLMRerank(ctx, "find B", items, cfg)
-	
+
 	if len(res) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(res))
 	}

@@ -17,7 +17,7 @@ import (
 func TestNativeGetMemoryByIDs_MissingIDs(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/get_memory_by_ids",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_memory_by_ids",
 		strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 
@@ -36,7 +36,7 @@ func TestNativeGetMemoryByIDs_MissingIDs(t *testing.T) {
 func TestNativeGetMemoryByIDs_EmptyArray(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/get_memory_by_ids",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_memory_by_ids",
 		strings.NewReader(`{"memory_ids":[]}`))
 	w := httptest.NewRecorder()
 	h.NativeGetMemoryByIDs(w, req)
@@ -50,7 +50,7 @@ func TestNativeGetMemoryByIDs_EmptyArray(t *testing.T) {
 
 func TestNativeGetAll_NoPostgres_MissingFields(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/get_all",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_all",
 		strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 
@@ -70,7 +70,7 @@ func TestNativeGetAll_NoPostgres_MissingFields(t *testing.T) {
 
 func TestNativeGetAll_NoPostgres_InvalidMemoryType(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/get_all",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_all",
 		strings.NewReader(`{"user_id":"memos","memory_type":"invalid"}`))
 	w := httptest.NewRecorder()
 
@@ -86,7 +86,7 @@ func TestNativeGetAll_NoPostgres_InvalidMemoryType(t *testing.T) {
 
 func TestNativeGetAll_NoPostgres_NilBody(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/get_all", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/get_all", nil)
 	w := httptest.NewRecorder()
 
 	h.NativeGetAll(w, req)
@@ -101,7 +101,7 @@ func TestNativeGetAll_NoPostgres_NilBody(t *testing.T) {
 
 func TestNativeGetAll_NoPostgres_InvalidJSON(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/get_all",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_all",
 		strings.NewReader(`{not json`))
 	w := httptest.NewRecorder()
 
@@ -117,7 +117,7 @@ func TestNativeGetAll_NoPostgres_InvalidJSON(t *testing.T) {
 
 func TestNativeGetAll_NoPostgres_EmptyUserID(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/get_all",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_all",
 		strings.NewReader(`{"user_id":"","memory_type":"text_mem"}`))
 	w := httptest.NewRecorder()
 
@@ -135,7 +135,7 @@ func TestNativeGetAll_NoPostgres_EmptyUserID(t *testing.T) {
 
 func TestNativeDelete_NoPostgres_MissingFields(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/delete_memory",
+	req := httptest.NewRequest(http.MethodPost, "/product/delete_memory",
 		strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 
@@ -151,7 +151,7 @@ func TestNativeDelete_NoPostgres_MissingFields(t *testing.T) {
 
 func TestNativeDelete_NoPostgres_EmptyMemoryIDs(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/delete_memory",
+	req := httptest.NewRequest(http.MethodPost, "/product/delete_memory",
 		strings.NewReader(`{"memory_ids":[]}`))
 	w := httptest.NewRecorder()
 
@@ -164,7 +164,7 @@ func TestNativeDelete_NoPostgres_EmptyMemoryIDs(t *testing.T) {
 
 func TestNativeDelete_NoPostgres_NilBody(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/delete_memory", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/delete_memory", nil)
 	w := httptest.NewRecorder()
 
 	h.NativeDelete(w, req)
@@ -179,7 +179,7 @@ func TestNativeDelete_NoPostgres_NilBody(t *testing.T) {
 
 func TestNativeDelete_NoPostgres_InvalidJSON(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/delete_memory",
+	req := httptest.NewRequest(http.MethodPost, "/product/delete_memory",
 		strings.NewReader(`{not json`))
 	w := httptest.NewRecorder()
 
@@ -200,7 +200,7 @@ func TestNativeDelete_NoPostgres_InvalidJSON(t *testing.T) {
 // which proxies. But readBody runs first, so nil body is caught.
 func TestNativePostGetMemory_NoPostgres_NilBody(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/get_memory", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/get_memory", nil)
 	w := httptest.NewRecorder()
 
 	// With nil postgres, it tries ValidatedGetMemory which calls readBody first.
@@ -219,7 +219,7 @@ func TestNativePostGetMemory_NoPostgres_NilBody(t *testing.T) {
 // TestNativePostGetMemory_NoPostgres_InvalidJSON verifies invalid JSON returns 400.
 func TestNativePostGetMemory_NoPostgres_InvalidJSON(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/get_memory",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_memory",
 		strings.NewReader(`{not json`))
 	w := httptest.NewRecorder()
 
@@ -246,7 +246,7 @@ func TestNativePostGetMemory_MissingMemCubeID(t *testing.T) {
 	// We use setPostgresNonNil helper (defined below).
 	setPostgresNonNil(h)
 
-	req := httptest.NewRequest("POST", "/product/get_memory",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_memory",
 		strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 
@@ -265,7 +265,7 @@ func TestNativePostGetMemory_EmptyMemCubeID(t *testing.T) {
 	h := testValidateHandler()
 	setPostgresNonNil(h)
 
-	req := httptest.NewRequest("POST", "/product/get_memory",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_memory",
 		strings.NewReader(`{"mem_cube_id":""}`))
 	w := httptest.NewRecorder()
 
@@ -284,7 +284,7 @@ func TestNativePostGetMemory_InvalidJSON_NativeRoute(t *testing.T) {
 	h := testValidateHandler()
 	setPostgresNonNil(h)
 
-	req := httptest.NewRequest("POST", "/product/get_memory",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_memory",
 		strings.NewReader(`{not json`))
 	w := httptest.NewRecorder()
 
@@ -303,7 +303,7 @@ func TestNativePostGetMemory_EmptyBody_NativeRoute(t *testing.T) {
 	h := testValidateHandler()
 	setPostgresNonNil(h)
 
-	req := httptest.NewRequest("POST", "/product/get_memory",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_memory",
 		strings.NewReader(""))
 	w := httptest.NewRecorder()
 

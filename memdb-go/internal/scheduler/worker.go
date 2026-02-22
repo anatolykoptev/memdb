@@ -57,6 +57,10 @@ periodicReorgInterval = 6 * time.Hour
 
 // vsetKeyPrefix is duplicated here to scan active cubes without importing db package.
 vsetKeyScanPattern = "wm:v:*"
+
+// scanBatchSize is the max number of Redis keys returned per SCAN iteration.
+// 200 is a safe value that balances iteration speed vs per-call latency.
+scanBatchSize = 200
 )
 
 // streamMsg bundles a parsed message with its origin stream key.

@@ -19,7 +19,6 @@ package scheduler
 
 import (
 	"context"
-	"log/slog"
 )
 
 // enqueue routes a streamMsg to the appropriate priority channel.
@@ -98,13 +97,4 @@ func priorityLabel(high bool) string {
 		return "high"
 	}
 	return "low"
-}
-
-// logEnqueue logs message routing for observability (debug level only).
-func (w *Worker) logEnqueue(sm streamMsg) {
-	w.logger.Debug("scheduler: enqueue",
-		slog.String("label", sm.msg.Label),
-		slog.String("cube_id", sm.msg.CubeID),
-		slog.String("priority", priorityLabel(sm.msg.HighPriority)),
-	)
 }

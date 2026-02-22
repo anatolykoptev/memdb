@@ -66,7 +66,8 @@ func main() {
 	pgCfg, err := pgxpool.ParseConfig(pgURL)
 	if err != nil {
 		logger.Error("invalid postgres URL", slog.Any("error", err))
-		os.Exit(1)
+		_ = emb.Close()
+		os.Exit(1) //nolint:gocritic // emb.Close() already called explicitly above
 	}
 	pgCfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		_, err := conn.Exec(ctx, "LOAD 'age'")
@@ -207,24 +208,41 @@ func reembedPolarDB(ctx context.Context, pool *pgxpool.Pool, emb *embedder.ONNXE
 
 // reembedQdrant re-embeds all points in a Qdrant collection.
 func reembedQdrant(ctx context.Context, client *qdrant.Client, collection string, emb *embedder.ONNXEmbedder, logger *slog.Logger) (int, error) {
-	// Check if collection exists
-	collections, err := client.ListCollections(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("list collections: %w", err)
-	}
-	found := false
-	for _, c := range collections {
-		if c == collection {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if found, err := qdrantCollectionExists(ctx, client, collection); err != nil {
+		return 0, err
+	} else if !found {
 		logger.Info("collection not found, skipping", slog.String("collection", collection))
 		return 0, nil
 	}
 
-	// Scroll all points using ScrollAndOffset (returns points + next page offset)
+	allPoints, err := scrollAllQdrantPoints(ctx, client, collection)
+	if err != nil {
+		return 0, err
+	}
+	logger.Info("loaded Qdrant points for re-embedding",
+		slog.String("collection", collection),
+		slog.Int("count", len(allPoints)),
+	)
+
+	return reembedPointBatches(ctx, client, collection, allPoints, emb, logger)
+}
+
+// qdrantCollectionExists returns true if the named collection exists in Qdrant.
+func qdrantCollectionExists(ctx context.Context, client *qdrant.Client, collection string) (bool, error) {
+	collections, err := client.ListCollections(ctx)
+	if err != nil {
+		return false, fmt.Errorf("list collections: %w", err)
+	}
+	for _, c := range collections {
+		if c == collection {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// scrollAllQdrantPoints fetches all points from a Qdrant collection with cursor pagination.
+func scrollAllQdrantPoints(ctx context.Context, client *qdrant.Client, collection string) ([]*qdrant.RetrievedPoint, error) {
 	var scrollOffset *qdrant.PointId
 	var allPoints []*qdrant.RetrievedPoint
 	limit := uint32(100)
@@ -238,72 +256,69 @@ func reembedQdrant(ctx context.Context, client *qdrant.Client, collection string
 			WithVectors:    qdrant.NewWithVectors(true),
 		})
 		if err != nil {
-			return 0, fmt.Errorf("scroll %s: %w", collection, err)
+			return nil, fmt.Errorf("scroll %s: %w", collection, err)
 		}
-
 		allPoints = append(allPoints, points...)
-
 		if nextOffset == nil {
 			break
 		}
 		scrollOffset = nextOffset
 	}
+	return allPoints, nil
+}
 
-	logger.Info("loaded Qdrant points for re-embedding",
-		slog.String("collection", collection),
-		slog.Int("count", len(allPoints)),
-	)
-
-	// Process in batches
+// reembedPointBatches processes all points in batches: embed + upsert back to Qdrant.
+func reembedPointBatches(ctx context.Context, client *qdrant.Client, collection string, allPoints []*qdrant.RetrievedPoint, emb *embedder.ONNXEmbedder, logger *slog.Logger) (int, error) {
 	updated := 0
 	for i := 0; i < len(allPoints); i += batchSize {
 		end := i + batchSize
 		if end > len(allPoints) {
 			end = len(allPoints)
 		}
-		batch := allPoints[i:end]
-
-		texts := make([]string, len(batch))
-		for j, pt := range batch {
-			memory := extractPayloadString(pt.Payload, "memory")
-			if memory == "" {
-				memory = extractPayloadString(pt.Payload, "memory_content")
-			}
-			texts[j] = "passage: " + memory
-		}
-
-		embeddings, err := emb.Embed(ctx, texts)
+		n, err := reembedSingleBatch(ctx, client, collection, allPoints[i:end], emb)
 		if err != nil {
-			logger.Error("embed batch failed", slog.Int("batch_start", i), slog.Any("error", err))
+			logger.Error("batch failed", slog.Int("batch_start", i), slog.Any("error", err))
 			continue
 		}
+		updated += n
+	}
+	return updated, nil
+}
 
-		// Build upsert points
-		points := make([]*qdrant.PointStruct, len(batch))
-		for j, pt := range batch {
-			points[j] = &qdrant.PointStruct{
-				Id:      pt.Id,
-				Payload: pt.Payload,
-				Vectors: qdrant.NewVectorsDense(embeddings[j]),
-			}
+// reembedSingleBatch embeds one batch of points and upserts them back to Qdrant.
+func reembedSingleBatch(ctx context.Context, client *qdrant.Client, collection string, batch []*qdrant.RetrievedPoint, emb *embedder.ONNXEmbedder) (int, error) {
+	texts := make([]string, len(batch))
+	for j, pt := range batch {
+		memory := extractPayloadString(pt.Payload, "memory")
+		if memory == "" {
+			memory = extractPayloadString(pt.Payload, "memory_content")
 		}
-
-		wait := true
-		_, err = client.Upsert(ctx, &qdrant.UpsertPoints{
-			CollectionName: collection,
-			Points:         points,
-			Wait:           &wait,
-		})
-		if err != nil {
-			logger.Error("upsert failed",
-				slog.String("collection", collection),
-				slog.Any("error", err))
-			continue
-		}
-		updated += len(batch)
+		texts[j] = "passage: " + memory
 	}
 
-	return updated, nil
+	embeddings, err := emb.Embed(ctx, texts)
+	if err != nil {
+		return 0, fmt.Errorf("embed: %w", err)
+	}
+
+	points := make([]*qdrant.PointStruct, len(batch))
+	for j, pt := range batch {
+		points[j] = &qdrant.PointStruct{
+			Id:      pt.Id,
+			Payload: pt.Payload,
+			Vectors: qdrant.NewVectorsDense(embeddings[j]),
+		}
+	}
+
+	wait := true
+	if _, err = client.Upsert(ctx, &qdrant.UpsertPoints{
+		CollectionName: collection,
+		Points:         points,
+		Wait:           &wait,
+	}); err != nil {
+		return 0, fmt.Errorf("upsert: %w", err)
+	}
+	return len(batch), nil
 }
 
 // extractPayloadString extracts a string value from Qdrant payload.

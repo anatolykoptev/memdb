@@ -17,6 +17,10 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
 )
 
+// candidateConvHeadChars is the character limit for the conversation head used
+// when fetching dedup candidates (embed only a prefix for speed).
+const candidateConvHeadChars = 512
+
 // nativeFineAddForCube implements the fine-mode add pipeline (v2) for a single cube.
 //
 // Pipeline:
@@ -141,11 +145,9 @@ func (h *Handler) filterAddsByContentHash(ctx context.Context, facts []llm.Extra
 			// Mark as skip so applyFineActions ignores it.
 			facts[e.idx].Action = llm.MemSkip
 			skipped++
-		} else {
+		} else if facts[e.idx].ContentHash == "" {
 			// Embed the content_hash into the fact so buildAddNodes can store it.
-			if facts[e.idx].ContentHash == "" {
-				facts[e.idx].ContentHash = e.hash
-			}
+			facts[e.idx].ContentHash = e.hash
 		}
 	}
 	if skipped > 0 {
@@ -171,7 +173,7 @@ type wmVSetInsert struct {
 //
 // Both results are merged and deduplicated by ID before returning.
 func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID, agentID string) []llm.Candidate {
-	head := conversation[:min(512, len(conversation))]
+	head := conversation[:min(candidateConvHeadChars, len(conversation))]
 	convEmbs, err := h.embedder.Embed(ctx, []string{head})
 	if err != nil || len(convEmbs) == 0 || len(convEmbs[0]) == 0 {
 		return nil
@@ -293,54 +295,18 @@ func (h *Handler) applyFineActions(
 		f := ef.fact
 		switch f.Action {
 		case llm.MemSkip:
-			// Exact duplicate detected by content-hash dedup — already stored.
 			continue
 
 		case llm.MemDelete:
 			h.applyDeleteAction(ctx, f.TargetID, cubeID)
-			// Evict from VSET hot cache
-			if h.wmCache != nil && f.TargetID != "" {
-				if err := h.wmCache.VRem(ctx, cubeID, f.TargetID); err != nil {
-					h.logger.Debug("fine add: vset vrem failed",
-						slog.String("id", f.TargetID), slog.Any("error", err))
-				}
-			}
+			h.evictFromVSet(ctx, cubeID, f.TargetID, "fine add: vset vrem failed")
 
 		case llm.MemUpdate:
 			h.applyUpdateAction(ctx, f.TargetID, f.Memory, ef.embVec, now)
-			// Store targetID as ltmID for entity linking (UPDATE links to existing LTM node).
 			embedded[i].ltmID = f.TargetID
-			// Generate WorkingMemory node for the updated context.
-			if ef.embVec != "" && len(ef.embedding) > 0 {
-				wmID := uuid.New().String()
-				createdAt := now
-				if f.ValidAt != "" {
-					createdAt = f.ValidAt
-				}
-				
-				allTags := append([]string{}, customTags...)
-				allTags = append(allTags, f.Tags...)
-				
-				factInfo := make(map[string]any, len(info)+1)
-				for k, v := range info {
-					factInfo[k] = v
-				}
-				if f.ContentHash != "" {
-					factInfo["content_hash"] = f.ContentHash
-				}
-
-				wmJSON, err := marshalProps(buildMemoryPropertiesAt(
-					wmID, f.Memory, "WorkingMemory", cubeID, agentID, sessionID, now, createdAt,
-					factInfo, allTags, sources, "",
-				))
-				if err == nil {
-					allNodes = append(allNodes, db.MemoryInsertNode{
-						ID: wmID, PropertiesJSON: wmJSON, EmbeddingVec: ef.embVec,
-					})
-					vsetInserts = append(vsetInserts, wmVSetInsert{
-						id: wmID, memory: f.Memory, embedding: ef.embedding,
-					})
-				}
+			if node, vsi, ok := buildUpdateWMNode(f, ef, cubeID, agentID, sessionID, now, info, customTags, sources); ok {
+				allNodes = append(allNodes, node)
+				vsetInserts = append(vsetInserts, vsi)
 			}
 
 		default: // llm.MemAdd
@@ -348,7 +314,6 @@ func (h *Handler) applyFineActions(
 			allNodes = append(allNodes, nodes...)
 			if item != nil {
 				items = append(items, *item)
-				// nodes[0]=WM, nodes[1]=LTM — store LTM ID for entity linking
 				if len(nodes) >= 2 {
 					embedded[i].ltmID = nodes[1].ID
 				}
@@ -361,6 +326,54 @@ func (h *Handler) applyFineActions(
 		}
 	}
 	return allNodes, items, vsetInserts
+}
+
+// buildUpdateWMNode creates a WorkingMemory node for an UPDATE fact.
+// Returns (node, vsetInsert, ok) — ok=false if the embedding is missing.
+func buildUpdateWMNode(
+	f llm.ExtractedFact,
+	ef embeddedFact,
+	cubeID, agentID, sessionID, now string,
+	info map[string]any,
+	customTags []string,
+	sources []map[string]any,
+) (db.MemoryInsertNode, wmVSetInsert, bool) {
+	if ef.embVec == "" || len(ef.embedding) == 0 {
+		return db.MemoryInsertNode{}, wmVSetInsert{}, false
+	}
+	wmID := uuid.New().String()
+	createdAt := now
+	if f.ValidAt != "" {
+		createdAt = f.ValidAt
+	}
+	allTags := append(append([]string{}, customTags...), f.Tags...)
+	factInfo := make(map[string]any, len(info)+1)
+	for k, v := range info {
+		factInfo[k] = v
+	}
+	if f.ContentHash != "" {
+		factInfo["content_hash"] = f.ContentHash
+	}
+	wmJSON, err := marshalProps(buildMemoryPropertiesAt(
+		wmID, f.Memory, "WorkingMemory", cubeID, agentID, sessionID, now, createdAt,
+		factInfo, allTags, sources, "",
+	))
+	if err != nil {
+		return db.MemoryInsertNode{}, wmVSetInsert{}, false
+	}
+	node := db.MemoryInsertNode{ID: wmID, PropertiesJSON: wmJSON, EmbeddingVec: ef.embVec}
+	vsi := wmVSetInsert{id: wmID, memory: f.Memory, embedding: ef.embedding}
+	return node, vsi, true
+}
+
+// evictFromVSet removes a memory ID from the VSET hot cache (non-fatal).
+func (h *Handler) evictFromVSet(ctx context.Context, cubeID, id, logMsg string) {
+	if h.wmCache == nil || id == "" {
+		return
+	}
+	if err := h.wmCache.VRem(ctx, cubeID, id); err != nil {
+		h.logger.Debug(logMsg, slog.String("id", id), slog.Any("error", err))
+	}
 }
 
 // applyDeleteAction hard-deletes a memory contradicted by a newer fact.

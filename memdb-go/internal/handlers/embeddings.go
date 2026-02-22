@@ -2,7 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"log/slog"
 	"net/http"
 )
@@ -126,7 +126,7 @@ func parseEmbeddingInput(raw json.RawMessage) ([]string, error) {
 	// Try array of strings.
 	var arr []string
 	if err := json.Unmarshal(raw, &arr); err != nil {
-		return nil, fmt.Errorf("input must be a string or array of strings")
+		return nil, errors.New("input must be a string or array of strings")
 	}
 	return arr, nil
 }

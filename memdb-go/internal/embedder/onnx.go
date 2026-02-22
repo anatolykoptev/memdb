@@ -8,6 +8,7 @@ package embedder
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -18,9 +19,10 @@ import (
 )
 
 const (
-	e5Dim    = 1024 // multilingual-e5-large output dimension
-	e5MaxLen = 512  // maximum token sequence length
-	e5PadID  = 1    // XLM-RoBERTa pad token id
+	e5Dim            = 1024 // multilingual-e5-large output dimension
+	e5MaxLen         = 512  // maximum token sequence length
+	e5PadID          = 1    // XLM-RoBERTa pad token id
+	onnxIntraOpThreads = 4  // intra-op parallelism: 4 threads within a single ONNX op
 )
 
 // ONNXEmbedder runs a quantized multilingual-e5-large ONNX model.
@@ -69,8 +71,8 @@ func NewONNXEmbedder(modelDir string, logger *slog.Logger) (*ONNXEmbedder, error
 		tk.Close()
 		return nil, fmt.Errorf("onnx: create session options: %w", err)
 	}
-	opts.SetIntraOpNumThreads(4)
-	opts.SetInterOpNumThreads(1)
+	_ = opts.SetIntraOpNumThreads(onnxIntraOpThreads)
+	_ = opts.SetInterOpNumThreads(1)
 
 	modelPath := filepath.Join(modelDir, "model_quantized.onnx")
 	inputNames := []string{"input_ids", "attention_mask"}
@@ -83,7 +85,7 @@ func NewONNXEmbedder(modelDir string, logger *slog.Logger) (*ONNXEmbedder, error
 		opts,
 	)
 	if err != nil {
-		opts.Destroy()
+		_ = opts.Destroy()
 		tk.Close()
 		return nil, fmt.Errorf("onnx: create session from %s: %w", modelPath, err)
 	}
@@ -210,13 +212,13 @@ func (e *ONNXEmbedder) runInference(
 	if err != nil {
 		return nil, fmt.Errorf("onnx: create input_ids tensor: %w", err)
 	}
-	defer idsTensor.Destroy()
+	defer func() { _ = idsTensor.Destroy() }()
 
 	maskTensor, err := ort.NewTensor(shape, attentionMask)
 	if err != nil {
 		return nil, fmt.Errorf("onnx: create attention_mask tensor: %w", err)
 	}
-	defer maskTensor.Destroy()
+	defer func() { _ = maskTensor.Destroy() }()
 
 	// Auto-allocate output: pass nil and let ONNX Runtime determine the shape.
 	outputs := []ort.Value{nil}
@@ -231,15 +233,15 @@ func (e *ONNXEmbedder) runInference(
 
 	// The output is auto-allocated; we must destroy it when done.
 	if outputs[0] == nil {
-		return nil, fmt.Errorf("onnx: session produced nil output")
+		return nil, errors.New("onnx: session produced nil output")
 	}
-	defer outputs[0].Destroy()
+	defer func() { _ = outputs[0].Destroy() }()
 
 	// Extract the flat float32 data from the output tensor.
 	// The output shape is [batchSize, seqLen, dim].
 	outputTensor, ok := outputs[0].(*ort.Tensor[float32])
 	if !ok {
-		return nil, fmt.Errorf("onnx: unexpected output tensor type, expected *Tensor[float32]")
+		return nil, errors.New("onnx: unexpected output tensor type, expected *Tensor[float32]")
 	}
 
 	data := outputTensor.GetData()
@@ -271,7 +273,7 @@ func (e *ONNXEmbedder) Close() error {
 	defer e.mu.Unlock()
 
 	if e.session != nil {
-		e.session.Destroy()
+		_ = e.session.Destroy()
 		e.session = nil
 	}
 	if e.tokenizer != nil {
@@ -281,7 +283,7 @@ func (e *ONNXEmbedder) Close() error {
 
 	// DestroyEnvironment cleans up the global ONNX Runtime state.
 	// Safe to call even if other sessions have already been destroyed.
-	ort.DestroyEnvironment()
+	_ = ort.DestroyEnvironment()
 
 	e.logger.Info("onnx embedder closed")
 	return nil

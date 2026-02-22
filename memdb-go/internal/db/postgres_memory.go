@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -32,7 +33,7 @@ func (p *Postgres) GetMemoryByPropertyID(ctx context.Context, propertyID string)
 	var id, propsStr string
 	err := p.pool.QueryRow(ctx, q, propertyID).Scan(&id, &propsStr)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
@@ -126,6 +127,30 @@ func (p *Postgres) ExistUser(ctx context.Context, userName string) (bool, error)
 	return exists, err
 }
 
+// scanPaginatedMemoryRows scans id+propsJSON pairs from a pgx rows result set.
+// Shared by GetAllMemories and GetAllMemoriesByTypes to eliminate duplicate scan loops.
+func scanPaginatedMemoryRows(rows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+	Close()
+}) ([]map[string]any, error) {
+	defer rows.Close()
+	var results []map[string]any
+	for rows.Next() {
+		var id string
+		var propsJSON []byte
+		if err := rows.Scan(&id, &propsJSON); err != nil {
+			return nil, err
+		}
+		results = append(results, map[string]any{
+			"memory_id":  id,
+			"properties": string(propsJSON),
+		})
+	}
+	return results, rows.Err()
+}
+
 // GetAllMemoriesByTypes returns paginated memories for a user across multiple memory types.
 // Used by NativePostGetMemory to fetch text_mem (LongTermMemory + UserMemory) in one query.
 func (p *Postgres) GetAllMemoriesByTypes(ctx context.Context, userName string, memoryTypes []string, page, pageSize int) ([]map[string]any, int, error) {
@@ -142,21 +167,8 @@ func (p *Postgres) GetAllMemoriesByTypes(ctx context.Context, userName string, m
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
-
-	var results []map[string]any
-	for rows.Next() {
-		var id string
-		var propsJSON []byte
-		if err := rows.Scan(&id, &propsJSON); err != nil {
-			return nil, 0, err
-		}
-		results = append(results, map[string]any{
-			"memory_id":  id,
-			"properties": string(propsJSON),
-		})
-	}
-	if err := rows.Err(); err != nil {
+	results, err := scanPaginatedMemoryRows(rows)
+	if err != nil {
 		return nil, 0, err
 	}
 	return results, total, nil
@@ -178,21 +190,8 @@ func (p *Postgres) GetAllMemories(ctx context.Context, userName, memoryType stri
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
-
-	var results []map[string]any
-	for rows.Next() {
-		var id string
-		var propsJSON []byte
-		if err := rows.Scan(&id, &propsJSON); err != nil {
-			return nil, 0, err
-		}
-		results = append(results, map[string]any{
-			"memory_id":  id,
-			"properties": string(propsJSON),
-		})
-	}
-	if err := rows.Err(); err != nil {
+	results, err := scanPaginatedMemoryRows(rows)
+	if err != nil {
 		return nil, 0, err
 	}
 	return results, total, nil
@@ -266,7 +265,7 @@ func (p *Postgres) InsertMemoryNodes(ctx context.Context, nodes []MemoryInsertNo
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	batch := &pgx.Batch{}
 	for _, n := range nodes {
@@ -443,6 +442,45 @@ func (p *Postgres) CheckContentHashExists(ctx context.Context, hash, userName st
 	var exists bool
 	err := p.pool.QueryRow(ctx, q, hash, userName).Scan(&exists)
 	return exists, err
+}
+
+// RawMemory is a memory node identified as a raw conversation window (fast-mode artifact).
+type RawMemory struct {
+	ID     string // properties->>'id' (UUID)
+	Memory string // raw conversation text
+}
+
+// FindRawMemories returns activated LTM/UserMemory nodes that contain raw conversation
+// window patterns. These are fast-mode artifacts that should be reprocessed through fine extraction.
+func (p *Postgres) FindRawMemories(ctx context.Context, userName string, limit int) ([]RawMemory, error) {
+	q := fmt.Sprintf(queries.FindRawMemories, graphName)
+	memTypes := []string{"LongTermMemory", "UserMemory"}
+	rows, err := p.pool.Query(ctx, q, userName, memTypes, limit)
+	if err != nil {
+		return nil, fmt.Errorf("find raw memories: %w", err)
+	}
+	defer rows.Close()
+
+	var results []RawMemory
+	for rows.Next() {
+		var r RawMemory
+		if err := rows.Scan(&r.ID, &r.Memory); err != nil {
+			return nil, fmt.Errorf("find raw memories scan: %w", err)
+		}
+		if r.ID != "" && r.Memory != "" {
+			results = append(results, r)
+		}
+	}
+	return results, rows.Err()
+}
+
+// CountRawMemories returns the total count of raw conversation-window memories for a user.
+func (p *Postgres) CountRawMemories(ctx context.Context, userName string) (int64, error) {
+	q := fmt.Sprintf(queries.CountRawMemories, graphName)
+	memTypes := []string{"LongTermMemory", "UserMemory"}
+	var count int64
+	err := p.pool.QueryRow(ctx, q, userName, memTypes).Scan(&count)
+	return count, err
 }
 
 // SearchLTMByVectorSQL returns the SearchLTMByVector SQL template for testing.

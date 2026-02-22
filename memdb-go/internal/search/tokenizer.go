@@ -16,6 +16,16 @@ var tokenRegexp = regexp.MustCompile(`[a-zA-ZА-Яа-яёЁ0-9]+`)
 // numericRegexp matches tokens that are purely numeric.
 var numericRegexp = regexp.MustCompile(`^[0-9]+$`)
 
+const (
+	// cyrillicLangThreshold is the minimum ratio of Cyrillic characters required
+	// to classify text as Russian (ru).
+	cyrillicLangThreshold = 0.20
+
+	// cjkLangThreshold is the minimum ratio of CJK characters required
+	// to classify text as Chinese (zh).
+	cjkLangThreshold = 0.30
+)
+
 // TokenizeMixed is the main entry point. It detects the language of the input text,
 // extracts tokens using a shared regex, lowercases them, and filters stopwords
 // based on the detected language.
@@ -108,13 +118,13 @@ func detectLang(text string) string {
 	cyrillicRatio := float64(cyrillic) / float64(total)
 	cjkRatio := float64(cjk) / float64(total)
 
-	// Check Cyrillic first (>20% threshold).
-	if cyrillicRatio > 0.20 {
+	// Check Cyrillic first (>cyrillicLangThreshold).
+	if cyrillicRatio > cyrillicLangThreshold {
 		return "ru"
 	}
 
-	// Check CJK (>30% threshold).
-	if cjkRatio > 0.30 {
+	// Check CJK (>cjkLangThreshold).
+	if cjkRatio > cjkLangThreshold {
 		return "zh"
 	}
 

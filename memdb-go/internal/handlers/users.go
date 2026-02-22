@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -27,7 +26,7 @@ func (h *Handler) NativeListUsers(w http.ResponseWriter, r *http.Request) {
 	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(cached)
+		w.Write(cached) //nolint:errcheck
 		return
 	}
 
@@ -160,7 +159,7 @@ func (h *Handler) NativeInstancesCount(w http.ResponseWriter, r *http.Request) {
 	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(cached)
+		w.Write(cached) //nolint:errcheck
 		return
 	}
 
@@ -265,7 +264,7 @@ func (h *Handler) NativeUpdateUserConfig(w http.ResponseWriter, r *http.Request)
 
 	var cfg map[string]any
 	if err := json.Unmarshal(body, &cfg); err != nil {
-		h.writeValidationError(w, []string{fmt.Sprintf("invalid JSON body: %s", err.Error())})
+		h.writeValidationError(w, []string{"invalid JSON body: " + err.Error()})
 		return
 	}
 

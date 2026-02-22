@@ -35,6 +35,8 @@ const (
 	maxMessages = 200
 	// maxCubeIDs is the upper bound on writable_cube_ids per add request.
 	maxCubeIDs = 20
+	// userConfigCacheTTL is the TTL for user config entries cached in Redis.
+	userConfigCacheTTL = 5 * time.Minute
 )
 
 // --- Response types (Python-compatible) ---
@@ -66,24 +68,7 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required fields
-	var errs []string
-	if req.UserID == nil || *req.UserID == "" {
-		errs = append(errs, "user_id is required")
-	}
-	if req.AsyncMode != nil {
-		switch *req.AsyncMode {
-		case "async", "sync":
-		default:
-			errs = append(errs, "async_mode must be one of: async, sync")
-		}
-	}
-	if req.Mode != nil {
-		switch *req.Mode {
-		case "fast", "fine":
-		default:
-			errs = append(errs, "mode must be one of: fast, fine")
-		}
-	}
+	errs := validateAddRequest(req.UserID, req.AsyncMode, req.Mode)
 	if len(req.Messages) > maxMessages {
 		errs = append(errs, fmt.Sprintf("messages must not exceed %d items", maxMessages))
 	}
@@ -153,19 +138,19 @@ func (h *Handler) canHandleNativeAdd(req *fullAddRequest) bool {
 		return false
 	}
 	// Async requires redis for XADD
-	if req.AsyncMode != nil && *req.AsyncMode == "async" {
+	if req.AsyncMode != nil && *req.AsyncMode == modeAsync {
 		return h.redis != nil
 	}
 	// Don't handle feedback
 	if req.IsFeedback != nil && *req.IsFeedback {
 		return false
 	}
-	// mode=fine requires llmExtractor
-	if req.Mode != nil && *req.Mode == "fine" {
-		return h.llmExtractor != nil
+	// mode=fast is always native
+	if req.Mode != nil && *req.Mode == modeFast {
+		return true
 	}
-	// mode=fast (or nil) is always native
-	return true
+	// mode=fine (or nil default) requires llmExtractor
+	return h.llmExtractor != nil
 }
 
 // proxyReason returns a human-readable reason for proxying (for debug logs).
@@ -176,11 +161,11 @@ func (h *Handler) proxyReason(req *fullAddRequest) string {
 	if h.embedder == nil {
 		return "embedder nil"
 	}
-	if req.Mode != nil && *req.Mode == "fine" && h.llmExtractor == nil {
-		return "mode=fine but llm extractor not configured"
+	if h.llmExtractor == nil {
+		return "llm extractor not configured (fine mode unavailable)"
 	}
-	if req.AsyncMode != nil && *req.AsyncMode == "async" {
-		return "async"
+	if req.AsyncMode != nil && *req.AsyncMode == modeAsync {
+		return modeAsync
 	}
 	if req.IsFeedback != nil && *req.IsFeedback {
 		return "feedback"
@@ -189,11 +174,16 @@ func (h *Handler) proxyReason(req *fullAddRequest) string {
 }
 
 // nativeAddForCube dispatches to async, fast, or fine pipeline based on mode.
+// Default (no mode specified) is fine if llmExtractor is available, otherwise fast.
 func (h *Handler) nativeAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
-	if req.AsyncMode != nil && *req.AsyncMode == "async" {
+	if req.AsyncMode != nil && *req.AsyncMode == modeAsync {
 		return h.nativeAsyncAddForCube(ctx, req, cubeID)
 	}
-	if req.Mode != nil && *req.Mode == "fine" {
+	if req.Mode != nil && *req.Mode == modeFast {
+		return h.nativeFastAddForCube(ctx, req, cubeID)
+	}
+	// mode=fine explicitly, or nil (default) → fine with LLM extraction
+	if h.llmExtractor != nil {
 		return h.nativeFineAddForCube(ctx, req, cubeID)
 	}
 	return h.nativeFastAddForCube(ctx, req, cubeID)
@@ -217,6 +207,22 @@ func stringOrEmpty(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// derefStringOr dereferences a *string, returning def if nil.
+func derefStringOr(s *string, def string) string {
+	if s == nil {
+		return def
+	}
+	return *s
+}
+
+// derefBoolOr dereferences a *bool, returning def if nil.
+func derefBoolOr(v *bool, def bool) bool {
+	if v == nil {
+		return def
+	}
+	return *v
 }
 
 // mapOrEmpty returns m if non-nil, otherwise an empty map.
@@ -304,7 +310,7 @@ func (h *Handler) getWorkingMemoryLimit(ctx context.Context, cubeID string) int 
 		}
 		// Save back to cache
 		if encoded, err := json.Marshal(config); err == nil {
-			h.cacheSet(ctx, cacheKey, encoded, 5*time.Minute)
+			h.cacheSet(ctx, cacheKey, encoded, userConfigCacheTTL)
 		}
 	}
 

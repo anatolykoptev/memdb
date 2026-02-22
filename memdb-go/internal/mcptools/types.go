@@ -8,6 +8,7 @@ type SearchInput struct {
 	Query      string   `json:"query" jsonschema:"Search query text"`
 	UserID     string   `json:"user_id,omitempty" jsonschema:"User ID for memory scoping"`
 	CubeIDs    []string `json:"cube_ids,omitempty" jsonschema:"List of cube IDs to search in"`
+	Profile    string   `json:"profile,omitempty" jsonschema:"Search profile preset: inject, default, deep"`
 	TopK       int      `json:"top_k,omitempty" jsonschema:"Max results per category (default 6)"`
 	Relativity float64  `json:"relativity,omitempty" jsonschema:"Minimum relevance score threshold 0-1 (default 0.85)"`
 	Dedup      string   `json:"dedup,omitempty" jsonschema:"Dedup mode: no, sim, mmr (default mmr)"`
@@ -137,6 +138,7 @@ type ControlSchedulerProxyInput struct {
 type SearchMemoriesProxyInput struct {
 	Query      string   `json:"query"`
 	UserID     string   `json:"user_id"`
+	Profile    string   `json:"profile,omitempty"`
 	TopK       int      `json:"top_k,omitempty"`
 	Relativity float64  `json:"relativity,omitempty"`
 	Dedup      string   `json:"dedup,omitempty"`

@@ -13,6 +13,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+const (
+	proxyErrStatusThreshold = 400 // HTTP status codes >= this are treated as errors
+	proxyErrBodyTruncLen    = 200 // max chars of error body to include in error message
+)
+
 // proxyClient is a shared HTTP client for forwarding requests to Python.
 var proxyClient = &http.Client{
 	Timeout: 120 * time.Second,
@@ -51,8 +56,8 @@ func proxyCall(ctx context.Context, pythonURL string, endpoint string, serviceSe
 		return TextResult{}, fmt.Errorf("read response error: %w", err)
 	}
 
-	if resp.StatusCode >= 400 {
-		return TextResult{}, fmt.Errorf("%s returned HTTP %d: %s", toolName, resp.StatusCode, truncate(string(respBody), 200))
+	if resp.StatusCode >= proxyErrStatusThreshold {
+		return TextResult{}, fmt.Errorf("%s returned HTTP %d: %s", toolName, resp.StatusCode, truncate(string(respBody), proxyErrBodyTruncLen))
 	}
 
 	var result any

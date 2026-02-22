@@ -2,11 +2,59 @@ package mcptools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+const (
+	mcpDefaultTopK      = 6
+	mcpDefaultRelativity = 0.85
+	mcpDefaultDedup     = "mmr"
+)
+
+// buildProxySearchInput constructs the proxy payload from MCP search input.
+// In profile mode the server handles defaults; otherwise MCP backward-compat defaults apply.
+func buildProxySearchInput(input SearchInput) SearchMemoriesProxyInput {
+	userName := input.UserID
+	if userName == "" {
+		userName = defaultUserID
+	}
+	p := SearchMemoriesProxyInput{
+		Query:   input.Query,
+		UserID:  userName,
+		CubeIDs: input.CubeIDs,
+	}
+	if input.Profile != "" {
+		p.Profile = input.Profile
+		if input.TopK > 0 {
+			p.TopK = input.TopK
+		}
+		if input.Relativity > 0 {
+			p.Relativity = input.Relativity
+		}
+		if input.Dedup != "" {
+			p.Dedup = input.Dedup
+		}
+		return p
+	}
+	// No profile: use MCP defaults for backward compatibility.
+	p.TopK = mcpDefaultTopK
+	if input.TopK > 0 {
+		p.TopK = input.TopK
+	}
+	p.Relativity = mcpDefaultRelativity
+	if input.Relativity > 0 {
+		p.Relativity = input.Relativity
+	}
+	p.Dedup = mcpDefaultDedup
+	if input.Dedup != "" {
+		p.Dedup = input.Dedup
+	}
+	return p
+}
 
 // RegisterSearchTool registers the search_memories MCP tool.
 // It proxies to memdb-go /product/search instead of running ONNX locally.
@@ -17,43 +65,15 @@ func RegisterSearchTool(server *mcp.Server, memdbGoURL string, serviceSecret str
 		Annotations: &mcp.ToolAnnotations{
 			ReadOnlyHint: true,
 		},
-	}, func(ctx context.Context, req *mcp.CallToolRequest, input SearchInput) (*mcp.CallToolResult, TextResult, error) {
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input SearchInput) (*mcp.CallToolResult, TextResult, error) {
 		if input.Query == "" {
-			return nil, TextResult{}, fmt.Errorf("query is required")
+			return nil, TextResult{}, errors.New("query is required")
 		}
-
-		userName := input.UserID
-		if userName == "" {
-			userName = "memos"
-		}
-
-		topK := 6
-		if input.TopK > 0 {
-			topK = input.TopK
-		}
-		relativity := 0.85
-		if input.Relativity > 0 {
-			relativity = input.Relativity
-		}
-		dedup := "mmr"
-		if input.Dedup != "" {
-			dedup = input.Dedup
-		}
-
-		proxyInput := SearchMemoriesProxyInput{
-			Query:      input.Query,
-			UserID:     userName,
-			TopK:       topK,
-			Relativity: relativity,
-			Dedup:      dedup,
-			CubeIDs:    input.CubeIDs,
-		}
-
+		proxyInput := buildProxySearchInput(input)
 		result, err := proxyCall(ctx, memdbGoURL, "/product/search", serviceSecret, "search_memories", proxyInput, logger)
 		if err != nil {
 			return nil, TextResult{}, fmt.Errorf("search failed: %w", err)
 		}
-
 		return nil, result, nil
 	})
 }

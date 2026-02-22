@@ -39,7 +39,7 @@ ON CONFLICT (from_id, to_id, relation) DO NOTHING`
 // Args: $1 = seed_ids (text[]), $2 = relation (text), $3 = user_name (text), $4 = limit (int)
 const GraphRecallByEdge = `
 SELECT m.id::text,
-       m.properties::text
+       (m.properties - 'sources')::text
 FROM %[1]s."Memory" m
 JOIN memory_edges e ON m.id = e.to_id
 WHERE e.from_id = ANY($1)

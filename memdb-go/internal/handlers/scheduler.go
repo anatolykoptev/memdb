@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+const schedulerStatusTimeout = 5 * time.Second
+
 const goConsumerGroup = "memdb_go_scheduler"
 
 // NativeSchedulerStatus handles GET /product/scheduler/status
@@ -23,7 +25,7 @@ func (h *Handler) NativeSchedulerStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), schedulerStatusTimeout)
 	defer cancel()
 
 	info := h.buildSchedulerStatus(ctx)
@@ -38,7 +40,7 @@ func (h *Handler) NativeSchedulerAllStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), schedulerStatusTimeout)
 	defer cancel()
 
 	info := h.buildSchedulerStatus(ctx)
@@ -59,7 +61,7 @@ func (h *Handler) NativeSchedulerTaskQueueStatus(w http.ResponseWriter, r *http.
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), schedulerStatusTimeout)
 	defer cancel()
 
 	streams, total, pending := h.countSchedulerStreams(ctx)

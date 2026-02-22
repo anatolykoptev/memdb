@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"os"
 	"strings"
 	"testing"
 
@@ -178,7 +176,7 @@ func TestCompactWorkingMemory_BelowThreshold_NoFetch(t *testing.T) {
 		t.Error("test setup: count must be below threshold")
 	}
 	// The condition `count < int64(wmCompactThreshold)` must be true
-	if !(count < int64(wmCompactThreshold)) {
+	if count >= int64(wmCompactThreshold) {
 		t.Error("threshold check logic is wrong")
 	}
 }
@@ -232,7 +230,7 @@ func TestEpisodicMemory_NotInWMType(t *testing.T) {
 	r := &Reorganizer{}
 	data := r.buildEpisodicProps("id", "summary", "cube", "2026-01-01T00:00:00.000000", 5)
 	var props map[string]any
-	json.Unmarshal(data, &props)
+	_ = json.Unmarshal(data, &props)
 	if props["memory_type"] == "WorkingMemory" {
 		t.Error("EpisodicMemory must not have memory_type=WorkingMemory")
 	}
@@ -269,8 +267,4 @@ func makeTestMemNodes(n int) []db.MemNode {
 		}
 	}
 	return nodes
-}
-
-func newTestReorgLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }

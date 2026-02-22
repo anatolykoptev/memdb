@@ -1,6 +1,7 @@
 package embedder
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 )
@@ -52,7 +53,7 @@ func New(cfg Config, logger *slog.Logger) (Embedder, error) {
 
 	case "voyage":
 		if cfg.VoyageAPIKey == "" {
-			return nil, fmt.Errorf("embedder: voyage requires VOYAGE_API_KEY")
+			return nil, errors.New("embedder: voyage requires VOYAGE_API_KEY")
 		}
 		model := cfg.Model
 		if model == "" {
@@ -64,7 +65,7 @@ func New(cfg Config, logger *slog.Logger) (Embedder, error) {
 
 	case "onnx", "":
 		if cfg.ONNXModelDir == "" {
-			return nil, fmt.Errorf("embedder: onnx requires MEMDB_ONNX_MODEL_DIR")
+			return nil, errors.New("embedder: onnx requires MEMDB_ONNX_MODEL_DIR")
 		}
 		e, err := NewONNXEmbedder(cfg.ONNXModelDir, logger)
 		if err != nil {

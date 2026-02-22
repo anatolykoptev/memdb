@@ -64,7 +64,8 @@ type Config struct {
 	// LLM proxy (CLIProxyAPI — internal Gemini proxy)
 	LLMProxyURL      string `json:"llm_proxy_url"`
 	LLMProxyAPIKey   string `json:"llm_proxy_api_key"`
-	LLMDefaultModel  string `json:"llm_default_model"`
+	LLMDefaultModel    string   `json:"llm_default_model"`
+	LLMSearchModel     string   `json:"llm_search_model"`     // model for search LLM calls: rerank, iterative (default: gemini-2.0-flash)
 	LLMExtractModel    string   `json:"llm_extract_model"`    // model for fine-mode extraction (default: gemini-2.0-flash-lite)
 	LLMFallbackModels  []string `json:"llm_fallback_models"`  // fallback models tried on quota errors (comma-separated env)
 
@@ -72,13 +73,21 @@ type Config struct {
 	MemDBGoURL string `json:"memdb_go_url"`
 }
 
+const (
+	defaultPort            = 8080
+	defaultReadTimeout     = 30 * time.Second
+	defaultWriteTimeout    = 120 * time.Second
+	defaultShutdownTimeout = 15 * time.Second
+	defaultRateLimitRPS    = 50
+)
+
 // Load reads configuration from environment variables with sensible defaults.
 func Load() *Config {
 	return &Config{
-		Port:            envInt("MEMDB_GO_PORT", 8080),
-		ReadTimeout:     envDuration("MEMDB_GO_READ_TIMEOUT", 30*time.Second),
-		WriteTimeout:    envDuration("MEMDB_GO_WRITE_TIMEOUT", 120*time.Second),
-		ShutdownTimeout: envDuration("MEMDB_GO_SHUTDOWN_TIMEOUT", 15*time.Second),
+		Port:            envInt("MEMDB_GO_PORT", defaultPort),
+		ReadTimeout:     envDuration("MEMDB_GO_READ_TIMEOUT", defaultReadTimeout),
+		WriteTimeout:    envDuration("MEMDB_GO_WRITE_TIMEOUT", defaultWriteTimeout),
+		ShutdownTimeout: envDuration("MEMDB_GO_SHUTDOWN_TIMEOUT", defaultShutdownTimeout),
 
 		PythonBackendURL: envStr("MEMDB_PYTHON_URL", "http://localhost:8000"),
 
@@ -97,7 +106,7 @@ func Load() *Config {
 		RedisURL:     envStr("MEMDB_REDIS_URL", "redis://redis:6379/1"),
 
 		RateLimitEnabled: envBool("MEMDB_RATE_LIMIT_ENABLED", false),
-		RateLimitRPS:     envFloat("MEMDB_RATE_LIMIT_RPS", 50),
+		RateLimitRPS:     envFloat("MEMDB_RATE_LIMIT_RPS", defaultRateLimitRPS),
 		RateLimitBurst:   envInt("MEMDB_RATE_LIMIT_BURST", 100),
 
 		PostgresURL: envStr("MEMDB_POSTGRES_URL", ""),
@@ -117,7 +126,8 @@ func Load() *Config {
 
 		LLMProxyURL:     envStr("MEMDB_LLM_PROXY_URL", "http://cliproxyapi:8317"),
 		LLMProxyAPIKey:  envStr("CLI_PROXY_API_KEY", ""),
-		LLMDefaultModel: envStr("MEMDB_LLM_MODEL", "gemini-2.5-flash"),
+		LLMDefaultModel:   envStr("MEMDB_LLM_MODEL", "gemini-2.5-flash"),
+		LLMSearchModel:    envStr("MEMDB_LLM_SEARCH_MODEL", "gemini-2.0-flash"),
 		LLMExtractModel:   envStr("MEMDB_LLM_EXTRACT_MODEL", "gemini-2.0-flash-lite"),
 		LLMFallbackModels: envCSV("MEMDB_LLM_FALLBACK_MODELS", nil),
 

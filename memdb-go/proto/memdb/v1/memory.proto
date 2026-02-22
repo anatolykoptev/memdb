@@ -48,11 +48,11 @@ message SearchRequest {
   string dedup = 7;        // "no", "sim", "mmr"
   string mode = 8;         // "fast", "fine"
   string async_mode = 9;   // "sync", "async"
-  
+
   // Threshold and filter
   float threshold = 10;
   google.protobuf.Struct filter = 11;
-  
+
   // Search configuration
   bool enable_text_mem = 12;
   bool enable_act_mem = 13;
@@ -60,7 +60,7 @@ message SearchRequest {
   bool enable_pref_mem = 15;
   bool enable_tool_mem = 16;
   bool enable_knowledge_base = 17;
-  
+
   // Backward compat fields
   string mem_cube_id = 18;  // deprecated, use mem_cube_ids
 }
@@ -93,7 +93,7 @@ message AddRequest {
   string user_profile = 10;
   string task_id = 11;
   string doc_path = 12;
-  
+
   // Backward compat
   string mem_cube_id = 13;  // deprecated
 }

@@ -75,46 +75,55 @@ func ApplyTemporalDecay(items []map[string]any, now time.Time, alpha float64) []
 		return items
 	}
 	for _, item := range items {
-		meta, ok := item["metadata"].(map[string]any)
-		if !ok || meta == nil {
-			continue
-		}
-		// WorkingMemory is session context — recency is already its purpose.
-		if mt, _ := meta["memory_type"].(string); mt == "WorkingMemory" {
-			continue
-		}
-
-		// Resolve reference timestamp: last_accessed_at > updated_at > created_at
-		refTime, ok := parseTimestamp(meta, "last_accessed_at")
-		if !ok {
-			refTime, ok = parseTimestamp(meta, "updated_at")
-		}
-		if !ok {
-			refTime, ok = parseTimestamp(meta, "created_at")
-		}
-		if !ok {
-			continue // no timestamp — leave score unchanged
-		}
-
-		days := now.Sub(refTime).Hours() / 24.0
-		if days < 0 {
-			days = 0
-		}
-
-		// Memories beyond MaxDecayAgeDays get recency=0 (semantic still counts).
-		var recency float64
-		if days <= MaxDecayAgeDays {
-			recency = math.Exp(-alpha * days)
-		}
-
-		// Weighted combination: semantic relevance + recency tiebreaker.
-		// Matches MemOS pattern (0.6 sem + 0.3 rec + 0.1 imp) but without
-		// importance score (not yet stored). We use 0.75/0.25 split.
-		if cosine, ok := meta["relativity"].(float64); ok {
-			meta["relativity"] = DecaySemanticWeight*cosine + DecayRecencyWeight*recency
-		}
+		applyDecayToItem(item, now, alpha)
 	}
 	return items
+}
+
+// applyDecayToItem applies temporal decay to a single item's metadata in place.
+func applyDecayToItem(item map[string]any, now time.Time, alpha float64) {
+	meta, ok := item["metadata"].(map[string]any)
+	if !ok || meta == nil {
+		return
+	}
+	// WorkingMemory is session context — recency is already its purpose.
+	if mt, _ := meta["memory_type"].(string); mt == "WorkingMemory" {
+		return
+	}
+
+	refTime, ok := resolveRefTimestamp(meta)
+	if !ok {
+		return // no timestamp — leave score unchanged
+	}
+
+	days := now.Sub(refTime).Hours() / 24.0
+	if days < 0 {
+		days = 0
+	}
+
+	// Memories beyond MaxDecayAgeDays get recency=0 (semantic still counts).
+	var recency float64
+	if days <= MaxDecayAgeDays {
+		recency = math.Exp(-alpha * days)
+	}
+
+	// Weighted combination: semantic relevance + recency tiebreaker.
+	// Matches MemOS pattern (0.6 sem + 0.3 rec + 0.1 imp) but without
+	// importance score (not yet stored). We use 0.75/0.25 split.
+	if cosine, ok := meta["relativity"].(float64); ok {
+		meta["relativity"] = DecaySemanticWeight*cosine + DecayRecencyWeight*recency
+	}
+}
+
+// resolveRefTimestamp returns the most relevant timestamp from metadata.
+// Priority: last_accessed_at > updated_at > created_at.
+func resolveRefTimestamp(meta map[string]any) (time.Time, bool) {
+	for _, field := range []string{"last_accessed_at", "updated_at", "created_at"} {
+		if t, ok := parseTimestamp(meta, field); ok {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // parseTimestamp extracts and parses a named timestamp field from metadata.

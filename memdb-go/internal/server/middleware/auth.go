@@ -29,63 +29,81 @@ func Auth(logger *slog.Logger, cfg AuthConfig) func(http.Handler) http.Handler {
 		}
 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip auth for health endpoints and internal APIs
-			if r.URL.Path == "/health" || r.URL.Path == "/ready" ||
-				strings.HasPrefix(r.URL.Path, "/v1/") {
+			if isAuthExempt(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			// Skip auth for CORS preflight
-			if r.Method == http.MethodOptions {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Check internal service secret first (for service-to-service calls)
-			// Accept both X-Service-Secret and X-Internal-Service headers for compatibility
-			if cfg.ServiceSecret != "" {
-				secret := r.Header.Get("X-Service-Secret")
-				if secret == "" {
-					secret = r.Header.Get("X-Internal-Service")
+			if ok, granted := checkServiceSecret(r, cfg.ServiceSecret); ok {
+				if granted {
+					next.ServeHTTP(w, r)
+					return
 				}
-				if secret != "" {
-					if subtle.ConstantTimeCompare([]byte(secret), []byte(cfg.ServiceSecret)) == 1 {
-						next.ServeHTTP(w, r)
-						return
-					}
-					logger.Warn("invalid service secret",
-						slog.String("path", r.URL.Path),
-						slog.String("remote", r.RemoteAddr),
-					)
-				}
-			}
-
-			// Check Bearer token
-			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
-				writeAuthError(w, http.StatusUnauthorized, "missing Authorization header")
-				return
-			}
-
-			token, ok := parseBearerToken(authHeader)
-			if !ok {
-				writeAuthError(w, http.StatusUnauthorized, "invalid Authorization header format, expected: Bearer <token>")
-				return
-			}
-
-			if !validateToken(token, cfg.MasterKeyHash) {
-				logger.Warn("auth failed: invalid token",
+				logger.Warn("invalid service secret",
 					slog.String("path", r.URL.Path),
 					slog.String("remote", r.RemoteAddr),
 				)
-				writeAuthError(w, http.StatusForbidden, "invalid API key")
+			}
+
+			if !checkBearerToken(w, r, logger, cfg.MasterKeyHash) {
 				return
 			}
 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// isAuthExempt returns true for paths that skip auth (health, internal APIs, CORS preflight).
+func isAuthExempt(r *http.Request) bool {
+	if r.Method == http.MethodOptions {
+		return true
+	}
+	return r.URL.Path == "/health" || r.URL.Path == "/ready" ||
+		strings.HasPrefix(r.URL.Path, "/v1/")
+}
+
+// checkServiceSecret checks the X-Service-Secret / X-Internal-Service headers.
+// Returns (presented, valid): presented=true if a secret header was sent, valid=true if it matches.
+func checkServiceSecret(r *http.Request, expected string) (presented bool, valid bool) {
+	if expected == "" {
+		return false, false
+	}
+	secret := r.Header.Get("X-Service-Secret")
+	if secret == "" {
+		secret = r.Header.Get("X-Internal-Service")
+	}
+	if secret == "" {
+		return false, false
+	}
+	return true, subtle.ConstantTimeCompare([]byte(secret), []byte(expected)) == 1
+}
+
+// checkBearerToken validates the Authorization: Bearer header and writes an error response on failure.
+// Returns true if auth succeeded.
+func checkBearerToken(w http.ResponseWriter, r *http.Request, logger *slog.Logger, masterKeyHash string) bool {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		writeAuthError(w, http.StatusUnauthorized, "missing Authorization header")
+		return false
+	}
+
+	token, ok := parseBearerToken(authHeader)
+	if !ok {
+		writeAuthError(w, http.StatusUnauthorized, "invalid Authorization header format, expected: Bearer <token>")
+		return false
+	}
+
+	if !validateToken(token, masterKeyHash) {
+		logger.Warn("auth failed: invalid token",
+			slog.String("path", r.URL.Path),
+			slog.String("remote", r.RemoteAddr),
+		)
+		writeAuthError(w, http.StatusForbidden, "invalid API key")
+		return false
+	}
+
+	return true
 }
 
 // parseBearerToken extracts the token from "Bearer <token>" header value.

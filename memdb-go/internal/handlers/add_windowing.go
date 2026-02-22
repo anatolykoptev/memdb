@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+const (
+	roleUser        = "user"
+	memTypeLongTerm = "LongTermMemory"
+	memTypeUser     = "UserMemory"
+	modeFast        = "fast"
+	modeFine        = "fine"
+	modeAsync       = "async"
+)
+
 // extractedMemory is a single memory window produced by the sliding-window algorithm.
 type extractedMemory struct {
 	Text       string
@@ -89,7 +98,7 @@ func buildWindow(msgs []formattedMsg, start int) (*extractedMemory, int) {
 		}
 		sb.WriteString(line)
 		sources = append(sources, msgs[end].source)
-		if msgs[end].role != "user" {
+		if msgs[end].role != roleUser {
 			userOnly = false
 		}
 		end++
@@ -99,9 +108,9 @@ func buildWindow(msgs []formattedMsg, start int) (*extractedMemory, int) {
 		return nil, end
 	}
 
-	memType := "LongTermMemory"
+	memType := memTypeLongTerm
 	if userOnly {
-		memType = "UserMemory"
+		memType = memTypeUser
 	}
 
 	return &extractedMemory{

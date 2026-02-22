@@ -3,6 +3,7 @@ package handlers
 // memory_delete.go — native DELETE handler: delete memories by property UUIDs.
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 )
@@ -64,32 +65,37 @@ func (h *Handler) NativeDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Also delete from Qdrant preference collections (best-effort).
-	if h.qdrant != nil {
-		for _, collection := range []string{"explicit_preference", "implicit_preference"} {
-			if err := h.qdrant.DeleteByIDs(r.Context(), collection, *req.MemoryIDs); err != nil {
-				h.logger.Debug("qdrant delete from preference collection failed",
-					slog.String("collection", collection),
-					slog.Any("error", err),
-				)
-			}
-		}
-	}
-
-	// Invalidate caches: get_all pages for this user, users list/count, individual memories.
-	h.cacheInvalidate(ctx,
-		cachePrefix+"get_all:"+*req.UserID+":*",
-		cachePrefix+"users:*",
-	)
-	for _, id := range *req.MemoryIDs {
-		h.cacheInvalidate(ctx, cachePrefix+"memory:"+id)
-	}
+	h.deleteFromPreferenceCollections(r.Context(), *req.MemoryIDs)
+	h.invalidateDeleteCaches(ctx, *req.UserID, *req.MemoryIDs)
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
 		"code":    200,
 		"message": "ok",
-		"data": map[string]any{
-			"deleted_count": deleted,
-		},
+		"data":    map[string]any{"deleted_count": deleted},
 	})
+}
+
+// deleteFromPreferenceCollections deletes from Qdrant preference collections (best-effort).
+func (h *Handler) deleteFromPreferenceCollections(ctx context.Context, ids []string) {
+	if h.qdrant == nil {
+		return
+	}
+	for _, collection := range []string{"explicit_preference", "implicit_preference"} {
+		if err := h.qdrant.DeleteByIDs(ctx, collection, ids); err != nil {
+			h.logger.Debug("qdrant delete from preference collection failed",
+				slog.String("collection", collection),
+				slog.Any("error", err),
+			)
+		}
+	}
+}
+
+// invalidateDeleteCaches invalidates get_all, users, and per-memory caches after deletion.
+func (h *Handler) invalidateDeleteCaches(ctx context.Context, userID string, ids []string) {
+	patterns := make([]string, 0, 2+len(ids))
+	patterns = append(patterns, cachePrefix+"get_all:"+userID+":*", cachePrefix+"users:*")
+	for _, id := range ids {
+		patterns = append(patterns, cachePrefix+"memory:"+id)
+	}
+	h.cacheInvalidate(ctx, patterns...)
 }

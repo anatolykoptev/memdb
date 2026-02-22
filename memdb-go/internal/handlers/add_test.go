@@ -264,7 +264,7 @@ func TestSerializeSources_JSONStrings(t *testing.T) {
 func TestNativeAdd_MissingUserID(t *testing.T) {
 	h := &Handler{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 
-	req := httptest.NewRequest("POST", "/product/add", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/product/add", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 	h.NativeAdd(w, req)
 
@@ -279,7 +279,7 @@ func TestNativeAdd_MissingUserID(t *testing.T) {
 func TestNativeAdd_InvalidMode(t *testing.T) {
 	h := &Handler{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 
-	req := httptest.NewRequest("POST", "/product/add",
+	req := httptest.NewRequest(http.MethodPost, "/product/add",
 		strings.NewReader(`{"user_id":"test","mode":"turbo"}`))
 	w := httptest.NewRecorder()
 	h.NativeAdd(w, req)
@@ -295,7 +295,7 @@ func TestNativeAdd_InvalidMode(t *testing.T) {
 func TestNativeAdd_InvalidAsyncMode(t *testing.T) {
 	h := &Handler{logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 
-	req := httptest.NewRequest("POST", "/product/add",
+	req := httptest.NewRequest(http.MethodPost, "/product/add",
 		strings.NewReader(`{"user_id":"test","async_mode":"invalid"}`))
 	w := httptest.NewRecorder()
 	h.NativeAdd(w, req)
@@ -358,13 +358,13 @@ func TestCanHandleNativeAdd(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "nil mode (defaults to fast)",
+			name: "nil mode (defaults to fine, needs llmExtractor)",
 			handler: &Handler{
 				postgres: &stubPostgres,
 				embedder: &stubEmbedder{},
 			},
 			req:      &fullAddRequest{},
-			expected: true,
+			expected: false,
 		},
 	}
 

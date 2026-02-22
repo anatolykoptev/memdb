@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +30,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+)
+
+const (
+	iterativeRespBodyLimit  = 16 * 1024 // 16 KB max LLM response body for iterative retrieval
+	iterativeMemContextTopK = 5          // number of top memories used to build context for expansion LLM prompt
 )
 
 // IterativeConfig configures multi-stage iterative retrieval.
@@ -102,74 +108,100 @@ func IterativeExpand(
 	}
 
 	all := firstPassItems
-	seen := make(map[string]bool)
-	for _, item := range firstPassItems {
+	seen := buildSeenSet(firstPassItems)
+
+	for stage := 0; stage < cfg.NumStages; stage++ {
+		phrases, ok := getExpansionPhrases(ctx, query, stage, all, cfg)
+		if !ok || len(phrases) == 0 {
+			break
+		}
+		all = expandByPhrases(ctx, all, seen, phrases, stage, embedFn)
+	}
+
+	sortByRelativity(all)
+	return all
+}
+
+// getExpansionPhrases returns retrieval phrases for the current stage, using the cache when available.
+// Returns (phrases, true) on success, (nil, false) if expansion should stop.
+func getExpansionPhrases(ctx context.Context, query string, stage int, all []map[string]any, cfg IterativeConfig) ([]string, bool) {
+	memCtx := buildMemoryContext(all, iterativeMemContextTopK)
+	cacheKey := buildStageKey(query, stage, all)
+	if phrases, cached := globalIterativeCache.get(cacheKey); cached {
+		return phrases, true
+	}
+	decision, err := callExpansionLLM(ctx, query, memCtx, stage, cfg)
+	if err != nil {
+		return nil, false // non-fatal: stop expansion
+	}
+	if decision.CanAnswer {
+		return nil, false // LLM says we have enough
+	}
+	globalIterativeCache.set(cacheKey, decision.RetrievalPhrases, iterativeCacheTTL)
+	return decision.RetrievalPhrases, true
+}
+
+// expandByPhrases runs vector search for each phrase and appends unseen results to all.
+func expandByPhrases(
+	ctx context.Context,
+	all []map[string]any,
+	seen map[string]bool,
+	phrases []string,
+	stage int,
+	embedFn func(ctx context.Context, subQuery string) ([]map[string]any, error),
+) []map[string]any {
+	for _, phrase := range phrases {
+		if strings.TrimSpace(phrase) == "" {
+			continue
+		}
+		expanded, err := embedFn(ctx, phrase)
+		if err != nil {
+			continue
+		}
+		for _, item := range expanded {
+			id, _ := item["id"].(string)
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			tagIterativeProvenance(item, stage+1, phrase)
+			all = append(all, item)
+		}
+	}
+	return all
+}
+
+// tagIterativeProvenance sets iterative_stage and expansion_phrase metadata on an item.
+func tagIterativeProvenance(item map[string]any, stage int, phrase string) {
+	if meta, ok := item["metadata"].(map[string]any); ok {
+		meta["iterative_stage"] = stage
+		meta["expansion_phrase"] = phrase
+	}
+}
+
+// buildSeenSet builds a set of IDs already present in items.
+func buildSeenSet(items []map[string]any) map[string]bool {
+	seen := make(map[string]bool, len(items))
+	for _, item := range items {
 		if id, ok := item["id"].(string); ok {
 			seen[id] = true
 		}
 	}
+	return seen
+}
 
-	for stage := 0; stage < cfg.NumStages; stage++ {
-		// Build memory context from current results (top-5 for brevity)
-		memCtx := buildMemoryContext(all, 5)
-
-		// Check cache for expansion phrases
-		cacheKey := buildStageKey(query, stage, all)
-		phrases, cached := globalIterativeCache.get(cacheKey)
-		if !cached {
-			decision, err := callExpansionLLM(ctx, query, memCtx, stage, cfg)
-			if err != nil {
-				break // non-fatal: stop expansion, return what we have
-			}
-			if decision.CanAnswer {
-				break // LLM says we have enough — stop early
-			}
-			phrases = decision.RetrievalPhrases
-			globalIterativeCache.set(cacheKey, phrases, iterativeCacheTTL)
-		}
-
-		if len(phrases) == 0 {
-			break
-		}
-
-		// Run vector search for each expansion phrase, collect new items
-		for _, phrase := range phrases {
-			if strings.TrimSpace(phrase) == "" {
-				continue
-			}
-			expanded, err := embedFn(ctx, phrase)
-			if err != nil {
-				continue
-			}
-			for _, item := range expanded {
-				id, _ := item["id"].(string)
-				if id == "" || seen[id] {
-					continue
-				}
-				seen[id] = true
-				// Tag provenance for debug/logging
-				if meta, ok := item["metadata"].(map[string]any); ok {
-					meta["iterative_stage"] = stage + 1
-					meta["expansion_phrase"] = phrase
-				}
-				all = append(all, item)
-			}
-		}
-	}
-
-	// Re-sort by relativity (score) descending so new items slot in correctly
-	sort.SliceStable(all, func(i, j int) bool {
+// sortByRelativity sorts items by their metadata.relativity score descending.
+func sortByRelativity(items []map[string]any) {
+	sort.SliceStable(items, func(i, j int) bool {
 		si, sj := 0.0, 0.0
-		if mi, ok := all[i]["metadata"].(map[string]any); ok {
+		if mi, ok := items[i]["metadata"].(map[string]any); ok {
 			si, _ = mi["relativity"].(float64)
 		}
-		if mj, ok := all[j]["metadata"].(map[string]any); ok {
+		if mj, ok := items[j]["metadata"].(map[string]any); ok {
 			sj, _ = mj["relativity"].(float64)
 		}
 		return si > sj
 	})
-
-	return all
 }
 
 // buildMemoryContext formats the top-N items as a concise bullet list for the LLM.
@@ -246,7 +278,7 @@ Respond ONLY with valid JSON matching this schema:
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, iterativeRespBodyLimit))
 	if err != nil {
 		return stageDecision{}, err
 	}
@@ -257,7 +289,7 @@ Respond ONLY with valid JSON matching this schema:
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(respBody, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return stageDecision{}, fmt.Errorf("iterative: bad LLM response")
+		return stageDecision{}, errors.New("iterative: bad LLM response")
 	}
 
 	content := strings.TrimSpace(chatResp.Choices[0].Message.Content)

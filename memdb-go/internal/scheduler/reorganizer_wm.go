@@ -13,6 +13,8 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
 )
 
+const wmQueryLogPreviewLen = 60 // max chars of query to log as preview
+
 func (r *Reorganizer) generateUUID() string {
 	return uuid.New().String()
 }
@@ -61,7 +63,7 @@ func (r *Reorganizer) buildWMProps(id, text, cubeID, now, background string) []b
 func (r *Reorganizer) RefreshWorkingMemory(ctx context.Context, cubeID, queryText string) {
 	log := r.logger.With(
 		slog.String("cube_id", cubeID),
-		slog.String("query_preview", truncate(queryText, 60)),
+		slog.String("query_preview", truncate(queryText, wmQueryLogPreviewLen)),
 	)
 
 	if r.embedder == nil {
@@ -107,16 +109,16 @@ func (r *Reorganizer) RefreshWorkingMemory(ctx context.Context, cubeID, queryTex
 	// calls correctly compare user queries against memory content.
 	nowStr := time.Now().UTC().Format("2006-01-02T15:04:05.000000")
 	nowUnix := time.Now().UTC().Unix()
-	
+
 	var allNodes []db.MemoryInsertNode
 	var vsetInserts []struct{ id, text string; emb []float32 }
-	
+
 	for _, res := range results {
 		emb := res.Embedding
 		if len(emb) == 0 {
 			emb = queryVec
 		}
-		
+
 		wmID := r.generateUUID()
 		propsJSON := r.buildWMProps(wmID, res.Text, cubeID, nowStr, "[working_binding:"+res.ID+"]")
 		embStr := db.FormatVector(emb)
@@ -128,26 +130,32 @@ func (r *Reorganizer) RefreshWorkingMemory(ctx context.Context, cubeID, queryTex
 			id: wmID, text: res.Text, emb: emb,
 		})
 	}
-	
-	if len(allNodes) > 0 {
-		if err := r.postgres.InsertMemoryNodes(ctx, allNodes); err != nil {
-			log.Warn("wm refresh: InsertMemoryNodes failed", slog.Any("error", err))
-		} else {
-			added := 0
-			for _, vi := range vsetInserts {
-				if err := r.wmCache.VAdd(ctx, cubeID, vi.id, vi.text, vi.emb, nowUnix); err != nil {
-					log.Debug("wm refresh: vset vadd failed",
-						slog.String("id", vi.id), slog.Any("error", err))
-					continue
-				}
-				added++
-			}
-			log.Info("wm refresh: complete",
-				slog.Int("candidates", len(results)),
-				slog.Int("added_to_vset", added),
-			)
-		}
-	} else {
+
+	if len(allNodes) == 0 {
 		log.Info("wm refresh: no LTM found (or failed to build nodes)")
+		return
 	}
+	if err := r.postgres.InsertMemoryNodes(ctx, allNodes); err != nil {
+		log.Warn("wm refresh: InsertMemoryNodes failed", slog.Any("error", err))
+		return
+	}
+	added := r.addNodesToVSet(ctx, cubeID, vsetInserts, nowUnix, log)
+	log.Info("wm refresh: complete",
+		slog.Int("candidates", len(results)),
+		slog.Int("added_to_vset", added),
+	)
+}
+
+// addNodesToVSet writes vset entries and returns the count of successfully added entries.
+func (r *Reorganizer) addNodesToVSet(ctx context.Context, cubeID string, vsetInserts []struct{ id, text string; emb []float32 }, nowUnix int64, log *slog.Logger) int {
+	added := 0
+	for _, vi := range vsetInserts {
+		if err := r.wmCache.VAdd(ctx, cubeID, vi.id, vi.text, vi.emb, nowUnix); err != nil {
+			log.Debug("wm refresh: vset vadd failed",
+				slog.String("id", vi.id), slog.Any("error", err))
+			continue
+		}
+		added++
+	}
+	return added
 }

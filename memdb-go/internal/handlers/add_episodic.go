@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -28,7 +29,13 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
 )
 
-const episodicMemoryType = "EpisodicMemory"
+const (
+	episodicMemoryType        = "EpisodicMemory"
+	episodicSummaryTimeout    = 45 * time.Second
+	entityLinkTimeout         = 15 * time.Second
+	episodicConvMaxChars      = 6000 // ~4000 tokens; truncate to avoid prompt overflow
+	episodicRespBodyLimit     = 16 * 1024 // 16 KB max LLM response body
+)
 
 // generateEpisodicSummary asynchronously creates an EpisodicMemory node for the session.
 // Called after fact insertion — non-blocking (fire-and-forget via goroutine).
@@ -41,7 +48,7 @@ func (h *Handler) generateEpisodicSummary(cubeID, sessionID, conversation, now s
 		return // too short to be worth summarising
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), episodicSummaryTimeout)
 		defer cancel()
 
 		summary, err := callEpisodicSummarizer(ctx, conversation)
@@ -104,6 +111,14 @@ func (h *Handler) generateEpisodicSummary(cubeID, sessionID, conversation, now s
 	}()
 }
 
+// entityLinkPair holds a handler-side LTM node and its associated entities/relations.
+type entityLinkPair struct {
+	ltmID     string
+	entities  []llm.EntityMention
+	relations []llm.EntityRelation
+	validAt   string
+}
+
 // linkEntitiesAsync fires a background goroutine that upserts entity_nodes and creates
 // MENTIONS_ENTITY edges for every ADD/UPDATE fact that carries LLM-extracted entities.
 // Non-blocking, non-fatal — entity graph enriches search but is not required for correctness.
@@ -111,106 +126,105 @@ func (h *Handler) linkEntitiesAsync(embedded []embeddedFact, cubeID, now string)
 	if h.postgres == nil {
 		return
 	}
-	// Collect (ltmID, entities) pairs — only ADD/UPDATE facts have LTM nodes.
-	type pair struct {
-		ltmID     string
-		entities  []llm.EntityMention
-		relations []llm.EntityRelation
-		validAt   string // ISO-8601 when this fact became true (from ExtractedFact.ValidAt)
-	}
-	var pairs []pair
-	for _, ef := range embedded {
-		if ef.fact.Action != llm.MemAdd && ef.fact.Action != llm.MemUpdate {
-			continue
-		}
-		if len(ef.fact.Entities) == 0 {
-			continue
-		}
-		// LTM node is the second node in the pair built by buildAddNodes (index 1).
-		// We stored it in ef.ltmID during applyFineActions.
-		if ef.ltmID == "" {
-			continue
-		}
-		pairs = append(pairs, pair{
-			ltmID:     ef.ltmID,
-			entities:  ef.fact.Entities,
-			relations: ef.fact.Relations,
-			validAt:   ef.fact.ValidAt,
-		})
-	}
+	pairs := collectHandlerEntityPairs(embedded)
 	if len(pairs) == 0 {
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), entityLinkTimeout)
 		defer cancel()
 
-		// Batch-embed all unique entity names for identity resolution.
-		// Falls back to plain upsert if embedder is unavailable.
-		entityEmbByName := make(map[string]string)
-		if h.embedder != nil {
-			var allNames []string
-			seen := make(map[string]bool)
-			for _, p := range pairs {
-				for _, ent := range p.entities {
-					if ent.Name != "" && !seen[ent.Name] {
-						allNames = append(allNames, ent.Name)
-						seen[ent.Name] = true
-					}
-				}
-			}
-			if len(allNames) > 0 {
-				vecs, err := h.embedder.Embed(ctx, allNames)
-				if err == nil && len(vecs) == len(allNames) {
-					for i, name := range allNames {
-						entityEmbByName[name] = db.FormatVector(vecs[i])
-					}
-				}
-			}
-		}
-
+		embByName := h.batchEmbedHandlerEntities(ctx, pairs)
 		for _, p := range pairs {
-			// Build entity name → normalized ID map for relation linking.
-			entityIDByName := make(map[string]string, len(p.entities))
-			for _, ent := range p.entities {
-				if ent.Name == "" {
-					continue
-				}
-				embVec := entityEmbByName[ent.Name]
-				entityID, err := h.postgres.UpsertEntityNodeWithEmbedding(ctx, ent.Name, ent.Type, cubeID, now, embVec)
-				if err != nil {
-					h.logger.Debug("entity link: upsert entity node failed",
-						slog.String("name", ent.Name), slog.Any("error", err))
-					continue
-				}
-				entityIDByName[ent.Name] = entityID
-				if err := h.postgres.CreateMemoryEdge(ctx, p.ltmID, entityID, db.EdgeMentionsEntity, now, p.validAt); err != nil {
-					h.logger.Debug("entity link: create edge failed",
-						slog.String("ltm_id", p.ltmID), slog.String("entity_id", entityID), slog.Any("error", err))
-				}
-			}
-			// Create entity-to-entity triplet edges from LLM-extracted relations.
-			for _, rel := range p.relations {
-				fromID, ok1 := entityIDByName[rel.Subject]
-				toID, ok2 := entityIDByName[rel.Object]
-				if !ok1 || !ok2 || rel.Predicate == "" {
-					continue
-				}
-				if err := h.postgres.UpsertEntityEdge(ctx, fromID, rel.Predicate, toID, p.ltmID, cubeID, p.validAt, now); err != nil {
-					h.logger.Debug("entity link: upsert entity edge failed",
-						slog.String("from", fromID), slog.String("pred", rel.Predicate),
-						slog.String("to", toID), slog.Any("error", err))
-				}
-			}
+			h.linkHandlerPair(ctx, p, cubeID, now, embByName)
 		}
 	}()
 }
 
+// collectHandlerEntityPairs builds entityLinkPair slice from embedded facts.
+func collectHandlerEntityPairs(embedded []embeddedFact) []entityLinkPair {
+	var pairs []entityLinkPair
+	for _, ef := range embedded {
+		if ef.fact.Action != llm.MemAdd && ef.fact.Action != llm.MemUpdate {
+			continue
+		}
+		if len(ef.fact.Entities) == 0 || ef.ltmID == "" {
+			continue
+		}
+		pairs = append(pairs, entityLinkPair{
+			ltmID: ef.ltmID, entities: ef.fact.Entities,
+			relations: ef.fact.Relations, validAt: ef.fact.ValidAt,
+		})
+	}
+	return pairs
+}
+
+// batchEmbedHandlerEntities embeds all unique entity names, returns name→vecStr map.
+func (h *Handler) batchEmbedHandlerEntities(ctx context.Context, pairs []entityLinkPair) map[string]string {
+	embByName := make(map[string]string)
+	if h.embedder == nil {
+		return embByName
+	}
+	seen := make(map[string]bool)
+	var allNames []string
+	for _, p := range pairs {
+		for _, ent := range p.entities {
+			if ent.Name != "" && !seen[ent.Name] {
+				allNames = append(allNames, ent.Name)
+				seen[ent.Name] = true
+			}
+		}
+	}
+	if len(allNames) == 0 {
+		return embByName
+	}
+	vecs, err := h.embedder.Embed(ctx, allNames)
+	if err == nil && len(vecs) == len(allNames) {
+		for i, name := range allNames {
+			embByName[name] = db.FormatVector(vecs[i])
+		}
+	}
+	return embByName
+}
+
+// linkHandlerPair upserts entity nodes, creates MENTIONS_ENTITY and entity-relation edges.
+func (h *Handler) linkHandlerPair(ctx context.Context, p entityLinkPair, cubeID, now string, embByName map[string]string) {
+	entityIDByName := make(map[string]string, len(p.entities))
+	for _, ent := range p.entities {
+		if ent.Name == "" {
+			continue
+		}
+		entityID, err := h.postgres.UpsertEntityNodeWithEmbedding(ctx, ent.Name, ent.Type, cubeID, now, embByName[ent.Name])
+		if err != nil {
+			h.logger.Debug("entity link: upsert entity node failed",
+				slog.String("name", ent.Name), slog.Any("error", err))
+			continue
+		}
+		entityIDByName[ent.Name] = entityID
+		if err := h.postgres.CreateMemoryEdge(ctx, p.ltmID, entityID, db.EdgeMentionsEntity, now, p.validAt); err != nil {
+			h.logger.Debug("entity link: create edge failed",
+				slog.String("ltm_id", p.ltmID), slog.String("entity_id", entityID), slog.Any("error", err))
+		}
+	}
+	for _, rel := range p.relations {
+		fromID, ok1 := entityIDByName[rel.Subject]
+		toID, ok2 := entityIDByName[rel.Object]
+		if !ok1 || !ok2 || rel.Predicate == "" {
+			continue
+		}
+		if err := h.postgres.UpsertEntityEdge(ctx, fromID, rel.Predicate, toID, p.ltmID, cubeID, p.validAt, now); err != nil {
+			h.logger.Debug("entity link: upsert entity edge failed",
+				slog.String("from", fromID), slog.String("pred", rel.Predicate),
+				slog.String("to", toID), slog.Any("error", err))
+		}
+	}
+}
+
 // callEpisodicSummarizer sends a single chat completion request to generate the session summary.
 func callEpisodicSummarizer(ctx context.Context, conversation string) (string, error) {
-	// Truncate to avoid prompt overflows (last 6000 chars covers ~4000 tokens)
-	if len(conversation) > 6000 {
-		conversation = "..." + conversation[len(conversation)-6000:]
+	// Truncate to avoid prompt overflows (last episodicConvMaxChars covers ~4000 tokens)
+	if len(conversation) > episodicConvMaxChars {
+		conversation = "..." + conversation[len(conversation)-episodicConvMaxChars:]
 	}
 
 	payload := map[string]any{
@@ -245,7 +259,7 @@ func callEpisodicSummarizer(ctx context.Context, conversation string) (string, e
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, episodicRespBodyLimit))
 	if err != nil {
 		return "", err
 	}
@@ -258,7 +272,7 @@ func callEpisodicSummarizer(ctx context.Context, conversation string) (string, e
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(respBody, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return "", fmt.Errorf("episodic summarizer: bad response")
+		return "", errors.New("episodic summarizer: bad response")
 	}
 
 	// Validate we got a reference to the llm package (suppress unused import)

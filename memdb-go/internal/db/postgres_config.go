@@ -6,6 +6,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -26,7 +27,7 @@ func (p *Postgres) GetUserConfig(ctx context.Context, userID string) (map[string
 	var configStr string
 	err := p.pool.QueryRow(ctx, queries.GetUserConfig, userID).Scan(&configStr)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err

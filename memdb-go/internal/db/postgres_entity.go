@@ -6,6 +6,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -58,7 +59,7 @@ func NormalizeEntityID(name string) string {
 func (p *Postgres) UpsertEntityNode(ctx context.Context, name, entityType, userName, now string) (string, error) {
 	id := NormalizeEntityID(name)
 	if id == "" {
-		return "", fmt.Errorf("entity name is empty")
+		return "", errors.New("entity name is empty")
 	}
 	_, err := p.pool.Exec(ctx, queries.UpsertEntityNode, id, userName, name, entityType, now, now)
 	if err != nil {
@@ -78,7 +79,7 @@ func (p *Postgres) UpsertEntityNodeWithEmbedding(ctx context.Context, name, enti
 	}
 	id := NormalizeEntityID(name)
 	if id == "" {
-		return "", fmt.Errorf("entity name is empty")
+		return "", errors.New("entity name is empty")
 	}
 	// Step 1: look for an existing entity node with high cosine similarity.
 	const findSimilar = `

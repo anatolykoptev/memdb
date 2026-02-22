@@ -10,6 +10,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,12 @@ import (
 	"os"
 	"strings"
 	"time"
+)
+
+const (
+	clientTimeout    = 120 * time.Second
+	scannerBufInit   = 1024 * 1024  // 1MB initial buffer
+	scannerBufMax    = 10 * 1024 * 1024 // 10MB max line
 )
 
 func main() {
@@ -27,9 +34,9 @@ func main() {
 		}
 	}
 
-	client := &http.Client{Timeout: 120 * time.Second}
+	client := &http.Client{Timeout: clientTimeout}
 	scanner := bufio.NewScanner(os.Stdin)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024) // 10MB max line
+	scanner.Buffer(make([]byte, 0, scannerBufInit), scannerBufMax) // 10MB max line
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -47,7 +54,7 @@ func main() {
 }
 
 func forward(client *http.Client, url string, body []byte) error {
-	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -63,7 +70,7 @@ func forward(client *http.Client, url string, body []byte) error {
 	ct := resp.Header.Get("Content-Type")
 	if strings.Contains(ct, "text/event-stream") {
 		scanner := bufio.NewScanner(resp.Body)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner.Buffer(make([]byte, 0, scannerBufInit), scannerBufMax)
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.HasPrefix(line, "data: ") {

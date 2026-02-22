@@ -25,11 +25,14 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/scheduler"
 )
 
+// zeroVecDim is the dimension of the zero vector used for WM-only inserts (must match ONNX model dim).
+const zeroVecDim = 1024
+
 // zeroVec1024 is a pre-allocated zero vector string for WM-only inserts.
 // WM nodes are temporary — Worker deletes them after LLM enhancement.
 // Zero vector won't match any real vector search (cosine = 0).
 var zeroVec1024 = func() string {
-	v := make([]float32, 1024)
+	v := make([]float32, zeroVecDim)
 	return db.FormatVector(v)
 }()
 

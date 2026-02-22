@@ -58,30 +58,44 @@ func parseMemReadIDs(content string) []string {
 	if content == "" {
 		return nil
 	}
-	// Try JSON array first (Go async add sends: ["uuid1","uuid2"]).
 	if content[0] == '[' {
-		var ids []string
-		if err := json.Unmarshal([]byte(content), &ids); err == nil && len(ids) > 0 {
+		if ids := parseJSONArrayIDs(content); len(ids) > 0 {
 			return ids
 		}
 	}
-	// Try JSON object (Python sends: {"memory_ids": ["uuid1","uuid2"]}).
 	if content[0] == '{' {
-		var payload struct {
-			MemoryIDs    []string `json:"memory_ids"`
-			MemoryIDsStr string   `json:"memory_ids_str"`
-		}
-		if err := json.Unmarshal([]byte(content), &payload); err == nil {
-			if len(payload.MemoryIDs) > 0 {
-				return payload.MemoryIDs
-			}
-			if payload.MemoryIDsStr != "" {
-				return splitIDs(payload.MemoryIDsStr)
-			}
+		if ids := parseJSONObjectIDs(content); len(ids) > 0 {
+			return ids
 		}
 	}
-	// Fallback: comma-separated string.
 	return splitIDs(content)
+}
+
+// parseJSONArrayIDs attempts to parse a JSON array of ID strings.
+func parseJSONArrayIDs(content string) []string {
+	var ids []string
+	if err := json.Unmarshal([]byte(content), &ids); err == nil {
+		return ids
+	}
+	return nil
+}
+
+// parseJSONObjectIDs attempts to parse memory IDs from a JSON object payload.
+func parseJSONObjectIDs(content string) []string {
+	var payload struct {
+		MemoryIDs    []string `json:"memory_ids"`
+		MemoryIDsStr string   `json:"memory_ids_str"`
+	}
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return nil
+	}
+	if len(payload.MemoryIDs) > 0 {
+		return payload.MemoryIDs
+	}
+	if payload.MemoryIDsStr != "" {
+		return splitIDs(payload.MemoryIDsStr)
+	}
+	return nil
 }
 
 // splitIDs splits a comma-separated string of IDs, trimming whitespace.
@@ -105,34 +119,52 @@ func parsePrefConversation(content string) string {
 		return ""
 	}
 	if content[0] == '{' {
-		var payload struct {
-			History []struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"history"`
-			Conversation string `json:"conversation"`
-			Content      string `json:"content"`
-		}
-		if err := json.Unmarshal([]byte(content), &payload); err == nil {
-			if payload.Conversation != "" {
-				return payload.Conversation
-			}
-			if payload.Content != "" {
-				return payload.Content
-			}
-			if len(payload.History) > 0 {
-				var sb strings.Builder
-				for _, msg := range payload.History {
-					sb.WriteString(msg.Role)
-					sb.WriteString(": ")
-					sb.WriteString(msg.Content)
-					sb.WriteString("\n")
-				}
-				return sb.String()
-			}
+		if s := parsePrefJSONPayload(content); s != "" {
+			return s
 		}
 	}
 	return content
+}
+
+// parsePrefJSONPayload extracts the conversation text from a JSON pref_add payload.
+// Tries: conversation field, content field, then history array joined as "role: content\n".
+func parsePrefJSONPayload(content string) string {
+	var payload struct {
+		History []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"history"`
+		Conversation string `json:"conversation"`
+		Content      string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(content), &payload); err != nil {
+		return ""
+	}
+	if payload.Conversation != "" {
+		return payload.Conversation
+	}
+	if payload.Content != "" {
+		return payload.Content
+	}
+	return joinHistoryMessages(payload.History)
+}
+
+// joinHistoryMessages formats a chat history slice as "role: content\n" lines.
+func joinHistoryMessages(history []struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}) string {
+	if len(history) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, msg := range history {
+		sb.WriteString(msg.Role)
+		sb.WriteString(": ")
+		sb.WriteString(msg.Content)
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
 
 // parseFeedbackPayload extracts retrieved_memory_ids and feedback_content from

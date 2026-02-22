@@ -125,13 +125,20 @@ func (w *Worker) runPeriodicReorg(ctx context.Context) {
 // Falls back to scanning scheduler stream keys if no VSET keys found.
 func (w *Worker) getActiveCubes(ctx context.Context) []string {
 	seen := make(map[string]bool)
-	var cubes []string
+	cubes := w.scanVSetCubeIDs(ctx, seen)
+	if len(cubes) == 0 {
+		cubes = w.scanStreamCubeIDs(ctx, seen)
+	}
+	return cubes
+}
 
-	// Primary: scan VSET hot cache keys — wm:v:<cubeID>
-	var cursor uint64
+// scanVSetCubeIDs extracts cube IDs from VSET hot cache keys (wm:v:<cubeID>).
+func (w *Worker) scanVSetCubeIDs(ctx context.Context, seen map[string]bool) []string {
 	const vsetPrefix = "wm:v:"
+	var cubes []string
+	var cursor uint64
 	for {
-		batch, next, err := w.redis.Scan(ctx, cursor, vsetKeyScanPattern, 200).Result()
+		batch, next, err := w.redis.Scan(ctx, cursor, vsetKeyScanPattern, scanBatchSize).Result()
 		if err != nil {
 			if ctx.Err() == nil {
 				w.logger.Debug("scheduler: scan vset keys error", slog.Any("error", err))
@@ -150,19 +157,18 @@ func (w *Worker) getActiveCubes(ctx context.Context) []string {
 			break
 		}
 	}
+	return cubes
+}
 
-	// Fallback: extract cube IDs from scheduler stream keys
-	// scheduler:messages:stream:v2.0:{user_id}:{cube_id}:{label}
-	if len(cubes) == 0 {
-		streamKeys := w.scanStreamKeys(ctx)
-		for _, key := range streamKeys {
-			parts := splitStreamKey(key)
-			if parts.cubeID != "" && !seen[parts.cubeID] {
-				seen[parts.cubeID] = true
-				cubes = append(cubes, parts.cubeID)
-			}
+// scanStreamCubeIDs extracts cube IDs from scheduler stream keys as a fallback.
+func (w *Worker) scanStreamCubeIDs(ctx context.Context, seen map[string]bool) []string {
+	var cubes []string
+	for _, key := range w.scanStreamKeys(ctx) {
+		parts := splitStreamKey(key)
+		if parts.cubeID != "" && !seen[parts.cubeID] {
+			seen[parts.cubeID] = true
+			cubes = append(cubes, parts.cubeID)
 		}
 	}
-
 	return cubes
 }

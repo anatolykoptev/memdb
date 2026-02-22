@@ -31,8 +31,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
 )
+
+// redisClient is the subset of *redis.Client methods used by stream-counting helpers.
+type redisClient interface {
+	Scan(ctx context.Context, cursor uint64, match string, count int64) *redis.ScanCmd
+	XLen(ctx context.Context, key string) *redis.IntCmd
+	XInfoGroups(ctx context.Context, key string) *redis.XInfoGroupsCmd
+}
 
 const (
 	// sseRetryMs is the reconnect delay sent to the browser EventSource.
@@ -51,6 +60,9 @@ const (
 
 	// sseMaxTimeout caps the client-requested timeout.
 	sseMaxTimeout = 600 * time.Second
+
+	// sseStatsTimeout is the per-poll context timeout for collecting scheduler stats.
+	sseStatsTimeout = 3 * time.Second
 )
 
 // schedulerUpdatePayload matches Python's SSE payload exactly.
@@ -194,72 +206,62 @@ func (h *Handler) NativeSchedulerWaitStream(w http.ResponseWriter, r *http.Reque
 			return
 
 		case <-heartbeatTicker.C:
-			fmt.Fprintf(w, ": heartbeat\n\n")
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
-			}
+			sseHeartbeat(w)
 
 		case <-pollTicker.C:
-			elapsed := time.Since(start)
-			seq++
-			eventID := strconv.FormatInt(seq, 10)
-
-			statsCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			activeTasks, stats := h.collectSchedulerStats(statsCtx, userID)
-			cancel()
-
-			if elapsed > timeout {
-				payload := schedulerUpdatePayload{
-					UserName:        userID,
-					ActiveTasks:     activeTasks,
-					ElapsedSeconds:  elapsed.Seconds(),
-					Status:          "timeout",
-					TimedOut:        true,
-					InstanceID:      instanceID,
-					WaitingTasks:    stats.waiting,
-					InProgressTasks: stats.inProgress,
-					CompletedTasks:  stats.completed,
-					FailedTasks:     stats.failed,
-				}
-				data, _ := json.Marshal(payload)
-				_ = sw.Write(rpc.SSEEvent{ID: eventID, Event: "scheduler_done", Data: string(data)})
-				h.logger.Debug("scheduler stream: timeout",
-					slog.String("user_id", userID), slog.Duration("elapsed", elapsed))
-				return
-			}
-
-			idle := activeTasks == 0
-			status := "running"
-			eventType := "scheduler_update"
-			if idle {
-				status = "idle"
-				eventType = "scheduler_done"
-			}
-
-			payload := schedulerUpdatePayload{
-				UserName:        userID,
-				ActiveTasks:     activeTasks,
-				ElapsedSeconds:  elapsed.Seconds(),
-				Status:          status,
-				InstanceID:      instanceID,
-				WaitingTasks:    stats.waiting,
-				InProgressTasks: stats.inProgress,
-				CompletedTasks:  stats.completed,
-				FailedTasks:     stats.failed,
-			}
-			data, _ := json.Marshal(payload)
-
-			if err := sw.Write(rpc.SSEEvent{ID: eventID, Event: eventType, Data: string(data)}); err != nil {
-				return
-			}
-
-			if idle {
-				h.logger.Debug("scheduler stream: idle, closing",
-					slog.String("user_id", userID), slog.Duration("elapsed", elapsed))
+			if done := h.handleSSEPollTick(ctx, sw, userID, instanceID, start, timeout, &seq); done {
 				return
 			}
 		}
 	}
+}
+
+// sseHeartbeat writes an SSE comment to keep the connection alive.
+func sseHeartbeat(w http.ResponseWriter) {
+	fmt.Fprintf(w, ": heartbeat\n\n")
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// handleSSEPollTick handles one poll tick for NativeSchedulerWaitStream.
+// Returns true when the stream should be closed (timeout, idle, or write error).
+func (h *Handler) handleSSEPollTick(ctx context.Context, sw interface{ Write(rpc.SSEEvent) error }, userID, instanceID string, start time.Time, timeout time.Duration, seq *int64) bool {
+	elapsed := time.Since(start)
+	*seq++
+	eventID := strconv.FormatInt(*seq, 10)
+
+	statsCtx, cancel := context.WithTimeout(ctx, sseStatsTimeout)
+	activeTasks, stats := h.collectSchedulerStats(statsCtx, userID)
+	cancel()
+
+	if elapsed > timeout {
+		payload := buildSchedulerPayload(userID, instanceID, activeTasks, elapsed, "timeout", true, stats)
+		data, _ := json.Marshal(payload)
+		_ = sw.Write(rpc.SSEEvent{ID: eventID, Event: "scheduler_done", Data: string(data)})
+		h.logger.Debug("scheduler stream: timeout",
+			slog.String("user_id", userID), slog.Duration("elapsed", elapsed))
+		return true
+	}
+
+	idle := activeTasks == 0
+	status, eventType := "running", "scheduler_update"
+	if idle {
+		status, eventType = "idle", "scheduler_done"
+	}
+
+	payload := buildSchedulerPayload(userID, instanceID, activeTasks, elapsed, status, false, stats)
+	data, _ := json.Marshal(payload)
+	if err := sw.Write(rpc.SSEEvent{ID: eventID, Event: eventType, Data: string(data)}); err != nil {
+		return true
+	}
+
+	if idle {
+		h.logger.Debug("scheduler stream: idle, closing",
+			slog.String("user_id", userID), slog.Duration("elapsed", elapsed))
+		return true
+	}
+	return false
 }
 
 // taskStats holds per-status counts from TaskStatusTracker.
@@ -268,6 +270,22 @@ type taskStats struct {
 	inProgress int
 	completed  int
 	failed     int
+}
+
+// buildSchedulerPayload constructs the SSE event payload for scheduler status updates.
+func buildSchedulerPayload(userID, instanceID string, activeTasks int, elapsed time.Duration, status string, timedOut bool, stats taskStats) schedulerUpdatePayload {
+	return schedulerUpdatePayload{
+		UserName:        userID,
+		ActiveTasks:     activeTasks,
+		ElapsedSeconds:  elapsed.Seconds(),
+		Status:          status,
+		TimedOut:        timedOut,
+		InstanceID:      instanceID,
+		WaitingTasks:    stats.waiting,
+		InProgressTasks: stats.inProgress,
+		CompletedTasks:  stats.completed,
+		FailedTasks:     stats.failed,
+	}
 }
 
 // collectSchedulerStats returns active task count and per-status breakdown.
@@ -313,25 +331,7 @@ func (h *Handler) countSchedulerStreamsForUser(ctx context.Context, userID strin
 	const batchSize = 100
 
 	rdb := h.redis.Client()
-	var cursor uint64
-	var keys []string
-
-	for {
-		batch, next, err := rdb.Scan(ctx, cursor, scanPattern, batchSize).Result()
-		if err != nil {
-			break
-		}
-		// Filter by user_id if specified.
-		for _, k := range batch {
-			if userID == "" || strings.Contains(k, ":"+userID+":") {
-				keys = append(keys, k)
-			}
-		}
-		cursor = next
-		if cursor == 0 {
-			break
-		}
-	}
+	keys := scanUserStreamKeys(ctx, rdb, scanPattern, userID, batchSize)
 
 	seenBases := make(map[string]struct{})
 	for _, k := range keys {
@@ -342,21 +342,51 @@ func (h *Handler) countSchedulerStreamsForUser(ctx context.Context, userID strin
 		seenBases[base] = struct{}{}
 		streams++
 
-		if n, err := rdb.XLen(ctx, k).Result(); err == nil {
-			totalMessages += n
-		}
-		groups, err := rdb.XInfoGroups(ctx, k).Result()
-		if err != nil {
-			continue
-		}
-		for _, g := range groups {
-			if g.Name == goConsumerGroup {
-				totalPending += g.Pending
-				break
-			}
-		}
+		msgs, pending := streamMessageCount(ctx, rdb, k)
+		totalMessages += msgs
+		totalPending += pending
 	}
 	return streams, totalMessages, totalPending
+}
+
+// scanUserStreamKeys scans Redis for stream keys matching the pattern filtered by userID.
+func scanUserStreamKeys(ctx context.Context, rdb redisClient, pattern, userID string, batchSize int64) []string {
+	var keys []string
+	var cursor uint64
+	for {
+		batch, next, err := rdb.Scan(ctx, cursor, pattern, batchSize).Result()
+		if err != nil {
+			break
+		}
+		for _, k := range batch {
+			if userID == "" || strings.Contains(k, ":"+userID+":") {
+				keys = append(keys, k)
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	return keys
+}
+
+// streamMessageCount returns the total message count and pending count for a stream.
+func streamMessageCount(ctx context.Context, rdb redisClient, key string) (messages, pending int64) {
+	if n, err := rdb.XLen(ctx, key).Result(); err == nil {
+		messages = n
+	}
+	groups, err := rdb.XInfoGroups(ctx, key).Result()
+	if err != nil {
+		return
+	}
+	for _, g := range groups {
+		if g.Name == goConsumerGroup {
+			pending = g.Pending
+			break
+		}
+	}
+	return
 }
 
 // parseSSETimeout parses a timeout query param (seconds) with bounds checking.

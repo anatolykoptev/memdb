@@ -8,6 +8,7 @@ import (
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/cache"
 	"github.com/MemDBai/MemDB/memdb-go/internal/config"
+	"github.com/MemDBai/MemDB/memdb-go/internal/db"
 	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
 	"github.com/MemDBai/MemDB/memdb-go/internal/handlers"
 	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
@@ -31,17 +32,53 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 		}
 	}
 
-	// Initialize Python proxy client
-	pythonClient := rpc.NewPythonClient(cfg.PythonBackendURL, logger)
-
-	// Initialize handlers
-	h := handlers.NewHandler(pythonClient, logger)
+	// Initialize Python proxy client and base handler
+	h := handlers.NewHandler(rpc.NewPythonClient(cfg.PythonBackendURL, logger), logger)
 
 	// Initialize database clients for Phase 2 native handlers (non-fatal)
 	pg, qd, rd, wmCache := initDBClients(ctx, cfg, h, logger)
 
 	// Initialize embedder via factory (non-fatal: server starts without embedder)
-	var emb embedder.Embedder
+	emb := initEmbedder(cfg, h, logger)
+
+	// Initialize search service with optional LLM features and profiler
+	searchSvc, profiler := initSearchService(cfg, pg, qd, emb, rd, h, logger)
+	h.SetSearchService(searchSvc)
+
+	// Configure LLM proxy (CLIProxyAPI) and initialize LLM extractor
+	handlers.SetLLMProxy(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel)
+	extractor := initLLMExtractor(cfg, h, logger)
+
+	// Start scheduler Worker (after embedder is initialized).
+	// Uses its own consumer group (memdb_go_scheduler), independent from Python's scheduler_group.
+	if rd != nil {
+		reorg := initReorganizer(ctx, cfg, pg, emb, wmCache, extractor, profiler, logger)
+		go scheduler.NewWorker(rd.Client(), reorg, logger).Run(ctx)
+		h.SetTaskTracker(scheduler.NewTaskStatusTracker(rd.Client()))
+		logger.Info("scheduler worker started")
+	}
+
+	// Create router and apply middleware
+	mux := http.NewServeMux()
+	registerRoutes(mux, h)
+
+	srv := &http.Server{
+		Addr:         ":" + cfg.PortStr(),
+		Handler:      applyMiddleware(mux, cfg, cacheClient, logger),
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+	}
+
+	return srv, func() {
+		h.Close()
+		if cacheClient != nil {
+			cacheClient.Close()
+		}
+	}
+}
+
+// initEmbedder initializes the embedder via factory (non-fatal if unavailable).
+func initEmbedder(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) embedder.Embedder {
 	embCfg := embedder.Config{
 		Type:         cfg.EmbedderType,
 		ONNXModelDir: cfg.ONNXModelDir,
@@ -52,99 +89,76 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 		OllamaPrefix: cfg.OllamaPrefix,
 		OllamaQuery:  cfg.OllamaQuery,
 	}
-	if e, err := embedder.New(embCfg, logger); err != nil {
+	e, err := embedder.New(embCfg, logger)
+	if err != nil {
 		logger.Warn("embedder init failed (native search disabled)", slog.Any("error", err))
-	} else {
-		emb = e
-		h.SetEmbedder(emb)
+		return nil
 	}
+	h.SetEmbedder(e)
+	return e
+}
 
-	// Initialize unified search service
-	searchSvc := search.NewSearchService(pg, qd, emb, logger)
-	// Enable LLM reranker if CLIProxyAPI is configured (same endpoint as extractor)
+// initSearchService creates the SearchService and wires up optional LLM features and profiler.
+func initSearchService(
+	cfg *config.Config,
+	pg *db.Postgres,
+	qd *db.Qdrant,
+	emb embedder.Embedder,
+	rd *db.Redis,
+	h *handlers.Handler,
+	logger *slog.Logger,
+) (*search.SearchService, *scheduler.Profiler) {
+	svc := search.NewSearchService(pg, qd, emb, logger)
+
+	// Enable LLM reranker + iterative expansion if CLIProxyAPI is configured.
+	// Both use the cheaper search model (gemini-2.0-flash by default).
+	// Neither fires by default — must be enabled per-request via profile or llm_rerank/num_stages fields.
 	if cfg.LLMProxyURL != "" {
-		searchSvc.LLMReranker = search.LLMRerankConfig{
+		svc.LLMReranker = search.LLMRerankConfig{
 			APIURL: cfg.LLMProxyURL,
 			APIKey: cfg.LLMProxyAPIKey,
-			Model:  cfg.LLMDefaultModel,
+			Model:  cfg.LLMSearchModel,
 		}
-		// Enable iterative multi-stage retrieval (AdvancedSearcher port).
-		// NumStages=2 is fast mode (2 expansion rounds after first-pass recall).
-		// Per-request override available via SearchParams.NumStages.
-		searchSvc.Iterative = search.IterativeConfig{
-			APIURL:    cfg.LLMProxyURL,
-			APIKey:    cfg.LLMProxyAPIKey,
-			Model:     cfg.LLMDefaultModel,
-			NumStages: 2,
+		svc.Iterative = search.IterativeConfig{
+			APIURL: cfg.LLMProxyURL,
+			APIKey: cfg.LLMProxyAPIKey,
+			Model:  cfg.LLMSearchModel,
 		}
 	}
+
 	// Enable Memobase-style user profile summaries if both LLM and Redis are available.
 	// Profiler generates a paragraph profile from UserMemory nodes and caches it 1hr in Redis.
 	// TriggerRefresh is called fire-and-forget from add_fine and async worker after each add operation.
 	var profiler *scheduler.Profiler
 	if rd != nil && cfg.LLMProxyURL != "" {
 		profiler = scheduler.NewProfiler(pg, rd, cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel, logger)
-		searchSvc.Profiler = profiler
+		svc.Profiler = profiler
 		h.SetProfiler(profiler)
 		logger.Info("user profile summarizer initialized")
 	}
-	h.SetSearchService(searchSvc)
 
-	// Configure LLM proxy (CLIProxyAPI)
-	handlers.SetLLMProxy(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel)
+	return svc, profiler
+}
 
-	// Initialize LLM extractor for fine-mode native add (non-fatal if URL not set).
-	// Shared between HTTP handler (sync fine add) and scheduler worker (async mem_read).
-	// Uses shared llm.Client with retry + model fallback on quota errors.
-	var extractor *llm.LLMExtractor
-	if cfg.LLMProxyURL != "" {
-		extractClient := llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMExtractModel, cfg.LLMFallbackModels, logger)
-		extractor = llm.NewLLMExtractorWithClient(extractClient)
-		h.SetLLMExtractor(extractor)
-		logger.Info("llm extractor initialized",
-			slog.String("model", extractor.Model()),
-			slog.String("url", cfg.LLMProxyURL),
-			slog.Any("fallback_models", cfg.LLMFallbackModels),
-		)
+// initLLMExtractor creates the LLM extractor for fine-mode native add (non-fatal if URL not set).
+// Shared between HTTP handler (sync fine add) and scheduler worker (async mem_read).
+func initLLMExtractor(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) *llm.LLMExtractor {
+	if cfg.LLMProxyURL == "" {
+		return nil
 	}
+	client := llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMExtractModel, cfg.LLMFallbackModels, logger)
+	extractor := llm.NewLLMExtractorWithClient(client)
+	h.SetLLMExtractor(extractor)
+	logger.Info("llm extractor initialized",
+		slog.String("model", extractor.Model()),
+		slog.String("url", cfg.LLMProxyURL),
+		slog.Any("fallback_models", cfg.LLMFallbackModels),
+	)
+	return extractor
+}
 
-	// Start scheduler Worker (after embedder is initialized).
-	// The Worker uses its own consumer group (memdb_go_scheduler), independent from
-	// Python's scheduler_group — both receive all messages in parallel via separate groups.
-	if rd != nil {
-		var reorg *scheduler.Reorganizer
-		if pg != nil && cfg.LLMProxyURL != "" {
-			reorgLLMClient := llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel, cfg.LLMFallbackModels, logger)
-			reorg = scheduler.NewReorganizer(
-				pg, emb, wmCache,
-				reorgLLMClient,
-				logger,
-			)
-			if extractor != nil {
-				reorg.SetLLMExtractor(extractor)
-			}
-			if profiler != nil {
-				reorg.SetProfiler(profiler)
-			}
-			logger.Info("scheduler reorganizer initialized",
-				slog.String("model", cfg.LLMDefaultModel),
-				slog.Any("fallback_models", cfg.LLMFallbackModels),
-			)
-		} else {
-			logger.Info("scheduler reorganizer disabled (postgres or LLM not configured)")
-		}
-		w := scheduler.NewWorker(rd.Client(), reorg, logger)
-		go w.Run(ctx)
-		logger.Info("scheduler worker started")
-		// Share the Worker's TaskStatusTracker with the HTTP handler so that
-		// /scheduler/wait and /scheduler/wait/stream read from memos:task_meta:{user_id}
-		// — the same Redis Hash written by the Worker and Python's dispatcher.
-		h.SetTaskTracker(scheduler.NewTaskStatusTracker(rd.Client()))
-	}
-
-	// Create router using Go 1.22+ stdlib ServeMux
-	mux := http.NewServeMux()
-
+// registerRoutes mounts all HTTP handlers on the provided ServeMux.
+func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	// ─── Health endpoints (native Go, no proxy) ─────────────────────────
 	mux.HandleFunc("GET /health", h.Health)
 	mux.HandleFunc("GET /ready", h.ReadinessCheck)
@@ -213,41 +227,28 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	// Instance monitoring — native
 	mux.HandleFunc("GET /product/instances/status", h.NativeInstancesStatus)
 	mux.HandleFunc("GET /product/instances/count", h.NativeInstancesCount)
+}
 
-	// ─── Apply middleware stack ──────────────────────────────────────────
-	// Order: outermost wrapper first → innermost last
-	var handler http.Handler = mux
-	handler = mw.Cache(logger, mw.CacheConfig{Client: cacheClient})(handler)
-	handler = mw.OTel(logger, cfg.OTelEnabled)(handler)
-	handler = mw.RateLimit(logger, mw.RateLimitConfig{
+// applyMiddleware wraps the handler with the full middleware stack.
+// Order: outermost wrapper first → innermost last.
+func applyMiddleware(next http.Handler, cfg *config.Config, cacheClient *cache.Client, logger *slog.Logger) http.Handler {
+	h := next
+	h = mw.Cache(logger, mw.CacheConfig{Client: cacheClient})(h)
+	h = mw.OTel(logger, cfg.OTelEnabled)(h)
+	h = mw.RateLimit(logger, mw.RateLimitConfig{
 		Enabled:       cfg.RateLimitEnabled,
 		RPS:           cfg.RateLimitRPS,
 		Burst:         cfg.RateLimitBurst,
 		ServiceSecret: cfg.InternalServiceSecret,
-	})(handler)
-	handler = mw.Auth(logger, mw.AuthConfig{
+	})(h)
+	h = mw.Auth(logger, mw.AuthConfig{
 		Enabled:       cfg.AuthEnabled,
 		MasterKeyHash: cfg.MasterKeyHash,
 		ServiceSecret: cfg.InternalServiceSecret,
-	})(handler)
-	handler = mw.CORS(handler)
-	handler = mw.Logging(logger)(handler)
-	handler = mw.RequestID(handler)
-	handler = mw.Recovery(logger)(handler)
-
-	srv := &http.Server{
-		Addr:         ":" + cfg.PortStr(),
-		Handler:      handler,
-		ReadTimeout:  cfg.ReadTimeout,
-		WriteTimeout: cfg.WriteTimeout,
-	}
-
-	cleanup := func() {
-		h.Close()
-		if cacheClient != nil {
-			cacheClient.Close()
-		}
-	}
-
-	return srv, cleanup
+	})(h)
+	h = mw.CORS(h)
+	h = mw.Logging(logger)(h)
+	h = mw.RequestID(h)
+	h = mw.Recovery(logger)(h)
+	return h
 }
