@@ -47,7 +47,7 @@ func (h *Handler) generateEpisodicSummary(cubeID, sessionID, conversation, now s
 	if factCount == 0 {
 		return // no facts extracted — nothing to summarize
 	}
-	if codeBlockRatio(conversation) > 0.8 {
+	if codeBlockRatio(conversation) > episodicCodeRatio {
 		return // mostly code — low episodic value
 	}
 	if len(strings.TrimSpace(conversation)) < 100 {

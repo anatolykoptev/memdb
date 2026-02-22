@@ -12,17 +12,54 @@ import (
 	"unicode/utf8"
 )
 
-// nearDuplicateThreshold is the cosine similarity above which a conversation
-// is considered a near-duplicate of an existing memory and skipped.
-const nearDuplicateThreshold = 0.97
+// Classifier thresholds.
+const (
+	// nearDuplicateThreshold is the cosine similarity above which a conversation
+	// is considered a near-duplicate of an existing memory and skipped.
+	nearDuplicateThreshold = 0.97
 
-// mergeSuggestionThreshold is the cosine similarity above which the pipeline
-// suggests UPDATE-over-ADD to the LLM (but doesn't hard skip).
-const mergeSuggestionThreshold = 0.92
+	// mergeSuggestionThreshold is the cosine similarity above which the pipeline
+	// suggests UPDATE-over-ADD to the LLM (but doesn't hard skip).
+	mergeSuggestionThreshold = 0.92
 
-// trivialMaxChars is the rune limit below which a single-message
-// conversation may be classified as trivial.
-const trivialMaxChars = 20
+	// trivialMaxChars is the rune limit below which a single-message
+	// conversation may be classified as trivial.
+	trivialMaxChars = 20
+
+	// codeOnlyRatio is the minimum code-block character ratio to classify as code-only.
+	codeOnlyRatio = 0.9
+
+	// codeBiasRatio is the threshold above which code presence biases toward technical.
+	codeBiasRatio = 0.2
+
+	// episodicCodeRatio is the threshold above which episodic summary is skipped.
+	episodicCodeRatio = 0.8
+)
+
+// Content type constants.
+const (
+	contentOpinion   = "opinion"
+	contentTechnical = "technical"
+	contentFactual   = "factual"
+	contentMultiTurn = "multi-turn"
+	contentMixed     = "mixed"
+)
+
+// Skip reason constants.
+const (
+	skipTrivial  = "trivial"
+	skipCodeOnly = "code-only"
+	skipNoUser   = "no-user-content"
+)
+
+// Session type constants.
+const (
+	sessionGeneral  = "general"
+	sessionDecision = "decision"
+	sessionLearning = "learning"
+	sessionDebug    = "debug"
+	sessionPlanning = "planning"
+)
 
 // casualPatterns matches short, trivial messages that carry no memorable content.
 var casualPatterns = regexp.MustCompile(
@@ -68,12 +105,19 @@ type ContentSignal struct {
 func classifyContent(messages []chatMessage, conversation string) ContentSignal {
 	var sig ContentSignal
 
+	// Rule 0: no user content — skip (system-only, empty, whitespace).
+	if !hasUserContent(messages) {
+		sig.Skip = true
+		sig.SkipReason = skipNoUser
+		return sig
+	}
+
 	// Rule 1: trivial single-message — hard skip.
 	if len(messages) == 1 {
 		content := strings.TrimSpace(messages[0].Content)
-		if utf8.RuneCountInString(content) <= trivialMaxChars && casualPatterns.MatchString(content) {
+		if content == "" || (utf8.RuneCountInString(content) <= trivialMaxChars && casualPatterns.MatchString(content)) {
 			sig.Skip = true
-			sig.SkipReason = "trivial"
+			sig.SkipReason = skipTrivial
 			return sig
 		}
 	}
@@ -81,15 +125,15 @@ func classifyContent(messages []chatMessage, conversation string) ContentSignal 
 	// Rule 2: pure code (>90%) — hard skip.
 	// Use raw message content to avoid conversation metadata diluting the ratio.
 	rawContent := joinMessageContent(messages)
-	if ratio := codeBlockRatio(rawContent); ratio > 0.9 {
+	if ratio := codeBlockRatio(rawContent); ratio > codeOnlyRatio {
 		sig.Skip = true
-		sig.SkipReason = "code-only"
+		sig.SkipReason = skipCodeOnly
 		return sig
 	}
 
 	// Rule 3: multi-turn detection (>2 messages with back-and-forth).
 	if len(messages) > 2 {
-		sig.ContentType = "multi-turn"
+		sig.ContentType = contentMultiTurn
 		sig.Hints = append(sig.Hints, "Multi-turn conversation — look for decisions, conclusions, and preference changes across turns")
 		return sig
 	}
@@ -100,10 +144,34 @@ func classifyContent(messages []chatMessage, conversation string) ContentSignal 
 	return sig
 }
 
+// hasUserContent returns true if at least one message has role "user" with non-empty content.
+func hasUserContent(messages []chatMessage) bool {
+	for _, m := range messages {
+		if m.Role == roleUser && strings.TrimSpace(m.Content) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // classifyContentFromText is a text-only variant for the buffer zone pipeline
 // (receives pre-formatted conversation, no raw chatMessage structs).
 func classifyContentFromText(conversation string) ContentSignal {
 	var sig ContentSignal
+
+	// Skip if no meaningful content.
+	if strings.TrimSpace(conversation) == "" {
+		sig.Skip = true
+		sig.SkipReason = skipTrivial
+		return sig
+	}
+
+	// Code-only check.
+	if ratio := codeBlockRatio(conversation); ratio > codeOnlyRatio {
+		sig.Skip = true
+		sig.SkipReason = skipCodeOnly
+		return sig
+	}
 
 	// Count role-prefixed lines to approximate message count.
 	msgCount := 0
@@ -115,7 +183,7 @@ func classifyContentFromText(conversation string) ContentSignal {
 	}
 
 	if msgCount > 2 {
-		sig.ContentType = "multi-turn"
+		sig.ContentType = contentMultiTurn
 		sig.Hints = append(sig.Hints, "Multi-turn conversation — look for decisions, conclusions, and preference changes across turns")
 		return sig
 	}
@@ -143,33 +211,33 @@ func detectContentType(text string) string {
 	factualScore := len(factualDateRe.FindAllStringIndex(stripped, -1)) + len(factualNameRe.FindAllStringIndex(stripped, -1))
 
 	// Code blocks present → technical bias.
-	if codeBlockRatio(stripped) > 0.2 {
+	if codeBlockRatio(stripped) > codeBiasRatio {
 		techScore += 3
 	}
 
 	if opinionScore >= 2 || (opinionScore >= 1 && techScore == 0 && factualScore == 0) {
-		return "opinion"
+		return contentOpinion
 	}
 	if techScore >= 3 || (techScore >= 2 && opinionScore == 0) {
-		return "technical"
+		return contentTechnical
 	}
 	if factualScore >= 2 || (factualScore >= 1 && opinionScore == 0 && techScore == 0) {
-		return "factual"
+		return contentFactual
 	}
-	return "mixed"
+	return contentMixed
 }
 
 // hintsForContentType returns extraction hints for the given content type.
 func hintsForContentType(contentType, text string) []string {
 	switch contentType {
-	case "opinion":
+	case contentOpinion:
 		return []string{"Content contains opinions and preferences — extract user preferences with high fidelity, preserve the specific preference and reasoning"}
-	case "technical":
-		if codeBlockRatio(text) > 0.2 {
+	case contentTechnical:
+		if codeBlockRatio(text) > codeBiasRatio {
 			return []string{"Technical content with code — extract architectural decisions, tool preferences, and configuration choices mentioned alongside code. Ignore the code syntax itself."}
 		}
 		return []string{"Technical content — extract tool choices, configuration decisions, and technical preferences"}
-	case "factual":
+	case contentFactual:
 		return []string{"Factual content with specific names, dates, or numbers — preserve all specifics exactly as stated"}
 	default:
 		return nil
@@ -180,13 +248,13 @@ func hintsForContentType(contentType, text string) []string {
 // Used by episodic summary generation to customize the summary prompt.
 func detectSessionType(conversation string) string {
 	scores := map[string]int{
-		"decision": len(decisionRe.FindAllStringIndex(conversation, -1)),
-		"learning": len(learningRe.FindAllStringIndex(conversation, -1)),
-		"debug":    len(debugRe.FindAllStringIndex(conversation, -1)),
-		"planning": len(planningRe.FindAllStringIndex(conversation, -1)),
+		sessionDecision: len(decisionRe.FindAllStringIndex(conversation, -1)),
+		sessionLearning: len(learningRe.FindAllStringIndex(conversation, -1)),
+		sessionDebug:    len(debugRe.FindAllStringIndex(conversation, -1)),
+		sessionPlanning: len(planningRe.FindAllStringIndex(conversation, -1)),
 	}
 
-	bestType := "general"
+	bestType := sessionGeneral
 	bestScore := 0
 	for typ, score := range scores {
 		if score > bestScore {
@@ -195,7 +263,7 @@ func detectSessionType(conversation string) string {
 		}
 	}
 	if bestScore == 0 {
-		return "general"
+		return sessionGeneral
 	}
 	return bestType
 }

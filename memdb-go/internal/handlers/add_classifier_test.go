@@ -11,7 +11,7 @@ func TestClassifySkipExtraction_TrivialMessages(t *testing.T) {
 		if !skip {
 			t.Errorf("expected skip for trivial %q, got false", msg)
 		}
-		if reason != "trivial" {
+		if reason != skipTrivial {
 			t.Errorf("expected reason 'trivial' for %q, got %q", msg, reason)
 		}
 	}
@@ -77,7 +77,7 @@ func TestClassifySkipExtraction_CodeOnly(t *testing.T) {
 	if !skip {
 		t.Errorf("expected skip for code-only content (ratio=%.2f)", codeBlockRatio(conv))
 	}
-	if reason != "code-only" {
+	if reason != skipCodeOnly {
 		t.Errorf("expected reason 'code-only', got %q", reason)
 	}
 }
@@ -118,13 +118,21 @@ func TestClassifySkipExtraction_WhitespaceTrimmed(t *testing.T) {
 }
 
 func TestClassifySkipExtraction_EmptyMessages(t *testing.T) {
-	skip, _ := classifySkipExtraction(nil, "")
-	if skip {
-		t.Error("should not skip empty messages list")
+	// No messages → no user content → skip.
+	skip, reason := classifySkipExtraction(nil, "")
+	if !skip {
+		t.Error("expected skip for nil messages (no user content)")
 	}
-	skip, _ = classifySkipExtraction([]chatMessage{}, "")
-	if skip {
-		t.Error("should not skip empty messages slice")
+	if reason != skipNoUser {
+		t.Errorf("expected reason %q, got %q", skipNoUser, reason)
+	}
+
+	skip, reason = classifySkipExtraction([]chatMessage{}, "")
+	if !skip {
+		t.Error("expected skip for empty messages slice (no user content)")
+	}
+	if reason != skipNoUser {
+		t.Errorf("expected reason %q, got %q", skipNoUser, reason)
 	}
 }
 
@@ -172,7 +180,7 @@ func TestClassifyContent_Opinion(t *testing.T) {
 	if sig.Skip {
 		t.Error("opinion should not be skipped")
 	}
-	if sig.ContentType != "opinion" {
+	if sig.ContentType != contentOpinion {
 		t.Errorf("expected content type 'opinion', got %q", sig.ContentType)
 	}
 	if len(sig.Hints) == 0 {
@@ -184,7 +192,7 @@ func TestClassifyContent_Technical(t *testing.T) {
 	msgs := []chatMessage{{Role: "user", Content: "Use docker compose up -d to deploy the stack. The Dockerfile uses multi-stage builds with nginx."}}
 	conv := "user: [2025-01-01T00:00:00]: Use docker compose up -d to deploy the stack. The Dockerfile uses multi-stage builds with nginx."
 	sig := classifyContent(msgs, conv)
-	if sig.ContentType != "technical" {
+	if sig.ContentType != contentTechnical {
 		t.Errorf("expected content type 'technical', got %q", sig.ContentType)
 	}
 }
@@ -193,7 +201,7 @@ func TestClassifyContent_Factual(t *testing.T) {
 	msgs := []chatMessage{{Role: "user", Content: "The meeting is on 2026-03-15 at 3pm in Berlin."}}
 	conv := "user: [2025-01-01T00:00:00]: The meeting is on 2026-03-15 at 3pm in Berlin."
 	sig := classifyContent(msgs, conv)
-	if sig.ContentType != "factual" {
+	if sig.ContentType != contentFactual {
 		t.Errorf("expected content type 'factual', got %q", sig.ContentType)
 	}
 }
@@ -206,7 +214,7 @@ func TestClassifyContent_MultiTurn(t *testing.T) {
 	}
 	conv := "user: [2025-01-01T00:00:00]: What's the best database for this?\nassistant: [2025-01-01T00:00:01]: PostgreSQL would work well.\nuser: [2025-01-01T00:00:02]: OK, let's go with Postgres then."
 	sig := classifyContent(msgs, conv)
-	if sig.ContentType != "multi-turn" {
+	if sig.ContentType != contentMultiTurn {
 		t.Errorf("expected content type 'multi-turn', got %q", sig.ContentType)
 	}
 }
@@ -218,7 +226,7 @@ func TestClassifyContent_TrivialStillSkips(t *testing.T) {
 	if !sig.Skip {
 		t.Error("trivial message should still be skipped")
 	}
-	if sig.SkipReason != "trivial" {
+	if sig.SkipReason != skipTrivial {
 		t.Errorf("expected skip reason 'trivial', got %q", sig.SkipReason)
 	}
 }
@@ -246,7 +254,7 @@ func TestClassifyContent_PureCodeStillSkips(t *testing.T) {
 func TestClassifyContentFromText_Opinion(t *testing.T) {
 	conv := "user: [2025-01-01T00:00:00]: I think Python is better for data science"
 	sig := classifyContentFromText(conv)
-	if sig.ContentType != "opinion" {
+	if sig.ContentType != contentOpinion {
 		t.Errorf("expected 'opinion', got %q", sig.ContentType)
 	}
 }
@@ -254,7 +262,7 @@ func TestClassifyContentFromText_Opinion(t *testing.T) {
 func TestClassifyContentFromText_MultiTurn(t *testing.T) {
 	conv := "user: [2025-01-01T00:00:00]: What do you think?\nassistant: [2025-01-01T00:00:01]: I suggest X.\nuser: [2025-01-01T00:00:02]: Great idea."
 	sig := classifyContentFromText(conv)
-	if sig.ContentType != "multi-turn" {
+	if sig.ContentType != contentMultiTurn {
 		t.Errorf("expected 'multi-turn', got %q", sig.ContentType)
 	}
 }
@@ -263,7 +271,7 @@ func TestClassifyContent_MixedContent(t *testing.T) {
 	msgs := []chatMessage{{Role: "user", Content: "The sky is blue today."}}
 	conv := "user: [2025-01-01T00:00:00]: The sky is blue today."
 	sig := classifyContent(msgs, conv)
-	if sig.ContentType != "mixed" {
+	if sig.ContentType != contentMixed {
 		t.Errorf("expected content type 'mixed' for generic content, got %q", sig.ContentType)
 	}
 	if len(sig.Hints) != 0 {
@@ -276,49 +284,49 @@ func TestClassifyContent_MixedContent(t *testing.T) {
 func TestDetectSessionType_Decision(t *testing.T) {
 	conv := "user: [2025-01-01T00:00:00]: We decided to go with PostgreSQL for the main database.\nassistant: [2025-01-01T00:00:01]: Going with Postgres makes sense."
 	st := detectSessionType(conv)
-	if st != "decision" {
-		t.Errorf("expected 'decision', got %q", st)
+	if st != sessionDecision {
+		t.Errorf("expected %q, got %q", sessionDecision, st)
 	}
 }
 
 func TestDetectSessionType_Learning(t *testing.T) {
 	conv := "user: [2025-01-01T00:00:00]: TIL that Go channels are not thread-safe by default.\nassistant: [2025-01-01T00:00:01]: Right, turns out you need to use sync primitives."
 	st := detectSessionType(conv)
-	if st != "learning" {
-		t.Errorf("expected 'learning', got %q", st)
+	if st != sessionLearning {
+		t.Errorf("expected %q, got %q", sessionLearning, st)
 	}
 }
 
 func TestDetectSessionType_Debug(t *testing.T) {
 	conv := "user: [2025-01-01T00:00:00]: Got an error: connection refused on port 5432. Fixed by restarting postgres."
 	st := detectSessionType(conv)
-	if st != "debug" {
-		t.Errorf("expected 'debug', got %q", st)
+	if st != sessionDebug {
+		t.Errorf("expected %q, got %q", sessionDebug, st)
 	}
 }
 
 func TestDetectSessionType_Planning(t *testing.T) {
 	conv := "user: [2025-01-01T00:00:00]: The roadmap for next sprint includes auth and rate limiting. TODO: set up OAuth."
 	st := detectSessionType(conv)
-	if st != "planning" {
-		t.Errorf("expected 'planning', got %q", st)
+	if st != sessionPlanning {
+		t.Errorf("expected %q, got %q", sessionPlanning, st)
 	}
 }
 
 func TestDetectSessionType_General(t *testing.T) {
 	conv := "user: [2025-01-01T00:00:00]: The weather is nice today."
 	st := detectSessionType(conv)
-	if st != "general" {
-		t.Errorf("expected 'general', got %q", st)
+	if st != sessionGeneral {
+		t.Errorf("expected %q, got %q", sessionGeneral, st)
 	}
 }
 
 func TestSessionPromptFocus(t *testing.T) {
-	if sessionPromptFocus("decision") == "" {
-		t.Error("expected non-empty focus for 'decision'")
+	if sessionPromptFocus(sessionDecision) == "" {
+		t.Error("expected non-empty focus for decision")
 	}
-	if sessionPromptFocus("general") != "" {
-		t.Error("expected empty focus for 'general'")
+	if sessionPromptFocus(sessionGeneral) != "" {
+		t.Error("expected empty focus for general")
 	}
 }
 
@@ -339,6 +347,99 @@ func TestCodeBlockRatio(t *testing.T) {
 			ratio := codeBlockRatio(tc.text)
 			if ratio < tc.low || ratio > tc.high {
 				t.Errorf("codeBlockRatio = %f, want [%f, %f]", ratio, tc.low, tc.high)
+			}
+		})
+	}
+}
+
+// --- Bug fix regression tests ---
+
+func TestClassifyContent_EmptyContent_Skips(t *testing.T) {
+	msgs := []chatMessage{{Role: "user", Content: ""}}
+	conv := "user: [2025-01-01T00:00:00]: "
+	sig := classifyContent(msgs, conv)
+	if !sig.Skip {
+		t.Error("empty user content should be skipped")
+	}
+}
+
+func TestClassifyContent_WhitespaceContent_Skips(t *testing.T) {
+	msgs := []chatMessage{{Role: "user", Content: "   \n\t  "}}
+	conv := "user: [2025-01-01T00:00:00]:    \n\t  "
+	sig := classifyContent(msgs, conv)
+	if !sig.Skip {
+		t.Error("whitespace-only user content should be skipped")
+	}
+}
+
+func TestClassifyContent_SystemOnly_Skips(t *testing.T) {
+	msgs := []chatMessage{{Role: "system", Content: "You are a helpful assistant."}}
+	conv := "system: [2025-01-01T00:00:00]: You are a helpful assistant."
+	sig := classifyContent(msgs, conv)
+	if !sig.Skip {
+		t.Error("system-only message should be skipped (no user content)")
+	}
+	if sig.SkipReason != skipNoUser {
+		t.Errorf("expected reason %q, got %q", skipNoUser, sig.SkipReason)
+	}
+}
+
+func TestClassifyContent_AssistantOnly_Skips(t *testing.T) {
+	msgs := []chatMessage{{Role: "assistant", Content: "Here is some information for you."}}
+	conv := "assistant: [2025-01-01T00:00:00]: Here is some information for you."
+	sig := classifyContent(msgs, conv)
+	if !sig.Skip {
+		t.Error("assistant-only message should be skipped (no user content)")
+	}
+}
+
+func TestClassifyContent_SystemPlusUser_NotSkipped(t *testing.T) {
+	msgs := []chatMessage{
+		{Role: "system", Content: "You are a helpful assistant."},
+		{Role: "user", Content: "I prefer dark mode in all my editors."},
+	}
+	conv := "system: [2025-01-01T00:00:00]: You are a helpful assistant.\nuser: [2025-01-01T00:00:01]: I prefer dark mode in all my editors."
+	sig := classifyContent(msgs, conv)
+	if sig.Skip {
+		t.Error("system + user message should NOT be skipped")
+	}
+}
+
+func TestClassifyContentFromText_Empty_Skips(t *testing.T) {
+	sig := classifyContentFromText("")
+	if !sig.Skip {
+		t.Error("empty text should be skipped in buffer zone classifier")
+	}
+}
+
+func TestClassifyContentFromText_CodeOnly_Skips(t *testing.T) {
+	conv := "```go\npackage main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"hello\") }\n```"
+	sig := classifyContentFromText(conv)
+	if !sig.Skip {
+		t.Error("code-only text should be skipped in buffer zone classifier")
+	}
+}
+
+func TestHasUserContent(t *testing.T) {
+	tests := []struct {
+		name     string
+		messages []chatMessage
+		want     bool
+	}{
+		{"nil", nil, false},
+		{"empty", []chatMessage{}, false},
+		{"user with content", []chatMessage{{Role: "user", Content: "hello"}}, true},
+		{"user empty", []chatMessage{{Role: "user", Content: ""}}, false},
+		{"user whitespace", []chatMessage{{Role: "user", Content: "  \t "}}, false},
+		{"system only", []chatMessage{{Role: "system", Content: "prompt"}}, false},
+		{"assistant only", []chatMessage{{Role: "assistant", Content: "response"}}, false},
+		{"system+user", []chatMessage{{Role: "system", Content: "prompt"}, {Role: "user", Content: "query"}}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := hasUserContent(tc.messages)
+			if got != tc.want {
+				t.Errorf("hasUserContent = %v, want %v", got, tc.want)
 			}
 		})
 	}
