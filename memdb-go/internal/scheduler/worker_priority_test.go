@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -124,9 +126,12 @@ func TestEnqueue_CancelledContext(t *testing.T) {
 func TestProcessLoop_HighBeforeLow(t *testing.T) {
 	w := newMinimalWorker()
 
+	var mu sync.Mutex
 	var order []string
 	w.handleFn = func(_ context.Context, msg ScheduleMessage) {
+		mu.Lock()
 		order = append(order, msg.Label)
+		mu.Unlock()
 	}
 
 	// Pre-fill: 3 low-priority, then 2 high-priority.
@@ -158,7 +163,10 @@ func TestProcessLoop_HighBeforeLow(t *testing.T) {
 		case <-done:
 			goto check
 		default:
-			if len(order) >= 5 {
+			mu.Lock()
+			n := len(order)
+			mu.Unlock()
+			if n >= 5 {
 				cancel()
 				<-done
 				goto check
@@ -168,6 +176,8 @@ func TestProcessLoop_HighBeforeLow(t *testing.T) {
 	}
 
 check:
+	mu.Lock()
+	defer mu.Unlock()
 	if len(order) < 5 {
 		t.Fatalf("only %d messages processed, want 5: %v", len(order), order)
 	}
@@ -188,9 +198,9 @@ check:
 
 func TestProcessLoop_OnlyHighPriority(t *testing.T) {
 	w := newMinimalWorker()
-	var processed int
+	var processed atomic.Int32
 	w.handleFn = func(_ context.Context, msg ScheduleMessage) {
-		processed++
+		processed.Add(1)
 	}
 
 	for i := 0; i < 5; i++ {
@@ -204,16 +214,16 @@ func TestProcessLoop_OnlyHighPriority(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	cancel()
 
-	if processed < 5 {
-		t.Errorf("processed %d, want 5", processed)
+	if processed.Load() < 5 {
+		t.Errorf("processed %d, want 5", processed.Load())
 	}
 }
 
 func TestProcessLoop_OnlyLowPriority(t *testing.T) {
 	w := newMinimalWorker()
-	var processed int
+	var processed atomic.Int32
 	w.handleFn = func(_ context.Context, msg ScheduleMessage) {
-		processed++
+		processed.Add(1)
 	}
 
 	for i := 0; i < 5; i++ {
@@ -227,8 +237,8 @@ func TestProcessLoop_OnlyLowPriority(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	cancel()
 
-	if processed < 5 {
-		t.Errorf("processed %d, want 5", processed)
+	if processed.Load() < 5 {
+		t.Errorf("processed %d, want 5", processed.Load())
 	}
 }
 
