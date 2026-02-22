@@ -69,6 +69,11 @@ type Config struct {
 	LLMExtractModel    string   `json:"llm_extract_model"`    // model for fine-mode extraction (default: gemini-2.0-flash-lite)
 	LLMFallbackModels  []string `json:"llm_fallback_models"`  // fallback models tried on quota errors (comma-separated env)
 
+	// Buffer zone (batch add before LLM extraction)
+	BufferEnabled bool          `json:"buffer_enabled"`
+	BufferSize    int           `json:"buffer_size"`
+	BufferTTL     time.Duration `json:"buffer_ttl"`
+
 	// MemDB Go API URL (used by MCP server to proxy search)
 	MemDBGoURL string `json:"memdb_go_url"`
 }
@@ -79,6 +84,8 @@ const (
 	defaultWriteTimeout    = 120 * time.Second
 	defaultShutdownTimeout = 15 * time.Second
 	defaultRateLimitRPS    = 50
+	defaultBufferSize      = 5
+	defaultBufferTTL       = 30 * time.Second
 )
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -130,6 +137,10 @@ func Load() *Config {
 		LLMSearchModel:    envStr("MEMDB_LLM_SEARCH_MODEL", "gemini-2.0-flash"),
 		LLMExtractModel:   envStr("MEMDB_LLM_EXTRACT_MODEL", "gemini-2.0-flash-lite"),
 		LLMFallbackModels: envCSV("MEMDB_LLM_FALLBACK_MODELS", nil),
+
+		BufferEnabled: envBool("MEMDB_BUFFER_ENABLED", false),
+		BufferSize:    envInt("MEMDB_BUFFER_SIZE", defaultBufferSize),
+		BufferTTL:     envDuration("MEMDB_BUFFER_TTL", defaultBufferTTL),
 
 		MemDBGoURL: envStr("MEMDB_GO_URL", ""),
 	}

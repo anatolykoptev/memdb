@@ -167,15 +167,15 @@
 ### 🟡 Важно — значимые пробелы в функциональности
 
 #### 3. Community detection + cross-session summaries
-**Кто имеет:** Graphiti/Zep  
-**Что это:** Периодически кластеризовать связанные воспоминания в "сообщества" и генерировать их суммари. Позволяет отвечать на абстрактные вопросы без точного vector match.  
+**Кто имеет:** Graphiti/Zep
+**Что это:** Периодически кластеризовать связанные воспоминания в "сообщества" и генерировать их суммари. Позволяет отвечать на абстрактные вопросы без точного vector match.
 **Что сделать:**
 - В `scheduler/reorganizer.go`: после Union-Find merge — если кластер > 3 узлов → LLM summary → `CommunityMemory` тип
 - В `search/service.go`: включить `CommunityMemory` в `TextScopes`
 
 #### 4. `get_context` MCP tool
-**Кто имеет:** Redis Agent Memory Server (`memory_prompt`)  
-**Что это:** Один MCP вызов возвращает готовый контекстный блок: profile + act_mem + top search results как строку для вставки в system prompt. Агент не собирает контекст вручную.  
+**Кто имеет:** Redis Agent Memory Server (`memory_prompt`)
+**Что это:** Один MCP вызов возвращает готовый контекстный блок: profile + act_mem + top search results как строку для вставки в system prompt. Агент не собирает контекст вручную.
 **Что сделать:**
 - В `mcptools/`: новый tool `get_context` — вызывает `SearchService.Search` + `Profiler.GetProfile` → форматирует в единый текстовый блок
 
@@ -184,8 +184,8 @@
 ### 🟢 Желательно — улучшают DX и enterprise-ready
 
 #### 6. Pluggable VectorStore interface
-**Кто имеет:** mem0 (10+ backends), LangMem (BaseStore)  
-**Что это:** Позволяет использовать любой vector store без переписывания SearchService.  
+**Кто имеет:** mem0 (10+ backends), LangMem (BaseStore)
+**Что это:** Позволяет использовать любой vector store без переписывания SearchService.
 **Что сделать:**
 ```go
 type VectorStore interface {
@@ -196,27 +196,27 @@ type VectorStore interface {
 Первая реализация — текущий `db.Postgres`. Вторая — Qdrant как standalone.
 
 #### 7. Procedural memory (update system prompt)
-**Кто имеет:** LangMem  
-**Что это:** LLM анализирует feedback агента и редактирует system prompt — агент обучается новому поведению без fine-tuning.  
+**Кто имеет:** LangMem
+**Что это:** LLM анализирует feedback агента и редактирует system prompt — агент обучается новому поведению без fine-tuning.
 **Что сделать:**
 - Новый memory type `ProcedureMemory` в Postgres
 - MCP tool `update_system_prompt` — принимает instruction → сохраняет в `ProcedureMemory`
 - В `SearchService.Search`: читать `ProcedureMemory` и инжектировать в ответ
 
 #### 8. SSE streaming memory events
-**Кто имеет:** MemOS  
-**Что это:** Клиент подписывается на `GET /product/memory/events` и получает real-time обновления при add/update/delete.  
+**Кто имеет:** MemOS
+**Что это:** Клиент подписывается на `GET /product/memory/events` и получает real-time обновления при add/update/delete.
 **Что сделать:**
 - ✅
 
 #### 9. JWT auth (user-scoped tokens)
-**Кто имеет:** Zep, частично Redis AMS  
-**Что это:** Выдача user-scoped JWT с `user_id` claim. Позволяет браузерным клиентам обращаться к API без service secret.  
+**Кто имеет:** Zep, частично Redis AMS
+**Что это:** Выдача user-scoped JWT с `user_id` claim. Позволяет браузерным клиентам обращаться к API без service secret.
 **Что сделать:**
 - ✅
 
 #### 10. Go embedded SDK (zero-latency)
-**Что это:** `go get memdb.io/sdk` — встраиваемый клиент с SQLite + pgvector для Go-агентов без HTTP round-trip. LangMem-style zero-latency.  
+**Что это:** `go get memdb.io/sdk` — встраиваемый клиент с SQLite + pgvector для Go-агентов без HTTP round-trip. LangMem-style zero-latency.
 **Что сделать:**
 - `sdk/` директория с in-process SearchService (subset функций)
 - SQLite + `sqlite-vec` extension как lightweight бэкенд

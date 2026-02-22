@@ -49,6 +49,19 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	handlers.SetLLMProxy(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel)
 	extractor := initLLMExtractor(cfg, h, logger)
 
+	// Configure buffer zone (batches default-mode adds before LLM extraction)
+	if cfg.BufferEnabled {
+		h.SetBufferConfig(handlers.BufferConfig{
+			Enabled: true,
+			Size:    cfg.BufferSize,
+			TTL:     cfg.BufferTTL,
+		})
+		go h.StartBufferFlusher(ctx)
+		logger.Info("buffer zone enabled",
+			slog.Int("size", cfg.BufferSize),
+			slog.Duration("ttl", cfg.BufferTTL))
+	}
+
 	// Start scheduler Worker (after embedder is initialized).
 	// Uses its own consumer group (memdb_go_scheduler), independent from Python's scheduler_group.
 	if rd != nil {
@@ -227,6 +240,9 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	// Instance monitoring — native
 	mux.HandleFunc("GET /product/instances/status", h.NativeInstancesStatus)
 	mux.HandleFunc("GET /product/instances/count", h.NativeInstancesCount)
+
+	// ─── Admin endpoints ────────────────────────────────────────────────
+	mux.HandleFunc("POST /product/admin/reprocess", h.AdminReprocess)
 }
 
 // applyMiddleware wraps the handler with the full middleware stack.

@@ -47,6 +47,11 @@ func NewRedis(ctx context.Context, redisURL string, logger *slog.Logger) (*Redis
 	return &Redis{client: client, logger: logger}, nil
 }
 
+// NewRedisFromClient wraps an existing Redis client (useful for tests with miniredis).
+func NewRedisFromClient(client *redis.Client, logger *slog.Logger) *Redis {
+	return &Redis{client: client, logger: logger}
+}
+
 // Client returns the underlying Redis client.
 func (r *Redis) Client() *redis.Client {
 	return r.client
