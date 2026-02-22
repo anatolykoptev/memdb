@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+// pythonErrStatusThreshold is the HTTP status code threshold above which the
+// Python backend is considered unhealthy.
+const pythonErrStatusThreshold = 500
+
 // PythonClient proxies requests to the Python MemDB backend.
 type PythonClient struct {
 	baseURL    string
@@ -115,7 +119,7 @@ func (c *PythonClient) ProxyRequest(ctx context.Context, w http.ResponseWriter, 
 	}
 
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, resp.Body)
 }
 
 
@@ -136,7 +140,7 @@ func (c *PythonClient) HealthCheck(ctx context.Context) error {
 		return fmt.Errorf("python backend unreachable: %w", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 500 {
+	if resp.StatusCode >= pythonErrStatusThreshold {
 		return fmt.Errorf("python backend unhealthy: status %d", resp.StatusCode)
 	}
 	return nil

@@ -56,7 +56,7 @@ WHERE user_name = $1
 // Args: $1 = user_name (text), $2 = entity_ids (text[]), $3 = limit (int)
 const GetMemoriesByEntityIDs = `
 SELECT m.id::text,
-       m.properties::text
+       (m.properties - 'sources')::text
 FROM %[1]s."Memory" m
 JOIN memory_edges e ON m.id::text = e.from_id
 WHERE e.to_id = ANY($2)

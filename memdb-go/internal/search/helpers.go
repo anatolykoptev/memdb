@@ -129,6 +129,7 @@ metadata[k] = v
 metadata["relativity"] = float64(r.Score)
 metadata["embedding"] = []any{}
 metadata["usage"] = []any{}
+delete(metadata, "sources")
 metadata["id"] = r.ID
 metadata["memory"] = memory
 

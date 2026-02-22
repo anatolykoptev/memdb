@@ -12,7 +12,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-const tracerName = "memdb-go"
+const (
+	tracerName          = "memdb-go"
+	errorStatusMinCode  = http.StatusBadRequest // 400: track as error for OTel metrics
+)
 
 // OTelMetrics holds the metric instruments for request tracking.
 type OTelMetrics struct {
@@ -87,7 +90,7 @@ func OTel(logger *slog.Logger, enabled bool) func(http.Handler) http.Handler {
 			rec := &otelResponseWriter{ResponseWriter: w}
 			next.ServeHTTP(rec, r)
 
-			if rec.statusCode >= 400 {
+			if rec.statusCode >= errorStatusMinCode {
 				metrics.ErrorCount.Add(r.Context(), 1,
 					metric.WithAttributes(
 						attribute.String("method", r.Method),

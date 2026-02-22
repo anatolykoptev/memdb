@@ -3,7 +3,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -57,7 +58,7 @@ func TestOpenAIEmbeddings_Success_SingleString(t *testing.T) {
 	}
 
 	body := `{"input": "hello world", "model": "test-model"}`
-	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.OpenAIEmbeddings(w, req)
 
@@ -112,7 +113,7 @@ func TestOpenAIEmbeddings_Success_ArrayInput(t *testing.T) {
 	}
 
 	body := `{"input": ["text1", "text2"]}`
-	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.OpenAIEmbeddings(w, req)
 
@@ -146,7 +147,7 @@ func TestOpenAIEmbeddings_NilEmbedder(t *testing.T) {
 	h := &Handler{logger: discardLogger()} // embedder is nil
 
 	body := `{"input": "test"}`
-	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.OpenAIEmbeddings(w, req)
 
@@ -176,7 +177,7 @@ func TestOpenAIEmbeddings_EmptyArrayInput(t *testing.T) {
 	}
 
 	body := `{"input": []}`
-	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.OpenAIEmbeddings(w, req)
 
@@ -203,7 +204,7 @@ func TestOpenAIEmbeddings_EmptyStringInput(t *testing.T) {
 	}
 
 	body := `{"input": ""}`
-	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.OpenAIEmbeddings(w, req)
 
@@ -223,7 +224,7 @@ func TestOpenAIEmbeddings_InvalidBody(t *testing.T) {
 	}
 
 	body := `not json`
-	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.OpenAIEmbeddings(w, req)
 
@@ -250,7 +251,7 @@ func TestOpenAIEmbeddings_InvalidInputType(t *testing.T) {
 
 	// Input is a number, which is neither string nor []string.
 	body := `{"input": 42}`
-	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.OpenAIEmbeddings(w, req)
 
@@ -264,13 +265,13 @@ func TestOpenAIEmbeddings_EmbedderError(t *testing.T) {
 		logger: discardLogger(),
 		embedder: &mockEmbedder{
 			embedFn: func(ctx context.Context, texts []string) ([][]float32, error) {
-				return nil, fmt.Errorf("voyage: status 429: rate limited")
+				return nil, errors.New("voyage: status 429: rate limited")
 			},
 		},
 	}
 
 	body := `{"input": "test"}`
-	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.OpenAIEmbeddings(w, req)
 
@@ -308,7 +309,7 @@ func TestOpenAIEmbeddings_PassagePrefix(t *testing.T) {
 	}
 
 	body := `{"input": ["alpha", "beta"]}`
-	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.OpenAIEmbeddings(w, req)
 
@@ -337,7 +338,7 @@ func TestOpenAIEmbeddings_UsageField(t *testing.T) {
 	}
 
 	body := `{"input": "test"}`
-	req := httptest.NewRequest("POST", "/v1/embeddings", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.OpenAIEmbeddings(w, req)
 

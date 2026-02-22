@@ -8,11 +8,18 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
+)
+
+const (
+	consolidateLogPreviewLen = 80  // chars of merged text to log as preview
+	consolidateLLMMaxTokens  = 512 // max_tokens for consolidation LLM call
+	consolidateErrTruncLen   = 200 // max chars of error LLM output to include in error message
 )
 
 // Run performs one reorganization cycle for the given cube (user_name in DB terms).
@@ -174,7 +181,7 @@ func (r *Reorganizer) consolidateCluster(ctx context.Context, cubeID string, clu
 		return fmt.Errorf("llm consolidate: %w", err)
 	}
 	if result.KeepID == "" || result.MergedText == "" {
-		return fmt.Errorf("llm returned empty keep_id or merged_text")
+		return errors.New("llm returned empty keep_id or merged_text")
 	}
 
 	clusterSet := make(map[string]bool, len(cluster))
@@ -198,33 +205,14 @@ func (r *Reorganizer) consolidateCluster(ctx context.Context, cubeID string, clu
 	}
 	r.logger.Debug("reorganizer: updated keep node",
 		slog.String("id", result.KeepID),
-		slog.String("text_preview", truncate(result.MergedText, 80)))
+		slog.String("text_preview", truncate(result.MergedText, consolidateLogPreviewLen)))
 
 	for _, removeID := range result.RemoveIDs {
-		if !clusterSet[removeID] {
+		if clusterSet[removeID] {
+			r.removeMergedNode(ctx, cubeID, removeID, result.KeepID, now)
+		} else {
 			r.logger.Warn("reorganizer: LLM returned remove_id not in cluster, skipping",
 				slog.String("remove_id", removeID))
-			continue
-		}
-		if err := r.postgres.SoftDeleteMerged(ctx, removeID, result.KeepID, now); err != nil {
-			r.logger.Warn("reorganizer: soft-delete merged failed",
-				slog.String("remove_id", removeID), slog.Any("error", err))
-		} else {
-			r.logger.Debug("reorganizer: merged memory",
-				slog.String("remove_id", removeID),
-				slog.String("into", result.KeepID))
-			// Record MERGED_INTO edge for graph traversal (non-fatal).
-			if err := r.postgres.CreateMemoryEdge(ctx, removeID, result.KeepID, db.EdgeMergedInto, now, ""); err != nil {
-				r.logger.Debug("reorganizer: create merged edge failed (non-fatal)",
-					slog.String("from", removeID), slog.String("to", result.KeepID), slog.Any("error", err))
-			}
-		}
-
-		if r.wmCache != nil {
-			if err := r.wmCache.VRem(ctx, cubeID, removeID); err != nil {
-				r.logger.Debug("reorganizer: vset evict failed (non-fatal)",
-					slog.String("id", removeID), slog.Any("error", err))
-			}
 		}
 	}
 
@@ -232,42 +220,67 @@ func (r *Reorganizer) consolidateCluster(ctx context.Context, cubeID string, clu
 	// Unlike near-dupes (soft-merged for audit), contradicted memories must not
 	// resurface — they are factually wrong and their existence would mislead the model.
 	for _, contradictedID := range result.ContradictedIDs {
-		if !clusterSet[contradictedID] {
+		if clusterSet[contradictedID] {
+			r.removeContradictedNode(ctx, cubeID, contradictedID, result.KeepID, now)
+		} else {
 			r.logger.Warn("reorganizer: LLM returned contradicted_id not in cluster, skipping",
 				slog.String("contradicted_id", contradictedID))
-			continue
-		}
-		// Record CONTRADICTS edge before hard-delete so the relationship is auditable.
-		if err := r.postgres.CreateMemoryEdge(ctx, result.KeepID, contradictedID, db.EdgeContradicts, now, ""); err != nil {
-			r.logger.Debug("reorganizer: create contradicts edge failed (non-fatal)",
-				slog.String("from", result.KeepID), slog.String("to", contradictedID), slog.Any("error", err))
-		}
-		// Bi-temporal invalidation: stamp invalid_at on all edges from the contradicted memory.
-		if err := r.postgres.InvalidateEdgesByMemoryID(ctx, contradictedID, now); err != nil {
-			r.logger.Debug("reorganizer: invalidate memory edges failed (non-fatal)",
-				slog.String("id", contradictedID), slog.Any("error", err))
-		}
-		if err := r.postgres.InvalidateEntityEdgesByMemoryID(ctx, contradictedID, now); err != nil {
-			r.logger.Debug("reorganizer: invalidate entity edges failed (non-fatal)",
-				slog.String("id", contradictedID), slog.Any("error", err))
-		}
-		if _, err := r.postgres.DeleteByPropertyIDs(ctx, []string{contradictedID}, cubeID); err != nil {
-			r.logger.Warn("reorganizer: hard-delete contradicted failed",
-				slog.String("contradicted_id", contradictedID), slog.Any("error", err))
-		} else {
-			r.logger.Info("reorganizer: hard-deleted contradicted memory",
-				slog.String("contradicted_id", contradictedID),
-				slog.String("by", result.KeepID))
-		}
-		if r.wmCache != nil {
-			if err := r.wmCache.VRem(ctx, cubeID, contradictedID); err != nil {
-				r.logger.Debug("reorganizer: vset evict contradicted failed (non-fatal)",
-					slog.String("id", contradictedID), slog.Any("error", err))
-			}
 		}
 	}
 
 	return nil
+}
+
+// removeMergedNode soft-deletes a near-duplicate node and records the MERGED_INTO graph edge.
+func (r *Reorganizer) removeMergedNode(ctx context.Context, cubeID, removeID, keepID, now string) {
+	if err := r.postgres.SoftDeleteMerged(ctx, removeID, keepID, now); err != nil {
+		r.logger.Warn("reorganizer: soft-delete merged failed",
+			slog.String("remove_id", removeID), slog.Any("error", err))
+	} else {
+		r.logger.Debug("reorganizer: merged memory",
+			slog.String("remove_id", removeID), slog.String("into", keepID))
+		if err := r.postgres.CreateMemoryEdge(ctx, removeID, keepID, db.EdgeMergedInto, now, ""); err != nil {
+			r.logger.Debug("reorganizer: create merged edge failed (non-fatal)",
+				slog.String("from", removeID), slog.String("to", keepID), slog.Any("error", err))
+		}
+	}
+	r.evictVSet(ctx, cubeID, removeID, "reorganizer: vset evict failed (non-fatal)")
+}
+
+// removeContradictedNode hard-deletes a contradicted memory and invalidates its graph edges.
+func (r *Reorganizer) removeContradictedNode(ctx context.Context, cubeID, contradictedID, keepID, now string) {
+	// Record CONTRADICTS edge before hard-delete so the relationship is auditable.
+	if err := r.postgres.CreateMemoryEdge(ctx, keepID, contradictedID, db.EdgeContradicts, now, ""); err != nil {
+		r.logger.Debug("reorganizer: create contradicts edge failed (non-fatal)",
+			slog.String("from", keepID), slog.String("to", contradictedID), slog.Any("error", err))
+	}
+	// Bi-temporal invalidation: stamp invalid_at on all edges from the contradicted memory.
+	if err := r.postgres.InvalidateEdgesByMemoryID(ctx, contradictedID, now); err != nil {
+		r.logger.Debug("reorganizer: invalidate memory edges failed (non-fatal)",
+			slog.String("id", contradictedID), slog.Any("error", err))
+	}
+	if err := r.postgres.InvalidateEntityEdgesByMemoryID(ctx, contradictedID, now); err != nil {
+		r.logger.Debug("reorganizer: invalidate entity edges failed (non-fatal)",
+			slog.String("id", contradictedID), slog.Any("error", err))
+	}
+	if _, err := r.postgres.DeleteByPropertyIDs(ctx, []string{contradictedID}, cubeID); err != nil {
+		r.logger.Warn("reorganizer: hard-delete contradicted failed",
+			slog.String("contradicted_id", contradictedID), slog.Any("error", err))
+	} else {
+		r.logger.Info("reorganizer: hard-deleted contradicted memory",
+			slog.String("contradicted_id", contradictedID), slog.String("by", keepID))
+	}
+	r.evictVSet(ctx, cubeID, contradictedID, "reorganizer: vset evict contradicted failed (non-fatal)")
+}
+
+// evictVSet removes an ID from the VSET hot cache (non-fatal).
+func (r *Reorganizer) evictVSet(ctx context.Context, cubeID, id, logMsg string) {
+	if r.wmCache == nil {
+		return
+	}
+	if err := r.wmCache.VRem(ctx, cubeID, id); err != nil {
+		r.logger.Debug(logMsg, slog.String("id", id), slog.Any("error", err))
+	}
 }
 
 // consolidationResult is the JSON structure returned by the LLM.
@@ -288,7 +301,7 @@ func (r *Reorganizer) llmConsolidate(ctx context.Context, cluster []memNode) (co
 	}
 	items := make([]inputItem, len(cluster))
 	for i, n := range cluster {
-		items[i] = inputItem{ID: n.ID, Text: n.Text}
+		items[i] = inputItem(n)
 	}
 	memoriesJSON, _ := json.Marshal(items)
 
@@ -300,7 +313,7 @@ func (r *Reorganizer) llmConsolidate(ctx context.Context, cluster []memNode) (co
 	callCtx, cancel := context.WithTimeout(ctx, reorganizerLLMTimeout)
 	defer cancel()
 
-	raw, err := r.callLLM(callCtx, msgs, 512)
+	raw, err := r.callLLM(callCtx, msgs, consolidateLLMMaxTokens)
 	if err != nil {
 		return consolidationResult{}, err
 	}
@@ -308,7 +321,7 @@ func (r *Reorganizer) llmConsolidate(ctx context.Context, cluster []memNode) (co
 	raw = stripFences(raw)
 	var result consolidationResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		return consolidationResult{}, fmt.Errorf("parse llm json (%s): %w", truncate(raw, 200), err)
+		return consolidationResult{}, fmt.Errorf("parse llm json (%s): %w", truncate(raw, consolidateErrTruncLen), err)
 	}
 	return result, nil
 }

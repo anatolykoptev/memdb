@@ -6,12 +6,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
+
+const redisPingTimeout = 3 * time.Second
 
 // Client wraps a Redis client for response caching.
 type Client struct {
@@ -35,7 +38,7 @@ func New(redisURL string, logger *slog.Logger) (*Client, error) {
 
 	rdb := redis.NewClient(opts)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), redisPingTimeout)
 	defer cancel()
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		rdb.Close()
@@ -49,7 +52,7 @@ func New(redisURL string, logger *slog.Logger) (*Client, error) {
 // Get retrieves a cached response. Returns nil, nil on cache miss.
 func (c *Client) Get(ctx context.Context, key string) ([]byte, error) {
 	val, err := c.rdb.Get(ctx, key).Bytes()
-	if err == redis.Nil {
+	if errors.Is(err, redis.Nil) {
 		return nil, nil
 	}
 	if err != nil {

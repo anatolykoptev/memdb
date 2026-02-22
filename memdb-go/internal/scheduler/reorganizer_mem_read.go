@@ -33,6 +33,10 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
 )
 
+// memReadCandidateHeadChars is the character limit for the conversation head
+// when embedding for dedup candidate lookup.
+const memReadCandidateHeadChars = 512
+
 // enhancementFact is one structured memory extracted by the LLM from a raw WM note (legacy path).
 type enhancementFact struct {
 	Text string `json:"text"`
@@ -66,11 +70,21 @@ func (r *Reorganizer) ProcessRawMemory(ctx context.Context, cubeID string, wmIDs
 	r.processRawMemoryLegacy(ctx, cubeID, wmIDs, log)
 }
 
+// wmInfo holds the extracted fields from WorkingMemory node properties.
+type wmInfo struct {
+	texts          []string
+	sessionID      string
+	agentID        string
+	processedWMIDs []string
+}
+
+// actionCounts holds outcome counters for Step 7.
+type actionCounts struct{ inserted, updated, deleted int }
+
 // processRawMemoryFine runs the full fine-level pipeline for async mem_read.
 func (r *Reorganizer) processRawMemoryFine(ctx context.Context, cubeID string, wmIDs []string, log *slog.Logger) {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000000")
 
-	// Step 1: fetch WM nodes with full properties.
 	fullNodes, err := r.postgres.GetMemoriesByPropertyIDs(ctx, wmIDs)
 	if err != nil || len(fullNodes) == 0 {
 		log.Warn("mem_read: GetMemoriesByPropertyIDs failed or returned empty",
@@ -78,10 +92,52 @@ func (r *Reorganizer) processRawMemoryFine(ctx context.Context, cubeID string, w
 		return
 	}
 
-	// Extract texts, session_id, agent_id from WM properties.
-	var texts []string
-	var sessionID, agentID string
-	var processedWMIDs []string
+	info := extractWMInfo(fullNodes)
+	if len(info.texts) == 0 {
+		log.Debug("mem_read: no valid WM texts found")
+		return
+	}
+	conversation := strings.Join(info.texts, "\n")
+
+	candidates := r.fetchMemReadCandidates(ctx, conversation, cubeID, info.agentID, log)
+	facts, err := r.llmExtractor.ExtractAndDedup(ctx, conversation, candidates)
+	if err != nil {
+		log.Warn("mem_read: ExtractAndDedup failed", slog.Any("error", err))
+		return
+	}
+	if len(facts) == 0 {
+		log.Debug("mem_read: no facts extracted")
+		r.deleteWMNodes(ctx, cubeID, info.processedWMIDs, log)
+		return
+	}
+	log.Info("mem_read: extracted facts", slog.Int("count", len(facts)), slog.String("model", r.llmExtractor.Model()))
+
+	facts = r.filterAddsByContentHash(ctx, facts, cubeID, log)
+	embedded := r.embedFacts(ctx, facts, log)
+
+	allNodes, counts := r.applyMemoryActions(ctx, embedded, cubeID, info.agentID, info.sessionID, now, log)
+	r.insertAndLinkLTMNodes(ctx, allNodes, info.processedWMIDs, now, log)
+	r.linkEntities(embedded, cubeID, now)
+	r.deleteWMNodes(ctx, cubeID, info.processedWMIDs, log)
+
+	if info.sessionID != "" {
+		r.generateEpisodicSummary(cubeID, info.sessionID, conversation, now)
+	}
+	if r.profiler != nil {
+		r.profiler.TriggerRefresh(cubeID)
+	}
+
+	log.Info("mem_read: complete",
+		slog.Int("wm_nodes_processed", len(info.processedWMIDs)),
+		slog.Int("ltm_inserted", counts.inserted),
+		slog.Int("updated", counts.updated),
+		slog.Int("deleted", counts.deleted),
+	)
+}
+
+// extractWMInfo extracts texts, sessionID, agentID and property IDs from raw WM node rows.
+func extractWMInfo(fullNodes []map[string]any) wmInfo {
+	var info wmInfo
 	for _, fn := range fullNodes {
 		propsStr, _ := fn["properties"].(string)
 		if propsStr == "" {
@@ -96,201 +152,162 @@ func (r *Reorganizer) processRawMemoryFine(ctx context.Context, cubeID string, w
 		if mem == "" || id == "" {
 			continue
 		}
-		texts = append(texts, mem)
-		processedWMIDs = append(processedWMIDs, id)
-		if sessionID == "" {
-			sessionID, _ = props["session_id"].(string)
+		info.texts = append(info.texts, mem)
+		info.processedWMIDs = append(info.processedWMIDs, id)
+		if info.sessionID == "" {
+			info.sessionID, _ = props["session_id"].(string)
 		}
-		if agentID == "" {
-			agentID, _ = props["agent_id"].(string)
+		if info.agentID == "" {
+			info.agentID, _ = props["agent_id"].(string)
 		}
 	}
-	if len(texts) == 0 {
-		log.Debug("mem_read: no valid WM texts found")
-		return
-	}
+	return info
+}
 
-	// Step 2: concatenate WM texts into conversation block.
-	conversation := strings.Join(texts, "\n")
-
-	// Step 3: fetch dedup candidates (two-tier: VSET + pgvector).
-	candidates := r.fetchMemReadCandidates(ctx, conversation, cubeID, agentID, log)
-
-	// Step 4: one LLM call — ExtractAndDedup.
-	facts, err := r.llmExtractor.ExtractAndDedup(ctx, conversation, candidates)
-	if err != nil {
-		log.Warn("mem_read: ExtractAndDedup failed", slog.Any("error", err))
-		return
-	}
-	if len(facts) == 0 {
-		log.Debug("mem_read: no facts extracted")
-		// Still delete WM staging nodes.
-		r.deleteWMNodes(ctx, cubeID, processedWMIDs, log)
-		return
-	}
-	log.Info("mem_read: extracted facts",
-		slog.Int("count", len(facts)),
-		slog.String("model", r.llmExtractor.Model()),
-	)
-
-	// Step 5: content-hash dedup for ADD facts.
-	facts = r.filterAddsByContentHash(ctx, facts, cubeID, log)
-
-	// Step 6: batch embed all ADD/UPDATE facts.
-	embedded := r.embedFacts(ctx, facts, log)
-
-	// Step 7: apply actions.
+// applyMemoryActions applies ADD/UPDATE/DELETE actions from the embedded facts.
+// Returns new LTM nodes to insert and outcome counters.
+func (r *Reorganizer) applyMemoryActions(
+	ctx context.Context,
+	embedded []embeddedMemReadFact,
+	cubeID, agentID, sessionID, now string,
+	log *slog.Logger,
+) ([]db.MemoryInsertNode, actionCounts) {
 	var allNodes []db.MemoryInsertNode
-	var inserted, updated, deleted int
+	var counts actionCounts
 	for i := range embedded {
 		ef := &embedded[i]
-		f := ef.fact
-		switch f.Action {
+		switch ef.fact.Action {
 		case llm.MemSkip:
 			continue
-
 		case llm.MemDelete:
-			if f.TargetID != "" {
-				if err := r.postgres.InvalidateEdgesByMemoryID(ctx, f.TargetID, now); err != nil {
-					log.Debug("mem_read: invalidate edges failed", slog.String("id", f.TargetID), slog.Any("error", err))
-				}
-				if err := r.postgres.InvalidateEntityEdgesByMemoryID(ctx, f.TargetID, now); err != nil {
-					log.Debug("mem_read: invalidate entity edges failed", slog.String("id", f.TargetID), slog.Any("error", err))
-				}
-				if _, err := r.postgres.DeleteByPropertyIDs(ctx, []string{f.TargetID}, cubeID); err != nil {
-					log.Debug("mem_read: delete contradicted memory failed", slog.String("id", f.TargetID), slog.Any("error", err))
-				}
-				if r.wmCache != nil {
-					_ = r.wmCache.VRem(ctx, cubeID, f.TargetID)
-				}
-				deleted++
+			if r.applyMemDelete(ctx, ef.fact.TargetID, cubeID, now, log) {
+				counts.deleted++
 			}
-
 		case llm.MemUpdate:
-			if f.TargetID != "" && ef.embVec != "" {
-				if err := r.postgres.InvalidateEdgesByMemoryID(ctx, f.TargetID, now); err != nil {
-					log.Debug("mem_read: invalidate edges on update failed", slog.String("id", f.TargetID), slog.Any("error", err))
-				}
-				if err := r.postgres.InvalidateEntityEdgesByMemoryID(ctx, f.TargetID, now); err != nil {
-					log.Debug("mem_read: invalidate entity edges on update failed", slog.String("id", f.TargetID), slog.Any("error", err))
-				}
-				if err := r.postgres.UpdateMemoryNodeFull(ctx, f.TargetID, f.Memory, ef.embVec, now); err != nil {
-					log.Debug("mem_read: update node failed", slog.String("id", f.TargetID), slog.Any("error", err))
-				} else {
-					updated++
-				}
-				ef.ltmID = f.TargetID
+			if r.applyMemUpdate(ctx, ef, now, log) {
+				counts.updated++
 			}
-
 		default: // llm.MemAdd
-			if ef.embVec == "" {
-				continue
-			}
-			createdAt := now
-			if f.ValidAt != "" {
-				createdAt = f.ValidAt
-			}
-			memType := f.Type
-			if memType != "UserMemory" {
-				memType = "LongTermMemory"
-			}
-			ltID := uuid.New().String()
-			allTags := append([]string{"mode:mem_read"}, f.Tags...)
-
-			factInfo := map[string]any{}
-			if f.ContentHash != "" {
-				factInfo["content_hash"] = f.ContentHash
-			}
-			if f.Confidence > 0 {
-				factInfo["confidence"] = f.Confidence
-			}
-			if f.ValidAt != "" {
-				factInfo["valid_at"] = f.ValidAt
-			}
-
-			props := map[string]any{
-				"id":               ltID,
-				"memory":           f.Memory,
-				"memory_type":      memType,
-				"user_name":        cubeID,
-				"user_id":          cubeID,
-				"agent_id":         agentID,
-				"session_id":       sessionID,
-				"status":           "activated",
-				"created_at":       createdAt,
-				"updated_at":       now,
-				"tags":             allTags,
-				"background":       "",
-				"delete_time":      "",
-				"delete_record_id": "",
-				"confidence":       f.Confidence,
-				"type":             "fact",
-				"info":             factInfo,
-				"graph_id":         uuid.New().String(),
-				"importance_score": 1.0,
-				"retrieval_count":  0,
-			}
-			propsJSON, err := json.Marshal(props)
-			if err != nil {
-				continue
-			}
-			allNodes = append(allNodes, db.MemoryInsertNode{
-				ID:             ltID,
-				PropertiesJSON: propsJSON,
-				EmbeddingVec:   ef.embVec,
-			})
-			ef.ltmID = ltID
-			inserted++
-		}
-	}
-
-	// Step 8: batch insert all ADD nodes.
-	if len(allNodes) > 0 {
-		if err := r.postgres.InsertMemoryNodes(ctx, allNodes); err != nil {
-			log.Warn("mem_read: InsertMemoryNodes failed", slog.Any("error", err))
-		} else {
-			// Create EXTRACTED_FROM edges for all new LTM nodes.
-			for _, ltmNode := range allNodes {
-				for _, wmID := range processedWMIDs {
-					if err := r.postgres.CreateMemoryEdge(ctx, ltmNode.ID, wmID, db.EdgeExtractedFrom, now, ""); err != nil {
-						log.Debug("mem_read: create extracted_from edge failed (non-fatal)",
-							slog.String("ltm_id", ltmNode.ID), slog.String("wm_id", wmID), slog.Any("error", err))
-					}
-				}
+			node, ltmID, ok := buildLTMNode(ef, cubeID, agentID, sessionID, now)
+			if ok {
+				allNodes = append(allNodes, node)
+				ef.ltmID = ltmID
+				counts.inserted++
 			}
 		}
 	}
+	return allNodes, counts
+}
 
-	// Step 9: entity linking (async goroutine).
-	r.linkEntities(embedded, cubeID, now)
+// applyMemDelete invalidates edges and deletes a memory node. Returns true if deleted.
+func (r *Reorganizer) applyMemDelete(ctx context.Context, targetID, cubeID, now string, log *slog.Logger) bool {
+	if targetID == "" {
+		return false
+	}
+	if err := r.postgres.InvalidateEdgesByMemoryID(ctx, targetID, now); err != nil {
+		log.Debug("mem_read: invalidate edges failed", slog.String("id", targetID), slog.Any("error", err))
+	}
+	if err := r.postgres.InvalidateEntityEdgesByMemoryID(ctx, targetID, now); err != nil {
+		log.Debug("mem_read: invalidate entity edges failed", slog.String("id", targetID), slog.Any("error", err))
+	}
+	if _, err := r.postgres.DeleteByPropertyIDs(ctx, []string{targetID}, cubeID); err != nil {
+		log.Debug("mem_read: delete contradicted memory failed", slog.String("id", targetID), slog.Any("error", err))
+	}
+	if r.wmCache != nil {
+		_ = r.wmCache.VRem(ctx, cubeID, targetID)
+	}
+	return true
+}
 
-	// Step 10: delete original WM staging nodes.
-	r.deleteWMNodes(ctx, cubeID, processedWMIDs, log)
+// applyMemUpdate invalidates edges and updates the memory node in place. Returns true if updated.
+func (r *Reorganizer) applyMemUpdate(ctx context.Context, ef *embeddedMemReadFact, now string, log *slog.Logger) bool {
+	f := ef.fact
+	if f.TargetID == "" || ef.embVec == "" {
+		return false
+	}
+	if err := r.postgres.InvalidateEdgesByMemoryID(ctx, f.TargetID, now); err != nil {
+		log.Debug("mem_read: invalidate edges on update failed", slog.String("id", f.TargetID), slog.Any("error", err))
+	}
+	if err := r.postgres.InvalidateEntityEdgesByMemoryID(ctx, f.TargetID, now); err != nil {
+		log.Debug("mem_read: invalidate entity edges on update failed", slog.String("id", f.TargetID), slog.Any("error", err))
+	}
+	if err := r.postgres.UpdateMemoryNodeFull(ctx, f.TargetID, f.Memory, ef.embVec, now); err != nil {
+		log.Debug("mem_read: update node failed", slog.String("id", f.TargetID), slog.Any("error", err))
+		return false
+	}
+	ef.ltmID = f.TargetID
+	return true
+}
 
-	// Step 11: episodic summary (async) — if session_id present.
-	if sessionID != "" {
-		r.generateEpisodicSummary(cubeID, sessionID, conversation, now)
+// buildLTMNode constructs a MemoryInsertNode for a MemAdd fact.
+// Returns (node, ltmID, ok).
+func buildLTMNode(ef *embeddedMemReadFact, cubeID, agentID, sessionID, now string) (db.MemoryInsertNode, string, bool) {
+	f := ef.fact
+	if ef.embVec == "" {
+		return db.MemoryInsertNode{}, "", false
+	}
+	createdAt := now
+	if f.ValidAt != "" {
+		createdAt = f.ValidAt
+	}
+	memType := f.Type
+	if memType != "UserMemory" {
+		memType = "LongTermMemory"
+	}
+	ltID := uuid.New().String()
+
+	factInfo := map[string]any{}
+	if f.ContentHash != "" {
+		factInfo["content_hash"] = f.ContentHash
+	}
+	if f.Confidence > 0 {
+		factInfo["confidence"] = f.Confidence
+	}
+	if f.ValidAt != "" {
+		factInfo["valid_at"] = f.ValidAt
 	}
 
-	// Step 12: profiler TriggerRefresh (async).
-	if r.profiler != nil {
-		r.profiler.TriggerRefresh(cubeID)
+	props := map[string]any{
+		"id": ltID, "memory": f.Memory, "memory_type": memType,
+		"user_name": cubeID, "user_id": cubeID, "agent_id": agentID, "session_id": sessionID,
+		"status": "activated", "created_at": createdAt, "updated_at": now,
+		"tags": append([]string{"mode:mem_read"}, f.Tags...),
+		"background": "", "delete_time": "", "delete_record_id": "",
+		"confidence": f.Confidence, "type": "fact", "info": factInfo,
+		"graph_id": uuid.New().String(), "importance_score": 1.0, "retrieval_count": 0,
 	}
+	propsJSON, err := json.Marshal(props)
+	if err != nil {
+		return db.MemoryInsertNode{}, "", false
+	}
+	return db.MemoryInsertNode{ID: ltID, PropertiesJSON: propsJSON, EmbeddingVec: ef.embVec}, ltID, true
+}
 
-	log.Info("mem_read: complete",
-		slog.Int("wm_nodes_processed", len(processedWMIDs)),
-		slog.Int("ltm_inserted", inserted),
-		slog.Int("updated", updated),
-		slog.Int("deleted", deleted),
-	)
+// insertAndLinkLTMNodes inserts allNodes and creates EXTRACTED_FROM edges to WM source nodes.
+func (r *Reorganizer) insertAndLinkLTMNodes(ctx context.Context, allNodes []db.MemoryInsertNode, processedWMIDs []string, now string, log *slog.Logger) {
+	if len(allNodes) == 0 {
+		return
+	}
+	if err := r.postgres.InsertMemoryNodes(ctx, allNodes); err != nil {
+		log.Warn("mem_read: InsertMemoryNodes failed", slog.Any("error", err))
+		return
+	}
+	for _, ltmNode := range allNodes {
+		for _, wmID := range processedWMIDs {
+			if err := r.postgres.CreateMemoryEdge(ctx, ltmNode.ID, wmID, db.EdgeExtractedFrom, now, ""); err != nil {
+				log.Debug("mem_read: create extracted_from edge failed (non-fatal)",
+					slog.String("ltm_id", ltmNode.ID), slog.String("wm_id", wmID), slog.Any("error", err))
+			}
+		}
+	}
 }
 
 // fetchMemReadCandidates fetches dedup candidates for the mem_read pipeline (two-tier).
 func (r *Reorganizer) fetchMemReadCandidates(ctx context.Context, conversation, cubeID, agentID string, log *slog.Logger) []llm.Candidate {
 	const candidateLimit = 10
 	head := conversation
-	if len(head) > 512 {
-		head = head[:512]
+	if len(head) > memReadCandidateHeadChars {
+		head = head[:memReadCandidateHeadChars]
 	}
 	convEmbs, err := r.embedder.Embed(ctx, []string{head})
 	if err != nil || len(convEmbs) == 0 || len(convEmbs[0]) == 0 {
@@ -298,45 +315,54 @@ func (r *Reorganizer) fetchMemReadCandidates(ctx context.Context, conversation, 
 		return nil
 	}
 	embedding := convEmbs[0]
-
 	seen := make(map[string]struct{})
 	out := make([]llm.Candidate, 0, candidateLimit)
 
-	// Tier 1: VSET hot cache.
-	if r.wmCache != nil {
-		vsetResults, err := r.wmCache.VSim(ctx, cubeID, embedding, candidateLimit)
-		if err != nil {
-			log.Debug("mem_read: vset vsim failed", slog.Any("error", err))
-		} else {
-			for _, vr := range vsetResults {
-				if vr.ID != "" && vr.Memory != "" {
-					out = append(out, llm.Candidate{ID: vr.ID, Memory: vr.Memory})
-					seen[vr.ID] = struct{}{}
-				}
-			}
+	r.appendVSetCandidates(ctx, cubeID, embedding, candidateLimit, &out, seen, log)
+	r.appendPGCandidates(ctx, cubeID, agentID, embedding, candidateLimit, &out, seen, log)
+	return out
+}
+
+// appendVSetCandidates adds VSET hot-cache candidates to the output slice.
+func (r *Reorganizer) appendVSetCandidates(ctx context.Context, cubeID string, embedding []float32, limit int, out *[]llm.Candidate, seen map[string]struct{}, log *slog.Logger) {
+	if r.wmCache == nil {
+		return
+	}
+	results, err := r.wmCache.VSim(ctx, cubeID, embedding, limit)
+	if err != nil {
+		log.Debug("mem_read: vset vsim failed", slog.Any("error", err))
+		return
+	}
+	for _, vr := range results {
+		if vr.ID != "" && vr.Memory != "" {
+			*out = append(*out, llm.Candidate{ID: vr.ID, Memory: vr.Memory})
+			seen[vr.ID] = struct{}{}
 		}
 	}
+}
 
-	// Tier 2: Postgres pgvector.
+// appendPGCandidates adds Postgres pgvector candidates to the output slice.
+func (r *Reorganizer) appendPGCandidates(ctx context.Context, cubeID, agentID string, embedding []float32, limit int, out *[]llm.Candidate, seen map[string]struct{}, log *slog.Logger) {
 	results, err := r.postgres.VectorSearch(ctx, embedding, cubeID,
-		[]string{"LongTermMemory", "UserMemory"}, agentID, candidateLimit)
+		[]string{"LongTermMemory", "UserMemory"}, agentID, limit)
 	if err != nil {
 		log.Debug("mem_read: postgres vector search failed", slog.Any("error", err))
-	} else {
-		for _, vr := range results {
-			id, mem := extractIDAndMemory(vr.Properties)
-			if id == "" || mem == "" {
-				continue
-			}
-			if _, dup := seen[id]; dup {
-				continue
-			}
-			out = append(out, llm.Candidate{ID: id, Memory: mem})
-			seen[id] = struct{}{}
-		}
+		return
 	}
+	for _, vr := range results {
+		id, mem := extractIDAndMemory(vr.Properties)
+		if id == "" || mem == "" || isDup(id, seen) {
+			continue
+		}
+		*out = append(*out, llm.Candidate{ID: id, Memory: mem})
+		seen[id] = struct{}{}
+	}
+}
 
-	return out
+// isDup returns true if id is already in the seen set.
+func isDup(id string, seen map[string]struct{}) bool {
+	_, dup := seen[id]
+	return dup
 }
 
 // filterAddsByContentHash removes ADD facts whose content_hash already exists in the DB.
@@ -478,83 +504,12 @@ func (r *Reorganizer) processRawMemoryLegacy(ctx context.Context, cubeID string,
 	var inserted, skipped int
 
 	for _, node := range nodes {
-		rawText := node.Text
-		wmID := node.ID
-		if rawText == "" || wmID == "" {
+		n, skip := r.processLegacyNode(ctx, cubeID, node, now, log)
+		if skip {
 			skipped++
-			continue
+		} else {
+			inserted += n
 		}
-
-		facts, err := r.llmEnhance(ctx, rawText)
-		if err != nil {
-			log.Warn("mem_read: llmEnhance failed", slog.String("wm_id", wmID), slog.Any("error", err))
-			skipped++
-			continue
-		}
-		if len(facts) == 0 {
-			log.Debug("mem_read: no facts extracted", slog.String("wm_id", wmID))
-			r.deleteWMNode(ctx, cubeID, wmID, log)
-			continue
-		}
-
-		legacyTexts := make([]string, len(facts))
-		for i, f := range facts {
-			legacyTexts[i] = f.Text
-		}
-		embs, err := r.embedder.Embed(ctx, legacyTexts)
-		if err != nil {
-			log.Warn("mem_read: embed failed", slog.String("wm_id", wmID), slog.Any("error", err))
-			skipped++
-			continue
-		}
-
-		var ltmNodes []db.MemoryInsertNode
-		for i, f := range facts {
-			if i >= len(embs) || len(embs[i]) == 0 {
-				continue
-			}
-			memType := f.Type
-			if memType != "UserMemory" {
-				memType = "LongTermMemory"
-			}
-			ltID := uuid.New().String()
-			props := map[string]any{
-				"id":               ltID,
-				"memory":           f.Text,
-				"memory_type":      memType,
-				"user_name":        cubeID,
-				"user_id":          cubeID,
-				"status":           "activated",
-				"created_at":       now,
-				"updated_at":       now,
-				"tags":             []string{"mode:mem_read"},
-				"background":       "working_binding:" + wmID,
-				"delete_time":      "",
-				"delete_record_id": "",
-			}
-			propsJSON, _ := json.Marshal(props)
-			ltmNodes = append(ltmNodes, db.MemoryInsertNode{
-				ID:             ltID,
-				PropertiesJSON: propsJSON,
-				EmbeddingVec:   db.FormatVector(embs[i]),
-			})
-		}
-		if len(ltmNodes) > 0 {
-			if err := r.postgres.InsertMemoryNodes(ctx, ltmNodes); err != nil {
-				log.Warn("mem_read: InsertMemoryNodes failed", slog.String("wm_id", wmID), slog.Any("error", err))
-				skipped++
-				continue
-			}
-			for _, ltmNode := range ltmNodes {
-				if err := r.postgres.CreateMemoryEdge(ctx, ltmNode.ID, wmID, db.EdgeExtractedFrom, now, ""); err != nil {
-					log.Debug("mem_read: create extracted_from edge failed (non-fatal)",
-						slog.String("ltm_id", ltmNode.ID), slog.String("wm_id", wmID), slog.Any("error", err))
-				}
-			}
-			inserted += len(ltmNodes)
-		}
-
-		r.deleteWMNode(ctx, cubeID, wmID, log)
 	}
 
 	log.Info("mem_read: complete",
@@ -562,6 +517,93 @@ func (r *Reorganizer) processRawMemoryLegacy(ctx context.Context, cubeID string,
 		slog.Int("ltm_inserted", inserted),
 		slog.Int("skipped", skipped),
 	)
+}
+
+// processLegacyNode runs the enhance→embed→insert pipeline for a single WM node.
+// Returns (ltmInserted, skipped).
+func (r *Reorganizer) processLegacyNode(ctx context.Context, cubeID string, node db.MemNode, now string, log *slog.Logger) (int, bool) {
+	rawText := node.Text
+	wmID := node.ID
+	if rawText == "" || wmID == "" {
+		return 0, true
+	}
+
+	facts, err := r.llmEnhance(ctx, rawText)
+	if err != nil {
+		log.Warn("mem_read: llmEnhance failed", slog.String("wm_id", wmID), slog.Any("error", err))
+		return 0, true
+	}
+	if len(facts) == 0 {
+		log.Debug("mem_read: no facts extracted", slog.String("wm_id", wmID))
+		r.deleteWMNode(ctx, cubeID, wmID, log)
+		return 0, false
+	}
+
+	legacyTexts := make([]string, len(facts))
+	for i, f := range facts {
+		legacyTexts[i] = f.Text
+	}
+	embs, err := r.embedder.Embed(ctx, legacyTexts)
+	if err != nil {
+		log.Warn("mem_read: embed failed", slog.String("wm_id", wmID), slog.Any("error", err))
+		return 0, true
+	}
+
+	ltmNodes := buildLegacyLTMNodes(facts, embs, cubeID, wmID, now)
+	if len(ltmNodes) == 0 {
+		r.deleteWMNode(ctx, cubeID, wmID, log)
+		return 0, false
+	}
+
+	if err := r.postgres.InsertMemoryNodes(ctx, ltmNodes); err != nil {
+		log.Warn("mem_read: InsertMemoryNodes failed", slog.String("wm_id", wmID), slog.Any("error", err))
+		return 0, true
+	}
+	for _, ltmNode := range ltmNodes {
+		if err := r.postgres.CreateMemoryEdge(ctx, ltmNode.ID, wmID, db.EdgeExtractedFrom, now, ""); err != nil {
+			log.Debug("mem_read: create extracted_from edge failed (non-fatal)",
+				slog.String("ltm_id", ltmNode.ID), slog.String("wm_id", wmID), slog.Any("error", err))
+		}
+	}
+
+	r.deleteWMNode(ctx, cubeID, wmID, log)
+	return len(ltmNodes), false
+}
+
+// buildLegacyLTMNodes constructs LTM insert nodes from enhanced facts and their embeddings.
+func buildLegacyLTMNodes(facts []enhancementFact, embs [][]float32, cubeID, wmID, now string) []db.MemoryInsertNode {
+	var ltmNodes []db.MemoryInsertNode
+	for i, f := range facts {
+		if i >= len(embs) || len(embs[i]) == 0 {
+			continue
+		}
+		memType := f.Type
+		if memType != "UserMemory" {
+			memType = "LongTermMemory"
+		}
+		ltID := uuid.New().String()
+		props := map[string]any{
+			"id":               ltID,
+			"memory":           f.Text,
+			"memory_type":      memType,
+			"user_name":        cubeID,
+			"user_id":          cubeID,
+			"status":           "activated",
+			"created_at":       now,
+			"updated_at":       now,
+			"tags":             []string{"mode:mem_read"},
+			"background":       "working_binding:" + wmID,
+			"delete_time":      "",
+			"delete_record_id": "",
+		}
+		propsJSON, _ := json.Marshal(props)
+		ltmNodes = append(ltmNodes, db.MemoryInsertNode{
+			ID:             ltID,
+			PropertiesJSON: propsJSON,
+			EmbeddingVec:   db.FormatVector(embs[i]),
+		})
+	}
+	return ltmNodes
 }
 
 // llmEnhance calls the LLM to extract structured facts from a raw WM note (legacy path).
@@ -574,7 +616,7 @@ func (r *Reorganizer) llmEnhance(ctx context.Context, rawText string) ([]enhance
 	callCtx, cancel := context.WithTimeout(ctx, reorganizerLLMTimeout)
 	defer cancel()
 
-	raw, err := r.callLLM(callCtx, msgs, 512)
+	raw, err := r.callLLM(callCtx, msgs, llmCompactMaxTokens)
 	if err != nil {
 		return nil, err
 	}
@@ -584,7 +626,7 @@ func (r *Reorganizer) llmEnhance(ctx context.Context, rawText string) ([]enhance
 		Memories []enhancementFact `json:"memories"`
 	}
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		return nil, fmt.Errorf("parse llm enhance json (%s): %w", truncate(raw, 200), err)
+		return nil, fmt.Errorf("parse llm enhance json (%s): %w", truncate(raw, llmTruncateLen), err)
 	}
 	return result.Memories, nil
 }

@@ -1,9 +1,17 @@
 {
   "messages": [
-    {"role": "user", "content": "Load test message - please ignore"},
-    {"role": "assistant", "content": "This is a load test response for benchmarking purposes."}
+    {
+      "role": "user",
+      "content": "Load test message - please ignore"
+    },
+    {
+      "role": "assistant",
+      "content": "This is a load test response for benchmarking purposes."
+    }
   ],
   "user_id": "memos",
-  "writable_cube_ids": ["memos"],
+  "writable_cube_ids": [
+    "memos"
+  ],
   "mode": "fast"
 }

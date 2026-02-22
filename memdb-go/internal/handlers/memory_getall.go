@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+const getAllCacheTTL = 30 * time.Second // TTL for get_all_memories response cache
+
 // getAllNativeRequest extends getAllRequest with pagination fields.
 type getAllNativeRequest struct {
 	UserID     *string `json:"user_id"`
@@ -55,18 +57,7 @@ func (h *Handler) NativeGetAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page := 0
-	pageSize := 100
-	if req.Page != nil && *req.Page >= 0 {
-		page = *req.Page
-	}
-	if req.PageSize != nil && *req.PageSize > 0 {
-		pageSize = *req.PageSize
-	}
-	if pageSize > maxPageSize {
-		pageSize = maxPageSize
-	}
-
+	page, pageSize := parseGetAllPagination(req)
 	dbType := memoryTypeToDBType[*req.MemoryType]
 	ctx := r.Context()
 	cacheKey := fmt.Sprintf("%sget_all:%s:%s:%d:%d", cachePrefix, *req.UserID, *req.MemoryType, page, pageSize)
@@ -74,7 +65,7 @@ func (h *Handler) NativeGetAll(w http.ResponseWriter, r *http.Request) {
 	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write(cached)
+		w.Write(cached) //nolint:errcheck
 		return
 	}
 
@@ -87,6 +78,41 @@ func (h *Handler) NativeGetAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	memories := parseMemoryResults(results)
+
+	resp := map[string]any{
+		"code":    200,
+		"message": "ok",
+		"data": map[string]any{
+			"memories": memories,
+			"total":    total,
+		},
+	}
+	if encoded, err := json.Marshal(resp); err == nil {
+		h.cacheSet(ctx, cacheKey, encoded, getAllCacheTTL)
+	}
+
+	h.writeJSON(w, http.StatusOK, resp)
+}
+
+// parseGetAllPagination extracts page and pageSize from a getAllNativeRequest with defaults and bounds.
+func parseGetAllPagination(req getAllNativeRequest) (page, pageSize int) {
+	page = 0
+	pageSize = 100
+	if req.Page != nil && *req.Page >= 0 {
+		page = *req.Page
+	}
+	if req.PageSize != nil && *req.PageSize > 0 {
+		pageSize = *req.PageSize
+	}
+	if pageSize > maxPageSize {
+		pageSize = maxPageSize
+	}
+	return
+}
+
+// parseMemoryResults converts DB rows to API response entries with parsed properties.
+func parseMemoryResults(results []map[string]any) []map[string]any {
 	memories := make([]map[string]any, 0, len(results))
 	for _, result := range results {
 		entry := map[string]any{"memory_id": result["memory_id"]}
@@ -100,18 +126,5 @@ func (h *Handler) NativeGetAll(w http.ResponseWriter, r *http.Request) {
 		}
 		memories = append(memories, entry)
 	}
-
-	resp := map[string]any{
-		"code":    200,
-		"message": "ok",
-		"data": map[string]any{
-			"memories": memories,
-			"total":    total,
-		},
-	}
-	if encoded, err := json.Marshal(resp); err == nil {
-		h.cacheSet(ctx, cacheKey, encoded, 30*time.Second)
-	}
-
-	h.writeJSON(w, http.StatusOK, resp)
+	return memories
 }

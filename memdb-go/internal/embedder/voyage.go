@@ -13,9 +13,10 @@ import (
 )
 
 const (
-	voyageEndpoint    = "https://api.voyageai.com/v1/embeddings"
-	defaultModel      = "voyage-4-lite"
-	defaultHTTPTimeout = 10 * time.Second
+	voyageEndpoint        = "https://api.voyageai.com/v1/embeddings"
+	defaultModel          = "voyage-4-lite"
+	defaultHTTPTimeout    = 10 * time.Second
+	voyageDimension       = 1024 // voyage-4-lite embedding dimension
 )
 
 // VoyageClient calls the VoyageAI embedding API.
@@ -134,7 +135,7 @@ func (v *VoyageClient) EmbedQuery(ctx context.Context, text string) ([]float32, 
 }
 
 // Dimension returns the embedding vector dimension (1024 for voyage-4-lite).
-func (v *VoyageClient) Dimension() int { return 1024 }
+func (v *VoyageClient) Dimension() int { return voyageDimension }
 
 // Close is a no-op for the HTTP-based VoyageAI client.
 func (v *VoyageClient) Close() error { return nil }

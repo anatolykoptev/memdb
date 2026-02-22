@@ -17,6 +17,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -24,6 +25,8 @@ import (
 	"strings"
 	"time"
 )
+
+const rerankRespBodyLimit = 32 * 1024 // 32 KB max LLM response body for reranking
 
 // LLMRerankConfig holds the parameters for the LLM reranker.
 type LLMRerankConfig struct {
@@ -146,9 +149,18 @@ func callLLMReranker(ctx context.Context, query string, items []map[string]any, 
 		}
 	}
 	if len(cands) == 0 {
-		return nil, fmt.Errorf("no valid candidates")
+		return nil, errors.New("no valid candidates")
 	}
 
+	content, err := rerankHTTPCall(ctx, query, cands, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return parseRerankScores(content)
+}
+
+// rerankHTTPCall builds and sends the LLM rerank request, returning the raw response content.
+func rerankHTTPCall(ctx context.Context, query string, cands any, cfg LLMRerankConfig) (string, error) {
 	candsJSON, _ := json.Marshal(cands)
 	userMsg := fmt.Sprintf(`Query: %s
 
@@ -174,7 +186,7 @@ Return ONLY valid JSON: [{"id": "...", "score": 0.8}, ...]`, query, string(cands
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.APIURL+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if cfg.APIKey != "" {
@@ -184,13 +196,13 @@ Return ONLY valid JSON: [{"id": "...", "score": 0.8}, ...]`, query, string(cands
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, rerankRespBodyLimit))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	var chatResp struct {
@@ -201,16 +213,19 @@ Return ONLY valid JSON: [{"id": "...", "score": 0.8}, ...]`, query, string(cands
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(respBody, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return nil, fmt.Errorf("llm reranker: bad response")
+		return "", errors.New("llm reranker: bad response")
 	}
 
-	content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
 	// Strip markdown code fences if present
+	content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
 	content = strings.TrimPrefix(content, "```json")
 	content = strings.TrimPrefix(content, "```")
 	content = strings.TrimSuffix(content, "```")
-	content = strings.TrimSpace(content)
+	return strings.TrimSpace(content), nil
+}
 
+// parseRerankScores parses the JSON array of {id, score} objects into a map.
+func parseRerankScores(content string) (map[string]float64, error) {
 	var scored []struct {
 		ID    string  `json:"id"`
 		Score float64 `json:"score"`
@@ -218,7 +233,6 @@ Return ONLY valid JSON: [{"id": "...", "score": 0.8}, ...]`, query, string(cands
 	if err := json.Unmarshal([]byte(content), &scored); err != nil {
 		return nil, fmt.Errorf("llm reranker: parse failed: %w", err)
 	}
-
 	result := make(map[string]float64, len(scored))
 	for _, s := range scored {
 		result[s.ID] = s.Score

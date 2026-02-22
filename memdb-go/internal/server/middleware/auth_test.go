@@ -18,7 +18,7 @@ func hashKey(key string) string {
 func testHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 }
 
@@ -30,7 +30,7 @@ func TestAuth_Disabled(t *testing.T) {
 	mw := Auth(testLogger(), AuthConfig{Enabled: false})
 	handler := mw(testHandler())
 
-	req := httptest.NewRequest("POST", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -44,7 +44,7 @@ func TestAuth_HealthSkipped(t *testing.T) {
 	handler := mw(testHandler())
 
 	for _, path := range []string{"/health", "/ready"} {
-		req := httptest.NewRequest("GET", path, nil)
+		req := httptest.NewRequest(http.MethodGet, path, nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
@@ -57,7 +57,7 @@ func TestAuth_OptionsSkipped(t *testing.T) {
 	mw := Auth(testLogger(), AuthConfig{Enabled: true, MasterKeyHash: hashKey("secret")})
 	handler := mw(testHandler())
 
-	req := httptest.NewRequest("OPTIONS", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodOptions, "/product/search", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -70,7 +70,7 @@ func TestAuth_MissingHeader(t *testing.T) {
 	mw := Auth(testLogger(), AuthConfig{Enabled: true, MasterKeyHash: hashKey("secret")})
 	handler := mw(testHandler())
 
-	req := httptest.NewRequest("POST", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -83,7 +83,7 @@ func TestAuth_InvalidFormat(t *testing.T) {
 	mw := Auth(testLogger(), AuthConfig{Enabled: true, MasterKeyHash: hashKey("secret")})
 	handler := mw(testHandler())
 
-	req := httptest.NewRequest("POST", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	req.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -97,7 +97,7 @@ func TestAuth_WrongToken(t *testing.T) {
 	mw := Auth(testLogger(), AuthConfig{Enabled: true, MasterKeyHash: hashKey("correct-key")})
 	handler := mw(testHandler())
 
-	req := httptest.NewRequest("POST", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	req.Header.Set("Authorization", "Bearer wrong-key")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -112,7 +112,7 @@ func TestAuth_ValidToken(t *testing.T) {
 	mw := Auth(testLogger(), AuthConfig{Enabled: true, MasterKeyHash: hashKey(key)})
 	handler := mw(testHandler())
 
-	req := httptest.NewRequest("POST", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	req.Header.Set("Authorization", "Bearer "+key)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -130,7 +130,7 @@ func TestAuth_ServiceSecret(t *testing.T) {
 	})
 	handler := mw(testHandler())
 
-	req := httptest.NewRequest("POST", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	req.Header.Set("X-Service-Secret", "internal-secret-123")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -148,7 +148,7 @@ func TestAuth_ServiceSecretLegacyHeader(t *testing.T) {
 	})
 	handler := mw(testHandler())
 
-	req := httptest.NewRequest("POST", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	req.Header.Set("X-Internal-Service", "internal-secret-123")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -166,7 +166,7 @@ func TestAuth_InvalidServiceSecret(t *testing.T) {
 	})
 	handler := mw(testHandler())
 
-	req := httptest.NewRequest("POST", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	req.Header.Set("X-Service-Secret", "wrong-secret")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)

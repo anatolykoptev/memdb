@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -164,27 +165,37 @@ func (r *Reorganizer) llmSummarizeWM(ctx context.Context, cubeID string, nodes [
 	raw, err := r.callLLM(llmCtx, []map[string]string{
 		{"role": "system", "content": wmCompactionSystemPrompt},
 		{"role": "user", "content": sb.String()},
-	}, 512)
+	}, llmCompactMaxTokens)
 	if err != nil {
 		return "", fmt.Errorf("llm call: %w", err)
 	}
 
+	summary, err := extractJSONSummary(raw)
+	if err != nil {
+		return "", err
+	}
+	return summary, nil
+}
+
+// extractJSONSummary parses {"summary": "..."} from raw LLM output, stripping markdown fences.
+func extractJSONSummary(raw string) (string, error) {
 	var result struct {
 		Summary string `json:"summary"`
 	}
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		// Try to extract JSON if wrapped in markdown fences
-		if start := strings.Index(raw, "{"); start >= 0 {
-			if end := strings.LastIndex(raw, "}"); end > start {
-				if err2 := json.Unmarshal([]byte(raw[start:end+1]), &result); err2 != nil {
-					return "", fmt.Errorf("parse llm response: %w", err)
-				}
-			}
-		} else {
-			return "", fmt.Errorf("parse llm response: %w", err)
-		}
+	if err := json.Unmarshal([]byte(raw), &result); err == nil {
+		return strings.TrimSpace(result.Summary), nil
 	}
-
+	start := strings.Index(raw, "{")
+	if start < 0 {
+		return "", errors.New("parse llm response: no JSON object found")
+	}
+	end := strings.LastIndex(raw, "}")
+	if end <= start {
+		return "", errors.New("parse llm response: malformed JSON object")
+	}
+	if err := json.Unmarshal([]byte(raw[start:end+1]), &result); err != nil {
+		return "", fmt.Errorf("parse llm response: %w", err)
+	}
 	return strings.TrimSpace(result.Summary), nil
 }
 

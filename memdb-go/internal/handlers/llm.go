@@ -17,6 +17,11 @@ var llmProxyURL = "http://cliproxyapi:8317"
 var llmProxyAPIKey string
 var llmDefaultModel = "gemini-2.5-flash"
 
+const (
+	sseInitBufSize = 64 * 1024  // 64 KB initial SSE scanner buffer
+	sseMaxBufSize  = 512 * 1024 // 512 KB max SSE scanner buffer
+)
+
 // SetLLMProxy configures the upstream LLM proxy URL, API key, and default model.
 func SetLLMProxy(url, apiKey, defaultModel string) {
 	if url != "" {
@@ -46,14 +51,8 @@ func (h *Handler) ProxyLLMComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Inject default model if not specified by client
-	var req map[string]any
-	if json.Unmarshal(body, &req) == nil {
-		if _, hasModel := req["model"]; !hasModel || req["model"] == "" {
-			req["model"] = llmDefaultModel
-			body, _ = json.Marshal(req)
-		}
-	}
+	body = injectDefaultModel(body)
+	isStream := detectStreamMode(r, body)
 
 	targetURL := llmProxyURL + "/v1/chat/completions"
 	proxyReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL,
@@ -68,20 +67,6 @@ func (h *Handler) ProxyLLMComplete(w http.ResponseWriter, r *http.Request) {
 	proxyReq.Header.Set("Content-Type", "application/json")
 	if llmProxyAPIKey != "" {
 		proxyReq.Header.Set("Authorization", "Bearer "+llmProxyAPIKey)
-	}
-
-	// Detect streaming mode: client requested stream:true OR Accept: text/event-stream.
-	isStream := false
-	var reqMap map[string]any
-	if json.Unmarshal(body, &reqMap) == nil {
-		if v, ok := reqMap["stream"]; ok {
-			if b, ok := v.(bool); ok && b {
-				isStream = true
-			}
-		}
-	}
-	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
-		isStream = true
 	}
 
 	client := llmClient
@@ -100,14 +85,12 @@ func (h *Handler) ProxyLLMComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	// Pass through response headers.
 	for key, values := range resp.Header {
 		for _, v := range values {
 			w.Header().Add(key, v)
 		}
 	}
 
-	// SSE streaming response — use scanner-based proxy.
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
 		w.Header().Set("X-Accel-Buffering", "no")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -118,7 +101,38 @@ func (h *Handler) ProxyLLMComplete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, resp.Body)
+}
+
+// injectDefaultModel sets the model field to the default if absent or empty.
+func injectDefaultModel(body []byte) []byte {
+	var req map[string]any
+	if json.Unmarshal(body, &req) != nil {
+		return body
+	}
+	if _, hasModel := req["model"]; !hasModel || req["model"] == "" {
+		req["model"] = llmDefaultModel
+		if patched, err := json.Marshal(req); err == nil {
+			return patched
+		}
+	}
+	return body
+}
+
+// detectStreamMode returns true when the request signals SSE streaming.
+func detectStreamMode(r *http.Request, body []byte) bool {
+	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		return true
+	}
+	var req map[string]any
+	if json.Unmarshal(body, &req) == nil {
+		if v, ok := req["stream"]; ok {
+			if b, ok := v.(bool); ok && b {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // streamSSELines proxies an SSE body to the client using line-oriented scanning.
@@ -130,7 +144,7 @@ func (h *Handler) streamSSELines(ctx context.Context, w http.ResponseWriter, bod
 	}
 
 	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 64*1024), 512*1024)
+	scanner.Buffer(make([]byte, sseInitBufSize), sseMaxBufSize)
 
 	for {
 		select {

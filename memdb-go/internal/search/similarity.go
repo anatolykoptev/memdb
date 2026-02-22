@@ -9,6 +9,16 @@ import (
 	"strings"
 )
 
+const (
+	// embedSimThreshold is the minimum cosine similarity between embeddings required
+	// before performing the more expensive text-level comparison in isTextHighlySimilar.
+	embedSimThreshold = 0.9
+
+	// textCombinedSimThreshold is the weighted text similarity score above which two
+	// memories are considered duplicates (Dice 40% + TF-IDF 35% + bigram 25%).
+	textCombinedSimThreshold = 0.92
+)
+
 // CosineSimilarity computes cosine similarity between two float32 vectors.
 // Returns 0 if either vector is zero-length or has zero norm.
 func CosineSimilarity(a, b []float32) float32 {
@@ -83,8 +93,8 @@ func isTextHighlySimilar(
 		}
 	}
 
-	// If highest embedding similarity <= 0.9, skip text comparison
-	if maxSim <= 0.9 {
+	// If highest embedding similarity <= embedSimThreshold, skip text comparison
+	if maxSim <= embedSimThreshold {
 		return false
 	}
 
@@ -99,7 +109,7 @@ func isTextHighlySimilar(
 	// Weighted combination: Dice (40%) + TF-IDF (35%) + 2-gram (25%)
 	combinedScore := 0.40*diceSim + 0.35*tfidfSim + 0.25*bigramSim
 
-	return combinedScore >= 0.92
+	return combinedScore >= textCombinedSimThreshold
 }
 
 // diceSimilarity calculates character-level Dice coefficient.
@@ -182,7 +192,7 @@ func bigramSimilarity(a, b string) float64 {
 //
 // Uses character frequency as TF, with a simple 2-document IDF:
 // IDF = 1.0 if char appears in both documents, 1.5 if only in one.
-func tfidfSimilarity(a, b string) float64 {
+func tfidfSimilarity(a, b string) float64 { //nolint:cyclop // inherent complexity of character-level TF-IDF algorithm
 	if len(a) == 0 || len(b) == 0 {
 		return 0.0
 	}

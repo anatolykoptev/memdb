@@ -10,7 +10,7 @@ func TestNormalizeSearch_MemCubeID(t *testing.T) {
 	result := normalizeSearch(body)
 
 	var m map[string]any
-	json.Unmarshal(result, &m)
+	_ = json.Unmarshal(result, &m)
 
 	if _, ok := m["mem_cube_id"]; ok {
 		t.Error("mem_cube_id should be removed")
@@ -26,7 +26,7 @@ func TestNormalizeSearch_NoChange(t *testing.T) {
 	result := normalizeSearch(body)
 
 	var m map[string]any
-	json.Unmarshal(result, &m)
+	_ = json.Unmarshal(result, &m)
 
 	if _, ok := m["readable_cube_ids"]; ok {
 		t.Error("readable_cube_ids should not be added when mem_cube_id is absent")
@@ -38,7 +38,7 @@ func TestNormalizeSearch_ExistingReadableCubeIDs(t *testing.T) {
 	result := normalizeSearch(body)
 
 	var m map[string]any
-	json.Unmarshal(result, &m)
+	_ = json.Unmarshal(result, &m)
 
 	ids := m["readable_cube_ids"].([]any)
 	if len(ids) != 1 || ids[0] != "new" {
@@ -51,7 +51,7 @@ func TestNormalizeAdd_MemCubeID(t *testing.T) {
 	result := normalizeAdd(body)
 
 	var m map[string]any
-	json.Unmarshal(result, &m)
+	_ = json.Unmarshal(result, &m)
 
 	ids, ok := m["writable_cube_ids"].([]any)
 	if !ok || len(ids) != 1 || ids[0] != "cube1" {
@@ -64,7 +64,7 @@ func TestNormalizeAdd_MemoryContent(t *testing.T) {
 	result := normalizeAdd(body)
 
 	var m map[string]any
-	json.Unmarshal(result, &m)
+	_ = json.Unmarshal(result, &m)
 
 	if _, ok := m["memory_content"]; ok {
 		t.Error("memory_content should be removed")
@@ -84,7 +84,7 @@ func TestNormalizeAdd_MemoryContentAppend(t *testing.T) {
 	result := normalizeAdd(body)
 
 	var m map[string]any
-	json.Unmarshal(result, &m)
+	_ = json.Unmarshal(result, &m)
 
 	msgs := m["messages"].([]any)
 	if len(msgs) != 2 {
@@ -97,7 +97,7 @@ func TestNormalizeAdd_Source(t *testing.T) {
 	result := normalizeAdd(body)
 
 	var m map[string]any
-	json.Unmarshal(result, &m)
+	_ = json.Unmarshal(result, &m)
 
 	if _, ok := m["source"]; ok {
 		t.Error("source should be removed")
@@ -113,7 +113,7 @@ func TestNormalizeAdd_SourceExistingInfo(t *testing.T) {
 	result := normalizeAdd(body)
 
 	var m map[string]any
-	json.Unmarshal(result, &m)
+	_ = json.Unmarshal(result, &m)
 
 	info := m["info"].(map[string]any)
 	if info["source"] != "new" {
@@ -129,7 +129,7 @@ func TestNormalizeChatComplete_MemCubeID(t *testing.T) {
 	result := normalizeChatComplete(body)
 
 	var m map[string]any
-	json.Unmarshal(result, &m)
+	_ = json.Unmarshal(result, &m)
 
 	if _, ok := m["mem_cube_id"]; ok {
 		t.Error("mem_cube_id should be removed")
@@ -149,7 +149,7 @@ func TestNormalizeFeedback_MemCubeID(t *testing.T) {
 	result := normalizeFeedback(body)
 
 	var m map[string]any
-	json.Unmarshal(result, &m)
+	_ = json.Unmarshal(result, &m)
 
 	ids := m["writable_cube_ids"].([]any)
 	if len(ids) != 1 || ids[0] != "cube1" {

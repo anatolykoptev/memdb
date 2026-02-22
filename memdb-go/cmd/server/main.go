@@ -145,7 +145,7 @@ func initOTel(cfg *config.Config) (func(context.Context) error, error) {
 	}
 	metricExporter, err := otlpmetrichttp.New(ctx, metricOpts...)
 	if err != nil {
-		tp.Shutdown(ctx)
+		_ = tp.Shutdown(ctx)
 		return nil, err
 	}
 

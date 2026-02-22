@@ -53,26 +53,15 @@ func Cache(logger *slog.Logger, cfg CacheConfig) func(http.Handler) http.Handler
 				return
 			}
 
-			// Respect Cache-Control: no-cache
 			if r.Header.Get("Cache-Control") == "no-cache" {
 				w.Header().Set("X-Cache", "BYPASS")
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			// Read body for POST cache key generation
-			var body []byte
-			if rule.isPost {
-				var err error
-				body, err = io.ReadAll(r.Body)
-				r.Body.Close()
-				if err != nil {
-					next.ServeHTTP(w, r)
-					return
-				}
-				// Restore body for downstream handlers
-				r.Body = io.NopCloser(bytes.NewReader(body))
-				r.ContentLength = int64(len(body))
+			body, ok := readPostBody(w, r, rule, next)
+			if !ok {
+				return // body read failed; response already sent via next
 			}
 
 			cacheKey := rule.keyFn(r, body)
@@ -81,31 +70,57 @@ func Cache(logger *slog.Logger, cfg CacheConfig) func(http.Handler) http.Handler
 				return
 			}
 
-			// Try cache hit
-			cached, err := cfg.Client.Get(r.Context(), cacheKey)
-			if err != nil {
-				logger.Debug("cache get error", slog.Any("error", err))
-			}
-			if cached != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("X-Cache", "HIT")
-				w.WriteHeader(http.StatusOK)
-				w.Write(cached)
+			if serveCacheHit(w, r, cfg.Client, cacheKey, logger) {
 				return
 			}
 
-			// Cache miss — capture response
-			w.Header().Set("X-Cache", "MISS")
-			rec := &responseRecorder{ResponseWriter: w, body: &bytes.Buffer{}}
-			next.ServeHTTP(rec, r)
-
-			// Only cache successful responses
-			if rec.statusCode == http.StatusOK {
-				if err := cfg.Client.Set(r.Context(), cacheKey, rec.body.Bytes(), rule.ttl); err != nil {
-					logger.Debug("cache set error", slog.Any("error", err))
-				}
-			}
+			captureAndCache(w, r, next, cfg.Client, cacheKey, rule.ttl, logger)
 		})
+	}
+}
+
+// readPostBody reads the request body for POST rules and restores it for downstream handlers.
+// Returns (body, true) on success; on error it calls next and returns (nil, false).
+func readPostBody(w http.ResponseWriter, r *http.Request, rule cacheRule, next http.Handler) ([]byte, bool) {
+	if !rule.isPost {
+		return nil, true
+	}
+	body, err := io.ReadAll(r.Body)
+	r.Body.Close()
+	if err != nil {
+		next.ServeHTTP(w, r)
+		return nil, false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.ContentLength = int64(len(body))
+	return body, true
+}
+
+// serveCacheHit writes a cached response if available and returns true.
+func serveCacheHit(w http.ResponseWriter, r *http.Request, client *cache.Client, cacheKey string, logger *slog.Logger) bool {
+	cached, err := client.Get(r.Context(), cacheKey)
+	if err != nil {
+		logger.Debug("cache get error", slog.Any("error", err))
+	}
+	if cached == nil {
+		return false
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Cache", "HIT")
+	w.WriteHeader(http.StatusOK)
+	w.Write(cached) //nolint:errcheck // best-effort write
+	return true
+}
+
+// captureAndCache runs the handler, captures the response, and stores successful responses.
+func captureAndCache(w http.ResponseWriter, r *http.Request, next http.Handler, client *cache.Client, cacheKey string, ttl time.Duration, logger *slog.Logger) {
+	w.Header().Set("X-Cache", "MISS")
+	rec := &responseRecorder{ResponseWriter: w, body: &bytes.Buffer{}}
+	next.ServeHTTP(rec, r)
+	if rec.statusCode == http.StatusOK {
+		if err := client.Set(r.Context(), cacheKey, rec.body.Bytes(), ttl); err != nil {
+			logger.Debug("cache set error", slog.Any("error", err))
+		}
 	}
 }
 

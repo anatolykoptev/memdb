@@ -12,6 +12,7 @@ type searchRequest struct {
 	Query   *string `json:"query"`
 	UserID  *string `json:"user_id"`
 	AgentID *string `json:"agent_id,omitempty"`
+	Profile *string `json:"profile,omitempty"`
 	TopK    *int    `json:"top_k,omitempty"`
 	Dedup  *string `json:"dedup,omitempty"`
 
@@ -25,6 +26,10 @@ type searchRequest struct {
 	InternetSearch   *bool     `json:"internet_search,omitempty"`
 	ReadableCubeIDs  *[]string `json:"readable_cube_ids,omitempty"`
 	IncludeEmbedding *bool     `json:"include_embedding,omitempty"`
+
+	// Iterative expansion stages (0 = disabled, 2 = fast, 3 = fine)
+	NumStages *int  `json:"num_stages,omitempty"`
+	LLMRerank *bool `json:"llm_rerank,omitempty"`
 
 	// Per-type gating
 	IncludeSkillMemory *bool `json:"include_skill_memory,omitempty"`

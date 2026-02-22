@@ -29,9 +29,14 @@ import (
 	"strings"
 )
 
-// MinConfidence is the minimum confidence score for a fact to be persisted.
-// Facts below this threshold are treated as "skip" regardless of action.
-const MinConfidence = 0.65
+const (
+	// MinConfidence is the minimum confidence score for a fact to be persisted.
+	// Facts below this threshold are treated as "skip" regardless of action.
+	MinConfidence = 0.65
+
+	// extractMaxTokens is the max_tokens cap for the unified extraction+dedup LLM call.
+	extractMaxTokens = 4096
+)
 
 // MemAction is the operation to perform for an extracted fact.
 type MemAction string
@@ -210,7 +215,7 @@ func (e *LLMExtractor) ExtractAndDedup(ctx context.Context, conversation string,
 		{"role": "user", "content": sb.String()},
 	}
 
-	raw, err := e.client.Chat(ctx, msgs, 4096)
+	raw, err := e.client.Chat(ctx, msgs, extractMaxTokens)
 	if err != nil {
 		return nil, fmt.Errorf("extract and dedup: %w", err)
 	}

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -20,7 +21,7 @@ type Qdrant struct {
 // addr should be "host:port" or just "host" (default gRPC port is 6334).
 func NewQdrant(ctx context.Context, addr string, logger *slog.Logger) (*Qdrant, error) {
 	if addr == "" {
-		return nil, fmt.Errorf("qdrant address is empty")
+		return nil, errors.New("qdrant address is empty")
 	}
 
 	cfg := &qdrant.Config{}
@@ -129,7 +130,7 @@ func (q *Qdrant) SearchByVector(ctx context.Context, collection string, vector [
 			if uuid := pid.GetUuid(); uuid != "" {
 				r.ID = uuid
 			} else {
-				r.ID = fmt.Sprintf("%d", pid.GetNum())
+				r.ID = strconv.FormatUint(pid.GetNum(), 10)
 			}
 		}
 		// Extract payload values
@@ -151,7 +152,7 @@ func (q *Qdrant) ScrollByUserID(ctx context.Context, collection, userID string, 
 
 	pageSize := uint32(100)
 	if limit < 100 {
-		pageSize = uint32(limit)
+		pageSize = uint32(limit) //nolint:gosec // limit is in [1,99] after the guard above
 	}
 
 	filter := &qdrant.Filter{
@@ -176,22 +177,7 @@ func (q *Qdrant) ScrollByUserID(ctx context.Context, collection, userID string, 
 		}
 
 		for _, pt := range points {
-			r := QdrantSearchResult{
-				Score:   0,
-				Payload: make(map[string]any),
-			}
-			if pid := pt.GetId(); pid != nil {
-				if uuid := pid.GetUuid(); uuid != "" {
-					r.ID = uuid
-				} else {
-					r.ID = fmt.Sprintf("%d", pid.GetNum())
-				}
-			}
-			for k, v := range pt.GetPayload() {
-				r.Payload[k] = extractQdrantValue(v)
-			}
-			allResults = append(allResults, r)
-
+			allResults = append(allResults, pointToSearchResult(pt))
 			if len(allResults) >= limit {
 				return allResults, nil
 			}
@@ -204,6 +190,25 @@ func (q *Qdrant) ScrollByUserID(ctx context.Context, collection, userID string, 
 	}
 
 	return allResults, nil
+}
+
+// pointToSearchResult converts a retrieved Qdrant point to a QdrantSearchResult.
+func pointToSearchResult(pt *qdrant.RetrievedPoint) QdrantSearchResult {
+	r := QdrantSearchResult{
+		Score:   0,
+		Payload: make(map[string]any),
+	}
+	if pid := pt.GetId(); pid != nil {
+		if uuid := pid.GetUuid(); uuid != "" {
+			r.ID = uuid
+		} else {
+			r.ID = strconv.FormatUint(pid.GetNum(), 10)
+		}
+	}
+	for k, v := range pt.GetPayload() {
+		r.Payload[k] = extractQdrantValue(v)
+	}
+	return r
 }
 
 // extractQdrantValue converts a qdrant.Value to a Go native type.

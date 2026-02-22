@@ -42,6 +42,13 @@ const (
 	// A memory starting at 1.0 reaches this threshold after ~44 decay cycles (≈11 days).
 	// Each retrieval boosts by 0.1, so actively recalled memories stay well above threshold.
 	importanceArchiveThreshold = 0.10
+
+	// llmCompactMaxTokens is the max token budget for LLM calls that produce compact JSON output
+	// (memory enhancement, preference extraction, WM compaction). Larger calls use their own constant.
+	llmCompactMaxTokens = 512
+
+	// llmTruncateLen is the max characters of raw LLM output shown in error messages.
+	llmTruncateLen = 200
 )
 
 // Reorganizer detects near-duplicate LongTermMemory/UserMemory nodes for a

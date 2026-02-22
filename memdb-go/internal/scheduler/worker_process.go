@@ -12,6 +12,8 @@ import (
 // On transient error: scheduleRetry (exponential backoff → DLQ after maxRetries).
 // On success or permanent skip: XACK immediately.
 // Retry messages (RetryCount > 0) skip XACK since they were never in the PEL.
+//
+//nolint:cyclop // dispatch switch — complexity is inherent in message routing
 func (w *Worker) handle(ctx context.Context, msg ScheduleMessage) {
 	log := w.logger.With(
 		slog.String("label", msg.Label),
@@ -54,48 +56,18 @@ func (w *Worker) handle(ctx context.Context, msg ScheduleMessage) {
 	case LabelMemRead:
 		// Go-native: parse WM IDs from content, LLM-enhance each into LTM facts, delete WM nodes.
 		// Falls back to XACK-only when reorg is not configured (e.g. LLM not available).
-		if w.reorg != nil && msg.Content != "" {
-			if ids := parseMemReadIDs(msg.Content); len(ids) > 0 {
-				log.Info("scheduler: mem_read — processing raw WM nodes",
-					slog.Int("wm_ids", len(ids)))
-				if err := w.reorg.ProcessRawMemoryWithError(ctx, msg.CubeID, ids); err != nil {
-					handleErr = err
-				}
-			} else {
-				log.Debug("scheduler: mem_read — no WM IDs parsed, acking")
-			}
-		} else {
-			log.Debug("scheduler: mem_read — delegated to Python scheduler_group, acking")
-		}
+		handleErr = w.handleMemRead(ctx, msg, log)
 
 	case LabelMemUpdate:
 		// WorkingMemory refresh by query: embed query → search LTM → add to VSET.
 		// Mirrors Python's process_session_turn in GeneralScheduler.
 		// msg.Content contains the raw query text from the user.
-		if w.reorg != nil && msg.Content != "" {
-			log.Debug("scheduler: mem_update — refreshing working memory")
-			if err := w.reorg.RefreshWorkingMemoryWithError(ctx, msg.CubeID, msg.Content); err != nil {
-				handleErr = err
-			}
-		} else {
-			log.Debug("scheduler: mem_update — reorg not configured or empty content, acking")
-		}
+		handleErr = w.handleMemUpdate(ctx, msg, log)
 
 	case LabelPrefAdd:
 		// Go-native: extract user preferences from conversation via LLM → store as UserMemory in Postgres.
 		// Replaces Python's pref_mem service — no Qdrant dependency required.
-		if w.reorg != nil && msg.Content != "" {
-			if conv := parsePrefConversation(msg.Content); conv != "" {
-				log.Info("scheduler: pref_add — extracting preferences")
-				if err := w.reorg.ExtractAndStorePreferencesWithError(ctx, msg.CubeID, conv); err != nil {
-					handleErr = err
-				}
-			} else {
-				log.Debug("scheduler: pref_add — no conversation content, acking")
-			}
-		} else {
-			log.Debug("scheduler: pref_add — reorg not configured, acking")
-		}
+		handleErr = w.handlePrefAdd(ctx, msg, log)
 
 	case LabelQuery:
 		// Python logs the query then re-submits as mem_update (with same content).
@@ -116,20 +88,7 @@ func (w *Worker) handle(ctx context.Context, msg ScheduleMessage) {
 	case LabelMemFeedback:
 		// Full Go-native: parse retrieved_memory_ids + feedback_content → LLM analysis
 		// → UpdateMemoryNodeFull / DeleteByPropertyIDs. Falls back to RunTargeted on LLM error.
-		if w.reorg != nil && msg.Content != "" {
-			ids, feedbackContent := parseFeedbackPayload(msg.Content)
-			if len(ids) > 0 {
-				log.Info("scheduler: mem_feedback — full LLM processing",
-					slog.Int("memory_ids", len(ids)))
-				if err := w.reorg.ProcessFeedbackWithError(ctx, msg.CubeID, ids, feedbackContent); err != nil {
-					handleErr = err
-				}
-			} else {
-				log.Debug("scheduler: mem_feedback — no retrieved_memory_ids, acking")
-			}
-		} else {
-			log.Debug("scheduler: mem_feedback — reorg not configured, acking")
-		}
+		handleErr = w.handleMemFeedback(ctx, msg, log)
 
 	default:
 		// Unknown label — future Python labels or custom extensions.
@@ -162,4 +121,59 @@ func (w *Worker) handle(ctx context.Context, msg ScheduleMessage) {
 			log.Debug("scheduler: xack failed", slog.Any("error", err))
 		}
 	}
+}
+
+// handleMemRead processes a mem_read message: parses WM IDs and triggers raw memory processing.
+func (w *Worker) handleMemRead(ctx context.Context, msg ScheduleMessage, log *slog.Logger) error {
+	if w.reorg == nil || msg.Content == "" {
+		log.Debug("scheduler: mem_read — delegated to Python scheduler_group, acking")
+		return nil
+	}
+	ids := parseMemReadIDs(msg.Content)
+	if len(ids) == 0 {
+		log.Debug("scheduler: mem_read — no WM IDs parsed, acking")
+		return nil
+	}
+	log.Info("scheduler: mem_read — processing raw WM nodes", slog.Int("wm_ids", len(ids)))
+	return w.reorg.ProcessRawMemoryWithError(ctx, msg.CubeID, ids)
+}
+
+// handleMemUpdate processes a mem_update message: refreshes the WorkingMemory hot cache.
+func (w *Worker) handleMemUpdate(ctx context.Context, msg ScheduleMessage, log *slog.Logger) error {
+	if w.reorg == nil || msg.Content == "" {
+		log.Debug("scheduler: mem_update — reorg not configured or empty content, acking")
+		return nil
+	}
+	log.Debug("scheduler: mem_update — refreshing working memory")
+	return w.reorg.RefreshWorkingMemoryWithError(ctx, msg.CubeID, msg.Content)
+}
+
+// handlePrefAdd processes a pref_add message: extracts and stores user preferences.
+func (w *Worker) handlePrefAdd(ctx context.Context, msg ScheduleMessage, log *slog.Logger) error {
+	if w.reorg == nil || msg.Content == "" {
+		log.Debug("scheduler: pref_add — reorg not configured, acking")
+		return nil
+	}
+	conv := parsePrefConversation(msg.Content)
+	if conv == "" {
+		log.Debug("scheduler: pref_add — no conversation content, acking")
+		return nil
+	}
+	log.Info("scheduler: pref_add — extracting preferences")
+	return w.reorg.ExtractAndStorePreferencesWithError(ctx, msg.CubeID, conv)
+}
+
+// handleMemFeedback processes a mem_feedback message: applies LLM-driven keep/update/remove.
+func (w *Worker) handleMemFeedback(ctx context.Context, msg ScheduleMessage, log *slog.Logger) error {
+	if w.reorg == nil || msg.Content == "" {
+		log.Debug("scheduler: mem_feedback — reorg not configured, acking")
+		return nil
+	}
+	ids, feedbackContent := parseFeedbackPayload(msg.Content)
+	if len(ids) == 0 {
+		log.Debug("scheduler: mem_feedback — no retrieved_memory_ids, acking")
+		return nil
+	}
+	log.Info("scheduler: mem_feedback — full LLM processing", slog.Int("memory_ids", len(ids)))
+	return w.reorg.ProcessFeedbackWithError(ctx, msg.CubeID, ids, feedbackContent)
 }

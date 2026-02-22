@@ -149,7 +149,7 @@ func TestSSEWriter_NoRetryField_WhenZero(t *testing.T) {
 	w := httptest.NewRecorder()
 	sw := NewSSEWriter(w, nil)
 
-	sw.Write(SSEEvent{Data: "test", Retry: 0})
+	_ = sw.Write(SSEEvent{Data: "test", Retry: 0})
 	if strings.Contains(w.Body.String(), "retry:") {
 		t.Error("retry field must be omitted when Retry=0")
 	}
@@ -159,7 +159,7 @@ func TestSSEWriter_NoIDField_WhenEmpty(t *testing.T) {
 	w := httptest.NewRecorder()
 	sw := NewSSEWriter(w, nil)
 
-	sw.Write(SSEEvent{Data: "test", ID: ""})
+	_ = sw.Write(SSEEvent{Data: "test", ID: ""})
 	if strings.Contains(w.Body.String(), "id:") {
 		t.Error("id field must be omitted when ID is empty")
 	}
@@ -169,7 +169,7 @@ func TestSSEWriter_NoEventField_WhenEmpty(t *testing.T) {
 	w := httptest.NewRecorder()
 	sw := NewSSEWriter(w, nil)
 
-	sw.Write(SSEEvent{Data: "test", Event: ""})
+	_ = sw.Write(SSEEvent{Data: "test", Event: ""})
 	if strings.Contains(w.Body.String(), "event:") {
 		t.Error("event field must be omitted when Event is empty")
 	}
@@ -199,7 +199,11 @@ func TestStreamSSEProxy_ForwardsLines(t *testing.T) {
 	defer upstream.Close()
 
 	// Fetch from upstream.
-	resp, err := http.Get(upstream.URL)
+	getReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, upstream.URL, nil)
+	if err != nil {
+		t.Fatalf("upstream new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(getReq)
 	if err != nil {
 		t.Fatalf("upstream get: %v", err)
 	}
@@ -239,7 +243,11 @@ func TestStreamSSEProxy_StopsOnContextCancel(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	resp, err := http.Get(upstream.URL)
+	getReq2, err := http.NewRequestWithContext(context.Background(), http.MethodGet, upstream.URL, nil)
+	if err != nil {
+		t.Fatalf("upstream new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(getReq2)
 	if err != nil {
 		t.Fatalf("upstream get: %v", err)
 	}
@@ -273,7 +281,11 @@ func TestStreamSSEProxy_LargeDataLines(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	resp, err := http.Get(upstream.URL)
+	getReq3, err := http.NewRequestWithContext(context.Background(), http.MethodGet, upstream.URL, nil)
+	if err != nil {
+		t.Fatalf("upstream new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(getReq3)
 	if err != nil {
 		t.Fatalf("upstream get: %v", err)
 	}

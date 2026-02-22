@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -26,6 +27,12 @@ import (
 	"time"
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
+)
+
+const (
+	profileRefreshTimeout  = 60 * time.Second // timeout for background profile refresh
+	profileFactsMaxChars   = 4000             // truncate facts to avoid prompt overflow
+	profileRespBodyLimit   = 16 * 1024        // 16 KB max LLM response body
 )
 
 const (
@@ -60,7 +67,7 @@ func NewProfiler(pg *db.Postgres, rd *db.Redis, llmURL, llmKey, llmModel string,
 // Non-blocking: runs in goroutine, failures are logged and silently ignored.
 func (p *Profiler) TriggerRefresh(cubeID string) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), profileRefreshTimeout)
 		defer cancel()
 		if err := p.refresh(ctx, cubeID); err != nil {
 			p.logger.Debug("profile refresh failed",
@@ -128,8 +135,8 @@ func (p *Profiler) refresh(ctx context.Context, cubeID string) error {
 
 // callProfileLLM asks the LLM to synthesize a structured user profile paragraph.
 func (p *Profiler) callProfileLLM(ctx context.Context, facts string) (string, error) {
-	if len(facts) > 4000 {
-		facts = facts[:4000] + "\n[truncated]"
+	if len(facts) > profileFactsMaxChars {
+		facts = facts[:profileFactsMaxChars] + "\n[truncated]"
 	}
 
 	payload := map[string]any{
@@ -165,7 +172,7 @@ func (p *Profiler) callProfileLLM(ctx context.Context, facts string) (string, er
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, profileRespBodyLimit))
 	if err != nil {
 		return "", err
 	}
@@ -176,7 +183,7 @@ func (p *Profiler) callProfileLLM(ctx context.Context, facts string) (string, er
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(respBody, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return "", fmt.Errorf("profile: bad LLM response")
+		return "", errors.New("profile: bad LLM response")
 	}
 
 	return strings.TrimSpace(chatResp.Choices[0].Message.Content), nil

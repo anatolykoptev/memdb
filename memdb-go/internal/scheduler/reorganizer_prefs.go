@@ -99,7 +99,7 @@ func (r *Reorganizer) llmExtractPreferences(ctx context.Context, conversation st
 	callCtx, cancel := context.WithTimeout(ctx, reorganizerLLMTimeout)
 	defer cancel()
 
-	raw, err := r.callLLM(callCtx, msgs, 512)
+	raw, err := r.callLLM(callCtx, msgs, llmCompactMaxTokens)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func (r *Reorganizer) llmExtractPreferences(ctx context.Context, conversation st
 		} `json:"preferences"`
 	}
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		return nil, fmt.Errorf("pref extract parse json (%s): %w", truncate(raw, 200), err)
+		return nil, fmt.Errorf("pref extract parse json (%s): %w", truncate(raw, llmTruncateLen), err)
 	}
 	out := make([]string, 0, len(result.Preferences))
 	for _, p := range result.Preferences {

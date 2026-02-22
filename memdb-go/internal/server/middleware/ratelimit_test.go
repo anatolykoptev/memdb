@@ -12,7 +12,7 @@ func TestRateLimit_Disabled(t *testing.T) {
 	handler := RateLimit(testLogger(), RateLimitConfig{Enabled: false})(testHandler())
 
 	for i := 0; i < 200; i++ {
-		req := httptest.NewRequest("POST", "/product/search", nil)
+		req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
@@ -27,16 +27,16 @@ func TestRateLimit_SkipHealth(t *testing.T) {
 	})(testHandler())
 
 	// Exhaust the bucket
-	req := httptest.NewRequest("GET", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodGet, "/product/search", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	req = httptest.NewRequest("GET", "/product/search", nil)
+	req = httptest.NewRequest(http.MethodGet, "/product/search", nil)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
 	// Health should still work
-	req = httptest.NewRequest("GET", "/health", nil)
+	req = httptest.NewRequest(http.MethodGet, "/health", nil)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -50,17 +50,17 @@ func TestRateLimit_ServiceSecretBypass(t *testing.T) {
 	})(testHandler())
 
 	// Exhaust the bucket
-	req := httptest.NewRequest("POST", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	req = httptest.NewRequest("POST", "/product/search", nil)
+	req = httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	// This should be 429
 
 	// With service secret should still work
-	req = httptest.NewRequest("POST", "/product/search", nil)
+	req = httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	req.Header.Set("X-Service-Secret", "secret123")
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -76,7 +76,7 @@ func TestRateLimit_Enforced(t *testing.T) {
 
 	// First 2 requests should succeed (burst=2)
 	for i := 0; i < 2; i++ {
-		req := httptest.NewRequest("POST", "/product/search", nil)
+		req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		if w.Code != http.StatusOK {
@@ -85,7 +85,7 @@ func TestRateLimit_Enforced(t *testing.T) {
 	}
 
 	// Third request should be rate limited
-	req := httptest.NewRequest("POST", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusTooManyRequests {
@@ -97,7 +97,7 @@ func TestRateLimit_Enforced(t *testing.T) {
 }
 
 func TestExtractIP_XForwardedFor(t *testing.T) {
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
 	if ip := extractIP(req); ip != "1.2.3.4" {
 		t.Errorf("expected 1.2.3.4, got %s", ip)
@@ -105,7 +105,7 @@ func TestExtractIP_XForwardedFor(t *testing.T) {
 }
 
 func TestExtractIP_XRealIP(t *testing.T) {
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Real-IP", "10.0.0.1")
 	if ip := extractIP(req); ip != "10.0.0.1" {
 		t.Errorf("expected 10.0.0.1, got %s", ip)
@@ -113,7 +113,7 @@ func TestExtractIP_XRealIP(t *testing.T) {
 }
 
 func TestExtractIP_RemoteAddr(t *testing.T) {
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.168.1.1:12345"
 	if ip := extractIP(req); ip != "192.168.1.1" {
 		t.Errorf("expected 192.168.1.1, got %s", ip)

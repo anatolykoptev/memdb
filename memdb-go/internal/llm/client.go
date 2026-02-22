@@ -23,9 +23,10 @@ import (
 )
 
 const (
-	maxRetries   = 3
-	initialDelay = 2 * time.Second
-	maxDelay     = 30 * time.Second
+	maxRetries      = 3
+	initialDelay    = 2 * time.Second
+	maxDelay        = 30 * time.Second
+	jitterDivisor   = 4 // jitter = rand(0, delay/jitterDivisor) for retry backoff
 )
 
 // Client is an OpenAI-compatible chat completion client with retry and
@@ -75,60 +76,81 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 
 	var lastErr error
 	for i, model := range models {
-		for attempt := range maxRetries {
-			content, apiErr := c.chatOnce(ctx, model, messages, maxTokens)
-			if apiErr == nil {
-				return content, nil
-			}
-			lastErr = apiErr
-
-			// Auth errors: fail immediately, no retry.
-			if apiErr.IsAuth() {
-				return "", apiErr
-			}
-
-			// Quota error with more models available: break to try next model.
-			if apiErr.isQuotaError() && i < len(models)-1 {
-				c.logger.Warn("llm quota error, switching model",
-					slog.String("model", model),
-					slog.Int("status", apiErr.StatusCode),
-				)
-				break
-			}
-
-			// Transient error with more attempts: backoff and retry.
-			if apiErr.IsTransient() && attempt < maxRetries-1 {
-				delay := backoff(attempt)
-				c.logger.Warn("llm transient error, retrying",
-					slog.String("model", model),
-					slog.Int("status", apiErr.StatusCode),
-					slog.Int("attempt", attempt+1),
-					slog.Duration("delay", delay),
-				)
-				if sleepCtx(ctx, delay) != nil {
-					return "", lastErr
-				}
-				continue
-			}
-
-			// Non-transient or last attempt: stop retrying this model.
+		content, err, switchModel := c.chatModelLoop(ctx, model, models, i, messages, maxTokens)
+		if err != nil {
+			return "", err
+		}
+		if content != "" {
+			return content, nil
+		}
+		lastErr = switchModel
+		if lastErr == nil {
 			break
 		}
-
-		// If it was a quota error and there are more models, try next.
-		if lastErr != nil {
-			var apiErr *APIError
-			if isAPIError(lastErr, &apiErr) && apiErr.isQuotaError() && i < len(models)-1 {
-				c.logger.Info("llm model fallback",
-					slog.String("from", model),
-					slog.String("to", models[i+1]),
-				)
-				continue
-			}
-		}
-		break
 	}
 	return "", lastErr
+}
+
+// retryDecision describes the outcome of a single attempt.
+type retryDecision int
+
+const (
+	retryStop         retryDecision = iota // no more retries for this model
+	retryContinue                          // retry with same model (transient)
+	retryNextModel                         // switch to next model (quota)
+)
+
+// chatModelLoop runs the retry loop for one model.
+// Returns: (content, fatalErr, lastErr) — content set on success, fatalErr on auth failure,
+// lastErr holds the last error for the caller to surface if no fallback exists.
+func (c *Client) chatModelLoop(ctx context.Context, model string, models []string, modelIdx int, messages []map[string]string, maxTokens int) (string, error, error) {
+	hasNext := modelIdx < len(models)-1
+	var lastErr error
+
+	for attempt := range maxRetries {
+		content, apiErr := c.chatOnce(ctx, model, messages, maxTokens)
+		if apiErr == nil {
+			return content, nil, nil
+		}
+		lastErr = apiErr
+
+		decision := c.classifyAttemptError(ctx, apiErr, model, attempt, hasNext)
+		switch decision {
+		case retryContinue:
+			continue
+		case retryNextModel:
+			if hasNext {
+				c.logger.Info("llm model fallback",
+					slog.String("from", model), slog.String("to", models[modelIdx+1]))
+				return "", nil, lastErr
+			}
+		}
+		// retryStop or no fallback
+		break
+	}
+	return "", nil, lastErr
+}
+
+// classifyAttemptError determines what to do after a failed attempt and applies side effects
+// (logging, backoff sleep). Returns the retry decision.
+func (c *Client) classifyAttemptError(ctx context.Context, apiErr *APIError, model string, attempt int, hasNext bool) retryDecision {
+	if apiErr.IsAuth() {
+		return retryStop
+	}
+	if apiErr.isQuotaError() && hasNext {
+		c.logger.Warn("llm quota error, switching model",
+			slog.String("model", model), slog.Int("status", apiErr.StatusCode))
+		return retryNextModel
+	}
+	if apiErr.IsTransient() && attempt < maxRetries-1 {
+		delay := backoff(attempt)
+		c.logger.Warn("llm transient error, retrying",
+			slog.String("model", model), slog.Int("status", apiErr.StatusCode),
+			slog.Int("attempt", attempt+1), slog.Duration("delay", delay))
+		_ = sleepCtx(ctx, delay)
+		return retryContinue
+	}
+	return retryStop
 }
 
 // chatOnce performs a single HTTP round-trip to the chat completions endpoint.
@@ -203,7 +225,7 @@ func (e *APIError) Error() string {
 	if e.StatusCode > 0 {
 		return fmt.Sprintf("llm api error %d: %s", e.StatusCode, e.Message)
 	}
-	return fmt.Sprintf("llm error: %s", e.Message)
+	return "llm error: " + e.Message
 }
 
 // IsAuth returns true for 401/403 authentication errors.
@@ -222,16 +244,6 @@ func (e *APIError) isQuotaError() bool {
 	}
 	lower := strings.ToLower(e.Message)
 	return strings.Contains(lower, "quota") || strings.Contains(lower, "rate limit")
-}
-
-// isAPIError unwraps err into an *APIError (type assertion, not errors.As —
-// APIError is always returned directly by chatOnce).
-func isAPIError(err error, target **APIError) bool {
-	ae, ok := err.(*APIError)
-	if ok {
-		*target = ae
-	}
-	return ok
 }
 
 // parseAPIError parses a non-200 response body into an APIError.
@@ -269,7 +281,7 @@ func backoff(attempt int) time.Duration {
 	for range attempt {
 		delay *= 2
 	}
-	jitter := time.Duration(rand.Int64N(int64(delay / 4)))
+	jitter := time.Duration(rand.Int64N(int64(delay / jitterDivisor))) //nolint:gosec // jitter for retry backoff does not require cryptographic randomness
 	delay += jitter
 	if delay > maxDelay {
 		delay = maxDelay

@@ -22,6 +22,7 @@ package db
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -141,7 +142,7 @@ func (c *WorkingMemoryCache) VAdd(ctx context.Context, cubeID, nodeID, memoryTex
 // VRem removes a WorkingMemory node from the VSET.
 func (c *WorkingMemoryCache) VRem(ctx context.Context, cubeID, nodeID string) error {
 	key := vsetKey(cubeID)
-	if err := c.client.VRem(ctx, key, nodeID).Err(); err != nil && err != redis.Nil {
+	if err := c.client.VRem(ctx, key, nodeID).Err(); err != nil && !errors.Is(err, redis.Nil) {
 		return fmt.Errorf("vset vrem %s: %w", nodeID, err)
 	}
 	return nil
@@ -179,7 +180,7 @@ func (c *WorkingMemoryCache) VSimFiltered(ctx context.Context, cubeID string, qu
 
 	results, err := c.client.VSimWithArgsWithScores(ctx, key, vec, simArgs).Result()
 	if err != nil {
-		if err == redis.Nil {
+		if errors.Is(err, redis.Nil) {
 			return nil, nil // key doesn't exist yet — normal on first add
 		}
 		return nil, fmt.Errorf("vset vsim: %w", err)
@@ -194,7 +195,7 @@ func (c *WorkingMemoryCache) VSimFiltered(ctx context.Context, cubeID string, qu
 	for i, r := range results {
 		attrCmds[i] = pipe.VGetAttr(ctx, key, r.Name)
 	}
-	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 		return nil, fmt.Errorf("vset vgetattr pipeline: %w", err)
 	}
 
@@ -221,7 +222,7 @@ func (c *WorkingMemoryCache) VSimFiltered(ctx context.Context, cubeID string, qu
 // VCard returns the number of elements in the VSET for a cube.
 func (c *WorkingMemoryCache) VCard(ctx context.Context, cubeID string) (int64, error) {
 	n, err := c.client.VCard(ctx, vsetKey(cubeID)).Result()
-	if err != nil && err != redis.Nil {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		return 0, fmt.Errorf("vset vcard: %w", err)
 	}
 	return n, nil
@@ -237,7 +238,7 @@ func (c *WorkingMemoryCache) VRemBatch(ctx context.Context, cubeID string, nodeI
 	for _, id := range nodeIDs {
 		pipe.VRem(ctx, key, id)
 	}
-	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 		return fmt.Errorf("vset vrem batch: %w", err)
 	}
 	return nil
@@ -301,11 +302,14 @@ func (c *WorkingMemoryCache) Sync(ctx context.Context, pg interface {
 
 // --- Helpers ---
 
+// bytesPerFloat32 is the byte size of a single float32 value.
+const bytesPerFloat32 = 4
+
 // float32SliceToBytes converts []float32 to little-endian []byte for FP32 format.
 func float32SliceToBytes(v []float32) []byte {
-	b := make([]byte, len(v)*4)
+	b := make([]byte, len(v)*bytesPerFloat32)
 	for i, f := range v {
-		binary.LittleEndian.PutUint32(b[i*4:], math.Float32bits(f))
+		binary.LittleEndian.PutUint32(b[i*bytesPerFloat32:], math.Float32bits(f))
 	}
 	return b
 }

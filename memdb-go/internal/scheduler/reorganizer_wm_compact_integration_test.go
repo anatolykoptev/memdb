@@ -81,17 +81,6 @@ type reorganizerPG interface {
 var _ reorganizerPG = (*pgStub)(nil)
 var _ reorganizerPG = (*db.Postgres)(nil)
 
-// ---- vsetStub: in-memory VSET stub ------------------------------------------
-
-type vsetStub struct {
-	removed []string
-}
-
-func (v *vsetStub) VRemBatch(_ context.Context, _ string, ids []string) error {
-	v.removed = append(v.removed, ids...)
-	return nil
-}
-
 // ---- mockLLMServer: returns configurable JSON response ----------------------
 
 func mockLLMServer(t *testing.T, summary string, callCount *atomic.Int32) *httptest.Server {
@@ -106,7 +95,7 @@ func mockLLMServer(t *testing.T, summary string, callCount *atomic.Int32) *httpt
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 }
 
@@ -114,25 +103,11 @@ func mockLLMServerError(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error":{"message":"internal error"}}`))
+		_, _ = w.Write([]byte(`{"error":{"message":"internal error"}}`))
 	}))
 }
 
-// ---- newTestReorganizer builds a Reorganizer with stub postgres + mock LLM --
 
-func newTestReorganizer(t *testing.T, pg *pgStub, llmURL string) (*Reorganizer, *vsetStub) {
-	t.Helper()
-	vs := &vsetStub{}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-
-	r := &Reorganizer{
-		postgres:  pg.asPostgres(),
-		llmClient: testLLMClient(llmURL),
-		logger:    logger,
-		wmCache:   vs.asWMCache(),
-	}
-	return r, vs
-}
 
 // asPostgres wraps pgStub as *db.Postgres via a thin adapter.
 // Since db.Postgres is a concrete struct we can't embed, we use a test-only
@@ -257,7 +232,7 @@ func TestCompactWM_LLMUserMessage_ContainsAllNodes(t *testing.T) {
 				{"message": map[string]string{"content": `{"summary":"ok"}`}},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -328,7 +303,7 @@ func TestCompactWM_LLMRequest_SystemPrompt(t *testing.T) {
 				{"message": map[string]string{"content": `{"summary":"test"}`}},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -465,7 +440,7 @@ func TestCompactWM_LLMMarkdownFenceStripped(t *testing.T) {
 				}},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer srv.Close()
 
@@ -532,17 +507,4 @@ func SearchLTMByVectorQuery() string {
 // FindNearDuplicatesQuery exposes the SQL query string for testing.
 func FindNearDuplicatesQuery() string {
 	return db.FindNearDuplicatesSQL()
-}
-
-// vsetStub.asWMCache returns a *db.WorkingMemoryCache shim.
-// Since WorkingMemoryCache is a concrete struct, we use a nil pointer
-// and test VSET eviction separately via vsetStub.
-func (v *vsetStub) asWMCache() *db.WorkingMemoryCache {
-	return nil // CompactWorkingMemory checks wmCache != nil before calling VRemBatch
-}
-
-// pgStub.asPostgres returns nil — CompactWorkingMemory uses r.postgres directly.
-// We test the helpers (llmSummarizeWM, buildEpisodicProps) independently.
-func (s *pgStub) asPostgres() *db.Postgres {
-	return nil
 }

@@ -14,6 +14,10 @@ import (
 // prefCollectionsGetMemory lists the Qdrant collections for preference memory.
 var prefCollectionsGetMemory = []string{"explicit_preference", "implicit_preference"}
 
+// formatPrefResultExtraFields is the number of extra fields added to each pref metadata map
+// beyond the payload fields (embedding, usage, id, memory).
+const formatPrefResultExtraFields = 3
+
 // formatMemoryBucket formats PolarDB results into a MemoryBucket with parsed properties.
 // Each memory item gets the full FormatMemoryItem treatment matching the Python API.
 func formatMemoryBucket(results []map[string]any, cubeID string, total int) search.MemoryBucket {
@@ -48,43 +52,12 @@ func (h *Handler) scrollPreferences(ctx context.Context, userID string, limit in
 			)
 			continue
 		}
-
 		for _, r := range results {
-			if seen[r.ID] {
+			item, ok := formatPrefResult(r.ID, r.Payload, seen)
+			if !ok {
 				continue
 			}
 			seen[r.ID] = true
-
-			memory, _ := r.Payload["memory"].(string)
-			if memory == "" {
-				memory, _ = r.Payload["memory_content"].(string)
-			}
-			if memory == "" {
-				continue
-			}
-
-			metadata := make(map[string]any)
-			for k, v := range r.Payload {
-				metadata[k] = v
-			}
-			metadata["embedding"] = []any{}
-			metadata["usage"] = []any{}
-			metadata["id"] = r.ID
-			metadata["memory"] = memory
-
-			refID := r.ID
-			if idx := strings.IndexByte(refID, '-'); idx > 0 {
-				refID = refID[:idx]
-			}
-			refIDStr := "[" + refID + "]"
-			metadata["ref_id"] = refIDStr
-
-			item := map[string]any{
-				"id":       r.ID,
-				"ref_id":   refIDStr,
-				"memory":   memory,
-				"metadata": metadata,
-			}
 			allItems = append(allItems, item)
 		}
 	}
@@ -93,4 +66,42 @@ func (h *Handler) scrollPreferences(ctx context.Context, userID string, limit in
 		allItems = []map[string]any{}
 	}
 	return allItems
+}
+
+// formatPrefResult formats a single Qdrant preference result for the API response.
+// Returns (item, true) when valid; (nil, false) when the entry should be skipped.
+func formatPrefResult(id string, payload map[string]any, seen map[string]bool) (map[string]any, bool) {
+	if seen[id] {
+		return nil, false
+	}
+	memory, _ := payload["memory"].(string)
+	if memory == "" {
+		memory, _ = payload["memory_content"].(string)
+	}
+	if memory == "" {
+		return nil, false
+	}
+
+	metadata := make(map[string]any, len(payload)+formatPrefResultExtraFields)
+	for k, v := range payload {
+		metadata[k] = v
+	}
+	metadata["embedding"] = []any{}
+	metadata["usage"] = []any{}
+	metadata["id"] = id
+	metadata["memory"] = memory
+
+	refID := id
+	if idx := strings.IndexByte(refID, '-'); idx > 0 {
+		refID = refID[:idx]
+	}
+	refIDStr := "[" + refID + "]"
+	metadata["ref_id"] = refIDStr
+
+	return map[string]any{
+		"id":       id,
+		"ref_id":   refIDStr,
+		"memory":   memory,
+		"metadata": metadata,
+	}, true
 }

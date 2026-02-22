@@ -11,6 +11,7 @@ package db
 
 import (
 "context"
+"errors"
 "fmt"
 "log/slog"
 "time"
@@ -34,7 +35,7 @@ logger *slog.Logger
 // The connStr should be a standard PostgreSQL connection string.
 func NewPostgres(ctx context.Context, connStr string, logger *slog.Logger) (*Postgres, error) {
 if connStr == "" {
-return nil, fmt.Errorf("postgres connection string is empty")
+return nil, errors.New("postgres connection string is empty")
 }
 
 cfg, err := pgxpool.ParseConfig(connStr)

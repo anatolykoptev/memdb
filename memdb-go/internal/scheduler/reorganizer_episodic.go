@@ -17,7 +17,12 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
 )
 
-const episodicMemType = "EpisodicMemory"
+const (
+	episodicMemType          = "EpisodicMemory"
+	episodicSummaryTimeout   = 45 * time.Second // timeout for background episodic summary goroutine
+	episodicConvMaxChars     = 6000             // ~4000 tokens; truncate to avoid prompt overflow
+	episodicSummaryMaxTokens = 300              // max_tokens for episodic summary LLM call
+)
 
 // generateEpisodicSummary asynchronously creates an EpisodicMemory node for the session.
 // Uses r.callLLM() for summarization and r.embedder for embedding.
@@ -31,12 +36,12 @@ func (r *Reorganizer) generateEpisodicSummary(cubeID, sessionID, conversation, n
 	}
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), episodicSummaryTimeout)
 		defer cancel()
 
-		// Truncate to avoid prompt overflows (last 6000 chars covers ~4000 tokens).
-		if len(conversation) > 6000 {
-			conversation = "..." + conversation[len(conversation)-6000:]
+		// Truncate to avoid prompt overflows (last episodicConvMaxChars covers ~4000 tokens).
+		if len(conversation) > episodicConvMaxChars {
+			conversation = "..." + conversation[len(conversation)-episodicConvMaxChars:]
 		}
 
 		msgs := []map[string]string{
@@ -50,7 +55,7 @@ func (r *Reorganizer) generateEpisodicSummary(cubeID, sessionID, conversation, n
 			},
 		}
 
-		summary, err := r.callLLM(ctx, msgs, 300)
+		summary, err := r.callLLM(ctx, msgs, episodicSummaryMaxTokens)
 		if err != nil {
 			r.logger.Debug("mem_read episodic summary: llm call failed", slog.Any("error", err))
 			return

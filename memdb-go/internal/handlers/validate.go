@@ -5,11 +5,12 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/MemDBai/MemDB/memdb-go/internal/search"
 )
 
 // --- Validated handler methods ---
@@ -26,37 +27,7 @@ func (h *Handler) ValidatedSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var errs []string
-	if req.Query == nil || strings.TrimSpace(*req.Query) == "" {
-		errs = append(errs, "query is required and must be non-empty")
-	}
-	if req.UserID == nil || *req.UserID == "" {
-		errs = append(errs, "user_id is required")
-	}
-	if req.TopK != nil && *req.TopK < 1 {
-		errs = append(errs, "top_k must be >= 1")
-	}
-	if req.Dedup != nil {
-		switch *req.Dedup {
-		case "no", "sim", "mmr":
-		default:
-			errs = append(errs, "dedup must be one of: no, sim, mmr")
-		}
-	}
-	if req.Relativity != nil && *req.Relativity < 0 {
-		errs = append(errs, "relativity must be >= 0")
-	}
-	if req.PrefTopK != nil && *req.PrefTopK < 0 {
-		errs = append(errs, "pref_top_k must be >= 0")
-	}
-	if req.ToolMemTopK != nil && *req.ToolMemTopK < 0 {
-		errs = append(errs, "tool_mem_top_k must be >= 0")
-	}
-	if req.SkillMemTopK != nil && *req.SkillMemTopK < 0 {
-		errs = append(errs, "skill_mem_top_k must be >= 0")
-	}
-
-	if !h.checkErrors(w, errs) {
+	if !h.checkErrors(w, validateSearchRequest(req)) {
 		return
 	}
 
@@ -75,26 +46,7 @@ func (h *Handler) ValidatedAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var errs []string
-	if req.UserID == nil || *req.UserID == "" {
-		errs = append(errs, "user_id is required")
-	}
-	if req.AsyncMode != nil {
-		switch *req.AsyncMode {
-		case "async", "sync":
-		default:
-			errs = append(errs, "async_mode must be one of: async, sync")
-		}
-	}
-	if req.Mode != nil {
-		switch *req.Mode {
-		case "fast", "fine":
-		default:
-			errs = append(errs, "mode must be one of: fast, fine")
-		}
-	}
-
-	if !h.checkErrors(w, errs) {
+	if !h.checkErrors(w, validateAddRequest(req.UserID, req.AsyncMode, req.Mode)) {
 		return
 	}
 
@@ -324,7 +276,7 @@ func (h *Handler) readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool
 // decodeJSON unmarshals body into dst. Returns false and writes 400 on error.
 func (h *Handler) decodeJSON(w http.ResponseWriter, body []byte, dst any) bool {
 	if err := json.Unmarshal(body, dst); err != nil {
-		h.writeValidationError(w, []string{fmt.Sprintf("invalid JSON: %s", err.Error())})
+		h.writeValidationError(w, []string{"invalid JSON: " + err.Error()})
 		return false
 	}
 	return true
@@ -337,6 +289,91 @@ func (h *Handler) checkErrors(w http.ResponseWriter, errs []string) bool {
 		return false
 	}
 	return true
+}
+
+// validateSearchRequest validates all fields of a searchRequest.
+// Returns a list of validation errors (empty if valid).
+func validateSearchRequest(req searchRequest) []string {
+	errs := validateSearchRequired(req)
+	errs = append(errs, validateSearchOptionals(req)...)
+	return errs
+}
+
+// validateSearchRequired checks required fields: query and user_id.
+func validateSearchRequired(req searchRequest) []string {
+	var errs []string
+	if req.Query == nil || strings.TrimSpace(*req.Query) == "" {
+		errs = append(errs, "query is required and must be non-empty")
+	}
+	if req.UserID == nil || *req.UserID == "" {
+		errs = append(errs, "user_id is required")
+	}
+	return errs
+}
+
+// validateSearchOptionals checks optional numeric bounds and enum fields.
+func validateSearchOptionals(req searchRequest) []string {
+	var errs []string
+	if req.TopK != nil && *req.TopK < 1 {
+		errs = append(errs, "top_k must be >= 1")
+	}
+	if req.Dedup != nil {
+		if err := validateDedupValue(*req.Dedup); err != "" {
+			errs = append(errs, err)
+		}
+	}
+	if req.Profile != nil {
+		if _, err := search.LookupProfile(*req.Profile); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if req.Relativity != nil && *req.Relativity < 0 {
+		errs = append(errs, "relativity must be >= 0")
+	}
+	if req.PrefTopK != nil && *req.PrefTopK < 0 {
+		errs = append(errs, "pref_top_k must be >= 0")
+	}
+	if req.ToolMemTopK != nil && *req.ToolMemTopK < 0 {
+		errs = append(errs, "tool_mem_top_k must be >= 0")
+	}
+	if req.SkillMemTopK != nil && *req.SkillMemTopK < 0 {
+		errs = append(errs, "skill_mem_top_k must be >= 0")
+	}
+	return errs
+}
+
+// validateDedupValue returns an error string if the dedup value is not recognized.
+func validateDedupValue(dedup string) string {
+	switch dedup {
+	case "no", "sim", "mmr":
+		return ""
+	default:
+		return "dedup must be one of: no, sim, mmr"
+	}
+}
+
+// validateAddRequest validates mode/async_mode/user_id fields for add requests.
+// Returns a list of validation errors (empty if valid).
+func validateAddRequest(userID, asyncMode, mode *string) []string {
+	var errs []string
+	if userID == nil || *userID == "" {
+		errs = append(errs, "user_id is required")
+	}
+	if asyncMode != nil {
+		switch *asyncMode {
+		case modeAsync, "sync":
+		default:
+			errs = append(errs, "async_mode must be one of: async, sync")
+		}
+	}
+	if mode != nil {
+		switch *mode {
+		case modeFast, modeFine:
+		default:
+			errs = append(errs, "mode must be one of: fast, fine")
+		}
+	}
+	return errs
 }
 
 // validateGetAllRequest validates the common fields for get_all requests.
@@ -376,5 +413,5 @@ func (h *Handler) writeValidationError(w http.ResponseWriter, errors []string) {
 	}
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
-	enc.Encode(resp)
+	_ = enc.Encode(resp)
 }

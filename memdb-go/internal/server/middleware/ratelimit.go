@@ -13,6 +13,9 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// rateLimitCleanupInterval is how often the IP store removes stale limiter entries.
+const rateLimitCleanupInterval = 5 * time.Minute
+
 // RateLimitConfig holds rate limiting settings.
 type RateLimitConfig struct {
 	Enabled       bool
@@ -32,7 +35,7 @@ func RateLimit(logger *slog.Logger, cfg RateLimitConfig) func(http.Handler) http
 		store := newIPStore(cfg.RPS, cfg.Burst)
 
 		// Periodically clean up stale entries
-		go store.cleanup(5 * time.Minute)
+		go store.cleanup(rateLimitCleanupInterval)
 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Skip rate limiting for health endpoints

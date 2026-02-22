@@ -2,12 +2,15 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
+
+const redisPingTimeout = 3 * time.Second
 
 // Redis wraps a go-redis client for shared use (cache + general storage).
 type Redis struct {
@@ -18,7 +21,7 @@ type Redis struct {
 // NewRedis creates a new Redis client from a URL.
 func NewRedis(ctx context.Context, redisURL string, logger *slog.Logger) (*Redis, error) {
 	if redisURL == "" {
-		return nil, fmt.Errorf("redis URL is empty")
+		return nil, errors.New("redis URL is empty")
 	}
 
 	opts, err := redis.ParseURL(redisURL)
@@ -33,7 +36,7 @@ func NewRedis(ctx context.Context, redisURL string, logger *slog.Logger) (*Redis
 
 	client := redis.NewClient(opts)
 
-	pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, redisPingTimeout)
 	defer cancel()
 	if err := client.Ping(pingCtx).Err(); err != nil {
 		client.Close()

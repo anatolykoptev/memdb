@@ -14,7 +14,7 @@ import (
 
 func TestNativeInstancesStatus(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("GET", "/product/instances/status", nil)
+	req := httptest.NewRequest(http.MethodGet, "/product/instances/status", nil)
 	w := httptest.NewRecorder()
 
 	h.NativeInstancesStatus(w, req)
@@ -50,7 +50,7 @@ func TestNativeInstancesStatus(t *testing.T) {
 
 func TestNativeExistMemCube_NoPostgres_MissingField(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/exist_mem_cube_id",
+	req := httptest.NewRequest(http.MethodPost, "/product/exist_mem_cube_id",
 		strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 
@@ -66,7 +66,7 @@ func TestNativeExistMemCube_NoPostgres_MissingField(t *testing.T) {
 
 func TestNativeExistMemCube_NoPostgres_EmptyString(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/exist_mem_cube_id",
+	req := httptest.NewRequest(http.MethodPost, "/product/exist_mem_cube_id",
 		strings.NewReader(`{"mem_cube_id":""}`))
 	w := httptest.NewRecorder()
 
@@ -79,7 +79,7 @@ func TestNativeExistMemCube_NoPostgres_EmptyString(t *testing.T) {
 
 func TestNativeExistMemCube_NoPostgres_NilBody(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/exist_mem_cube_id", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/exist_mem_cube_id", nil)
 	w := httptest.NewRecorder()
 
 	h.NativeExistMemCube(w, req)
@@ -99,13 +99,13 @@ func TestNativeExistMemCube_NoPostgres_NilBody(t *testing.T) {
 
 func TestNativeGetUserNamesByMemoryIDs_NoPostgres_InvalidJSON(t *testing.T) {
 	h := testValidateHandler()
-	req := httptest.NewRequest("POST", "/product/get_user_names_by_memory_ids",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_user_names_by_memory_ids",
 		strings.NewReader(`{not json`))
 	w := httptest.NewRecorder()
 
 	// With postgres==nil, this goes to ProxyToProduct which panics.
 	// But it doesn't read body first — it calls ProxyToProduct immediately.
-	defer func() { recover() }()
+	defer func() { _ = recover() }()
 	h.NativeGetUserNamesByMemoryIDs(w, req)
 }
 
@@ -114,11 +114,11 @@ func TestNativeGetUserNamesByMemoryIDs_NoPostgres_InvalidJSON(t *testing.T) {
 func TestNativeListUsers_NoRedis_NoPostgres(t *testing.T) {
 	h := testValidateHandler() // redis=nil, postgres=nil
 
-	req := httptest.NewRequest("GET", "/product/users", nil)
+	req := httptest.NewRequest(http.MethodGet, "/product/users", nil)
 	w := httptest.NewRecorder()
 
 	// postgres=nil → ProxyToProduct → panics (nil python)
-	defer func() { recover() }()
+	defer func() { _ = recover() }()
 	h.NativeListUsers(w, req)
 }
 
@@ -134,7 +134,7 @@ func testNativeHandler() *Handler {
 
 func TestNativeUpdateUserConfig_InvalidJSON(t *testing.T) {
 	h := testNativeHandler()
-	req := httptest.NewRequest("PUT", "/product/users/testuser/config",
+	req := httptest.NewRequest(http.MethodPut, "/product/users/testuser/config",
 		strings.NewReader(`{not json`))
 	w := httptest.NewRecorder()
 
@@ -159,7 +159,7 @@ func TestNativeUpdateUserConfig_InvalidJSON(t *testing.T) {
 
 func TestNativeUpdateUserConfig_EmptyBody(t *testing.T) {
 	h := testNativeHandler()
-	req := httptest.NewRequest("PUT", "/product/users/testuser/config", nil)
+	req := httptest.NewRequest(http.MethodPut, "/product/users/testuser/config", nil)
 	w := httptest.NewRecorder()
 
 	h.NativeUpdateUserConfig(w, req)

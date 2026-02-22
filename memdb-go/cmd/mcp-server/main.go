@@ -86,7 +86,9 @@ func main() {
 	mcptools.RegisterUserTools(server, pg, logger)
 	mcptools.RegisterProxyTools(server, cfg.PythonBackendURL, cfg.InternalServiceSecret, logger)
 
-	logger.Info("MCP tools registered", slog.Int("native", 6), slog.Int("proxy", 10))
+	const mcpNativeToolCount = 6  // search + get/update/delete/delete_all + users (get_user_info, create_user)
+	const mcpProxyToolCount  = 10 // add_memory, chat, create_cube, register_cube, unregister_cube, etc.
+	logger.Info("MCP tools registered", slog.Int("native", mcpNativeToolCount), slog.Int("proxy", mcpProxyToolCount))
 
 	if stdioMode {
 		runStdio(ctx, server, logger, pg)
@@ -108,7 +110,8 @@ func runStdio(ctx context.Context, server *mcp.Server, logger *slog.Logger, pg *
 	session, err := server.Connect(sigCtx, &mcp.StdioTransport{}, nil)
 	if err != nil {
 		logger.Error("stdio connect failed", slog.Any("error", err))
-		os.Exit(1)
+		cancel()
+		os.Exit(1) //nolint:gocritic // cancel() already called explicitly above
 	}
 
 	if err := session.Wait(); err != nil {
@@ -136,7 +139,7 @@ func runHTTP(ctx context.Context, server *mcp.Server, port string, logger *slog.
 	mux.Handle("/mcp/", handler)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok","service":"memdb-mcp","version":"1.0.0"}`))
+		_, _ = w.Write([]byte(`{"status":"ok","service":"memdb-mcp","version":"1.0.0"}`))
 	})
 
 	srv := &http.Server{
@@ -160,7 +163,8 @@ func runHTTP(ctx context.Context, server *mcp.Server, port string, logger *slog.
 	<-sigCtx.Done()
 	logger.Info("shutdown signal received")
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	const shutdownTimeout = 15 * time.Second
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.Error("shutdown error", slog.Any("error", err))

@@ -2,12 +2,16 @@ package mcptools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// defaultUserID is the fallback user identifier used when no user_id is provided.
+const defaultUserID = "memos"
 
 // RegisterUserTools registers create_user and get_user_info MCP tools.
 func RegisterUserTools(server *mcp.Server, pg *db.Postgres, logger *slog.Logger) {
@@ -17,7 +21,7 @@ func RegisterUserTools(server *mcp.Server, pg *db.Postgres, logger *slog.Logger)
 		Description: "Create a new user account with specified role (USER or ADMIN). MemDB auto-creates users on first memory add.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input CreateUserInput) (*mcp.CallToolResult, TextResult, error) {
 		if input.UserID == "" {
-			return nil, TextResult{}, fmt.Errorf("user_id is required")
+			return nil, TextResult{}, errors.New("user_id is required")
 		}
 
 		role := input.Role
@@ -40,7 +44,7 @@ func RegisterUserTools(server *mcp.Server, pg *db.Postgres, logger *slog.Logger)
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input GetUserInfoInput) (*mcp.CallToolResult, TextResult, error) {
 		userID := input.UserID
 		if userID == "" {
-			userID = "memos"
+			userID = defaultUserID
 		}
 
 		exists, err := pg.ExistUser(ctx, userID)

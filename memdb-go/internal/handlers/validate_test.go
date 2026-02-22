@@ -20,7 +20,7 @@ func testValidateHandler() *Handler {
 func TestValidatedSearch_MissingBody(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/search", nil)
+	req := httptest.NewRequest(http.MethodPost, "/product/search", nil)
 	w := httptest.NewRecorder()
 	h.ValidatedSearch(w, req)
 
@@ -35,7 +35,7 @@ func TestValidatedSearch_MissingBody(t *testing.T) {
 func TestValidatedSearch_InvalidJSON(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/search", strings.NewReader("{not json"))
+	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader("{not json"))
 	w := httptest.NewRecorder()
 	h.ValidatedSearch(w, req)
 
@@ -50,7 +50,7 @@ func TestValidatedSearch_InvalidJSON(t *testing.T) {
 func TestValidatedSearch_MissingRequiredFields(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/search", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 	h.ValidatedSearch(w, req)
 
@@ -69,7 +69,7 @@ func TestValidatedSearch_MissingRequiredFields(t *testing.T) {
 func TestValidatedSearch_EmptyQuery(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/search",
+	req := httptest.NewRequest(http.MethodPost, "/product/search",
 		strings.NewReader(`{"query":"  ","user_id":"memos"}`))
 	w := httptest.NewRecorder()
 	h.ValidatedSearch(w, req)
@@ -85,7 +85,7 @@ func TestValidatedSearch_EmptyQuery(t *testing.T) {
 func TestValidatedSearch_InvalidTopK(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/search",
+	req := httptest.NewRequest(http.MethodPost, "/product/search",
 		strings.NewReader(`{"query":"test","user_id":"memos","top_k":0}`))
 	w := httptest.NewRecorder()
 	h.ValidatedSearch(w, req)
@@ -101,7 +101,7 @@ func TestValidatedSearch_InvalidTopK(t *testing.T) {
 func TestValidatedSearch_InvalidDedup(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/search",
+	req := httptest.NewRequest(http.MethodPost, "/product/search",
 		strings.NewReader(`{"query":"test","user_id":"memos","dedup":"invalid"}`))
 	w := httptest.NewRecorder()
 	h.ValidatedSearch(w, req)
@@ -117,7 +117,7 @@ func TestValidatedSearch_InvalidDedup(t *testing.T) {
 func TestValidatedSearch_NegativeRelativity(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/search",
+	req := httptest.NewRequest(http.MethodPost, "/product/search",
 		strings.NewReader(`{"query":"test","user_id":"memos","relativity":-1}`))
 	w := httptest.NewRecorder()
 	h.ValidatedSearch(w, req)
@@ -133,7 +133,7 @@ func TestValidatedSearch_NegativeRelativity(t *testing.T) {
 func TestValidatedSearch_NegativePrefTopK(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/search",
+	req := httptest.NewRequest(http.MethodPost, "/product/search",
 		strings.NewReader(`{"query":"test","user_id":"memos","pref_top_k":-1}`))
 	w := httptest.NewRecorder()
 	h.ValidatedSearch(w, req)
@@ -151,7 +151,7 @@ func TestValidatedSearch_NegativePrefTopK(t *testing.T) {
 func TestValidatedAdd_MissingUserID(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/add", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/product/add", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 	h.ValidatedAdd(w, req)
 
@@ -166,7 +166,7 @@ func TestValidatedAdd_MissingUserID(t *testing.T) {
 func TestValidatedAdd_InvalidAsyncMode(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/add",
+	req := httptest.NewRequest(http.MethodPost, "/product/add",
 		strings.NewReader(`{"user_id":"memos","async_mode":"bad"}`))
 	w := httptest.NewRecorder()
 	h.ValidatedAdd(w, req)
@@ -182,7 +182,7 @@ func TestValidatedAdd_InvalidAsyncMode(t *testing.T) {
 func TestValidatedAdd_InvalidMode(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/add",
+	req := httptest.NewRequest(http.MethodPost, "/product/add",
 		strings.NewReader(`{"user_id":"memos","mode":"turbo"}`))
 	w := httptest.NewRecorder()
 	h.ValidatedAdd(w, req)
@@ -200,7 +200,7 @@ func TestValidatedAdd_InvalidMode(t *testing.T) {
 func TestValidatedFeedback_MissingFields(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/feedback", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/product/feedback", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 	h.ValidatedFeedback(w, req)
 
@@ -224,7 +224,7 @@ func TestValidatedFeedback_MissingFields(t *testing.T) {
 func TestValidatedDelete_NoTargets(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/delete_memory", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/product/delete_memory", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 	h.ValidatedDelete(w, req)
 
@@ -239,7 +239,7 @@ func TestValidatedDelete_NoTargets(t *testing.T) {
 func TestValidatedDelete_EmptyArrays(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/delete_memory",
+	req := httptest.NewRequest(http.MethodPost, "/product/delete_memory",
 		strings.NewReader(`{"memory_ids":[],"file_ids":[]}`))
 	w := httptest.NewRecorder()
 	h.ValidatedDelete(w, req)
@@ -254,7 +254,7 @@ func TestValidatedDelete_EmptyArrays(t *testing.T) {
 func TestValidatedGetAll_MissingFields(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/get_all", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/product/get_all", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 	h.ValidatedGetAll(w, req)
 
@@ -273,7 +273,7 @@ func TestValidatedGetAll_MissingFields(t *testing.T) {
 func TestValidatedGetAll_InvalidMemoryType(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/get_all",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_all",
 		strings.NewReader(`{"user_id":"memos","memory_type":"bad_type"}`))
 	w := httptest.NewRecorder()
 	h.ValidatedGetAll(w, req)
@@ -291,7 +291,7 @@ func TestValidatedGetAll_InvalidMemoryType(t *testing.T) {
 func TestValidatedChat_MissingFields(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/chat", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/product/chat", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 	h.ValidatedChat(w, req)
 
@@ -310,7 +310,7 @@ func TestValidatedChat_MissingFields(t *testing.T) {
 func TestValidatedChatComplete_InvalidTopK(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/chat/complete",
+	req := httptest.NewRequest(http.MethodPost, "/product/chat/complete",
 		strings.NewReader(`{"user_id":"memos","query":"hello","top_k":-5}`))
 	w := httptest.NewRecorder()
 	h.ValidatedChatComplete(w, req)
@@ -328,7 +328,7 @@ func TestValidatedChatComplete_InvalidTopK(t *testing.T) {
 func TestValidatedGetMemoryByIDs_Missing(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/get_memory_by_ids",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_memory_by_ids",
 		strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 	h.ValidatedGetMemoryByIDs(w, req)
@@ -344,7 +344,7 @@ func TestValidatedGetMemoryByIDs_Missing(t *testing.T) {
 func TestValidatedGetMemoryByIDs_EmptyArray(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/get_memory_by_ids",
+	req := httptest.NewRequest(http.MethodPost, "/product/get_memory_by_ids",
 		strings.NewReader(`{"memory_ids":[]}`))
 	w := httptest.NewRecorder()
 	h.ValidatedGetMemoryByIDs(w, req)
@@ -359,7 +359,7 @@ func TestValidatedGetMemoryByIDs_EmptyArray(t *testing.T) {
 func TestValidatedExistMemCube_Missing(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/exist_mem_cube_id",
+	req := httptest.NewRequest(http.MethodPost, "/product/exist_mem_cube_id",
 		strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
 	h.ValidatedExistMemCube(w, req)
@@ -377,7 +377,7 @@ func TestValidatedExistMemCube_Missing(t *testing.T) {
 func TestReadBody_EmptyBody(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/test", strings.NewReader(""))
+	req := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(""))
 	w := httptest.NewRecorder()
 	_, ok := h.readBody(w, req)
 
@@ -392,7 +392,7 @@ func TestReadBody_EmptyBody(t *testing.T) {
 func TestReadBody_NilBody(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/test", nil)
+	req := httptest.NewRequest(http.MethodPost, "/test", nil)
 	w := httptest.NewRecorder()
 	_, ok := h.readBody(w, req)
 
@@ -424,7 +424,7 @@ func TestDecodeJSON_Invalid(t *testing.T) {
 func TestValidatedSearch_MultipleErrors(t *testing.T) {
 	h := testValidateHandler()
 
-	req := httptest.NewRequest("POST", "/product/search",
+	req := httptest.NewRequest(http.MethodPost, "/product/search",
 		strings.NewReader(`{"top_k":0,"dedup":"bad","relativity":-1}`))
 	w := httptest.NewRecorder()
 	h.ValidatedSearch(w, req)

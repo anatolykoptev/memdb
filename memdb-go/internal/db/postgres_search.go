@@ -22,6 +22,9 @@ type VectorSearchResult struct {
 	Embedding    []float32 // parsed embedding vector, nil for fulltext
 }
 
+// float32BitSize is the strconv bit-size argument for 32-bit float formatting.
+const float32BitSize = 32
+
 // FormatVector formats a float32 slice as a pgvector string literal: '[0.1,0.2,...]'.
 func FormatVector(vec []float32) string {
 	// Pre-allocate: '[' + len(vec)*(~9 chars avg) + ']'
@@ -31,7 +34,7 @@ func FormatVector(vec []float32) string {
 		if i > 0 {
 			buf = append(buf, ',')
 		}
-		buf = strconv.AppendFloat(buf, float64(v), 'g', -1, 32)
+		buf = strconv.AppendFloat(buf, float64(v), 'g', -1, float32BitSize)
 	}
 	buf = append(buf, ']')
 	return string(buf)

@@ -124,7 +124,7 @@ func TestScheduleRetry_IncrementsRetryCount(t *testing.T) {
 			t.Fatalf("attempt %d: expected 1 ZSet member", attempt)
 		}
 		var p retryPayload
-		json.Unmarshal([]byte(members[0]), &p)
+		_ = json.Unmarshal([]byte(members[0]), &p)
 		if p.RetryCount != attempt+1 {
 			t.Errorf("attempt %d: RetryCount = %d, want %d", attempt, p.RetryCount, attempt+1)
 		}
@@ -403,7 +403,7 @@ func TestHandle_NoXACKForRetryMessages(t *testing.T) {
 
 	// Create a stream and consumer group
 	streamKey := "scheduler:messages:stream:v2.0:u:cube-noack:mem_organize"
-	mr.XAdd(streamKey, "*", []string{"cube_id", "cube-noack", "label", "mem_organize"})
+	_, _ = mr.XAdd(streamKey, "*", []string{"cube_id", "cube-noack", "label", "mem_organize"})
 	w.redis.XGroupCreateMkStream(ctx, streamKey, ConsumerGroup, "0")
 
 	// Read the message to put it in PEL
@@ -447,7 +447,7 @@ func TestHandle_XACKForOriginalMessages(t *testing.T) {
 	ctx := context.Background()
 
 	streamKey := "scheduler:messages:stream:v2.0:u:cube-ack:add"
-	mr.XAdd(streamKey, "*", []string{"cube_id", "cube-ack", "label", "add"})
+	_, _ = mr.XAdd(streamKey, "*", []string{"cube_id", "cube-ack", "label", "add"})
 	w.redis.XGroupCreateMkStream(ctx, streamKey, ConsumerGroup, "0")
 
 	streams, _ := w.redis.XReadGroup(ctx, &redis.XReadGroupArgs{

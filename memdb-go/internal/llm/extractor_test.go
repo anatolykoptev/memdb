@@ -19,7 +19,7 @@ func mockLLM(t *testing.T, responseBody string) (*httptest.Server, *LLMExtractor
 				{"message": map[string]string{"content": responseBody}},
 			},
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	ext := NewLLMExtractor(srv.URL, "", "gemini-2.0-flash-lite", nil, slog.Default())
 	return srv, ext
