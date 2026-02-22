@@ -1,4 +1,5 @@
 import re
+
 from abc import ABC, abstractmethod
 
 from memdb.configs.chunker import BaseChunkerConfig

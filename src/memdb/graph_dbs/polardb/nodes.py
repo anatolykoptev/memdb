@@ -1,5 +1,6 @@
 import json
 import time
+
 from datetime import datetime
 from typing import Any
 
@@ -7,6 +8,7 @@ from memdb.graph_dbs.polardb.helpers import generate_vector
 from memdb.graph_dbs.utils import prepare_node_metadata as _prepare_node_metadata
 from memdb.log import get_logger
 from memdb.utils import timed
+
 
 logger = get_logger(__name__)
 
@@ -277,9 +279,7 @@ class NodeMixin:
                                     $3::vector
                                 )
                             """
-                            logger.debug(
-                                f"[add_nodes_batch] Preparing: {prepare_name}"
-                            )
+                            logger.debug(f"[add_nodes_batch] Preparing: {prepare_name}")
 
                             cursor.execute(prepare_query)
 
@@ -325,9 +325,7 @@ class NodeMixin:
                         # DEALLOCATE prepared statement (always execute, even on error)
                         try:
                             cursor.execute(f"DEALLOCATE {prepare_name}")
-                            logger.debug(
-                                f"[add_nodes_batch] Deallocated: {prepare_name}"
-                            )
+                            logger.debug(f"[add_nodes_batch] Deallocated: {prepare_name}")
                         except Exception as dealloc_error:
                             logger.warning(
                                 f"[add_nodes_batch] Failed to deallocate {prepare_name}: {dealloc_error}"
@@ -618,12 +616,7 @@ class NodeMixin:
 
         # Strip wrapping quotes from agtype string values (idempotent)
         for k, v in list(node.items()):
-            if (
-                isinstance(v, str)
-                and len(v) >= 2
-                and v[0] == v[-1]
-                and v[0] in ("'", '"')
-            ):
+            if isinstance(v, str) and len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
                 node[k] = v[1:-1]
 
         # Convert datetime to string

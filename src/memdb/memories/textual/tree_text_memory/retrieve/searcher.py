@@ -833,9 +833,7 @@ class Searcher:
                 return unique_results
 
             sim_matrix = cosine_similarity_matrix(embeddings)
-            selected_indices, _ = find_best_unrelated_subgroup(
-                documents, sim_matrix, bar=bar
-            )
+            selected_indices, _ = find_best_unrelated_subgroup(documents, sim_matrix, bar=bar)
             mmr_results = [unique_results[i] for i in selected_indices]
             dropped = len(unique_results) - len(mmr_results)
             if dropped:

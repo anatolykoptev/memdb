@@ -24,10 +24,10 @@ from memdb.mem_scheduler.schemas.task_schemas import (
     QUERY_TASK_LABEL,
 )
 from memdb.mem_user.user_manager import UserManager, UserRole
+from memdb.memdb_tools.thread_safe_dict_segment import OptimizedThreadSafeDict
 from memdb.memories.activation.item import ActivationMemoryItem
 from memdb.memories.parametric.item import ParametricMemoryItem
 from memdb.memories.textual.item import TextualMemoryItem, TextualMemoryMetadata
-from memdb.memdb_tools.thread_safe_dict_segment import OptimizedThreadSafeDict
 from memdb.templates.mos_prompts import QUERY_REWRITING_PROMPT
 from memdb.types import ChatHistory, MessageList, MOSSearchResult
 
@@ -629,8 +629,13 @@ class MemDBCore:
                         search_filter=search_filter,
                     )
                     search_time_end = time.time()
-                    print(f"🔍 [SEARCH_DEBUG] cube_id={cube_id}, found {len(memories)} memories", flush=True)
-                    logger.warning(f"[SEARCH_DEBUG] cube_id={cube_id}, memories_count={len(memories)}, first_3_ids={[m.id for m in memories[:3]]}")
+                    print(
+                        f"🔍 [SEARCH_DEBUG] cube_id={cube_id}, found {len(memories)} memories",
+                        flush=True,
+                    )
+                    logger.warning(
+                        f"[SEARCH_DEBUG] cube_id={cube_id}, memories_count={len(memories)}, first_3_ids={[m.id for m in memories[:3]]}"
+                    )
                     logger.info(
                         f"🧠 [Memory] Searched memories from {cube_id}:\n{self._str_memories(memories)}\n"
                     )

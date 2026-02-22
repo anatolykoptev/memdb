@@ -6,9 +6,10 @@ from typing import Any
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
+from memdb.mem_cube.general import GeneralMemCube
+
 # Assuming these are your imports
 from memdb.mem_os.main import MemDB
-from memdb.mem_cube.general import GeneralMemCube
 from memdb.mem_user.user_manager import UserRole
 
 

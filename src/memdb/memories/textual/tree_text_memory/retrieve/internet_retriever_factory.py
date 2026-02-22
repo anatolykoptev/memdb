@@ -5,13 +5,13 @@ from typing import Any, ClassVar
 from memdb.configs.internet_retriever import InternetRetrieverConfigFactory
 from memdb.embedders.base import BaseEmbedder
 from memdb.mem_reader.factory import MemReaderFactory
+from memdb.memdb_tools.singleton import singleton_factory
 from memdb.memories.textual.tree_text_memory.retrieve.bochasearch import BochaAISearchRetriever
 from memdb.memories.textual.tree_text_memory.retrieve.internet_retriever import (
     InternetGoogleRetriever,
 )
 from memdb.memories.textual.tree_text_memory.retrieve.searxng_search import SearxngSearchRetriever
 from memdb.memories.textual.tree_text_memory.retrieve.xinyusearch import XinyuSearchRetriever
-from memdb.memdb_tools.singleton import singleton_factory
 
 
 class InternetRetrieverFactory:

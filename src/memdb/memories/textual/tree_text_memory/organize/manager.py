@@ -154,9 +154,7 @@ class MemoryManager:
                     )
                     continue
             except Exception:
-                logger.warning(
-                    f"[MemoryManager:dedup] Check failed: {traceback.format_exc()}"
-                )
+                logger.warning(f"[MemoryManager:dedup] Check failed: {traceback.format_exc()}")
 
             unique.append(memory)
 

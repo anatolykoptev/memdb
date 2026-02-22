@@ -6,7 +6,7 @@ from memdb.log import get_logger
 from memdb.memories.textual.item import PreferenceTextualMemoryMetadata, TextualMemoryItem
 from memdb.memories.textual.preference import PreferenceTextMemory
 from memdb.types import MessageList
-from memdb.vec_dbs.factory import MilvusVecDB, QdrantVecDB, QdrantMultiCollectionVecDB
+from memdb.vec_dbs.factory import MilvusVecDB, QdrantMultiCollectionVecDB, QdrantVecDB
 
 
 logger = get_logger(__name__)

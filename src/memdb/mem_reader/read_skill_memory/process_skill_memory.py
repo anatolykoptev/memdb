@@ -48,7 +48,9 @@ def add_id_to_mysql(memory_id: str, mem_cube_id: str):
     try:
         response = requests.post(skill_mysql_url, headers=headers, json=data)
 
-        logger.debug(f"[PROCESS_SKILLS] MySQL response: {response.status_code}, memory_id={memory_id}")
+        logger.debug(
+            f"[PROCESS_SKILLS] MySQL response: {response.status_code}, memory_id={memory_id}"
+        )
         logger.info(f"[PROCESS_SKILLS] headers: \n\n{headers}")
         logger.info(f"[PROCESS_SKILLS] data: \n\n{data}")
 
@@ -752,9 +754,13 @@ def process_skill_memory_fine(
                     # Delete skill directory
                     if skill_dir.exists():
                         shutil.rmtree(skill_dir)
-                    logger.info(f"[PROCESS_SKILLS] Cleaned up local files: {zip_path} and {skill_dir}")
+                    logger.info(
+                        f"[PROCESS_SKILLS] Cleaned up local files: {zip_path} and {skill_dir}"
+                    )
                 except Exception as cleanup_error:
-                    logger.warning(f"[PROCESS_SKILLS] Error cleaning up local files: {cleanup_error}")
+                    logger.warning(
+                        f"[PROCESS_SKILLS] Error cleaning up local files: {cleanup_error}"
+                    )
 
     # Create TextualMemoryItem objects
     skill_memory_items = []

@@ -166,7 +166,9 @@ class MemosApiClient:
             max_retries = 5
             for attempt in range(max_retries):
                 try:
-                    response = requests.request("POST", url, data=payload, headers=self.headers, timeout=300)
+                    response = requests.request(
+                        "POST", url, data=payload, headers=self.headers, timeout=300
+                    )
                     assert response.status_code == 200, response.text
                     assert json.loads(response.text)["message"] == "Memory added successfully", (
                         response.text

@@ -78,11 +78,11 @@ class MarkdownChunker(BaseChunker):
     def _detect_malformed_headers(self, text: str) -> bool:
         """Detect if markdown has improper header hierarchy usage."""
         header_levels = []
-        pattern = re.compile(r'^#{1,6}\s+.+')
-        for line in text.split('\n'):
+        pattern = re.compile(r"^#{1,6}\s+.+")
+        for line in text.split("\n"):
             stripped_line = line.strip()
             if pattern.match(stripped_line):
-                hash_match = re.match(r'^(#+)', stripped_line)
+                hash_match = re.match(r"^(#+)", stripped_line)
                 if hash_match:
                     level = len(hash_match.group(1))
                     header_levels.append(level)
@@ -111,8 +111,8 @@ class MarkdownChunker(BaseChunker):
 
     def _fix_header_hierarchy(self, text: str) -> str:
         """Fix markdown header hierarchy by keeping first header and incrementing the rest."""
-        header_pattern = re.compile(r'^(#{1,6})\s+(.+)$')
-        lines = text.split('\n')
+        header_pattern = re.compile(r"^(#{1,6})\s+(.+)$")
+        lines = text.split("\n")
         fixed_lines = []
         first_valid_header = False
 
@@ -128,10 +128,10 @@ class MarkdownChunker(BaseChunker):
                     first_valid_header = True
                 else:
                     new_level = min(current_level + 1, 6)
-                    new_hashes = '#' * new_level
+                    new_hashes = "#" * new_level
                     fixed_line = f"{new_hashes} {title_content}"
                 fixed_lines.append(fixed_line)
             else:
                 fixed_lines.append(line)
 
-        return '\n'.join(fixed_lines)
+        return "\n".join(fixed_lines)

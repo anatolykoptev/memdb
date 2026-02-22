@@ -10,10 +10,10 @@ from memdb.mem_scheduler.scheduler_factory import SchedulerFactory
 
 
 __all__ = [
-    "MemDB",
     "GeneralMemCube",
     "GeneralMemCubeConfig",
     "GeneralScheduler",
+    "MemDB",
     "MemDBConfig",
     "SchedulerConfigFactory",
     "SchedulerFactory",

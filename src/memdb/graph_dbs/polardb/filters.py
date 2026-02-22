@@ -1,7 +1,9 @@
 import json
+
 from typing import Any, Literal
 
 from memdb.log import get_logger
+
 
 logger = get_logger(__name__)
 
@@ -50,11 +52,19 @@ class FilterMixin:
 
         return user_name_conditions
 
-    def _build_user_name_and_kb_ids_conditions_cypher(self, user_name, knowledgebase_ids, default_user_name=None):
-        return self._build_user_name_and_kb_ids_conditions(user_name, knowledgebase_ids, default_user_name, mode="cypher")
+    def _build_user_name_and_kb_ids_conditions_cypher(
+        self, user_name, knowledgebase_ids, default_user_name=None
+    ):
+        return self._build_user_name_and_kb_ids_conditions(
+            user_name, knowledgebase_ids, default_user_name, mode="cypher"
+        )
 
-    def _build_user_name_and_kb_ids_conditions_sql(self, user_name, knowledgebase_ids, default_user_name=None):
-        return self._build_user_name_and_kb_ids_conditions(user_name, knowledgebase_ids, default_user_name, mode="sql")
+    def _build_user_name_and_kb_ids_conditions_sql(
+        self, user_name, knowledgebase_ids, default_user_name=None
+    ):
+        return self._build_user_name_and_kb_ids_conditions(
+            user_name, knowledgebase_ids, default_user_name, mode="sql"
+        )
 
     def _build_filter_conditions(
         self,
@@ -247,7 +257,10 @@ class FilterMixin:
 
                             # Determine if this is a datetime field
                             field_name = info_field if is_info else key
-                            is_dt = field_name in ("created_at", "updated_at") or field_name.endswith("_at")
+                            is_dt = field_name in (
+                                "created_at",
+                                "updated_at",
+                            ) or field_name.endswith("_at")
 
                             if isinstance(op_value, str):
                                 escaped_value = escape_string(op_value)
@@ -286,14 +299,10 @@ class FilterMixin:
                                     )
                                 else:
                                     if is_cypher:
-                                        condition_parts.append(
-                                            f"{prop_expr} = {op_value}"
-                                        )
+                                        condition_parts.append(f"{prop_expr} = {op_value}")
                                     elif is_info:
                                         # Info nested field: use ::agtype cast
-                                        condition_parts.append(
-                                            f"{prop_expr} = {op_value}::agtype"
-                                        )
+                                        condition_parts.append(f"{prop_expr} = {op_value}::agtype")
                                     else:
                                         # Direct field: convert to JSON string and then to agtype
                                         value_json = json.dumps(op_value)
@@ -313,13 +322,9 @@ class FilterMixin:
                         elif op == "contains":
                             if isinstance(op_value, str):
                                 escaped_value = escape_string(str(op_value))
-                                condition_parts.append(
-                                    fmt_contains_str(escaped_value, prop_expr)
-                                )
+                                condition_parts.append(fmt_contains_str(escaped_value, prop_expr))
                             else:
-                                condition_parts.append(
-                                    fmt_contains_non_str(op_value, prop_expr)
-                                )
+                                condition_parts.append(fmt_contains_non_str(op_value, prop_expr))
 
                         elif op == "in":
                             if not isinstance(op_value, list):
@@ -370,9 +375,7 @@ class FilterMixin:
                                                 fmt_in_array_contains_non_str(item, prop_expr)
                                             )
                                     if or_conditions:
-                                        condition_parts.append(
-                                            f"({' OR '.join(or_conditions)})"
-                                        )
+                                        condition_parts.append(f"({' OR '.join(or_conditions)})")
                                 else:
                                     # For scalar fields
                                     if is_cypher:
@@ -401,18 +404,12 @@ class FilterMixin:
                         elif op == "like":
                             if isinstance(op_value, str):
                                 escaped_value = escape_like_value(op_value)
-                                condition_parts.append(
-                                    fmt_like(escaped_value, prop_expr)
-                                )
+                                condition_parts.append(fmt_like(escaped_value, prop_expr))
                             else:
                                 if is_cypher:
-                                    condition_parts.append(
-                                        f"{prop_expr} CONTAINS {op_value}"
-                                    )
+                                    condition_parts.append(f"{prop_expr} CONTAINS {op_value}")
                                 else:
-                                    condition_parts.append(
-                                        f"{prop_expr}::text LIKE '%{op_value}%'"
-                                    )
+                                    condition_parts.append(f"{prop_expr}::text LIKE '%{op_value}%'")
 
                 # Simple equality (value is not a dict)
                 elif is_info:

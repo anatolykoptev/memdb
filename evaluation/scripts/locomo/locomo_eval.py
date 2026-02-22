@@ -26,6 +26,7 @@ sentence_model = None
 
 try:
     import tiktoken
+
     encoding = tiktoken.get_encoding("cl100k_base")
 except ImportError:
     print("tiktoken not available, using word count for context_tokens")
@@ -60,7 +61,7 @@ def extract_label_json(text: str) -> str | None:
     """
     # Extract any JSON object containing a "label" key
     # Find all JSON-like blocks and try to parse them
-    for match in re.finditer(r'\{[^{}]*\}', text):
+    for match in re.finditer(r"\{[^{}]*\}", text):
         try:
             obj = json.loads(match.group(0))
             if "label" in obj:
@@ -122,7 +123,7 @@ async def locomo_grader(llm_client, question: str, gold_answer: str, response: s
             return parsed.llm_judgment.strip().lower() == "correct"
         except Exception as e:
             if "429" in str(e) or "rate" in str(e).lower():
-                wait = 2 ** attempt * 5
+                wait = 2**attempt * 5
                 print(f"Rate limited, retrying in {wait}s (attempt {attempt + 1}/5)...")
                 await asyncio.sleep(wait)
             else:
@@ -179,8 +180,10 @@ def calculate_semantic_similarity(gold_answer, response):
 
     try:
         from scipy.spatial.distance import cosine
+
         if sentence_model is None:
             from sentence_transformers import SentenceTransformer
+
             sentence_model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B")
 
         gold_embedding = sentence_model.encode([gold_answer], show_progress_bar=False)[0]
@@ -240,6 +243,7 @@ def calculate_nlp_metrics(gold_answer, response, context, options=None):
         metrics["semantic"]["similarity"] = calculate_semantic_similarity(gold_answer, response)
         try:
             from bert_score import score as bert_score_fn
+
             _, _, f1 = bert_score_fn(
                 [gold_answer], [response], lang="en", rescale_with_baseline=True, verbose=False
             )

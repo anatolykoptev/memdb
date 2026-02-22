@@ -32,9 +32,7 @@ class MemDBClient:
     """MemDB API client"""
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None):
-        self.base_url = (
-            base_url or os.getenv("MEMDB_BASE_URL") or "https://api.memdb.io/v1"
-        )
+        self.base_url = base_url or os.getenv("MEMDB_BASE_URL") or "https://api.memdb.io/v1"
         api_key = api_key or os.getenv("MEMDB_API_KEY")
 
         if not api_key:

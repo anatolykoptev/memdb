@@ -18,7 +18,7 @@ from memdb.memories.textual.prefer_text_memory.factory import (
 )
 from memdb.reranker.factory import RerankerFactory
 from memdb.types import MessageList
-from memdb.vec_dbs.factory import MilvusVecDB, QdrantVecDB, QdrantMultiCollectionVecDB, VecDBFactory
+from memdb.vec_dbs.factory import MilvusVecDB, QdrantMultiCollectionVecDB, QdrantVecDB, VecDBFactory
 from memdb.vec_dbs.item import VecDBItem
 
 
@@ -34,7 +34,9 @@ class PreferenceTextMemory(BaseTextMemory):
         self.extractor_llm: OpenAILLM | OllamaLLM | AzureLLM = LLMFactory.from_config(
             config.extractor_llm
         )
-        self.vector_db: MilvusVecDB | QdrantVecDB | QdrantMultiCollectionVecDB = VecDBFactory.from_config(config.vector_db)
+        self.vector_db: MilvusVecDB | QdrantVecDB | QdrantMultiCollectionVecDB = (
+            VecDBFactory.from_config(config.vector_db)
+        )
         self.embedder: BaseEmbedder = EmbedderFactory.from_config(config.embedder)
         self.reranker = RerankerFactory.from_config(config.reranker)
 

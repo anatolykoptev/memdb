@@ -14,4 +14,6 @@ class ParsedTaskGoal:
     internet_search: bool = False
     goal_type: str | None = None  # e.g., 'default', 'explanation', etc.
     context: str = ""
-    temporal_scope: str | None = None  # e.g., 'last_7_days', 'last_30_days', 'last_24h', 'last_90_days', None
+    temporal_scope: str | None = (
+        None  # e.g., 'last_7_days', 'last_30_days', 'last_24h', 'last_90_days', None
+    )

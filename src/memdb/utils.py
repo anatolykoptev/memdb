@@ -83,9 +83,7 @@ def timed_with_status(
                 status_info = f", status: {status}"
                 if not success_flag and exc_type is not None:
                     err_msg = str(exc_message)[:200] if exc_message else ""
-                    status_info += (
-                        f", error_type: {exc_type.__name__}, error_message: {err_msg}"
-                    )
+                    status_info += f", error_type: {exc_type.__name__}, error_message: {err_msg}"
 
                 msg = (
                     f"[TIMER_WITH_STATUS] {log_prefix or fn.__name__} "

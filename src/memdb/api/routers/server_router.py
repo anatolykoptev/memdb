@@ -437,7 +437,8 @@ def register_user(user_req: UserRegisterRequest):
 
 
 @router.get(
-    "/suggestions/{user_id}", summary="Get suggestion queries by user_id",
+    "/suggestions/{user_id}",
+    summary="Get suggestion queries by user_id",
     response_model=SuggestionResponse,
 )
 def get_suggestion_queries_by_user_id(user_id: str):
@@ -470,10 +471,10 @@ def list_users():
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    f'SELECT DISTINCT properties->>\'user_name\' AS user_name '
+                    f"SELECT DISTINCT properties->>'user_name' AS user_name "
                     f'FROM "{graph_db.db_name}_graph"."Memory" '
-                    f'WHERE properties->>\'status\' = \'activated\' '
-                    f'ORDER BY user_name'
+                    f"WHERE properties->>'status' = 'activated' "
+                    f"ORDER BY user_name"
                 )
                 rows = cur.fetchall()
                 result = [row[0] for row in rows if row[0]]
@@ -507,7 +508,8 @@ def get_user_info(user_id: str):
 
 
 @router.get(
-    "/configure/{user_id}", summary="Get configuration",
+    "/configure/{user_id}",
+    summary="Get configuration",
     response_model=SimpleResponse,
 )
 def get_config(user_id: str):
@@ -516,7 +518,8 @@ def get_config(user_id: str):
 
 
 @router.get(
-    "/users/{user_id}/config", summary="Get user configuration",
+    "/users/{user_id}/config",
+    summary="Get user configuration",
     response_model=BaseResponse[dict],
 )
 def get_user_config(user_id: str):
@@ -528,7 +531,8 @@ def get_user_config(user_id: str):
 
 
 @router.put(
-    "/users/{user_id}/config", summary="Update user configuration",
+    "/users/{user_id}/config",
+    summary="Update user configuration",
     response_model=SimpleResponse,
 )
 def update_user_config(user_id: str, config_data: dict):
@@ -537,7 +541,8 @@ def update_user_config(user_id: str, config_data: dict):
 
 
 @router.get(
-    "/instances/status", summary="Get instance status",
+    "/instances/status",
+    summary="Get instance status",
     response_model=BaseResponse[dict],
 )
 def get_instance_status():
@@ -552,7 +557,8 @@ def get_instance_status():
 
 
 @router.get(
-    "/instances/count", summary="Get active user count",
+    "/instances/count",
+    summary="Get active user count",
     response_model=BaseResponse[int],
 )
 def get_active_user_count():
@@ -563,9 +569,9 @@ def get_active_user_count():
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    f'SELECT COUNT(DISTINCT properties->>\'user_name\') '
+                    f"SELECT COUNT(DISTINCT properties->>'user_name') "
                     f'FROM "{graph_db.db_name}_graph"."Memory" '
-                    f'WHERE properties->>\'status\' = \'activated\''
+                    f"WHERE properties->>'status' = 'activated'"
                 )
                 count = cur.fetchone()[0] or 0
                 cur.close()

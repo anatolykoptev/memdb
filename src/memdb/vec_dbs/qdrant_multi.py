@@ -96,8 +96,7 @@ class QdrantMultiCollectionVecDB:
         inst = self._instances.get(collection_name)
         if inst is None:
             raise ValueError(
-                f"Unknown collection '{collection_name}'. "
-                f"Available: {list(self._instances.keys())}"
+                f"Unknown collection '{collection_name}'. Available: {list(self._instances.keys())}"
             )
         return inst
 
@@ -156,15 +155,21 @@ class QdrantMultiCollectionVecDB:
     def count(self, collection_name: str, filter: dict[str, Any] | None = None) -> int:
         return self._get(collection_name).count(filter)
 
-    def add(self, collection_name: str, data: list[VecDBItem | MilvusVecDBItem | dict[str, Any]]) -> None:
+    def add(
+        self, collection_name: str, data: list[VecDBItem | MilvusVecDBItem | dict[str, Any]]
+    ) -> None:
         prepared = [_prepare_for_qdrant(item) for item in data]
         self._get(collection_name).add(prepared)
 
-    def update(self, collection_name: str, id: str, data: VecDBItem | MilvusVecDBItem | dict[str, Any]) -> None:
+    def update(
+        self, collection_name: str, id: str, data: VecDBItem | MilvusVecDBItem | dict[str, Any]
+    ) -> None:
         prepared = _prepare_for_qdrant(data)
         self._get(collection_name).update(id, prepared)
 
-    def upsert(self, collection_name: str, data: list[VecDBItem | MilvusVecDBItem | dict[str, Any]]) -> None:
+    def upsert(
+        self, collection_name: str, data: list[VecDBItem | MilvusVecDBItem | dict[str, Any]]
+    ) -> None:
         prepared = [_prepare_for_qdrant(item) for item in data]
         self._get(collection_name).upsert(prepared)
 

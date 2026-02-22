@@ -169,7 +169,9 @@ class TreeTextMemory(BaseTextMemory):
         include_embedding: bool | None = None,
         **kwargs,
     ) -> list[TextualMemoryItem]:
-        logger.info(f"🌲 [TREE.SEARCH] query='{query}', mode={mode}, user_name={user_name}, kwargs={kwargs}")
+        logger.info(
+            f"🌲 [TREE.SEARCH] query='{query}', mode={mode}, user_name={user_name}, kwargs={kwargs}"
+        )
         """Search for memories based on a query.
         User query -> TaskGoalParser -> MemoryPathResolver ->
         GraphMemoryRetriever -> MemoryReranker -> MemoryReasoner -> Final output

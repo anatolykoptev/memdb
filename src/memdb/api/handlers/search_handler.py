@@ -63,9 +63,9 @@ class SearchHandler(BaseHandler):
 
         # When Go client handles fast/mix, it already does dedup + relativity +
         # embedding stripping, so skip Python-side post-processing.
-        go_handles_dedup = (
-            self.go_client is not None
-            and search_req_local.mode in ("fast", "mixture")
+        go_handles_dedup = self.go_client is not None and search_req_local.mode in (
+            "fast",
+            "mixture",
         )
 
         if not go_handles_dedup:

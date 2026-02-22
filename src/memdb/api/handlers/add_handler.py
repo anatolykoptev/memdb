@@ -50,9 +50,7 @@ class AddHandler(BaseHandler):
         Returns:
             MemoryResponse with added memory information
         """
-        self.logger.debug(
-            f"[add_handler] Full request: {add_req.model_dump_json(indent=2)}"
-        )
+        self.logger.debug(f"[add_handler] Full request: {add_req.model_dump_json(indent=2)}")
 
         if add_req.info:
             exclude_fields = list_all_fields()
