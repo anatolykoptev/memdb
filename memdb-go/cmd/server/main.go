@@ -1,10 +1,10 @@
-// MemDB Go API Server — Phase 1: Reverse Proxy to Python Backend.
+// MemDB Go API Server.
 //
 // This is the entry point for the Go API gateway. It:
 // 1. Loads config from environment variables
 // 2. Sets up structured logging with slog
 // 3. Initializes OpenTelemetry (if enabled)
-// 4. Starts the HTTP server with all routes proxying to Python
+// 4. Starts the HTTP server with all routes
 // 5. Handles graceful shutdown on SIGINT/SIGTERM
 package main
 
