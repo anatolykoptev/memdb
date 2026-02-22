@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -64,7 +65,8 @@ type Config struct {
 	LLMProxyURL      string `json:"llm_proxy_url"`
 	LLMProxyAPIKey   string `json:"llm_proxy_api_key"`
 	LLMDefaultModel  string `json:"llm_default_model"`
-	LLMExtractModel  string `json:"llm_extract_model"` // model for fine-mode extraction (default: gemini-2.0-flash-lite)
+	LLMExtractModel    string   `json:"llm_extract_model"`    // model for fine-mode extraction (default: gemini-2.0-flash-lite)
+	LLMFallbackModels  []string `json:"llm_fallback_models"`  // fallback models tried on quota errors (comma-separated env)
 
 	// MemDB Go API URL (used by MCP server to proxy search)
 	MemDBGoURL string `json:"memdb_go_url"`
@@ -116,7 +118,8 @@ func Load() *Config {
 		LLMProxyURL:     envStr("MEMDB_LLM_PROXY_URL", "http://cliproxyapi:8317"),
 		LLMProxyAPIKey:  envStr("CLI_PROXY_API_KEY", ""),
 		LLMDefaultModel: envStr("MEMDB_LLM_MODEL", "gemini-2.5-flash"),
-		LLMExtractModel: envStr("MEMDB_LLM_EXTRACT_MODEL", "gemini-2.0-flash-lite"),
+		LLMExtractModel:   envStr("MEMDB_LLM_EXTRACT_MODEL", "gemini-2.0-flash-lite"),
+		LLMFallbackModels: envCSV("MEMDB_LLM_FALLBACK_MODELS", nil),
 
 		MemDBGoURL: envStr("MEMDB_GO_URL", ""),
 	}
@@ -170,6 +173,18 @@ func envBool(key string, fallback bool) bool {
 		}
 	}
 	return fallback
+}
+
+func envCSV(key string, def []string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	parts := strings.Split(v, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
 }
 
 func envDuration(key string, fallback time.Duration) time.Duration {

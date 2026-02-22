@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,7 +21,7 @@ func mockLLM(t *testing.T, responseBody string) (*httptest.Server, *LLMExtractor
 		}
 		json.NewEncoder(w).Encode(resp)
 	}))
-	ext := NewLLMExtractor(srv.URL, "", "gemini-2.0-flash-lite")
+	ext := NewLLMExtractor(srv.URL, "", "gemini-2.0-flash-lite", nil, slog.Default())
 	return srv, ext
 }
 
@@ -271,7 +272,7 @@ func TestJudgeDedupMerge_LLMErrorDefaultsToAdd(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ext := NewLLMExtractor(srv.URL, "", "")
+	ext := NewLLMExtractor(srv.URL, "", "", nil, slog.Default())
 	candidates := []Candidate{{ID: "x", Memory: "some fact"}}
 	decision, _ := ext.JudgeDedupMerge(context.Background(), "new fact", candidates)
 	if decision.Action != DedupAdd {

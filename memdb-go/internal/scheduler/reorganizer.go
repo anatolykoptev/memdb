@@ -3,8 +3,6 @@ package scheduler
 import (
 	"context"
 	"log/slog"
-	"net/http"
-	"strings"
 	"time"
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
@@ -60,11 +58,8 @@ type Reorganizer struct {
 	postgres     *db.Postgres
 	embedder     embedder.Embedder
 	wmCache      *db.WorkingMemoryCache // nil = VSET not configured
-	llmURL       string
-	llmKey       string
-	llmModel     string
+	llmClient    *llm.Client            // shared LLM client with retry + fallback
 	logger       *slog.Logger
-	http         *http.Client
 	llmExtractor *llm.LLMExtractor // for ExtractAndDedup (fine-level mem_read)
 	profiler     *Profiler         // for TriggerRefresh after mem_read
 }
@@ -75,27 +70,21 @@ func (r *Reorganizer) SetLLMExtractor(e *llm.LLMExtractor) { r.llmExtractor = e 
 // SetProfiler injects the profiler for background user profile refresh.
 func (r *Reorganizer) SetProfiler(p *Profiler) { r.profiler = p }
 
-// NewReorganizer creates a Reorganizer. llmURL/llmKey/llmModel must point to the
-// CLIProxyAPI (OpenAI-compatible) endpoint used by the rest of the system.
+// NewReorganizer creates a Reorganizer. llmClient provides retry + model
+// fallback for all LLM calls (consolidation, feedback, prefs, enhance).
 func NewReorganizer(
 	postgres *db.Postgres,
 	emb embedder.Embedder,
 	wmCache *db.WorkingMemoryCache,
-	llmURL, llmKey, llmModel string,
+	llmClient *llm.Client,
 	logger *slog.Logger,
 ) *Reorganizer {
-	if llmModel == "" {
-		llmModel = "gemini-2.0-flash-lite"
-	}
 	return &Reorganizer{
-		postgres: postgres,
-		embedder: emb,
-		wmCache:  wmCache,
-		llmURL:   strings.TrimRight(llmURL, "/"),
-		llmKey:   llmKey,
-		llmModel: llmModel,
-		logger:   logger,
-		http:     &http.Client{Timeout: 120 * time.Second},
+		postgres:  postgres,
+		embedder:  emb,
+		wmCache:   wmCache,
+		llmClient: llmClient,
+		logger:    logger,
 	}
 }
 

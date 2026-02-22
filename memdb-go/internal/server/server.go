@@ -95,16 +95,16 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 
 	// Initialize LLM extractor for fine-mode native add (non-fatal if URL not set).
 	// Shared between HTTP handler (sync fine add) and scheduler worker (async mem_read).
+	// Uses shared llm.Client with retry + model fallback on quota errors.
 	var extractor *llm.LLMExtractor
 	if cfg.LLMProxyURL != "" {
-		// Prefer gemini-2.0-flash-lite for extraction (fast + cheap);
-		// falls back to configured default model if empty.
-		extractModel := cfg.LLMExtractModel
-		extractor = llm.NewLLMExtractor(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, extractModel)
+		extractClient := llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMExtractModel, cfg.LLMFallbackModels, logger)
+		extractor = llm.NewLLMExtractorWithClient(extractClient)
 		h.SetLLMExtractor(extractor)
 		logger.Info("llm extractor initialized",
 			slog.String("model", extractor.Model()),
 			slog.String("url", cfg.LLMProxyURL),
+			slog.Any("fallback_models", cfg.LLMFallbackModels),
 		)
 	}
 
@@ -114,9 +114,10 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	if rd != nil {
 		var reorg *scheduler.Reorganizer
 		if pg != nil && cfg.LLMProxyURL != "" {
+			reorgLLMClient := llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel, cfg.LLMFallbackModels, logger)
 			reorg = scheduler.NewReorganizer(
 				pg, emb, wmCache,
-				cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMExtractModel,
+				reorgLLMClient,
 				logger,
 			)
 			if extractor != nil {
@@ -126,7 +127,8 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 				reorg.SetProfiler(profiler)
 			}
 			logger.Info("scheduler reorganizer initialized",
-				slog.String("model", cfg.LLMExtractModel),
+				slog.String("model", cfg.LLMDefaultModel),
+				slog.Any("fallback_models", cfg.LLMFallbackModels),
 			)
 		} else {
 			logger.Info("scheduler reorganizer disabled (postgres or LLM not configured)")

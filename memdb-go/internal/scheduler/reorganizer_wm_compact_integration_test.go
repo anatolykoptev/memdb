@@ -29,7 +29,13 @@ import (
 	"testing"
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
+	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
 )
+
+// testLLMClient creates an llm.Client pointing to a test HTTP server.
+func testLLMClient(url string) *llm.Client {
+	return llm.NewClient(url, "", "test-model", nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+}
 
 // ---- pgStub: in-memory Postgres stub ----------------------------------------
 
@@ -120,12 +126,10 @@ func newTestReorganizer(t *testing.T, pg *pgStub, llmURL string) (*Reorganizer, 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	r := &Reorganizer{
-		postgres: pg.asPostgres(),
-		llmURL:   llmURL,
-		llmModel: "test-model",
-		logger:   logger,
-		http:     &http.Client{},
-		wmCache:  vs.asWMCache(),
+		postgres:  pg.asPostgres(),
+		llmClient: testLLMClient(llmURL),
+		logger:    logger,
+		wmCache:   vs.asWMCache(),
 	}
 	return r, vs
 }
@@ -161,10 +165,8 @@ func TestCompactWM_BelowThreshold_NoLLMCall(t *testing.T) {
 	// Verify: if count < threshold, llmSummarizeWM is never called.
 	// We test this by checking that an empty nodes slice returns "" immediately.
 	r := &Reorganizer{
-		llmURL:   srv.URL,
-		llmModel: "test-model",
-		logger:   slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
-		http:     &http.Client{},
+		llmClient: testLLMClient(srv.URL),
+		logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
 
 	summary, err := r.llmSummarizeWM(context.Background(), "cube-1", nil)
@@ -187,10 +189,8 @@ func TestCompactWM_LLMSummaryParsed(t *testing.T) {
 	defer srv.Close()
 
 	r := &Reorganizer{
-		llmURL:   srv.URL,
-		llmModel: "test-model",
-		logger:   slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
-		http:     &http.Client{},
+		llmClient: testLLMClient(srv.URL),
+		logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
 
 	nodes := makeTestMemNodes(5)
@@ -210,10 +210,8 @@ func TestCompactWM_LLMError_Propagated(t *testing.T) {
 	defer srv.Close()
 
 	r := &Reorganizer{
-		llmURL:   srv.URL,
-		llmModel: "test-model",
-		logger:   slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
-		http:     &http.Client{},
+		llmClient: testLLMClient(srv.URL),
+		logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
 
 	nodes := makeTestMemNodes(5)
@@ -230,10 +228,8 @@ func TestCompactWM_EmptySummary_NoDelete(t *testing.T) {
 	defer srv.Close()
 
 	r := &Reorganizer{
-		llmURL:   srv.URL,
-		llmModel: "test-model",
-		logger:   slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
-		http:     &http.Client{},
+		llmClient: testLLMClient(srv.URL),
+		logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
 
 	nodes := makeTestMemNodes(5)
@@ -266,10 +262,8 @@ func TestCompactWM_LLMUserMessage_ContainsAllNodes(t *testing.T) {
 	defer srv.Close()
 
 	r := &Reorganizer{
-		llmURL:   srv.URL,
-		llmModel: "test-model",
-		logger:   slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
-		http:     &http.Client{},
+		llmClient: testLLMClient(srv.URL),
+		logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
 
 	nodes := makeTestMemNodes(3)
@@ -339,10 +333,8 @@ func TestCompactWM_LLMRequest_SystemPrompt(t *testing.T) {
 	defer srv.Close()
 
 	r := &Reorganizer{
-		llmURL:   srv.URL,
-		llmModel: "test-model",
-		logger:   slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
-		http:     &http.Client{},
+		llmClient: testLLMClient(srv.URL),
+		logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
 
 	_, err := r.llmSummarizeWM(context.Background(), "cube-1", makeTestMemNodes(3))
@@ -478,10 +470,8 @@ func TestCompactWM_LLMMarkdownFenceStripped(t *testing.T) {
 	defer srv.Close()
 
 	r := &Reorganizer{
-		llmURL:   srv.URL,
-		llmModel: "test-model",
-		logger:   slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
-		http:     &http.Client{},
+		llmClient: testLLMClient(srv.URL),
+		logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
 
 	nodes := makeTestMemNodes(3)
@@ -505,10 +495,8 @@ func TestCompactWM_LLMCalledOnce(t *testing.T) {
 	defer srv.Close()
 
 	r := &Reorganizer{
-		llmURL:   srv.URL,
-		llmModel: "test-model",
-		logger:   slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
-		http:     &http.Client{},
+		llmClient: testLLMClient(srv.URL),
+		logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
 
 	// Even with many nodes, LLM is called exactly once
