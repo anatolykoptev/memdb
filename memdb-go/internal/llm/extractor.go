@@ -22,13 +22,11 @@
 package llm
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
+	"log/slog"
 	"strings"
-	"time"
 )
 
 // MinConfidence is the minimum confidence score for a fact to be persisted.
@@ -124,28 +122,27 @@ type Fact = ExtractedFact
 // LLMExtractor calls an OpenAI-compatible chat completion API to extract
 // atomic facts from conversations and judge deduplication decisions.
 type LLMExtractor struct {
-	client  *http.Client
-	baseURL string
-	apiKey  string
-	model   string
+	client *Client
 }
 
 // NewLLMExtractor creates an extractor pointing to CLIProxyAPI.
 // model defaults to "gemini-2.0-flash-lite" if empty.
-func NewLLMExtractor(baseURL, apiKey, model string) *LLMExtractor {
+func NewLLMExtractor(baseURL, apiKey, model string, fallbackModels []string, logger *slog.Logger) *LLMExtractor {
 	if model == "" {
 		model = "gemini-2.0-flash-lite"
 	}
 	return &LLMExtractor{
-		client:  &http.Client{Timeout: 90 * time.Second},
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
-		model:   model,
+		client: NewClient(baseURL, apiKey, model, fallbackModels, logger),
 	}
 }
 
+// NewLLMExtractorWithClient creates an extractor using a pre-configured Client.
+func NewLLMExtractorWithClient(c *Client) *LLMExtractor {
+	return &LLMExtractor{client: c}
+}
+
 // Model returns the configured LLM model name.
-func (e *LLMExtractor) Model() string { return e.model }
+func (e *LLMExtractor) Model() string { return e.client.Model() }
 
 // --- Unified extraction+dedup prompt (v2) ---
 //
@@ -213,7 +210,7 @@ func (e *LLMExtractor) ExtractAndDedup(ctx context.Context, conversation string,
 		{"role": "user", "content": sb.String()},
 	}
 
-	raw, err := e.callLLM(ctx, msgs, 60*time.Second)
+	raw, err := e.client.Chat(ctx, msgs, 4096)
 	if err != nil {
 		return nil, fmt.Errorf("extract and dedup: %w", err)
 	}
@@ -255,62 +252,6 @@ func (e *LLMExtractor) JudgeDedupMerge(ctx context.Context, newMem string, candi
 }
 
 // --- Internal helpers ---
-
-// callLLM sends a single OpenAI-compatible chat completion request.
-func (e *LLMExtractor) callLLM(ctx context.Context, messages []map[string]string, timeout time.Duration) (string, error) {
-	body, err := json.Marshal(map[string]any{
-		"model":       e.model,
-		"messages":    messages,
-		"temperature": 0.1,
-		"max_tokens":  4096,
-	})
-	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
-	}
-
-	callCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(callCtx, http.MethodPost,
-		e.baseURL+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if e.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.apiKey)
-	}
-
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error,omitempty"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
-	}
-	if result.Error != nil {
-		return "", fmt.Errorf("llm api error: %s", result.Error.Message)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("llm status %d", resp.StatusCode)
-	}
-	if len(result.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
-	}
-	return result.Choices[0].Message.Content, nil
-}
 
 // stripFences removes optional ```json ... ``` markdown fences from LLM output.
 func stripFences(s string) string {
