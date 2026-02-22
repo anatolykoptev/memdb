@@ -197,9 +197,11 @@ Return ONLY a JSON array of fact objects (no "skip" entries needed). Return [] i
 // decides ADD/UPDATE/DELETE against the provided candidates.
 //
 // candidates should be the top-N most similar existing memories (from vector search).
+// hints are optional quality signals from the content router, injected into the user
+// message to guide extraction focus. Pass no hints for default behavior.
 // Facts with confidence < MinConfidence are filtered out before returning.
 // The caller is responsible for acting on each fact's Action field.
-func (e *LLMExtractor) ExtractAndDedup(ctx context.Context, conversation string, candidates []Candidate) ([]ExtractedFact, error) {
+func (e *LLMExtractor) ExtractAndDedup(ctx context.Context, conversation string, candidates []Candidate, hints ...string) ([]ExtractedFact, error) {
 	var sb strings.Builder
 	sb.WriteString("Conversation:\n")
 	sb.WriteString(conversation)
@@ -208,6 +210,16 @@ func (e *LLMExtractor) ExtractAndDedup(ctx context.Context, conversation string,
 		sb.WriteString("\n\nEXISTING MEMORIES (for dedup context):\n")
 		enc, _ := json.Marshal(candidates)
 		sb.Write(enc)
+	}
+
+	if len(hints) > 0 {
+		sb.WriteString("\n\n<content_hints>\n")
+		for _, h := range hints {
+			sb.WriteString("- ")
+			sb.WriteString(h)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("</content_hints>")
 	}
 
 	msgs := []map[string]string{

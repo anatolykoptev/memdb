@@ -19,6 +19,13 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/search"
 )
 
+// BufferConfig holds buffer zone settings for batching add requests.
+type BufferConfig struct {
+	Enabled bool
+	Size    int           // count threshold (default 5)
+	TTL     time.Duration // time threshold (default 30s)
+}
+
 // Handler holds shared dependencies for all HTTP handlers.
 type Handler struct {
 	python        *rpc.PythonClient
@@ -32,6 +39,7 @@ type Handler struct {
 	llmExtractor  *llm.LLMExtractor        // nil = mode=fine falls back to proxy
 	profiler      *scheduler.Profiler      // nil = profile summaries disabled
 	tracker       *scheduler.TaskStatusTracker // nil = fall back to stream-based status
+	bufferCfg     BufferConfig                // buffer zone config (zero value = disabled)
 }
 
 // NewHandler creates a new Handler with the given dependencies.
@@ -77,6 +85,11 @@ func (h *Handler) SetProfiler(p *scheduler.Profiler) {
 // (same schema as Python) instead of stream-based XLen/XPending heuristics.
 func (h *Handler) SetTaskTracker(t *scheduler.TaskStatusTracker) {
 	h.tracker = t
+}
+
+// SetBufferConfig sets the buffer zone configuration for batching add requests.
+func (h *Handler) SetBufferConfig(cfg BufferConfig) {
+	h.bufferCfg = cfg
 }
 
 // SetWorkingMemoryCache sets the Redis VSET hot cache for WorkingMemory.

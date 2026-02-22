@@ -175,7 +175,7 @@ func (h *Handler) reprocessBatch(ctx context.Context, batch []db.RawMemory, cube
 	conversation := strings.TrimSpace(sb.String())
 
 	// Fetch dedup candidates (existing clean LTM nodes)
-	candidates := h.fetchFineCandidates(ctx, conversation, cubeID, "")
+	candidates, _ := h.fetchFineCandidates(ctx, conversation, cubeID, "")
 
 	// Extract facts via LLM
 	facts, err := h.llmExtractor.ExtractAndDedup(ctx, conversation, candidates)

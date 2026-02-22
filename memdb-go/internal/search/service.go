@@ -571,10 +571,19 @@ func (s *SearchService) postProcessResults(
 	skill = ReRankByCosine(queryVec, skill, skillEmbByID)
 	tool = ReRankByCosine(queryVec, tool, toolEmbByID)
 
-	// Step 6.1: LLM rerank of text_mem (opt-in)
-	if p.LLMRerank && s.LLMReranker.APIURL != "" && len(text) > 1 {
+	// Step 6.1: LLM rerank of text_mem (adaptive strategy)
+	if decision := rerankStrategy(text); p.LLMRerank && s.LLMReranker.APIURL != "" && decision.ShouldRerank {
 		t0 := time.Now()
-		text = LLMRerank(ctx, p.Query, text, s.LLMReranker)
+		rerankInput := text
+		if decision.TopK > 0 && decision.TopK < len(text) {
+			rerankInput = text[:decision.TopK]
+		}
+		reranked := LLMRerank(ctx, p.Query, rerankInput, s.LLMReranker)
+		if decision.TopK > 0 && decision.TopK < len(text) {
+			text = append(reranked, text[decision.TopK:]...)
+		} else {
+			text = reranked
+		}
 		llmRerankDur = time.Since(t0)
 	}
 

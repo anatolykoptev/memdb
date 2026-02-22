@@ -34,7 +34,7 @@ func TestCallEpisodicSummarizer_Success(t *testing.T) {
 		llmDefaultModel = origModel
 	}()
 
-	summary, err := callEpisodicSummarizer(context.Background(), "user: I like coffee\nassistant: got it")
+	summary, err := callEpisodicSummarizer(context.Background(), "user: I like coffee\nassistant: got it", "general")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestCallEpisodicSummarizer_ErrorFallback(t *testing.T) {
 	llmProxyURL = ts.URL
 	defer func() { llmProxyURL = origURL }()
 
-	summary, err := callEpisodicSummarizer(context.Background(), "user: I like coffee")
+	summary, err := callEpisodicSummarizer(context.Background(), "user: I like coffee", "general")
 	if err == nil {
 		t.Errorf("expected error from 500 response, got none")
 	}

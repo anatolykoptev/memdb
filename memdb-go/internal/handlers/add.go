@@ -173,8 +173,8 @@ func (h *Handler) proxyReason(req *fullAddRequest) string {
 	return "unknown"
 }
 
-// nativeAddForCube dispatches to async, fast, or fine pipeline based on mode.
-// Default (no mode specified) is fine if llmExtractor is available, otherwise fast.
+// nativeAddForCube dispatches to async, fast, fine, or buffer pipeline based on mode.
+// Default (no mode specified) uses buffer if enabled, otherwise fine/fast.
 func (h *Handler) nativeAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
 	if req.AsyncMode != nil && *req.AsyncMode == modeAsync {
 		return h.nativeAsyncAddForCube(ctx, req, cubeID)
@@ -182,7 +182,14 @@ func (h *Handler) nativeAddForCube(ctx context.Context, req *fullAddRequest, cub
 	if req.Mode != nil && *req.Mode == modeFast {
 		return h.nativeFastAddForCube(ctx, req, cubeID)
 	}
-	// mode=fine explicitly, or nil (default) → fine with LLM extraction
+	if req.Mode != nil && *req.Mode == modeFine {
+		return h.nativeFineAddForCube(ctx, req, cubeID)
+	}
+	// Default mode (no explicit mode): use buffer if enabled and available
+	if req.Mode == nil && h.bufferCfg.Enabled && h.redis != nil && h.llmExtractor != nil {
+		return h.bufferAddForCube(ctx, req, cubeID)
+	}
+	// Fallback: sync fine or fast
 	if h.llmExtractor != nil {
 		return h.nativeFineAddForCube(ctx, req, cubeID)
 	}

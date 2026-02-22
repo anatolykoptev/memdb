@@ -40,18 +40,27 @@ const (
 // generateEpisodicSummary asynchronously creates an EpisodicMemory node for the session.
 // Called after fact insertion — non-blocking (fire-and-forget via goroutine).
 // The node captures a 3-5 sentence overview of the conversation window.
-func (h *Handler) generateEpisodicSummary(cubeID, sessionID, conversation, now string) {
+func (h *Handler) generateEpisodicSummary(cubeID, sessionID, conversation, now string, factCount int) {
 	if h.llmExtractor == nil || h.postgres == nil || h.embedder == nil {
 		return
+	}
+	if factCount == 0 {
+		return // no facts extracted — nothing to summarize
+	}
+	if codeBlockRatio(conversation) > 0.8 {
+		return // mostly code — low episodic value
 	}
 	if len(strings.TrimSpace(conversation)) < 100 {
 		return // too short to be worth summarising
 	}
+	// Detect session type for focused summary.
+	sessionType := detectSessionType(conversation)
+
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), episodicSummaryTimeout)
 		defer cancel()
 
-		summary, err := callEpisodicSummarizer(ctx, conversation)
+		summary, err := callEpisodicSummarizer(ctx, conversation, sessionType)
 		if err != nil {
 			h.logger.Debug("episodic summary: llm call failed", slog.Any("error", err))
 			return
@@ -221,10 +230,16 @@ func (h *Handler) linkHandlerPair(ctx context.Context, p entityLinkPair, cubeID,
 }
 
 // callEpisodicSummarizer sends a single chat completion request to generate the session summary.
-func callEpisodicSummarizer(ctx context.Context, conversation string) (string, error) {
+// sessionType customizes the summary prompt focus (decision/learning/debug/planning/general).
+func callEpisodicSummarizer(ctx context.Context, conversation, sessionType string) (string, error) {
 	// Truncate to avoid prompt overflows (last episodicConvMaxChars covers ~4000 tokens)
 	if len(conversation) > episodicConvMaxChars {
 		conversation = "..." + conversation[len(conversation)-episodicConvMaxChars:]
+	}
+
+	systemContent := "You are a memory archivist. Summarize the key facts and themes from the conversation in 3-5 concise sentences. Focus on factual information, not pleasantries. Do not use bullet points."
+	if focus := sessionPromptFocus(sessionType); focus != "" {
+		systemContent += "\n\n" + focus
 	}
 
 	payload := map[string]any{
@@ -234,7 +249,7 @@ func callEpisodicSummarizer(ctx context.Context, conversation string) (string, e
 		"messages": []map[string]string{
 			{
 				"role":    "system",
-				"content": "You are a memory archivist. Summarize the key facts and themes from the conversation in 3-5 concise sentences. Focus on factual information, not pleasantries. Do not use bullet points.",
+				"content": systemContent,
 			},
 			{
 				"role":    "user",

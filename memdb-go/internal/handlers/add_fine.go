@@ -45,11 +45,29 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 	// Step 1: format conversation
 	conversation := formatConversation(req.Messages, now)
 
-	// Step 2: candidate fetch for dedup context
-	candidates := h.fetchFineCandidates(ctx, conversation, cubeID, stringOrEmpty(req.AgentID))
+	// Step 1.5: content router — classify and generate quality hints
+	sig := classifyContent(req.Messages, conversation)
+	if sig.Skip {
+		h.logger.Debug("fine add: skipped extraction",
+			slog.String("reason", sig.SkipReason), slog.String("cube_id", cubeID))
+		return nil, nil
+	}
 
-	// Step 3: unified LLM extraction + dedup (one round-trip)
-	facts, err := h.llmExtractor.ExtractAndDedup(ctx, conversation, candidates)
+	// Step 2: candidate fetch for dedup context
+	candidates, topScore := h.fetchFineCandidates(ctx, conversation, cubeID, stringOrEmpty(req.AgentID))
+	if topScore > nearDuplicateThreshold {
+		h.logger.Debug("fine add: skipped — near-duplicate",
+			slog.Float64("top_score", topScore), slog.String("cube_id", cubeID))
+		return nil, nil
+	}
+
+	// Step 2.5: merge hint for high-similarity (but not duplicate) content
+	if topScore > mergeSuggestionThreshold {
+		sig.Hints = append(sig.Hints, "High-similarity existing memory found — prefer UPDATE over ADD if semantically equivalent")
+	}
+
+	// Step 3: unified LLM extraction + dedup (one round-trip, with content hints)
+	facts, err := h.llmExtractor.ExtractAndDedup(ctx, conversation, candidates, sig.Hints...)
 	if err != nil {
 		return nil, fmt.Errorf("fine add: extract and dedup: %w", err)
 	}
@@ -97,7 +115,7 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 
 	// Step 7: generate episodic session summary in background (non-blocking, non-fatal)
 	// EpisodicMemory nodes improve multi-hop temporal reasoning on later queries.
-	h.generateEpisodicSummary(cubeID, sessionID, conversation, now)
+	h.generateEpisodicSummary(cubeID, sessionID, conversation, now, len(facts))
 
 	// Step 8: generate / update User profile summary in background
 	if h.profiler != nil {
@@ -172,16 +190,17 @@ type wmVSetInsert struct {
 //  2. Postgres pgvector fallback (~20-100ms) — covers LongTermMemory + UserMemory
 //
 // Both results are merged and deduplicated by ID before returning.
-func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID, agentID string) []llm.Candidate {
+func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID, agentID string) ([]llm.Candidate, float64) {
 	head := conversation[:min(candidateConvHeadChars, len(conversation))]
 	convEmbs, err := h.embedder.Embed(ctx, []string{head})
 	if err != nil || len(convEmbs) == 0 || len(convEmbs[0]) == 0 {
-		return nil
+		return nil, 0
 	}
 	embedding := convEmbs[0]
 
 	seen := make(map[string]struct{})
 	out := make([]llm.Candidate, 0, 10)
+	var topScore float64
 
 	// Tier 1: VSET hot cache (WorkingMemory, HNSW in-memory)
 	if h.wmCache != nil {
@@ -191,6 +210,9 @@ func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID,
 				slog.String("cube_id", cubeID), slog.Any("error", err))
 		} else {
 			for _, r := range vsetResults {
+				if r.Score > topScore {
+					topScore = r.Score
+				}
 				if r.ID != "" && r.Memory != "" {
 					out = append(out, llm.Candidate{ID: r.ID, Memory: r.Memory})
 					seen[r.ID] = struct{}{}
@@ -209,6 +231,9 @@ func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID,
 			slog.String("cube_id", cubeID), slog.Any("error", err))
 	} else {
 		for _, r := range results {
+			if r.Score > topScore {
+				topScore = r.Score
+			}
 			id, mem := extractIDAndMemory(r.Properties)
 			if id == "" || mem == "" {
 				continue
@@ -221,7 +246,7 @@ func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID,
 		}
 	}
 
-	return out
+	return out, topScore
 }
 
 // embeddedFact pairs an ExtractedFact with its computed embedding (if any).
