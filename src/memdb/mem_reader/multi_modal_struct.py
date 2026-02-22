@@ -439,7 +439,9 @@ class MultiModalStructMemReader(SimpleStructMemReader):
                 ],
                 "summary": mem_str,
             }
-        mem_count = len(response_json.get("memory list", [])) if isinstance(response_json, dict) else 0
+        mem_count = (
+            len(response_json.get("memory list", [])) if isinstance(response_json, dict) else 0
+        )
         logger.info(f"[MultiModalFine] Extracted {mem_count} memories")
         logger.debug(f"[MultiModalFine] Result {response_json}")
         return response_json

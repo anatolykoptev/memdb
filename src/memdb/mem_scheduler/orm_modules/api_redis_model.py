@@ -442,9 +442,7 @@ class APIRedisDBManager:
 
         # Check required environment variables
         if not redis_host:
-            error_msg = (
-                "Missing required Redis environment variable: REDIS_HOST or MEMDBSCHEDULER_REDIS_HOST"
-            )
+            error_msg = "Missing required Redis environment variable: REDIS_HOST or MEMDBSCHEDULER_REDIS_HOST"
             logger.error(error_msg)
             return None
 

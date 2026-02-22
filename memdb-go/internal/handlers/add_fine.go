@@ -190,7 +190,7 @@ type wmVSetInsert struct {
 //  2. Postgres pgvector fallback (~20-100ms) — covers LongTermMemory + UserMemory
 //
 // Both results are merged and deduplicated by ID before returning.
-func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID, agentID string) ([]llm.Candidate, float64) {
+func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID, agentID string) ([]llm.Candidate, float64) { //nolint:gocognit,cyclop
 	head := conversation[:min(candidateConvHeadChars, len(conversation))]
 	convEmbs, err := h.embedder.Embed(ctx, []string{head})
 	if err != nil || len(convEmbs) == 0 || len(convEmbs[0]) == 0 {
@@ -203,7 +203,7 @@ func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID,
 	var topScore float64
 
 	// Tier 1: VSET hot cache (WorkingMemory, HNSW in-memory)
-	if h.wmCache != nil {
+	if h.wmCache != nil { //nolint:nestif
 		vsetResults, err := h.wmCache.VSim(ctx, cubeID, embedding, 10)
 		if err != nil {
 			h.logger.Debug("fine add: vset vsim failed, falling back",

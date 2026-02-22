@@ -1,8 +1,10 @@
 import json
+
 from typing import Any
 
 from memdb.log import get_logger
 from memdb.utils import timed
+
 
 logger = get_logger(__name__)
 
@@ -425,7 +427,9 @@ class QueryMixin:
         finally:
             self._return_connection(conn)
 
-        logger.info(f"[get_all_memory_items] scope={scope}, returned={len(nodes)}, include_embedding={include_embedding}")
+        logger.info(
+            f"[get_all_memory_items] scope={scope}, returned={len(nodes)}, include_embedding={include_embedding}"
+        )
         return nodes
 
     @timed

@@ -440,9 +440,7 @@ class SingleCubeView(MemCubeView):
                 )
                 return results
             except Exception as e:
-                self.logger.warning(
-                    "[SEARCH:PREF:GO] failed, falling back to Python: %s", e
-                )
+                self.logger.warning("[SEARCH:PREF:GO] failed, falling back to Python: %s", e)
 
         # Fallback: direct Qdrant search
         logger.debug(f"search_req.filter for preference memory: {search_req.filter}")

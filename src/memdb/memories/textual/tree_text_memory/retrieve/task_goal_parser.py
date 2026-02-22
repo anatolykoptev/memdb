@@ -16,13 +16,25 @@ from memdb.memories.textual.tree_text_memory.retrieve.utils import TASK_PARSE_PR
 # Temporal intent patterns (EN + RU)
 _TEMPORAL_PATTERNS: list[tuple[str, str]] = [
     # last 24 hours
-    (r"\b(?:today|yesterday|last\s*(?:24\s*h|night)|сегодня|вчера|за\s*(?:последние\s*)?сутки)\b", "last_24h"),
+    (
+        r"\b(?:today|yesterday|last\s*(?:24\s*h|night)|сегодня|вчера|за\s*(?:последние\s*)?сутки)\b",
+        "last_24h",
+    ),
     # last 7 days
-    (r"\b(?:(?:this|last|past)\s*week|last\s*(?:7|seven)\s*days|(?:на\s*)?(?:этой|прошлой)\s*неделе|за\s*(?:последн(?:юю|ие)\s*)?неделю|последни[ех]\s*7\s*дн)\b", "last_7_days"),
+    (
+        r"\b(?:(?:this|last|past)\s*week|last\s*(?:7|seven)\s*days|(?:на\s*)?(?:этой|прошлой)\s*неделе|за\s*(?:последн(?:юю|ие)\s*)?неделю|последни[ех]\s*7\s*дн)\b",
+        "last_7_days",
+    ),
     # last 30 days
-    (r"\b(?:(?:this|last|past)\s*month|last\s*(?:30|thirty)\s*days|(?:в\s*)?(?:этом|прошлом)\s*месяце|за\s*(?:последний\s*)?месяц|последни[ех]\s*30\s*дн)\b", "last_30_days"),
+    (
+        r"\b(?:(?:this|last|past)\s*month|last\s*(?:30|thirty)\s*days|(?:в\s*)?(?:этом|прошлом)\s*месяце|за\s*(?:последний\s*)?месяц|последни[ех]\s*30\s*дн)\b",
+        "last_30_days",
+    ),
     # last 90 days / quarter
-    (r"\b(?:(?:this|last|past)\s*(?:quarter|3\s*months)|last\s*(?:90|ninety)\s*days|за\s*(?:последни[ех]\s*)?(?:3\s*месяц|квартал))\b", "last_90_days"),
+    (
+        r"\b(?:(?:this|last|past)\s*(?:quarter|3\s*months)|last\s*(?:90|ninety)\s*days|за\s*(?:последни[ех]\s*)?(?:3\s*месяц|квартал))\b",
+        "last_90_days",
+    ),
     # generic recent
     (r"\b(?:recently|recent|недавно|последн(?:ее|ие|ий))\b", "last_30_days"),
 ]
@@ -53,6 +65,7 @@ def temporal_scope_to_cutoff(scope: str | None) -> str | None:
     if not scope:
         return None
     from datetime import datetime, timedelta, timezone
+
     days = _SCOPE_TO_DAYS.get(scope)
     if days is None:
         return None
@@ -108,7 +121,9 @@ class TaskGoalParser:
         use_fast_graph = kwargs.get("use_fast_graph", False)
         temporal_scope = detect_temporal_scope(task_description)
         if temporal_scope:
-            logger.info(f"[TEMPORAL] Fast-mode detected temporal_scope='{temporal_scope}' from query")
+            logger.info(
+                f"[TEMPORAL] Fast-mode detected temporal_scope='{temporal_scope}' from query"
+            )
         if use_fast_graph:
             desc_tokenized = self.tokenizer.tokenize_mixed(task_description)
             return ParsedTaskGoal(
@@ -175,7 +190,9 @@ class TaskGoalParser:
                 llm_temporal = response_json.get("temporal_scope", None)
                 if not llm_temporal:
                     rephrased = response_json.get("rephrased_instruction", "") or ""
-                    llm_temporal = detect_temporal_scope(rephrased) or detect_temporal_scope(context)
+                    llm_temporal = detect_temporal_scope(rephrased) or detect_temporal_scope(
+                        context
+                    )
                 if llm_temporal:
                     logger.info(f"[TEMPORAL] Fine-mode detected temporal_scope='{llm_temporal}'")
                 return ParsedTaskGoal(

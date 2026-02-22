@@ -2,6 +2,7 @@ from memdb.graph_dbs.utils import convert_to_vector
 from memdb.log import get_logger
 from memdb.utils import timed
 
+
 logger = get_logger(__name__)
 
 
@@ -90,8 +91,12 @@ class SearchMixin:
         **kwargs,
     ) -> list[dict]:
         where_clauses = self._build_search_where_clauses_sql(
-            scope=scope, status=status, search_filter=search_filter,
-            user_name=user_name, filter=filter, knowledgebase_ids=knowledgebase_ids,
+            scope=scope,
+            status=status,
+            search_filter=search_filter,
+            user_name=user_name,
+            filter=filter,
+            knowledgebase_ids=knowledgebase_ids,
         )
 
         # Method-specific: LIKE pattern match
@@ -143,8 +148,12 @@ class SearchMixin:
         **kwargs,
     ) -> list[dict]:
         where_clauses = self._build_search_where_clauses_sql(
-            scope=scope, status=status, search_filter=search_filter,
-            user_name=user_name, filter=filter, knowledgebase_ids=knowledgebase_ids,
+            scope=scope,
+            status=status,
+            search_filter=search_filter,
+            user_name=user_name,
+            filter=filter,
+            knowledgebase_ids=knowledgebase_ids,
         )
 
         # Method-specific: TF-IDF fulltext search condition
@@ -224,8 +233,12 @@ class SearchMixin:
             f"[search_by_fulltext] query_words: {query_words}, top_k: {top_k}, scope: {scope}, filter: {filter}"
         )
         where_clauses = self._build_search_where_clauses_sql(
-            scope=scope, status=status, search_filter=search_filter,
-            user_name=user_name, filter=filter, knowledgebase_ids=knowledgebase_ids,
+            scope=scope,
+            status=status,
+            search_filter=search_filter,
+            user_name=user_name,
+            filter=filter,
+            knowledgebase_ids=knowledgebase_ids,
         )
 
         # Method-specific: fulltext search condition
@@ -293,8 +306,12 @@ class SearchMixin:
             f"[search_by_embedding] filter: {filter}, knowledgebase_ids: {knowledgebase_ids}"
         )
         where_clauses = self._build_search_where_clauses_sql(
-            scope=scope, status=status, search_filter=search_filter,
-            user_name=user_name, filter=filter, knowledgebase_ids=knowledgebase_ids,
+            scope=scope,
+            status=status,
+            search_filter=search_filter,
+            user_name=user_name,
+            filter=filter,
+            knowledgebase_ids=knowledgebase_ids,
         )
         # Method-specific: require embedding column
         where_clauses.append("embedding is not null")
@@ -356,11 +373,12 @@ class SearchMixin:
                     if threshold is None or score_val >= threshold:
                         output.append({"id": id_val, "score": score_val})
                 result = output[:top_k]
-                logger.info(f"[search_by_embedding] rows={len(results)}, after_threshold={len(output)}, returned={len(result)}")
+                logger.info(
+                    f"[search_by_embedding] rows={len(results)}, after_threshold={len(output)}, returned={len(result)}"
+                )
                 return result
         except Exception as e:
             logger.error(f"[search_by_embedding] Error: {type(e).__name__}: {e}", exc_info=True)
             return []
         finally:
             self._return_connection(conn)
-

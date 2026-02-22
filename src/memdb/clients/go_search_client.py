@@ -8,6 +8,7 @@ of the Phase 2 migration (search pipeline → Go).
 from __future__ import annotations
 
 import os
+
 from typing import Any
 
 import httpx
@@ -33,10 +34,7 @@ class GoSearchClient:
         base_url: str | None = None,
         timeout: int = DEFAULT_TIMEOUT,
     ) -> None:
-        self.base_url = (
-            base_url
-            or os.getenv("MEMDB_GO_URL", DEFAULT_GO_URL)
-        ).rstrip("/")
+        self.base_url = (base_url or os.getenv("MEMDB_GO_URL", DEFAULT_GO_URL)).rstrip("/")
         self.timeout = timeout
         headers: dict[str, str] = {}
         service_secret = os.getenv("INTERNAL_SERVICE_SECRET", "")
@@ -47,7 +45,12 @@ class GoSearchClient:
             timeout=httpx.Timeout(timeout),
             headers=headers,
         )
-        logger.info("[GoSearchClient] initialized → %s (timeout=%ds, auth=%s)", self.base_url, timeout, "yes" if service_secret else "no")
+        logger.info(
+            "[GoSearchClient] initialized → %s (timeout=%ds, auth=%s)",
+            self.base_url,
+            timeout,
+            "yes" if service_secret else "no",
+        )
 
     # ------------------------------------------------------------------
     # Public API

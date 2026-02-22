@@ -56,7 +56,7 @@ async def locomo_response(frame, llm_client, context: str, question: str) -> str
             return result
         except Exception as e:
             if "429" in str(e) or "rate" in str(e).lower():
-                wait = 2 ** attempt * 5
+                wait = 2**attempt * 5
                 print(f"Rate limited, retrying in {wait}s (attempt {attempt + 1}/5)...")
                 await asyncio.sleep(wait)
             else:

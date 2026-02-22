@@ -274,9 +274,7 @@ class BaseGraphDB(ABC):
         """
 
     @abstractmethod
-    def get_edges(
-        self, id: str, type: str = "ANY", direction: str = "ANY"
-    ) -> list[dict[str, str]]:
+    def get_edges(self, id: str, type: str = "ANY", direction: str = "ANY") -> list[dict[str, str]]:
         """
         Get edges connected to a node, with optional type and direction filter.
         Args:
@@ -287,9 +285,7 @@ class BaseGraphDB(ABC):
             List of edge dicts with 'from', 'to', and 'type' keys.
         """
 
-    def search_by_fulltext(
-        self, query_words: list[str], top_k: int = 10, **kwargs
-    ) -> list[dict]:
+    def search_by_fulltext(self, query_words: list[str], top_k: int = 10, **kwargs) -> list[dict]:
         """
         Full-text search for memory nodes.
         Args:
@@ -347,17 +343,13 @@ class BaseGraphDB(ABC):
         Check if a user_name exists in the graph.
         """
 
-    def search_by_keywords_like(
-        self, query_word: str, **kwargs
-    ) -> list[dict]:
+    def search_by_keywords_like(self, query_word: str, **kwargs) -> list[dict]:
         """
         Search memories using SQL LIKE pattern matching.
         """
         return []
 
-    def search_by_keywords_tfidf(
-        self, query_words: list[str], **kwargs
-    ) -> list[dict]:
+    def search_by_keywords_tfidf(self, query_words: list[str], **kwargs) -> list[dict]:
         """
         Search memories using TF-IDF fulltext scoring.
         """

@@ -64,7 +64,9 @@ class UniversalAPIEmbedder(BaseEmbedder):
     @timed_with_status(
         log_prefix="model_timed_embedding",
         log_extra_args=lambda self, texts: {
-            "model_name_or_path": getattr(getattr(self, "config", None), "model_name_or_path", "unknown"),
+            "model_name_or_path": getattr(
+                getattr(self, "config", None), "model_name_or_path", "unknown"
+            ),
             "text_len": len(texts),
         },
     )
@@ -91,7 +93,9 @@ class UniversalAPIEmbedder(BaseEmbedder):
                         _create_embeddings(), timeout=int(os.getenv("MEMDB_EMBEDDER_TIMEOUT", 5))
                     )
                 )
-                logger.info(f"Embeddings request succeeded: {len(response.data)} vectors in {time.time() - init_time:.2f}s")
+                logger.info(
+                    f"Embeddings request succeeded: {len(response.data)} vectors in {time.time() - init_time:.2f}s"
+                )
                 return [r.embedding for r in response.data]
             except Exception as e:
                 if self.use_backup_client:

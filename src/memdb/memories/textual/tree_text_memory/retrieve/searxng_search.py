@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+
 from datetime import datetime
 
 import requests
@@ -12,6 +13,7 @@ from memdb.memories.textual.item import (
     TextualMemoryItem,
     TreeNodeTextualMemoryMetadata,
 )
+
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +53,7 @@ class SearxngSearchAPI:
         }
 
         try:
-            response = requests.get(
-                f"{self.base_url}/search", params=params, timeout=10
-            )
+            response = requests.get(f"{self.base_url}/search", params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
             return data.get("results", [])[:max_results]
@@ -131,7 +131,7 @@ class SearxngSearchRetriever:
         session_id = info.get("session_id", "")
 
         memory_items = []
-        for entry, embedding in zip(entries, all_embeddings):
+        for entry, embedding in zip(entries, all_embeddings, strict=False):
             metadata = TreeNodeTextualMemoryMetadata(
                 user_id=user_id,
                 session_id=session_id,

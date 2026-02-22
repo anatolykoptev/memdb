@@ -1,11 +1,14 @@
 import copy
 import json
 import time
+
 from typing import Any
 
-from memdb.graph_dbs.utils import compose_node as _compose_node, prepare_node_metadata as _prepare_node_metadata
+from memdb.graph_dbs.utils import compose_node as _compose_node
+from memdb.graph_dbs.utils import prepare_node_metadata as _prepare_node_metadata
 from memdb.log import get_logger
 from memdb.utils import timed
+
 
 logger = get_logger(__name__)
 
@@ -457,7 +460,6 @@ class MaintenanceMixin:
         raise NotImplementedError
 
     def _convert_graph_edges(self, core_node: dict) -> dict:
-
         data = copy.deepcopy(core_node)
         id_map = {}
         core_node = data.get("core_node", {})

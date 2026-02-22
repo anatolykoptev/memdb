@@ -215,7 +215,7 @@ class ConnectionMixin:
                     if attempt < max_retries - 1:
                         # Longer backoff for pool exhaustion: 0.5s, 1.0s, 2.0s
                         wait_time = 0.5 * (2**attempt)
-                        logger.debug(f"[_get_connection] Waiting before retry...")
+                        logger.debug("[_get_connection] Waiting before retry...")
                         time.sleep(0.003)
                         continue
                     else:
