@@ -228,6 +228,14 @@ func (c *WorkingMemoryCache) VCard(ctx context.Context, cubeID string) (int64, e
 	return n, nil
 }
 
+// VDrop deletes the entire VSET for a cube (used by delete-all operations).
+func (c *WorkingMemoryCache) VDrop(ctx context.Context, cubeID string) error {
+	if err := c.client.Del(ctx, vsetKey(cubeID)).Err(); err != nil && !errors.Is(err, redis.Nil) {
+		return fmt.Errorf("vset drop %s: %w", cubeID, err)
+	}
+	return nil
+}
+
 // VRemBatch removes multiple nodes from the VSET in a pipeline.
 func (c *WorkingMemoryCache) VRemBatch(ctx context.Context, cubeID string, nodeIDs []string) error {
 	if len(nodeIDs) == 0 {
