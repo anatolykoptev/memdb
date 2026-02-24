@@ -82,12 +82,78 @@ func (h *Handler) deleteFromPreferenceCollections(ctx context.Context, ids []str
 	}
 	for _, collection := range []string{"explicit_preference", "implicit_preference"} {
 		if err := h.qdrant.DeleteByIDs(ctx, collection, ids); err != nil {
-			h.logger.Debug("qdrant delete from preference collection failed",
+			h.logger.Warn("qdrant delete from preference collection failed",
 				slog.String("collection", collection),
 				slog.Any("error", err),
 			)
 		}
 	}
+}
+
+// purgeUserPreferences deletes ALL points for a user from Qdrant preference collections.
+// Used by delete-all operations to ensure no ghost vectors remain.
+func (h *Handler) purgeUserPreferences(ctx context.Context, userID string) {
+	if h.qdrant == nil {
+		return
+	}
+	for _, collection := range []string{"explicit_preference", "implicit_preference"} {
+		if err := h.qdrant.PurgeByUserID(ctx, collection, userID); err != nil {
+			h.logger.Warn("qdrant purge user preferences failed",
+				slog.String("collection", collection),
+				slog.String("user_id", userID),
+				slog.Any("error", err),
+			)
+		}
+	}
+}
+
+// deleteAllRequest for the delete_all_memories REST endpoint.
+type deleteAllRequest struct {
+	UserID *string `json:"user_id"`
+}
+
+// NativeDeleteAll handles POST /product/delete_all_memories natively.
+// Deletes all activated memories from Postgres AND purges Qdrant preference collections.
+func (h *Handler) NativeDeleteAll(w http.ResponseWriter, r *http.Request) {
+	if h.postgres == nil {
+		h.ProxyToProduct(w, r)
+		return
+	}
+
+	body, ok := h.readBody(w, r)
+	if !ok {
+		return
+	}
+
+	var req deleteAllRequest
+	if !h.decodeJSON(w, body, &req) {
+		return
+	}
+
+	if req.UserID == nil || *req.UserID == "" {
+		h.writeValidationError(w, []string{"user_id is required"})
+		return
+	}
+
+	ctx := r.Context()
+	userID := *req.UserID
+
+	deleted, err := h.postgres.DeleteAllByUser(ctx, userID)
+	if err != nil {
+		h.logger.Warn("native delete_all failed", slog.Any("error", err))
+		h.proxyWithBody(w, r, body)
+		return
+	}
+
+	// Purge Qdrant preference collections to prevent ghost vectors.
+	h.purgeUserPreferences(ctx, userID)
+	h.cacheInvalidate(ctx, cachePrefix+"get_all:"+userID+":*", cachePrefix+"users:*")
+
+	h.writeJSON(w, http.StatusOK, map[string]any{
+		"code":    200,
+		"message": "ok",
+		"data":    map[string]any{"deleted_count": deleted},
+	})
 }
 
 // invalidateDeleteCaches invalidates get_all, users, and per-memory caches after deletion.

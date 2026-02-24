@@ -87,6 +87,27 @@ func (q *Qdrant) DeleteByIDs(ctx context.Context, collection string, ids []strin
 	return err
 }
 
+// PurgeByUserID deletes ALL points matching user_id from a collection using filter-based delete.
+// This is more reliable than ID-based delete because it catches orphaned points
+// that may have been missed during individual memory deletions.
+func (q *Qdrant) PurgeByUserID(ctx context.Context, collection, userID string) error {
+	wait := true
+	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
+		CollectionName: collection,
+		Points: &qdrant.PointsSelector{
+			PointsSelectorOneOf: &qdrant.PointsSelector_Filter{
+				Filter: &qdrant.Filter{
+					Must: []*qdrant.Condition{
+						qdrant.NewMatch("user_id", userID),
+					},
+				},
+			},
+		},
+		Wait: &wait,
+	})
+	return err
+}
+
 // ListCollections returns the names of all Qdrant collections.
 func (q *Qdrant) ListCollections(ctx context.Context) ([]string, error) {
 	return q.client.ListCollections(ctx)
