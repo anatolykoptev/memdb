@@ -66,6 +66,7 @@ func (h *Handler) NativeDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.deleteFromPreferenceCollections(r.Context(), *req.MemoryIDs)
+	h.evictFromVSetBatch(ctx, *req.UserID, *req.MemoryIDs)
 	h.invalidateDeleteCaches(ctx, *req.UserID, *req.MemoryIDs)
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
@@ -147,6 +148,7 @@ func (h *Handler) NativeDeleteAll(w http.ResponseWriter, r *http.Request) {
 
 	// Purge Qdrant preference collections to prevent ghost vectors.
 	h.purgeUserPreferences(ctx, userID)
+	h.dropVSet(ctx, userID)
 	h.cacheInvalidate(ctx, cachePrefix+"get_all:"+userID+":*", cachePrefix+"users:*")
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
@@ -156,10 +158,36 @@ func (h *Handler) NativeDeleteAll(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// invalidateDeleteCaches invalidates get_all, users, and per-memory caches after deletion.
+// evictFromVSetBatch removes deleted memory IDs from the VSET hot cache (non-fatal).
+func (h *Handler) evictFromVSetBatch(ctx context.Context, cubeID string, ids []string) {
+	if h.wmCache == nil || len(ids) == 0 {
+		return
+	}
+	if err := h.wmCache.VRemBatch(ctx, cubeID, ids); err != nil {
+		h.logger.Warn("vset evict batch failed",
+			slog.String("cube_id", cubeID), slog.Any("error", err))
+	}
+}
+
+// dropVSet removes the entire VSET for a cube (used by delete-all).
+func (h *Handler) dropVSet(ctx context.Context, cubeID string) {
+	if h.wmCache == nil {
+		return
+	}
+	if err := h.wmCache.VDrop(ctx, cubeID); err != nil {
+		h.logger.Warn("vset drop failed",
+			slog.String("cube_id", cubeID), slog.Any("error", err))
+	}
+}
+
+// invalidateDeleteCaches invalidates get_all, search, users, and per-memory caches after deletion.
 func (h *Handler) invalidateDeleteCaches(ctx context.Context, userID string, ids []string) {
-	patterns := make([]string, 0, 2+len(ids))
-	patterns = append(patterns, cachePrefix+"get_all:"+userID+":*", cachePrefix+"users:*")
+	patterns := make([]string, 0, 4+len(ids))
+	patterns = append(patterns,
+		cachePrefix+"get_all:"+userID+":*",
+		cachePrefix+"search:*:"+userID+":*",
+		cachePrefix+"users:*",
+	)
 	for _, id := range ids {
 		patterns = append(patterns, cachePrefix+"memory:"+id)
 	}
