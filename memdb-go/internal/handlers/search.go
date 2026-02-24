@@ -144,7 +144,7 @@ func buildSearchParams(req searchRequest) (search.SearchParams, error) {
 		PrefTopK:         search.DefaultPrefTopK,
 		ToolTopK:         search.DefaultToolTopK,
 		Dedup:            "no",
-		Relativity:       0.0,
+		Relativity:       search.DefaultRelativity,
 		IncludeEmbedding: derefBoolOr(req.IncludeEmbedding, false),
 		IncludeSkill:     true,
 		IncludePref:      true,

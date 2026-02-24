@@ -58,7 +58,7 @@ func main() {
 
 	ctx := context.Background()
 
-	// Only Postgres is needed (for memory CRUD and user tools).
+	// Postgres (memory CRUD and user tools) + Qdrant (preference cleanup on delete).
 	var pg *db.Postgres
 	if cfg.PostgresURL != "" {
 		var err error
@@ -66,6 +66,15 @@ func main() {
 		if err != nil {
 			logger.Error("postgres init failed", slog.Any("error", err))
 			os.Exit(1)
+		}
+	}
+
+	var qd *db.Qdrant
+	if cfg.QdrantAddr != "" {
+		var err error
+		qd, err = db.NewQdrant(ctx, cfg.QdrantAddr, logger)
+		if err != nil {
+			logger.Warn("qdrant init failed (preference cleanup disabled)", slog.Any("error", err))
 		}
 	}
 
@@ -82,7 +91,7 @@ func main() {
 		logger.Warn("MEMDB_GO_URL not set, search will proxy to python backend")
 	}
 	mcptools.RegisterSearchTool(server, memdbGoURL, cfg.InternalServiceSecret, logger)
-	mcptools.RegisterMemoryTools(server, pg, logger)
+	mcptools.RegisterMemoryTools(server, pg, qd, logger)
 	mcptools.RegisterUserTools(server, pg, logger)
 	mcptools.RegisterProxyTools(server, cfg.PythonBackendURL, cfg.InternalServiceSecret, logger)
 

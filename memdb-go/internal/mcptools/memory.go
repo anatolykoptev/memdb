@@ -13,7 +13,7 @@ import (
 )
 
 // RegisterMemoryTools registers get_memory, update_memory, delete_memory, and delete_all_memories.
-func RegisterMemoryTools(server *mcp.Server, pg *db.Postgres, logger *slog.Logger) {
+func RegisterMemoryTools(server *mcp.Server, pg *db.Postgres, qd *db.Qdrant, logger *slog.Logger) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_memory",
 		Description: "Retrieve a specific memory by its unique identifier from a memory cube.",
@@ -33,14 +33,14 @@ func RegisterMemoryTools(server *mcp.Server, pg *db.Postgres, logger *slog.Logge
 		Name:        "delete_memory",
 		Description: "Permanently delete a specific memory from a cube.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input DeleteMemoryInput) (*mcp.CallToolResult, TextResult, error) {
-		return handleDeleteMemory(ctx, pg, input)
+		return handleDeleteMemory(ctx, pg, qd, input, logger)
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "delete_all_memories",
 		Description: "Permanently delete all memories from a specific cube. Use with caution.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input DeleteAllMemoriesInput) (*mcp.CallToolResult, TextResult, error) {
-		return handleDeleteAllMemories(ctx, pg, input)
+		return handleDeleteAllMemories(ctx, pg, qd, input, logger)
 	})
 }
 
@@ -78,7 +78,10 @@ func handleUpdateMemory(ctx context.Context, pg *db.Postgres, input UpdateMemory
 	return nil, TextResult{Result: map[string]any{"memory_id": input.MemoryID, "updated": updated}}, nil
 }
 
-func handleDeleteMemory(ctx context.Context, pg *db.Postgres, input DeleteMemoryInput) (*mcp.CallToolResult, TextResult, error) {
+// prefCollections are the Qdrant collections for preference memory.
+var prefCollections = []string{"explicit_preference", "implicit_preference"}
+
+func handleDeleteMemory(ctx context.Context, pg *db.Postgres, qd *db.Qdrant, input DeleteMemoryInput, logger *slog.Logger) (*mcp.CallToolResult, TextResult, error) {
 	if input.MemoryID == "" {
 		return nil, TextResult{}, errors.New("memory_id is required")
 	}
@@ -90,10 +93,18 @@ func handleDeleteMemory(ctx context.Context, pg *db.Postgres, input DeleteMemory
 	if err != nil {
 		return nil, TextResult{}, fmt.Errorf("delete_memory failed: %w", err)
 	}
+	// Also clean Qdrant preference collections to prevent ghost vectors.
+	if qd != nil {
+		for _, coll := range prefCollections {
+			if err := qd.DeleteByIDs(ctx, coll, []string{input.MemoryID}); err != nil {
+				logger.Warn("mcp delete_memory: qdrant cleanup failed", slog.String("collection", coll), slog.Any("error", err))
+			}
+		}
+	}
 	return nil, TextResult{Result: map[string]any{"memory_id": input.MemoryID, "deleted_count": deleted}}, nil
 }
 
-func handleDeleteAllMemories(ctx context.Context, pg *db.Postgres, input DeleteAllMemoriesInput) (*mcp.CallToolResult, TextResult, error) {
+func handleDeleteAllMemories(ctx context.Context, pg *db.Postgres, qd *db.Qdrant, input DeleteAllMemoriesInput, logger *slog.Logger) (*mcp.CallToolResult, TextResult, error) {
 	if input.CubeID == "" {
 		return nil, TextResult{}, errors.New("cube_id is required")
 	}
@@ -104,6 +115,14 @@ func handleDeleteAllMemories(ctx context.Context, pg *db.Postgres, input DeleteA
 	deleted, err := pg.DeleteAllByUser(ctx, userName)
 	if err != nil {
 		return nil, TextResult{}, fmt.Errorf("delete_all_memories failed: %w", err)
+	}
+	// Purge ALL Qdrant preference vectors for this user to prevent ghost memories.
+	if qd != nil {
+		for _, coll := range prefCollections {
+			if err := qd.PurgeByUserID(ctx, coll, userName); err != nil {
+				logger.Warn("mcp delete_all: qdrant purge failed", slog.String("collection", coll), slog.Any("error", err))
+			}
+		}
 	}
 	return nil, TextResult{Result: map[string]any{"cube_id": input.CubeID, "deleted_count": deleted}}, nil
 }

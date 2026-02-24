@@ -186,7 +186,7 @@ WITH RECURSIVE bfs AS (
   -- Base case: seed nodes (matched by caller from vector/key/tag recall)
   SELECT id::text AS node_id, 0 AS depth
   FROM %[1]s."Memory"
-  WHERE id = ANY($1::uuid[])
+  WHERE id = ANY($1::text[])
     AND properties->>'status' = 'activated'
     AND properties->>'user_name' = $2
     AND ($6::text = '' OR properties->>'agent_id' = $6)
@@ -215,7 +215,7 @@ SELECT DISTINCT m.id::text, (m.properties - 'sources')::text
 FROM %[1]s."Memory" m
 JOIN bfs ON m.id::text = bfs.node_id
 WHERE m.properties->>'status' = 'activated'
-  AND NOT (m.id = ANY($1::uuid[]))  -- exclude original seeds
+  AND NOT (m.id = ANY($1::text[]))  -- exclude original seeds
   AND m.properties->>'memory_type' = ANY($3)
 ORDER BY m.id::text
 LIMIT $5`

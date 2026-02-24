@@ -9,8 +9,9 @@ const (
 	DefaultSkillTopK = 3
 	DefaultPrefTopK  = 6
 	DefaultToolTopK  = 6
-	InflateFactor    = 5  // inflate top_k for dedup modes
-	MinPrefLen       = 30 // minimum preference content length
+	InflateFactor    = 5    // inflate top_k for dedup modes
+	MinPrefLen       = 30   // minimum preference content length
+	DefaultRelativity = 0.5 // minimum relevance threshold (filters noise from search results)
 	CacheTTL         = 30 * time.Second
 
 	// MMR tuning.
