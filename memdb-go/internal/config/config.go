@@ -74,6 +74,10 @@ type Config struct {
 	BufferSize    int           `json:"buffer_size"`
 	BufferTTL     time.Duration `json:"buffer_ttl"`
 
+	// Ingestion queue (bounded concurrency for /product/add)
+	AddWorkers   int `json:"add_workers"`    // max concurrent native add requests
+	AddQueueSize int `json:"add_queue_size"` // max requests waiting in queue
+
 	// MemDB Go API URL (used by MCP server to proxy search)
 	MemDBGoURL string `json:"memdb_go_url"`
 }
@@ -86,6 +90,8 @@ const (
 	defaultRateLimitRPS    = 50
 	defaultBufferSize      = 5
 	defaultBufferTTL       = 30 * time.Second
+	defaultAddWorkers      = 4
+	defaultAddQueueSize    = 50
 )
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -141,6 +147,9 @@ func Load() *Config {
 		BufferEnabled: envBool("MEMDB_BUFFER_ENABLED", false),
 		BufferSize:    envInt("MEMDB_BUFFER_SIZE", defaultBufferSize),
 		BufferTTL:     envDuration("MEMDB_BUFFER_TTL", defaultBufferTTL),
+
+		AddWorkers:   envInt("MEMDB_ADD_WORKERS", defaultAddWorkers),
+		AddQueueSize: envInt("MEMDB_ADD_QUEUE_SIZE", defaultAddQueueSize),
 
 		MemDBGoURL: envStr("MEMDB_GO_URL", ""),
 	}
