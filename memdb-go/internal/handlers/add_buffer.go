@@ -273,6 +273,9 @@ func (h *Handler) StartBufferFlusher(ctx context.Context) {
 
 // checkStaleBuffers scans for buffer keys with entries older than the TTL and flushes them.
 func (h *Handler) checkStaleBuffers(ctx context.Context) {
+	if h.redis == nil {
+		return
+	}
 	client := h.redis.Client()
 
 	// SCAN for buffer keys
