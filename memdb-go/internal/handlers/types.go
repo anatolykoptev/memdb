@@ -127,3 +127,26 @@ type getMemoryByIDsRequest struct {
 type existMemCubeRequest struct {
 	MemCubeID *string `json:"mem_cube_id"`
 }
+
+// nativeChatRequest is the full chat request for native Go handlers.
+// Covers both /chat/complete and /chat/stream.
+type nativeChatRequest struct {
+	UserID             *string             `json:"user_id"`
+	AgentID            *string             `json:"agent_id,omitempty"`
+	Query              *string             `json:"query"`
+	History            []map[string]string `json:"history,omitempty"`
+	TopK               *int                `json:"top_k,omitempty"`
+	Threshold          *float64            `json:"threshold,omitempty"`
+	SystemPrompt       *string             `json:"system_prompt,omitempty"`
+	ModelNameOrPath    *string             `json:"model_name_or_path,omitempty"`
+	Mode               *string             `json:"mode,omitempty"`
+	SessionID          *string             `json:"session_id,omitempty"`
+	ReadableCubeIDs    []string            `json:"readable_cube_ids,omitempty"`
+	WritableCubeIDs    []string            `json:"writable_cube_ids,omitempty"`
+	IncludePreference  *bool               `json:"include_preference,omitempty"`
+	PrefTopK           *int                `json:"pref_top_k,omitempty"`
+	Filter             map[string]any      `json:"filter,omitempty"`
+	AddMessageOnAnswer *bool               `json:"add_message_on_answer,omitempty"`
+	MemCubeID          *string             `json:"mem_cube_id,omitempty"`
+	InternetSearch     *bool               `json:"internet_search,omitempty"`
+}
