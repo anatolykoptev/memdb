@@ -39,6 +39,7 @@ type Handler struct {
 	embedder      embedder.Embedder        // nil = native search disabled
 	searchService *search.SearchService    // nil = search falls back to proxy
 	llmExtractor  *llm.LLMExtractor        // nil = mode=fine falls back to proxy
+	llmChat       *llm.Client              // nil = chat falls back to proxy
 	profiler      *scheduler.Profiler      // nil = profile summaries disabled
 	tracker       *scheduler.TaskStatusTracker // nil = fall back to stream-based status
 	bufferCfg     BufferConfig                // buffer zone config (zero value = disabled)
@@ -78,6 +79,9 @@ func (h *Handler) SetSearchService(svc *search.SearchService) {
 func (h *Handler) SetLLMExtractor(e *llm.LLMExtractor) {
 	h.llmExtractor = e
 }
+
+// SetChatLLM sets the LLM client for native chat handlers.
+func (h *Handler) SetChatLLM(c *llm.Client) { h.llmChat = c }
 
 // SetProfiler sets the background user profile summarizer.
 // When set, profile summaries are triggered after fine-mode adds and injected into search results.

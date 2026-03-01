@@ -1,0 +1,183 @@
+package handlers
+
+// chat.go — native chat complete and streaming handlers.
+// Falls back to Python proxy when services are unavailable or on error.
+
+import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+	"strings"
+
+	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
+	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
+)
+
+const (
+	chatMaxHistory  = 20   // last N history messages kept for LLM context
+	chatMaxTokens   = 8192 // max tokens for chat completion
+)
+
+// chatCanNative returns true if all services needed for native chat are available.
+func (h *Handler) chatCanNative() bool {
+	return h.searchService != nil && h.searchService.CanSearch() && h.llmChat != nil
+}
+
+// NativeChatComplete handles POST /product/chat/complete.
+func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
+	body, ok := h.readBody(w, r)
+	if !ok {
+		return
+	}
+	var req nativeChatRequest
+	if !h.decodeJSON(w, body, &req) {
+		return
+	}
+	if !h.checkErrors(w, validateChatRequest(&req)) {
+		return
+	}
+	normalized := normalizeChatComplete(body)
+
+	if !h.chatCanNative() {
+		h.proxyWithBody(w, r, normalized)
+		return
+	}
+
+	ctx := r.Context()
+	memories, prefString, err := h.chatSearchMemories(ctx, &req)
+	if err != nil {
+		h.logger.Warn("chat search failed, proxying", slog.Any("error", err))
+		h.proxyWithBody(w, r, normalized)
+		return
+	}
+
+	prompt := buildSystemPrompt(*req.Query, memories, prefString, stringOrEmpty(req.SystemPrompt))
+	messages := chatBuildMessages(prompt, *req.Query, req.History)
+
+	answer, err := h.llmChat.Chat(ctx, messages, chatMaxTokens)
+	if err != nil {
+		h.logger.Error("chat LLM error", slog.Any("error", err))
+		h.writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"code": 500, "message": "LLM error: " + err.Error(),
+		})
+		return
+	}
+
+	response, reasoning := parseThinkTags(answer)
+
+	if derefBoolOr(req.AddMessageOnAnswer, false) {
+		h.chatPostAdd(&req, *req.Query, response)
+	}
+
+	h.writeJSON(w, http.StatusOK, map[string]any{
+		"code":    200,
+		"message": "Chat completed successfully",
+		"data":    map[string]any{"response": response, "reasoning": reasoning},
+	})
+}
+
+// NativeChatStream handles POST /product/chat and POST /product/chat/stream.
+func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
+	body, ok := h.readBody(w, r)
+	if !ok {
+		return
+	}
+	var req nativeChatRequest
+	if !h.decodeJSON(w, body, &req) {
+		return
+	}
+	if !h.checkErrors(w, validateChatRequest(&req)) {
+		return
+	}
+	normalized := normalizeChatComplete(body)
+
+	if !h.chatCanNative() {
+		h.proxyWithBody(w, r, normalized)
+		return
+	}
+
+	ctx := r.Context()
+	memories, prefString, err := h.chatSearchMemories(ctx, &req)
+	if err != nil {
+		h.logger.Warn("chat stream search failed, proxying", slog.Any("error", err))
+		h.proxyWithBody(w, r, normalized)
+		return
+	}
+
+	prompt := buildSystemPrompt(*req.Query, memories, prefString, stringOrEmpty(req.SystemPrompt))
+	messages := chatBuildMessages(prompt, *req.Query, req.History)
+
+	rpc.SSEHeaders(w)
+	sse := rpc.NewSSEWriter(w, h.logger)
+	if sse == nil {
+		h.writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"code": 500, "message": "streaming not supported",
+		})
+		return
+	}
+
+	chunks, errc := h.llmChat.ChatStream(ctx, messages, llm.StreamOpts{})
+	h.streamChatResponse(sse, chunks, errc, &req)
+}
+
+// streamChatResponse reads chunks, classifies think tags, emits SSE events.
+func (h *Handler) streamChatResponse(sse *rpc.SSEWriter, chunks <-chan llm.StreamChunk, errc <-chan error, req *nativeChatRequest) {
+	parser := &thinkParser{}
+	var fullResp strings.Builder
+
+	for chunk := range chunks {
+		if chunk.Done {
+			break
+		}
+		for _, seg := range parser.Feed(chunk.Content) {
+			h.emitSegment(sse, seg, &fullResp)
+		}
+	}
+	// Flush any buffered partial-tag text.
+	for _, seg := range parser.Flush() {
+		h.emitSegment(sse, seg, &fullResp)
+	}
+
+	// Check for stream error.
+	if err, ok := <-errc; ok && err != nil {
+		data, _ := json.Marshal(map[string]string{"type": "error", "content": err.Error()})
+		_ = sse.WriteData(string(data))
+	}
+	_ = sse.WriteDone()
+
+	if derefBoolOr(req.AddMessageOnAnswer, false) {
+		h.chatPostAdd(req, *req.Query, fullResp.String())
+	}
+}
+
+// emitSegment writes a single classified segment as an SSE event.
+func (h *Handler) emitSegment(sse *rpc.SSEWriter, seg chatSegment, fullResp *strings.Builder) {
+	if seg.Text == "" {
+		return
+	}
+	typ := "text"
+	if seg.Reasoning {
+		typ = "reasoning"
+	} else {
+		fullResp.WriteString(seg.Text)
+	}
+	data, _ := json.Marshal(map[string]string{"type": typ, "data": seg.Text})
+	if err := sse.WriteData(string(data)); err != nil {
+		h.logger.Debug("sse write failed", slog.Any("error", err))
+	}
+}
+
+// validateChatRequest validates a nativeChatRequest.
+func validateChatRequest(req *nativeChatRequest) []string {
+	var errs []string
+	if req.UserID == nil || *req.UserID == "" {
+		errs = append(errs, "user_id is required")
+	}
+	if req.Query == nil || strings.TrimSpace(*req.Query) == "" {
+		errs = append(errs, "query is required and must be non-empty")
+	}
+	if req.TopK != nil && *req.TopK < 1 {
+		errs = append(errs, "top_k must be >= 1")
+	}
+	return errs
+}

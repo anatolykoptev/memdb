@@ -49,6 +49,13 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	handlers.SetLLMProxy(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel)
 	extractor := initLLMExtractor(cfg, h, logger)
 
+	// Initialize chat LLM client (reuses CLIProxyAPI config, same default model)
+	if cfg.LLMProxyURL != "" {
+		chatClient := llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel, cfg.LLMFallbackModels, logger)
+		h.SetChatLLM(chatClient)
+		logger.Info("chat LLM client initialized", slog.String("model", cfg.LLMDefaultModel))
+	}
+
 	// Configure buffer zone (batches default-mode adds before LLM extraction)
 	if cfg.BufferEnabled {
 		h.SetBufferConfig(handlers.BufferConfig{
@@ -197,9 +204,9 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	mux.HandleFunc("POST /product/add", h.NativeAdd)
 	mux.HandleFunc("POST /product/search", h.NativeSearch)
 
-	// Chat — validated
-	mux.HandleFunc("POST /product/chat/complete", h.ValidatedChatComplete)
-	mux.HandleFunc("POST /product/chat/stream", h.ValidatedChatStream)
+	// Chat — native with proxy fallback (playground stays proxied)
+	mux.HandleFunc("POST /product/chat/complete", h.NativeChatComplete)
+	mux.HandleFunc("POST /product/chat/stream", h.NativeChatStream)
 	mux.HandleFunc("POST /product/chat/stream/playground", h.ProxyToProduct)
 
 	// LLM proxy — direct CLIProxyAPI (no memory retrieval)
@@ -244,7 +251,7 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	mux.HandleFunc("PUT /product/users/{user_id}/config", h.NativeUpdateUserConfig)
 
 	// Chat (product_router variant — SSE streaming)
-	mux.HandleFunc("POST /product/chat", h.ValidatedChatStream)
+	mux.HandleFunc("POST /product/chat", h.NativeChatStream)
 
 	// Instance monitoring — native
 	mux.HandleFunc("GET /product/instances/status", h.NativeInstancesStatus)

@@ -44,6 +44,27 @@
 
 ---
 
+## Фаза 6.5 — Chat Pipeline Migration to Go (1 неделя)
+
+> Перенос chat endpoints с Python на нативный Go. Устраняет 200-300ms proxy overhead.
+
+### Перенесено
+- `POST /product/chat/complete` — non-streaming RAG chat
+- `POST /product/chat/stream` — SSE streaming RAG chat
+- `POST /product/chat` — alias for stream
+- Streaming LLM client (`llm/stream.go`)
+- Language detection (en/zh/ru)
+- Prompt templates (Four-Step Memory Safety Verdict)
+- `<think>` tag parsing for reasoning extraction
+- Post-chat memory addition (fire-and-forget)
+
+### Осталось на Python (deferred)
+- `POST /product/chat/stream/playground` — enhanced two-stage search, references, suggestions, timing
+- `POST /product/suggestions` — suggestion generation
+- `POST /product/feedback` — feedback analysis
+
+---
+
 ## Фаза 7 — LLM Cost Reduction: Quick Wins (1-2 недели)
 
 > Снизить LLM-расходы на 50-60% без потери качества.
