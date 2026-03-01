@@ -88,6 +88,18 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ingestion queue: limit concurrent sync adds (async bypasses — already rate-limited by Redis Streams)
+	isAsync := req.AsyncMode != nil && *req.AsyncMode == modeAsync
+	if !isAsync && h.addSem != nil {
+		if !h.acquireAddSlot(r.Context()) {
+			h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"code": 503, "message": "add queue full, try again later",
+			})
+			return
+		}
+		defer h.addSem.Release(1)
+	}
+
 	ctx := r.Context()
 	userID := *req.UserID
 
@@ -171,6 +183,21 @@ func (h *Handler) proxyReason(req *fullAddRequest) string {
 		return "feedback"
 	}
 	return "unknown"
+}
+
+// acquireAddSlot tries to acquire a semaphore slot for add processing.
+// Returns true if a slot was acquired (caller must Release), false if the queue is full or context cancelled.
+func (h *Handler) acquireAddSlot(ctx context.Context) bool {
+	if h.addSem.TryAcquire(1) {
+		return true
+	}
+	if h.addWaiters.Add(1) > h.addQueueMax {
+		h.addWaiters.Add(-1)
+		return false
+	}
+	err := h.addSem.Acquire(ctx, 1)
+	h.addWaiters.Add(-1)
+	return err == nil
 }
 
 // nativeAddForCube dispatches to async, fast, fine, or buffer pipeline based on mode.

@@ -62,6 +62,14 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 			slog.Duration("ttl", cfg.BufferTTL))
 	}
 
+	// Configure ingestion queue (bounded concurrency for /product/add)
+	if cfg.AddWorkers > 0 {
+		h.SetAddQueue(cfg.AddWorkers, cfg.AddQueueSize)
+		logger.Info("add ingestion queue enabled",
+			slog.Int("workers", cfg.AddWorkers),
+			slog.Int("queue_size", cfg.AddQueueSize))
+	}
+
 	// Start scheduler Worker (after embedder is initialized).
 	// Uses its own consumer group (memdb_go_scheduler), independent from Python's scheduler_group.
 	if rd != nil {

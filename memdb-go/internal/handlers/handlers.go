@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/MemDBai/MemDB/memdb-go/internal/db"
@@ -17,6 +18,7 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
 	"github.com/MemDBai/MemDB/memdb-go/internal/scheduler"
 	"github.com/MemDBai/MemDB/memdb-go/internal/search"
+	"golang.org/x/sync/semaphore"
 )
 
 // BufferConfig holds buffer zone settings for batching add requests.
@@ -40,6 +42,9 @@ type Handler struct {
 	profiler      *scheduler.Profiler      // nil = profile summaries disabled
 	tracker       *scheduler.TaskStatusTracker // nil = fall back to stream-based status
 	bufferCfg     BufferConfig                // buffer zone config (zero value = disabled)
+	addSem        *semaphore.Weighted         // nil = no limit on concurrent adds
+	addQueueMax   int64                       // max waiters before 503
+	addWaiters    atomic.Int64                // current goroutines waiting for semaphore
 }
 
 // NewHandler creates a new Handler with the given dependencies.
@@ -90,6 +95,16 @@ func (h *Handler) SetTaskTracker(t *scheduler.TaskStatusTracker) {
 // SetBufferConfig sets the buffer zone configuration for batching add requests.
 func (h *Handler) SetBufferConfig(cfg BufferConfig) {
 	h.bufferCfg = cfg
+}
+
+// SetAddQueue configures bounded concurrency for native add requests.
+// workers = max concurrent processing goroutines, queueSize = max waiters before 503.
+func (h *Handler) SetAddQueue(workers, queueSize int) {
+	if workers <= 0 {
+		return
+	}
+	h.addSem = semaphore.NewWeighted(int64(workers))
+	h.addQueueMax = int64(queueSize)
 }
 
 // SetWorkingMemoryCache sets the Redis VSET hot cache for WorkingMemory.
