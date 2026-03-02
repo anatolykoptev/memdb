@@ -66,7 +66,7 @@ func filterMemoriesByThreshold(memories []map[string]any, threshold float64, min
 
 	var personal, outer []map[string]any
 	for _, m := range memories {
-		if memType(m) == "OuterMemory" {
+		if memType(m) == memTypeOuter {
 			outer = append(outer, m)
 		} else {
 			personal = append(personal, m)
@@ -77,7 +77,7 @@ func filterMemoriesByThreshold(memories []map[string]any, threshold float64, min
 	perCount := 0
 	for _, m := range sorted {
 		if relativity(m) >= threshold {
-			if memType(m) != "OuterMemory" {
+			if memType(m) != memTypeOuter {
 				perCount++
 			}
 			filtered = append(filtered, m)

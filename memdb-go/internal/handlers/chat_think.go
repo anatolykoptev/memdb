@@ -32,47 +32,61 @@ func (p *thinkParser) Feed(text string) []chatSegment {
 	var segments []chatSegment
 
 	for len(s) > 0 {
+		var consumed int
 		if p.inThink {
-			idx := strings.Index(s, thinkClose)
-			if idx < 0 {
-				// Check for partial close tag at end.
-				if partial := longestSuffix(s, thinkClose); partial > 0 {
-					if idx := len(s) - partial; idx > 0 {
-						segments = append(segments, chatSegment{Text: s[:idx], Reasoning: true})
-					}
-					p.buf.WriteString(s[len(s)-partial:])
-				} else {
-					segments = append(segments, chatSegment{Text: s, Reasoning: true})
-				}
-				return segments
-			}
-			if idx > 0 {
-				segments = append(segments, chatSegment{Text: s[:idx], Reasoning: true})
-			}
-			p.inThink = false
-			s = s[idx+len(thinkClose):]
+			consumed = p.feedInsideThink(s, &segments)
 		} else {
-			idx := strings.Index(s, thinkOpen)
-			if idx < 0 {
-				// Check for partial open tag at end.
-				if partial := longestSuffix(s, thinkOpen); partial > 0 {
-					if idx := len(s) - partial; idx > 0 {
-						segments = append(segments, chatSegment{Text: s[:idx], Reasoning: false})
-					}
-					p.buf.WriteString(s[len(s)-partial:])
-				} else if s != "" {
-					segments = append(segments, chatSegment{Text: s, Reasoning: false})
-				}
-				return segments
-			}
-			if idx > 0 {
-				segments = append(segments, chatSegment{Text: s[:idx], Reasoning: false})
-			}
-			p.inThink = true
-			s = s[idx+len(thinkOpen):]
+			consumed = p.feedOutsideThink(s, &segments)
 		}
+		if consumed == 0 {
+			break
+		}
+		s = s[consumed:]
 	}
 	return segments
+}
+
+// feedInsideThink processes text when parser is inside a <think> block.
+// Returns the number of bytes consumed.
+func (p *thinkParser) feedInsideThink(s string, segments *[]chatSegment) int {
+	idx := strings.Index(s, thinkClose)
+	if idx < 0 {
+		return p.bufferPartialTag(s, thinkClose, true, segments)
+	}
+	if idx > 0 {
+		*segments = append(*segments, chatSegment{Text: s[:idx], Reasoning: true})
+	}
+	p.inThink = false
+	return idx + len(thinkClose)
+}
+
+// feedOutsideThink processes text when parser is outside a <think> block.
+// Returns the number of bytes consumed.
+func (p *thinkParser) feedOutsideThink(s string, segments *[]chatSegment) int {
+	idx := strings.Index(s, thinkOpen)
+	if idx < 0 {
+		return p.bufferPartialTag(s, thinkOpen, false, segments)
+	}
+	if idx > 0 {
+		*segments = append(*segments, chatSegment{Text: s[:idx], Reasoning: false})
+	}
+	p.inThink = true
+	return idx + len(thinkOpen)
+}
+
+// bufferPartialTag checks for a partial tag suffix and buffers it.
+// Emits any text before the partial match as a segment.
+// Returns len(s) to signal all input was consumed.
+func (p *thinkParser) bufferPartialTag(s, tag string, reasoning bool, segments *[]chatSegment) int {
+	if partial := longestSuffix(s, tag); partial > 0 {
+		if textEnd := len(s) - partial; textEnd > 0 {
+			*segments = append(*segments, chatSegment{Text: s[:textEnd], Reasoning: reasoning})
+		}
+		p.buf.WriteString(s[len(s)-partial:])
+	} else if s != "" {
+		*segments = append(*segments, chatSegment{Text: s, Reasoning: reasoning})
+	}
+	return len(s)
 }
 
 // Flush returns any buffered partial-tag text as a segment
