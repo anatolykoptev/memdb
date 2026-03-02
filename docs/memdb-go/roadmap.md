@@ -63,6 +63,43 @@
 - `POST /product/suggestions` — suggestion generation
 - `POST /product/feedback` — feedback analysis
 
+### Проверено (2026-03-02)
+- Live test: chat/complete — нативный Go, 200ms LLM latency, think tags parsing OK
+- Live test: chat/stream — SSE streaming, reasoning/text segments OK
+- Live test: validation — proper 400 errors for missing fields
+- Live test: auth — 401/403 without credentials, OK with internal service secret
+- Live test: history — 20-msg truncation, context carryover working
+- Live test: add_message_on_answer — fire-and-forget post-add, no errors in logs
+- Lint: все 5 issues исправлены (cognitive complexity, goconst, magic numbers)
+- Tests: +18 новых (thinkParser, parseThinkTags, detectLang, buildSystemPrompt, filterMemories)
+
+### Потенциальные баги (найдены при анализе Python)
+1. **OuterMemory strict filter** — Go удаляет ВСЕ OuterMemory из chat context;
+   Python гибче — держит их при фильтрации, гарантируя minNum personal. Если internet
+   search включён (не playground), Go потеряет web-контент. Пока не критично — internet
+   search в chat/complete и chat/stream не используется.
+2. **Multi-cube search** — Go использует `ReadableCubeIDs[0]` для search (только первый
+   куб). Python аналогично — оба ищут только в первом кубе. Для multi-cube chat нужна
+   агрегация результатов из нескольких кубов.
+3. **Dedup strategy** — Go хардкодит `Dedup: "no"` (без MMR dedup в chat context).
+   Python использует дефолт search handler. Разница в поведении при дублирующихся
+   воспоминаниях.
+
+### Playground migration scope (для будущей фазы)
+Playground — ~1400 LOC Python с 12 стадиями:
+1. Fast search (top_k=20)
+2. Preference markdown rendering
+3. Goal parser (query rephrase + internet_search decision)
+4. Beginner guide mode
+5. Deep search (top_k=100) with rephrased query
+6. Memory dedup & supplement (target 50 memories)
+7. Enhanced prompt (P/O blocks with IDs, timestamps, tone/verbosity)
+8. Streaming with reference tracking (`[refid:memoryID]`)
+9. Timing metrics (speed_improvement %)
+10. Further suggestions (LLM-generated follow-ups)
+11. Post-processing (reference extraction, DingDing, scheduler)
+12. Memory addition (query + response)
+
 ---
 
 ## Фаза 7 — LLM Cost Reduction: Quick Wins (1-2 недели)
