@@ -62,5 +62,11 @@ var ToolScopes = []string{"ToolSchemaMemory", "ToolTrajectoryMemory"}
 // GraphRecallScopes are the scopes searched by graph-based recall (key/tag match).
 var GraphRecallScopes = []string{"LongTermMemory", "UserMemory", "SkillMemory", "EpisodicMemory"}
 
+// Internet search defaults.
+const (
+	DefaultInternetLimit = 5   // max web results to embed and merge
+	InternetBaseScore    = 0.5 // base score for internet results before reranking
+)
+
 // PrefCollections are the Qdrant collections for preference memory.
 var PrefCollections = []string{"explicit_preference", "implicit_preference"}
