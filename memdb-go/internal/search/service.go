@@ -38,6 +38,8 @@ type SearchService struct {
 	Enhance     EnhanceConfig
 	// Internet performs web search via SearXNG. nil = disabled.
 	Internet    *InternetSearcher
+	// Fine configures LLM fine-mode (filter + recall). Zero value = disabled.
+	Fine        FineConfig
 	// Profiler generates and serves Memobase-style user profile summaries.
 	// When non-nil, profile_mem is populated in every search response.
 	Profiler    *scheduler.Profiler
