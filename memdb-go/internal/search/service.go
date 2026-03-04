@@ -3,6 +3,7 @@ package search
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
 	"time"
@@ -34,6 +35,9 @@ type SearchService struct {
 	logger      *slog.Logger
 	LLMReranker LLMRerankConfig
 	Iterative   IterativeConfig
+	Enhance     EnhanceConfig
+	// Internet performs web search via SearXNG. nil = disabled.
+	Internet    *InternetSearcher
 	// Profiler generates and serves Memobase-style user profile summaries.
 	// When non-nil, profile_mem is populated in every search response.
 	Profiler    *scheduler.Profiler
@@ -75,6 +79,7 @@ type SearchParams struct {
 	IncludeEmbedding bool
 	NumStages        int     // iterative expansion stages (0 = disabled, 2 = fast, 3 = fine)
 	LLMRerank        bool    // enable LLM-based reranking (adds ~3-4s latency)
+	InternetSearch   bool    // enable web search via SearXNG
 }
 
 // SearchOutput holds the formatted result plus optional embedding sidecar.
@@ -95,6 +100,7 @@ type parallelSearchResults struct {
 	graphTagResults   []db.GraphRecallResult
 	entityGraphResults []db.GraphRecallResult
 	workingMemItems   []db.VectorSearchResult
+	internetResults   []InternetResult
 }
 
 // searchBudget holds the inflated top-k values for dedup modes.
@@ -137,8 +143,11 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	bfsResults := s.runBFSExpansion(ctx, psr.textVec, p)
 	bfsDur := time.Since(t0)
 
+	// Step 3.5: Embed internet results (if any)
+	internetMerged := s.embedInternetResults(ctx, psr.internetResults)
+
 	// Step 4: Merge per type
-	textMerged, skillMerged, toolMerged := s.mergeSearchResults(psr, bfsResults, p)
+	textMerged, skillMerged, toolMerged := s.mergeSearchResults(psr, bfsResults, internetMerged, p)
 
 	// Step 4.5: CONTRADICTS penalty
 	t0 = time.Now()
@@ -241,6 +250,7 @@ func (s *SearchService) runParallelSearches(
 	s.spawnSkillToolSearches(g, gctx, psr, queryVec, tsquery, p, budget)
 	s.spawnPrefSearch(g, gctx, psr, queryVec, p, budget)
 	s.spawnWorkingMemAndGraph(g, gctx, psr, tokens, p)
+	s.spawnInternetSearch(g, gctx, psr, p)
 
 	if err := g.Wait(); err != nil {
 		return nil, err
@@ -382,6 +392,55 @@ func (s *SearchService) spawnWorkingMemAndGraph(
 	}
 }
 
+// spawnInternetSearch enqueues an internet search goroutine if enabled.
+func (s *SearchService) spawnInternetSearch(
+	g *errgroup.Group, ctx context.Context, psr *parallelSearchResults, p SearchParams,
+) {
+	if s.Internet == nil || !p.InternetSearch {
+		return
+	}
+	g.Go(func() error {
+		var err error
+		psr.internetResults, err = s.Internet.Search(ctx, p.Query)
+		if err != nil {
+			s.logger.Debug("internet search failed", slog.Any("error", err))
+		}
+		return nil // never fail the pipeline
+	})
+}
+
+// embedInternetResults converts internet search results into MergedResults with embeddings.
+func (s *SearchService) embedInternetResults(ctx context.Context, results []InternetResult) []MergedResult {
+	if len(results) == 0 || s.embedder == nil {
+		return nil
+	}
+	texts := make([]string, len(results))
+	for i, r := range results {
+		texts[i] = r.Text()
+	}
+	vecs, err := s.embedder.Embed(ctx, texts)
+	if err != nil {
+		s.logger.Debug("internet embed failed", slog.Any("error", err))
+		return nil
+	}
+	merged := make([]MergedResult, 0, len(results))
+	for i, r := range results {
+		if i >= len(vecs) {
+			break
+		}
+		merged = append(merged, MergedResult{
+			ID: "internet:" + r.URL,
+			Properties: fmt.Sprintf(
+				`{"memory": %q, "memory_type": "InternetMemory", "sources": [{"url": %q, "title": %q}]}`,
+				r.Text(), r.URL, r.Title,
+			),
+			Score:     InternetBaseScore,
+			Embedding: vecs[i],
+		})
+	}
+	return merged
+}
+
 // runBFSExpansion runs graph BFS traversal from top vector hits.
 func (s *SearchService) runBFSExpansion(ctx context.Context, textVec []db.VectorSearchResult, p SearchParams) []db.GraphRecallResult {
 	if len(textVec) == 0 {
@@ -404,7 +463,7 @@ func (s *SearchService) runBFSExpansion(ctx context.Context, textVec []db.Vector
 }
 
 // mergeSearchResults merges all parallel results into per-type slices.
-func (s *SearchService) mergeSearchResults(psr *parallelSearchResults, bfsResults []db.GraphRecallResult, p SearchParams) (textMerged, skillMerged, toolMerged []MergedResult) {
+func (s *SearchService) mergeSearchResults(psr *parallelSearchResults, bfsResults []db.GraphRecallResult, internetMerged []MergedResult, p SearchParams) (textMerged, skillMerged, toolMerged []MergedResult) {
 	textMerged = MergeVectorAndFulltext(psr.textVec, psr.textFT)
 	skillMerged = MergeVectorAndFulltext(psr.skillVec, psr.skillFT)
 	toolMerged = MergeVectorAndFulltext(psr.toolVec, psr.toolFT)
@@ -431,6 +490,7 @@ func (s *SearchService) mergeSearchResults(psr *parallelSearchResults, bfsResult
 	if p.IncludeSkill && p.SkillTopK > 0 {
 		skillMerged = MergeGraphIntoResults(skillMerged, graphSkill)
 	}
+	textMerged = append(textMerged, internetMerged...)
 	return textMerged, skillMerged, toolMerged
 }
 
