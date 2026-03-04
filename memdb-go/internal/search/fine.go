@@ -1,6 +1,5 @@
+// Package search — fine.go: LLM fine-mode relevance filtering + recall hint.
 package search
-
-// fine.go — LLM fine-mode: relevance filtering + recall hint for search gaps.
 
 import (
 	"bytes"
@@ -31,28 +30,21 @@ const fineRecallPrompt = `You are a search assistant. Given a user query and the
 Output JSON: {"query": "a refined search query to find the missing information"}
 If nothing is missing, return {"query": ""}.`
 
-// FineConfig configures LLM calls for fine-mode filtering and recall.
+// FineConfig configures LLM calls for fine-mode.
 type FineConfig struct {
 	APIURL string
 	APIKey string
 	Model  string
 }
 
-// filterDecision is a single keep/drop judgment from the LLM.
 type filterDecision struct {
 	ID   string `json:"id"`
 	Keep bool   `json:"keep"`
 }
 
 // LLMFilter sends memories to the LLM for relevance filtering.
-// On any error, returns all memories unchanged (graceful degradation).
-// If the LLM keeps nothing, returns the originals as well.
-func LLMFilter(
-	ctx context.Context,
-	query string,
-	memories []map[string]any,
-	cfg FineConfig,
-) []map[string]any {
+// On any error or empty result, returns all memories unchanged (graceful degradation).
+func LLMFilter(ctx context.Context, query string, memories []map[string]any, cfg FineConfig) []map[string]any {
 	if len(memories) == 0 {
 		return memories
 	}
@@ -100,14 +92,8 @@ func LLMFilter(
 	return result
 }
 
-// LLMRecallHint asks the LLM what info is missing, returning a hint query.
-// Returns "" on any error.
-func LLMRecallHint(
-	ctx context.Context,
-	query string,
-	memories []map[string]any,
-	cfg FineConfig,
-) string {
+// LLMRecallHint asks the LLM what info is missing. Returns "" on any error.
+func LLMRecallHint(ctx context.Context, query string, memories []map[string]any, cfg FineConfig) string {
 	inputJSON, _ := json.Marshal(buildMemoryList(memories))
 	prompt := fmt.Sprintf("Query: %s\n\nKept memories:\n%s", query, string(inputJSON))
 
@@ -125,7 +111,6 @@ func LLMRecallHint(
 	return hint.Query
 }
 
-// extractID gets the ID string from a memory map (top-level "id" or metadata.id).
 func extractID(m map[string]any) string {
 	if id, ok := m["id"].(string); ok && id != "" {
 		return id
@@ -155,12 +140,8 @@ func buildMemoryList(items []map[string]any) []memEntry {
 	return entries
 }
 
-// callLLMForJSON makes an OpenAI-compatible chat completions call requesting JSON output.
-func callLLMForJSON(
-	ctx context.Context,
-	systemPrompt, userMsg string,
-	cfg FineConfig,
-) ([]byte, error) {
+// callLLMForJSON makes an OpenAI-compatible chat completions call with JSON response format.
+func callLLMForJSON(ctx context.Context, systemPrompt, userMsg string, cfg FineConfig) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, fineFilterTimeout)
 	defer cancel()
 
