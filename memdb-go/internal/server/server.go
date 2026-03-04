@@ -16,6 +16,10 @@ import (
 	"github.com/MemDBai/MemDB/memdb-go/internal/scheduler"
 	"github.com/MemDBai/MemDB/memdb-go/internal/search"
 	mw "github.com/MemDBai/MemDB/memdb-go/internal/server/middleware"
+
+	enginesearch "github.com/anatolykoptev/go-engine/search"
+	"github.com/anatolykoptev/go-engine/fetch"
+	"github.com/anatolykoptev/go-stealth/proxypool"
 )
 
 // New creates a fully configured HTTP server and returns a cleanup function
@@ -165,10 +169,18 @@ func initSearchService(
 		logger.Info("fine search mode enabled")
 	}
 
-	// Enable internet search via SearXNG if URL is configured.
+	// Enable internet search via SearXNG + optional direct scrapers (DDG/Startpage).
 	if cfg.SearXNGURL != "" {
-		svc.Internet = search.NewInternetSearcher(cfg.SearXNGURL, search.DefaultInternetLimit)
-		logger.Info("internet search enabled", slog.String("searxng_url", cfg.SearXNGURL))
+		bc := initBrowserClient(cfg, logger)
+		svc.Internet = search.NewInternetSearcher(search.InternetSearcherConfig{
+			SearXNGURL: cfg.SearXNGURL,
+			Limit:      search.DefaultInternetLimit,
+			Browser:    bc,
+		})
+		logger.Info("internet search enabled",
+			slog.String("searxng_url", cfg.SearXNGURL),
+			slog.Bool("direct_scraping", bc != nil),
+		)
 	}
 
 	// Enable Memobase-style user profile summaries if both LLM and Redis are available.
@@ -300,4 +312,20 @@ func applyMiddleware(next http.Handler, cfg *config.Config, cacheClient *cache.C
 	h = mw.RequestID(h)
 	h = mw.Recovery(logger)(h)
 	return h
+}
+
+// initBrowserClient creates a stealth browser client with Webshare proxy pool.
+// Returns nil if WebshareAPIKey is empty or proxy pool init fails.
+func initBrowserClient(cfg *config.Config, logger *slog.Logger) enginesearch.BrowserDoer {
+	if cfg.WebshareAPIKey == "" {
+		return nil
+	}
+	pool, err := proxypool.NewWebshare(cfg.WebshareAPIKey)
+	if err != nil {
+		logger.Warn("failed to init proxy pool, direct scraping disabled", slog.Any("error", err))
+		return nil
+	}
+	f := fetch.New(fetch.WithProxyPool(pool))
+	logger.Info("proxy pool initialized", slog.Int("proxies", pool.Len()))
+	return f.BrowserClient()
 }

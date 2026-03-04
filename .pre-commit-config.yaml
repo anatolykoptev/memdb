@@ -3,9 +3,9 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: tests/repositories/fixtures/pypi.org/metadata/.*\.metadata
+        exclude: tests/repositories/fixtures/pypi.org/metadata/.*\.metadata|^memdb-go/vendor/
       - id: end-of-file-fixer
-        exclude: ^.*\.egg-info/|tests/repositories/fixtures/pypi.org/metadata/.*\.metadata
+        exclude: ^.*\.egg-info/|tests/repositories/fixtures/pypi.org/metadata/.*\.metadata|^memdb-go/vendor/
       - id: check-merge-conflict
       - id: check-case-conflict
       - id: check-json
@@ -15,6 +15,7 @@ repos:
       - id: pretty-format-json
         args: [--autofix, --no-ensure-ascii, --no-sort-keys]
       - id: check-ast
+        exclude: ^memdb-go/vendor/
       - id: debug-statements
       - id: check-docstring-first
 
@@ -28,8 +29,10 @@ repos:
     hooks:
       - id: ruff
         args: [ --fix, --config=./pyproject.toml ]
+        exclude: ^memdb-go/vendor/
       - id: ruff-format
         args: [ --config=./pyproject.toml ]
+        exclude: ^memdb-go/vendor/
 
   - repo: https://github.com/python-poetry/poetry
     rev: '2.1.3'

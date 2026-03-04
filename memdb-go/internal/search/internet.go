@@ -1,18 +1,15 @@
-// Package search — SearXNG internet search client with graceful degradation.
+// Package search — internet search via go-engine (SearXNG + DDG/Startpage + WRR fusion).
 package search
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/url"
-	"time"
+	"log/slog"
+
+	enginesearch "github.com/anatolykoptev/go-engine/search"
+	"github.com/anatolykoptev/go-engine/sources"
 )
 
-const internetTimeout = 10 * time.Second
-
-// InternetResult represents a single search result from SearXNG.
+// InternetResult represents a single search result.
 type InternetResult struct {
 	Title   string
 	Content string
@@ -24,63 +21,58 @@ func (r InternetResult) Text() string {
 	return r.Title + ": " + r.Content
 }
 
-// InternetSearcher queries SearXNG for web search results.
+// InternetSearcherConfig holds configuration for creating an InternetSearcher.
+type InternetSearcherConfig struct {
+	SearXNGURL string
+	Limit      int
+	Browser    enginesearch.BrowserDoer // nil = SearXNG-only mode
+}
+
+// InternetSearcher queries SearXNG and optional direct scrapers (DDG/Startpage).
 type InternetSearcher struct {
-	baseURL string
+	searxng *enginesearch.SearXNG
+	browser enginesearch.BrowserDoer
 	limit   int
-	client  http.Client
 }
 
-// NewInternetSearcher creates a searcher targeting the given SearXNG base URL.
-func NewInternetSearcher(baseURL string, limit int) *InternetSearcher {
+// NewInternetSearcher creates a searcher with go-engine SearXNG client and optional direct scrapers.
+func NewInternetSearcher(cfg InternetSearcherConfig) *InternetSearcher {
 	return &InternetSearcher{
-		baseURL: baseURL,
-		limit:   limit,
-		client:  http.Client{Timeout: internetTimeout},
+		searxng: enginesearch.NewSearXNG(cfg.SearXNGURL),
+		browser: cfg.Browser,
+		limit:   cfg.Limit,
 	}
 }
 
-// searxngResponse is the top-level JSON envelope from SearXNG.
-type searxngResponse struct {
-	Results []searxngResult `json:"results"`
-}
-
-// searxngResult is a single item in the SearXNG results array.
-type searxngResult struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	URL     string `json:"url"`
-}
-
-// Search queries SearXNG and returns up to s.limit results.
-// On any failure (network, bad status, parse error) it returns an empty slice
-// instead of an error, providing graceful degradation.
+// Search queries SearXNG, optionally DDG/Startpage via proxy, fuses results with WRR,
+// and returns up to s.limit results. On any failure it returns an empty slice (graceful degradation).
 func (s *InternetSearcher) Search(ctx context.Context, query string) ([]InternetResult, error) {
-	reqURL := fmt.Sprintf("%s/search?q=%s&format=json&categories=general",
-		s.baseURL, url.QueryEscape(query))
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	// 1. Query SearXNG.
+	searxngResults, err := s.searxng.Search(ctx, query, "", "", "")
 	if err != nil {
-		return []InternetResult{}, nil
+		slog.Debug("searxng search failed", slog.Any("error", err))
+		searxngResults = nil
 	}
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return []InternetResult{}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return []InternetResult{}, nil
-	}
-
-	var body searxngResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return []InternetResult{}, nil
+	// 2. Query direct scrapers (DDG + Startpage) if browser client is available.
+	var directResults []sources.Result
+	if s.browser != nil {
+		directResults = enginesearch.SearchDirect(ctx, enginesearch.DirectConfig{
+			Browser:   s.browser,
+			DDG:       true,
+			Startpage: true,
+		}, query, "")
 	}
 
-	results := make([]InternetResult, 0, min(len(body.Results), s.limit))
-	for _, r := range body.Results {
+	// 3. Fuse results with WRR (SearXNG weight=1.0, direct=1.2).
+	fused := enginesearch.FuseWRR(
+		[][]sources.Result{searxngResults, directResults},
+		[]float64{1.0, 1.2},
+	)
+
+	// 4. Convert to InternetResult and limit.
+	results := make([]InternetResult, 0, min(len(fused), s.limit))
+	for _, r := range fused {
 		if len(results) >= s.limit {
 			break
 		}
