@@ -34,24 +34,15 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// assertProxied checks that the response has status 200 and the "proxied" message,
-// indicating the request was forwarded to the mock Python backend.
-func assertProxied(t *testing.T, w *httptest.ResponseRecorder) {
+// assertServiceUnavailable checks that the response has status 503.
+func assertServiceUnavailable(t *testing.T, w *httptest.ResponseRecorder) {
 	t.Helper()
 	resp := w.Result()
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
-	}
-
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-	msg, ok := result["message"].(string)
-	if !ok || msg != "proxied" {
-		t.Fatalf("expected proxied response, got message=%v", result["message"])
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 503, got %d; body: %s", resp.StatusCode, string(body))
 	}
 }
 
@@ -77,14 +68,10 @@ func assertValidationError(t *testing.T, w *httptest.ResponseRecorder, wantSubst
 	}
 }
 
-// TestNativeSearch_NoEmbedder verifies that when the embedder is nil, a valid
-// search request is proxied to the Python backend.
+// TestNativeSearch_NoEmbedder verifies that when the searchService is nil,
+// a valid search request returns 503 (no proxy fallback).
 func TestNativeSearch_NoEmbedder(t *testing.T) {
-	srv, pythonClient := newMockPython(t)
-	defer srv.Close()
-
-	h := NewHandler(pythonClient, discardLogger())
-	// embedder is nil by default
+	h := &Handler{logger: discardLogger()}
 
 	body := `{"query":"test","user_id":"memos","top_k":6}`
 	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader(body))
@@ -93,19 +80,14 @@ func TestNativeSearch_NoEmbedder(t *testing.T) {
 
 	h.NativeSearch(w, req)
 
-	assertProxied(t, w)
+	assertServiceUnavailable(t, w)
 }
 
-// TestNativeSearch_NoPostgres verifies that when postgres is nil but embedder
-// is set, a valid search request is still proxied to the Python backend.
+// TestNativeSearch_NoPostgres verifies that when postgres is nil (searchService
+// can't search), a valid search request returns 503.
 func TestNativeSearch_NoPostgres(t *testing.T) {
-	srv, pythonClient := newMockPython(t)
-	defer srv.Close()
-
-	h := NewHandler(pythonClient, discardLogger())
-	// Set a real embedder (won't actually be called since postgres is nil)
+	h := &Handler{logger: discardLogger()}
 	h.SetEmbedder(embedder.NewVoyageClient("fake-key", "voyage-4-lite", discardLogger()))
-	// postgres remains nil
 
 	body := `{"query":"test","user_id":"memos","top_k":6}`
 	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader(body))
@@ -114,23 +96,13 @@ func TestNativeSearch_NoPostgres(t *testing.T) {
 
 	h.NativeSearch(w, req)
 
-	assertProxied(t, w)
+	assertServiceUnavailable(t, w)
 }
 
-// TestNativeSearch_FineMode verifies that when mode is "fine", the request is
-// proxied to Python even if embedder and postgres are set.
+// TestNativeSearch_FineMode_NoService verifies that fine mode without a
+// searchService returns 503 (not proxied).
 func TestNativeSearch_FineMode(t *testing.T) {
-	srv, pythonClient := newMockPython(t)
-	defer srv.Close()
-
-	h := NewHandler(pythonClient, discardLogger())
-	h.SetEmbedder(embedder.NewVoyageClient("fake-key", "voyage-4-lite", discardLogger()))
-	// We cannot set a real postgres without a live DB, but the fine mode check
-	// happens after the nil-embedder/postgres check. To reach the fine mode branch
-	// we need both non-nil. Since we can't easily mock postgres here, we verify
-	// the proxy fallback happens for nil postgres + fine mode (earlier branch).
-	// The fine mode branch is tested by the fact that even with both set, fine
-	// would proxy. For unit test purposes, we confirm the proxy behavior.
+	h := &Handler{logger: discardLogger()}
 
 	body := `{"query":"test","user_id":"memos","top_k":6,"mode":"fine"}`
 	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader(body))
@@ -139,21 +111,13 @@ func TestNativeSearch_FineMode(t *testing.T) {
 
 	h.NativeSearch(w, req)
 
-	// With nil postgres, it proxies before reaching the mode check, which is fine:
-	// the key invariant is that fine mode requests always get proxied.
-	assertProxied(t, w)
+	assertServiceUnavailable(t, w)
 }
 
-// TestNativeSearch_InternetSearch verifies that when internet_search is true,
-// the request is proxied to Python.
+// TestNativeSearch_InternetSearch_NoService verifies that internet_search=true
+// without a searchService returns 503 (not proxied).
 func TestNativeSearch_InternetSearch(t *testing.T) {
-	srv, pythonClient := newMockPython(t)
-	defer srv.Close()
-
-	h := NewHandler(pythonClient, discardLogger())
-	h.SetEmbedder(embedder.NewVoyageClient("fake-key", "voyage-4-lite", discardLogger()))
-	// postgres is nil, so proxy happens at the nil check before internet_search
-	// check. The invariant is the same: internet_search=true always proxies.
+	h := &Handler{logger: discardLogger()}
 
 	body := `{"query":"test","user_id":"memos","top_k":6,"internet_search":true}`
 	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader(body))
@@ -162,14 +126,12 @@ func TestNativeSearch_InternetSearch(t *testing.T) {
 
 	h.NativeSearch(w, req)
 
-	assertProxied(t, w)
+	assertServiceUnavailable(t, w)
 }
 
 // TestNativeSearch_ValidationError verifies that an empty query returns a 400
-// validation error without proxying.
+// validation error.
 func TestNativeSearch_ValidationError(t *testing.T) {
-	// No mock Python needed: validation errors return before proxy is called.
-	// Use a nil python client handler like the existing validation tests.
 	h := &Handler{logger: discardLogger()}
 
 	body := `{"query":"","user_id":"memos","top_k":6}`
@@ -183,7 +145,7 @@ func TestNativeSearch_ValidationError(t *testing.T) {
 }
 
 // TestNativeSearch_MissingUserID verifies that a request without user_id
-// returns a 400 validation error without proxying.
+// returns a 400 validation error.
 func TestNativeSearch_MissingUserID(t *testing.T) {
 	h := &Handler{logger: discardLogger()}
 

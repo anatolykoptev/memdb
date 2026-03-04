@@ -14,12 +14,8 @@ import (
 
 const logQueryTruncLen = 60 // max chars for query logging
 
-// NativeSearch handles POST /product/search with native Go implementation.
-// Falls back to Python proxy when:
-//   - searchService is nil or cannot search
-//   - mode is "fine" (needs LLM)
-//   - internet_search is true (needs SearXNG)
-//   - any error during native search
+// NativeSearch handles POST /product/search with fully native Go implementation.
+// No proxy fallback — all search modes (fast, fine) and internet search handled natively.
 func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 	body, ok := h.readBody(w, r)
 	if !ok {
@@ -35,22 +31,13 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	normalized := normalizeSearch(body)
-
-	// Proxy fallback conditions
+	// Service must be available — no proxy fallback
 	if h.searchService == nil || !h.searchService.CanSearch() {
-		h.logger.Debug("native search: service unavailable, proxying")
-		h.proxyWithBody(w, r, normalized)
-		return
-	}
-	if req.Mode != nil && *req.Mode == modeFine {
-		h.logger.Debug("native search: fine mode, proxying")
-		h.proxyWithBody(w, r, normalized)
-		return
-	}
-	if req.InternetSearch != nil && *req.InternetSearch {
-		h.logger.Debug("native search: internet_search=true, proxying")
-		h.proxyWithBody(w, r, normalized)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "search service unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -59,12 +46,20 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 		h.writeValidationError(w, []string{err.Error()})
 		return
 	}
+
+	// Internet search flag
+	if req.InternetSearch != nil && *req.InternetSearch {
+		params.InternetSearch = true
+	}
+
 	ctx := r.Context()
 
-	// Check cache
+	// Check cache (includes mode in key)
 	profileKey := derefStringOr(req.Profile, "default")
-	cacheKey := fmt.Sprintf("%ssearch:%s:%s:%s:%d:%d:%d:%s",
-		cachePrefix, profileKey, params.UserName, hashQuery(params.Query), params.TopK, params.SkillTopK, params.PrefTopK, params.Dedup)
+	modeKey := derefStringOr(req.Mode, "fast")
+	cacheKey := fmt.Sprintf("%ssearch:%s:%s:%s:%s:%d:%d:%d:%s",
+		cachePrefix, profileKey, modeKey, params.UserName,
+		hashQuery(params.Query), params.TopK, params.SkillTopK, params.PrefTopK, params.Dedup)
 	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -72,10 +67,21 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	output, err := h.searchService.Search(ctx, params)
+	// Route by mode
+	var output *search.SearchOutput
+	if req.Mode != nil && *req.Mode == modeFine {
+		output, err = h.searchService.SearchFine(ctx, params)
+	} else {
+		output, err = h.searchService.Search(ctx, params)
+	}
+
 	if err != nil {
-		h.logger.Warn("native search failed, proxying", slog.Any("error", err))
-		h.proxyWithBody(w, r, normalized)
+		h.logger.Error("native search failed", slog.Any("error", err))
+		h.writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"code":    500,
+			"message": "search failed: " + err.Error(),
+			"data":    nil,
+		})
 		return
 	}
 
