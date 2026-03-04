@@ -152,6 +152,23 @@ func initSearchService(
 			APIKey: cfg.LLMProxyAPIKey,
 			Model:  cfg.LLMSearchModel,
 		}
+		svc.Enhance = search.EnhanceConfig{
+			APIURL: cfg.LLMProxyURL,
+			APIKey: cfg.LLMProxyAPIKey,
+			Model:  cfg.LLMSearchModel,
+		}
+		svc.Fine = search.FineConfig{
+			APIURL: cfg.LLMProxyURL,
+			APIKey: cfg.LLMProxyAPIKey,
+			Model:  cfg.LLMSearchModel,
+		}
+		logger.Info("fine search mode enabled")
+	}
+
+	// Enable internet search via SearXNG if URL is configured.
+	if cfg.SearXNGURL != "" {
+		svc.Internet = search.NewInternetSearcher(cfg.SearXNGURL, search.DefaultInternetLimit)
+		logger.Info("internet search enabled", slog.String("searxng_url", cfg.SearXNGURL))
 	}
 
 	// Enable Memobase-style user profile summaries if both LLM and Redis are available.
