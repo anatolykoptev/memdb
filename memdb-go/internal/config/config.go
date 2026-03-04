@@ -81,6 +81,9 @@ type Config struct {
 	// SearXNG URL for internet search
 	SearXNGURL string `json:"searxng_url"`
 
+	// Webshare proxy API key (enables DDG/Startpage direct scrapers)
+	WebshareAPIKey string `json:"webshare_api_key"`
+
 	// MemDB Go API URL (used by MCP server to proxy search)
 	MemDBGoURL string `json:"memdb_go_url"`
 }
@@ -154,7 +157,8 @@ func Load() *Config {
 		AddWorkers:   envInt("MEMDB_ADD_WORKERS", defaultAddWorkers),
 		AddQueueSize: envInt("MEMDB_ADD_QUEUE_SIZE", defaultAddQueueSize),
 
-		SearXNGURL: envStr("SEARXNG_URL", ""),
+		SearXNGURL:     envStr("SEARXNG_URL", ""),
+		WebshareAPIKey: envStr("WEBSHARE_API_KEY", ""),
 		MemDBGoURL: envStr("MEMDB_GO_URL", ""),
 	}
 }

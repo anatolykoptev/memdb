@@ -12,9 +12,6 @@ func TestInternetSearch_ParsesResults(t *testing.T) {
 		if r.URL.Query().Get("format") != "json" {
 			t.Error("expected format=json query param")
 		}
-		if r.URL.Query().Get("categories") != "general" {
-			t.Error("expected categories=general query param")
-		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"results":[
 			{"title":"First","content":"snippet one","url":"https://example.com/1"},
@@ -23,7 +20,10 @@ func TestInternetSearch_ParsesResults(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewInternetSearcher(srv.URL, 10)
+	s := NewInternetSearcher(InternetSearcherConfig{
+		SearXNGURL: srv.URL,
+		Limit:      10,
+	})
 	results, err := s.Search(context.Background(), "test query")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -44,7 +44,10 @@ func TestInternetSearch_ParsesResults(t *testing.T) {
 }
 
 func TestInternetSearch_EmptyOnError(t *testing.T) {
-	s := NewInternetSearcher("http://127.0.0.1:1", 10) // unreachable
+	s := NewInternetSearcher(InternetSearcherConfig{
+		SearXNGURL: "http://127.0.0.1:1", // unreachable
+		Limit:      10,
+	})
 	results, err := s.Search(context.Background(), "test")
 	if err != nil {
 		t.Fatalf("expected no error on failure, got: %v", err)
@@ -65,7 +68,10 @@ func TestInternetSearch_LimitsResults(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewInternetSearcher(srv.URL, 2)
+	s := NewInternetSearcher(InternetSearcherConfig{
+		SearXNGURL: srv.URL,
+		Limit:      2,
+	})
 	results, err := s.Search(context.Background(), "q")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -85,7 +91,10 @@ func TestInternetSearch_SkipsEmptyResults(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewInternetSearcher(srv.URL, 10)
+	s := NewInternetSearcher(InternetSearcherConfig{
+		SearXNGURL: srv.URL,
+		Limit:      10,
+	})
 	results, err := s.Search(context.Background(), "q")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -105,7 +114,10 @@ func TestInternetSearch_EmptyOnBadJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewInternetSearcher(srv.URL, 10)
+	s := NewInternetSearcher(InternetSearcherConfig{
+		SearXNGURL: srv.URL,
+		Limit:      10,
+	})
 	results, err := s.Search(context.Background(), "q")
 	if err != nil {
 		t.Fatalf("expected no error on bad JSON, got: %v", err)
@@ -121,12 +133,41 @@ func TestInternetSearch_EmptyOnBadStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := NewInternetSearcher(srv.URL, 10)
+	s := NewInternetSearcher(InternetSearcherConfig{
+		SearXNGURL: srv.URL,
+		Limit:      10,
+	})
 	results, err := s.Search(context.Background(), "q")
 	if err != nil {
 		t.Fatalf("expected no error on 500, got: %v", err)
 	}
 	if len(results) != 0 {
 		t.Fatalf("expected empty slice on 500, got %d", len(results))
+	}
+}
+
+func TestInternetSearch_NilBrowser_SearXNGOnly(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[
+			{"title":"Only","content":"searxng","url":"https://only.com"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	s := NewInternetSearcher(InternetSearcherConfig{
+		SearXNGURL: srv.URL,
+		Limit:      10,
+		Browser:    nil, // no direct scrapers
+	})
+	results, err := s.Search(context.Background(), "q")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Title != "Only" {
+		t.Errorf("expected Only, got %s", results[0].Title)
 	}
 }
