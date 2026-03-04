@@ -78,6 +78,9 @@ type Config struct {
 	AddWorkers   int `json:"add_workers"`    // max concurrent native add requests
 	AddQueueSize int `json:"add_queue_size"` // max requests waiting in queue
 
+	// SearXNG URL for internet search
+	SearXNGURL string `json:"searxng_url"`
+
 	// MemDB Go API URL (used by MCP server to proxy search)
 	MemDBGoURL string `json:"memdb_go_url"`
 }
@@ -151,6 +154,7 @@ func Load() *Config {
 		AddWorkers:   envInt("MEMDB_ADD_WORKERS", defaultAddWorkers),
 		AddQueueSize: envInt("MEMDB_ADD_QUEUE_SIZE", defaultAddQueueSize),
 
+		SearXNGURL: envStr("SEARXNG_URL", ""),
 		MemDBGoURL: envStr("MEMDB_GO_URL", ""),
 	}
 }
