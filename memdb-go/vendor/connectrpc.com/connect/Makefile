@@ -118,3 +118,4 @@ $(BIN)/protoc-gen-go: Makefile go.mod
 	@mkdir -p $(@D)
 	@# The version of protoc-gen-go is determined by the version in go.mod
 	go install google.golang.org/protobuf/cmd/protoc-gen-go
+

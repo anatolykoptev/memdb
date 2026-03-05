@@ -30,7 +30,7 @@ require (
 
 require (
 	github.com/PuerkitoBio/goquery v1.11.0 // indirect
-	github.com/anatolykoptev/go-kit v0.8.0 // indirect
+	github.com/anatolykoptev/go-kit v0.9.0 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect

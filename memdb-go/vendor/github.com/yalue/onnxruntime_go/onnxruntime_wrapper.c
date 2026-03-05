@@ -563,3 +563,4 @@ OrtStatus *GetStringTensorElement(OrtValue *v, size_t buffer_length,
   size_t index, void *buffer) {
   return ort_api->GetStringTensorElement(v, buffer_length, index, buffer);
 }
+

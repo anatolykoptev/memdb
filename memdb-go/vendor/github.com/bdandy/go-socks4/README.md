@@ -1,8 +1,8 @@
 # go-socks4
-Socks4 implementation for Go, compatible with net/proxy.
+Socks4 implementation for Go, compatible with net/proxy. 
 
 ## Features
-- `socks4`
+- `socks4` 
 - `socks4a`
 
 ## Usage
@@ -47,3 +47,7 @@ If you know proxy server to connect to tests should be running like this
 `
 go test -socks4.url=socks4://localhost:8080
 `
+
+
+
+

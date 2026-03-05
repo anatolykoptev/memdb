@@ -4,13 +4,11 @@ FROM golang:1.26rc3 AS builder
 
 WORKDIR /app
 
-# Cache dependencies
-COPY go.mod go.sum* ./
-RUN go mod download
-
-# Build MCP server as static binary (no CGO)
+# Copy source with vendored dependencies
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /memdb-mcp ./cmd/mcp-server
+
+# Build MCP server as static binary (no CGO, vendored deps)
+RUN CGO_ENABLED=0 go build -mod=vendor -ldflags="-s -w" -o /memdb-mcp ./cmd/mcp-server
 
 # ─── Runtime stage ───────────────────────────────────────────────────
 FROM debian:trixie-slim

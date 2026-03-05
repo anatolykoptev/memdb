@@ -12,13 +12,13 @@
 [![Twitter](https://img.shields.io/twitter/follow/redisinc?style=social)](https://twitter.com/redisinc)
 [![Stack Exchange questions](https://img.shields.io/stackexchange/stackoverflow/t/go-redis?style=social&logo=stackoverflow&label=Stackoverflow)](https://stackoverflow.com/questions/tagged/go-redis)
 
-> go-redis is the official Redis client library for the Go programming language. It offers a straightforward interface for interacting with Redis servers.
+> go-redis is the official Redis client library for the Go programming language. It offers a straightforward interface for interacting with Redis servers. 
 
 ## Supported versions
 
 In `go-redis` we are aiming to support the last three releases of Redis. Currently, this means we do support:
 - [Redis 8.0](https://raw.githubusercontent.com/redis/redis/8.0/00-RELEASENOTES) - using Redis CE 8.0
-- [Redis 8.2](https://raw.githubusercontent.com/redis/redis/8.2/00-RELEASENOTES) - using Redis CE 8.2
+- [Redis 8.2](https://raw.githubusercontent.com/redis/redis/8.2/00-RELEASENOTES) - using Redis CE 8.2 
 - [Redis 8.4](https://raw.githubusercontent.com/redis/redis/8.4/00-RELEASENOTES) - using Redis CE 8.4
 
 Although the `go.mod` states it requires at minimum `go 1.21`, our CI is configured to run the tests against all three
@@ -372,7 +372,7 @@ For example:
 You can find further details in the [query dialect documentation](https://redis.io/docs/latest/develop/interact/search-and-query/advanced-concepts/dialects/).
 
 #### Custom buffer sizes
-Prior to v9.12, the buffer size was the default go value of 4096 bytes. Starting from v9.12,
+Prior to v9.12, the buffer size was the default go value of 4096 bytes. Starting from v9.12, 
 go-redis uses 32KiB read and write buffers by default for optimal performance.
 For high-throughput applications or large pipelines, you can customize buffer sizes:
 
