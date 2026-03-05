@@ -9,6 +9,8 @@ github.com/anatolykoptev/go-engine v1.3.1 h1:B/deUA0pRpX9+hYOOTE7XPPuh69idlX4PVu
 github.com/anatolykoptev/go-engine v1.3.1/go.mod h1:ZcJMqmoy+GP9HJRrj5G0y7reyIM8NbMX6IMyHYmwoEQ=
 github.com/anatolykoptev/go-kit v0.8.0 h1:HpeMgdO/TEhBE659r4fbGaAZt3qCCt1Q8qYxd72lqUU=
 github.com/anatolykoptev/go-kit v0.8.0/go.mod h1:sxZXhRKXffOpIH5oSOCcnRZjiQT0s6te4os6eMUMwqg=
+github.com/anatolykoptev/go-kit v0.9.0 h1:4L3VCfv9GcyOWce+D12QhpldXqs6rwpdIB3XvV1D4Iw=
+github.com/anatolykoptev/go-kit v0.9.0/go.mod h1:sxZXhRKXffOpIH5oSOCcnRZjiQT0s6te4os6eMUMwqg=
 github.com/anatolykoptev/go-stealth v1.3.1 h1:6Q1MSi8JA66xggtVL8iAKdCy/ULKQ76KU7KSbfgo67A=
 github.com/anatolykoptev/go-stealth v1.3.1/go.mod h1:/3rYAaunzRjBKtFtHLeEh/Jw/jVyGRtdBPJeF8voYog=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=

@@ -215,7 +215,7 @@ if manager != nil {
     // Add logging hook
     loggingHook := maintnotifications.NewLoggingHook(2) // Info level
     manager.AddNotificationHook(loggingHook)
-
+    
     // Add metrics hook
     metricsHook := maintnotifications.NewMetricsHook()
     manager.AddNotificationHook(metricsHook)

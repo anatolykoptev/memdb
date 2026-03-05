@@ -6,7 +6,7 @@ GO library for merging JSON objects
 
 ## Original document
 ```json
-{
+{  
   "number": 1,
   "string": "value",
   "object": {
@@ -23,7 +23,7 @@ GO library for merging JSON objects
 
 ## Patch
 ```json
-{
+{  
   "number": 2,
   "string": "value1",
   "nonexitent": "woot",
@@ -43,7 +43,7 @@ GO library for merging JSON objects
 
 ## Result
 ```json
-{
+{  
   "number": 2,
   "string": "value1",
   "object": {

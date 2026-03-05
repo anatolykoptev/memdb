@@ -16,6 +16,7 @@ import (
 "log/slog"
 "time"
 
+"github.com/anatolykoptev/go-kit/retry"
 "github.com/jackc/pgx/v5"
 "github.com/jackc/pgx/v5/pgxpool"
 
@@ -67,15 +68,27 @@ logger.Warn("failed to set hnsw session params", slog.Any("error", err))
 return nil // non-fatal — queries use fully-qualified table names
 }
 
-pool, err := pgxpool.NewWithConfig(ctx, cfg)
-if err != nil {
-return nil, fmt.Errorf("postgres connect failed: %w", err)
+pool, err := retry.Do(ctx, retry.Options{
+MaxAttempts:  10,
+InitialDelay: time.Second,
+MaxDelay:     30 * time.Second,
+Jitter:       true,
+OnRetry: func(attempt int, err error) {
+	logger.Warn("postgres not ready, retrying", slog.Int("attempt", attempt), slog.Any("error", err))
+},
+}, func() (*pgxpool.Pool, error) {
+p, retryErr := pgxpool.NewWithConfig(ctx, cfg)
+if retryErr != nil {
+	return nil, retryErr
 }
-
-// Verify connection
-if err := pool.Ping(ctx); err != nil {
-pool.Close()
-return nil, fmt.Errorf("postgres ping failed: %w", err)
+if retryErr = p.Ping(ctx); retryErr != nil {
+	p.Close()
+	return nil, retryErr
+}
+return p, nil
+})
+if err != nil {
+return nil, fmt.Errorf("postgres connect: %w", err)
 }
 
 pg := &Postgres{pool: pool, logger: logger}

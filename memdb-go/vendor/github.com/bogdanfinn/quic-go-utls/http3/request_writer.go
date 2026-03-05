@@ -147,7 +147,7 @@ func (w *requestWriter) encodeHeaders(req *http.Request, addGzipHeader bool, tra
 			if k == http.HeaderOrderKey || k == http.PHeaderOrderKey {
 				continue
 			}
-
+			
 			return nil, fmt.Errorf("invalid HTTP header name %q", k)
 		}
 		for _, v := range vv {
