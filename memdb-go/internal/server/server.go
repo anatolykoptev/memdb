@@ -121,6 +121,7 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) 
 		OllamaDim:    cfg.OllamaDim,
 		OllamaPrefix: cfg.OllamaPrefix,
 		OllamaQuery:  cfg.OllamaQuery,
+		HTTPBaseURL:  cfg.EmbedURL,
 	}
 	e, err := embedder.New(embCfg, logger)
 	if err != nil {
@@ -129,8 +130,20 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) 
 	}
 	h.SetEmbedder(e)
 
-	// Multi-model registry: if code model dir is configured, load second ONNX model.
-	if cfg.ONNXModelDirCode != "" {
+	// Multi-model registry: HTTP embedder uses a single sidecar for all models;
+	// ONNX uses separate model directories.
+	if cfg.EmbedderType == "http" && cfg.EmbedURL != "" {
+		registry := embedder.NewRegistry("multilingual-e5-large")
+		registry.Register("multilingual-e5-large", e)
+
+		codeEmb := embedder.NewHTTPEmbedder(cfg.EmbedURL, "jina-code-v2", 768, logger)
+		registry.Register("jina-code-v2", codeEmb)
+		logger.Info("code embedder loaded (http)",
+			slog.String("model", "jina-code-v2"),
+			slog.Int("dim", 768),
+		)
+		h.SetEmbedRegistry(registry)
+	} else if cfg.ONNXModelDirCode != "" {
 		registry := embedder.NewRegistry("multilingual-e5-large")
 		registry.Register("multilingual-e5-large", e)
 
