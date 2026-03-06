@@ -5,6 +5,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
+
+	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
 )
 
 // openaiEmbeddingRequest is the OpenAI-compatible embedding request format.
@@ -43,62 +46,71 @@ type openaiErrorDetail struct {
 	Code    any    `json:"code"`
 }
 
-const passagePrefix = "passage: "
+// modelPrefixes defines per-model text prefixes.
+// e5 models need "passage: " prefix; other models get raw text.
+var modelPrefixes = map[string]string{
+	"multilingual-e5-large": "passage: ",
+}
 
 // OpenAIEmbeddings handles POST /v1/embeddings with OpenAI-compatible request/response format.
-// The Python MemDB backend uses UniversalAPIEmbedder (OpenAI SDK client) to call this endpoint.
+// Supports multi-model via embedRegistry (if set) or falls back to single embedder.
 func (h *Handler) OpenAIEmbeddings(w http.ResponseWriter, r *http.Request) {
-	if h.embedder == nil {
-		h.writeOpenAIError(w, http.StatusServiceUnavailable, "embedder not initialized", "server_error")
-		return
-	}
-
 	var req openaiEmbeddingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeOpenAIError(w, http.StatusBadRequest, "invalid request body: "+err.Error(), "invalid_request_error")
 		return
 	}
 
-	// Parse input: can be a single string or an array of strings.
 	texts, err := parseEmbeddingInput(req.Input)
 	if err != nil {
 		h.writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
-
 	if len(texts) == 0 {
 		h.writeOpenAIError(w, http.StatusBadRequest, "input is required", "invalid_request_error")
 		return
 	}
 
-	// Add "passage: " prefix for e5 models (storage/document use case).
-	prefixed := make([]string, len(texts))
-	for i, t := range texts {
-		prefixed[i] = passagePrefix + t
+	// Select embedder: registry (multi-model) or single embedder (legacy).
+	var emb embedder.Embedder
+	model := req.Model
+	if h.embedRegistry != nil {
+		var ok bool
+		emb, ok = h.embedRegistry.Get(model)
+		if !ok {
+			h.writeOpenAIError(w, http.StatusBadRequest, "unknown model: "+model, "invalid_request_error")
+			return
+		}
+	} else if h.embedder != nil {
+		emb = h.embedder
+	} else {
+		h.writeOpenAIError(w, http.StatusServiceUnavailable, "embedder not initialized", "server_error")
+		return
 	}
 
-	embeddings, err := h.embedder.Embed(r.Context(), prefixed)
+	// Resolve display model name (fallback default).
+	if model == "" {
+		model = "multilingual-e5-large"
+	}
+
+	// Apply model-specific prefix and run embedder.
+	input := applyModelPrefix(texts, model)
+	embeddings, err := emb.Embed(r.Context(), input)
 	if err != nil {
 		h.writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error")
 		return
 	}
 
-	// Build response.
-	model := req.Model
-	if model == "" {
-		model = "multilingual-e5-large"
-	}
-
 	data := make([]openaiEmbeddingData, len(embeddings))
-	for i, emb := range embeddings {
+	for i, vec := range embeddings {
 		data[i] = openaiEmbeddingData{
 			Object:    "embedding",
-			Embedding: emb,
+			Embedding: vec,
 			Index:     i,
 		}
 	}
 
-	h.logger.Info("openai embeddings complete", slog.Int("texts", len(texts)))
+	h.logger.Info("openai embeddings complete", slog.Int("texts", len(texts)), slog.String("model", model))
 
 	h.writeJSON(w, http.StatusOK, openaiEmbeddingResponse{
 		Object: "list",
@@ -106,6 +118,23 @@ func (h *Handler) OpenAIEmbeddings(w http.ResponseWriter, r *http.Request) {
 		Model:  model,
 		Usage:  openaiEmbeddingUsage{PromptTokens: 0, TotalTokens: 0},
 	})
+}
+
+// applyModelPrefix adds model-specific prefix to texts.
+// e5 models need "passage: " prefix; other models get raw text.
+func applyModelPrefix(texts []string, model string) []string {
+	prefix, ok := modelPrefixes[model]
+	if !ok && strings.Contains(model, "e5") {
+		prefix = "passage: "
+	}
+	if prefix == "" {
+		return texts
+	}
+	prefixed := make([]string, len(texts))
+	for i, t := range texts {
+		prefixed[i] = prefix + t
+	}
+	return prefixed
 }
 
 // parseEmbeddingInput handles the polymorphic "input" field: string or []string.

@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
 )
 
 // mockEmbedder implements embedder.Embedder for testing the embeddings handler.
@@ -57,7 +59,7 @@ func TestOpenAIEmbeddings_Success_SingleString(t *testing.T) {
 		},
 	}
 
-	body := `{"input": "hello world", "model": "test-model"}`
+	body := `{"input": "hello world", "model": "multilingual-e5-large"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
 	w := httptest.NewRecorder()
 	h.OpenAIEmbeddings(w, req)
@@ -73,8 +75,8 @@ func TestOpenAIEmbeddings_Success_SingleString(t *testing.T) {
 	if resp.Object != "list" {
 		t.Errorf("object=%q, want list", resp.Object)
 	}
-	if resp.Model != "test-model" {
-		t.Errorf("model=%q, want test-model", resp.Model)
+	if resp.Model != "multilingual-e5-large" {
+		t.Errorf("model=%q, want multilingual-e5-large", resp.Model)
 	}
 	if len(resp.Data) != 1 {
 		t.Fatalf("data len=%d, want 1", len(resp.Data))
@@ -432,5 +434,159 @@ func TestParseEmbeddingInput_SingleElementArray(t *testing.T) {
 	}
 	if len(texts) != 1 || texts[0] != "single" {
 		t.Errorf("got %v, want [single]", texts)
+	}
+}
+
+// --- Registry-based multi-model tests ---
+
+func TestOpenAIEmbeddings_Registry_SelectsCorrectModel(t *testing.T) {
+	// Create two mock embedders returning different vectors.
+	e5Emb := &mockEmbedder{
+		dim: 1024,
+		embedFn: func(_ context.Context, texts []string) ([][]float32, error) {
+			result := make([][]float32, len(texts))
+			for i := range texts {
+				result[i] = []float32{1.0, 0.0} // e5 signature
+			}
+			return result, nil
+		},
+	}
+	codeEmb := &mockEmbedder{
+		dim: 768,
+		embedFn: func(_ context.Context, texts []string) ([][]float32, error) {
+			// Code model should NOT get "passage: " prefix.
+			for _, text := range texts {
+				if strings.HasPrefix(text, "passage: ") {
+					t.Errorf("code model received passage prefix: %q", text)
+				}
+			}
+			result := make([][]float32, len(texts))
+			for i := range texts {
+				result[i] = []float32{0.0, 1.0} // code signature
+			}
+			return result, nil
+		},
+	}
+
+	reg := embedder.NewRegistry("multilingual-e5-large")
+	reg.Register("multilingual-e5-large", e5Emb)
+	reg.Register("jina-code-v2", codeEmb)
+
+	h := &Handler{
+		logger:        discardLogger(),
+		embedder:      e5Emb,
+		embedRegistry: reg,
+	}
+
+	// Request jina-code-v2 model.
+	body := `{"input": "func main()", "model": "jina-code-v2"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.OpenAIEmbeddings(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+
+	var resp openaiEmbeddingResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Model != "jina-code-v2" {
+		t.Errorf("model=%q, want jina-code-v2", resp.Model)
+	}
+	// Verify code embedder was used (returns {0.0, 1.0}).
+	if len(resp.Data) != 1 || resp.Data[0].Embedding[0] != 0.0 || resp.Data[0].Embedding[1] != 1.0 {
+		t.Errorf("expected code embedder output, got %v", resp.Data[0].Embedding)
+	}
+}
+
+func TestOpenAIEmbeddings_Registry_UnknownModel(t *testing.T) {
+	reg := embedder.NewRegistry("multilingual-e5-large")
+	reg.Register("multilingual-e5-large", &mockEmbedder{
+		embedFn: func(_ context.Context, texts []string) ([][]float32, error) {
+			return [][]float32{{0.1}}, nil
+		},
+	})
+
+	h := &Handler{
+		logger:        discardLogger(),
+		embedRegistry: reg,
+	}
+
+	body := `{"input": "test", "model": "nonexistent-model"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.OpenAIEmbeddings(w, req)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp openaiErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.Contains(resp.Error.Message, "unknown model") {
+		t.Errorf("message=%q, expected 'unknown model'", resp.Error.Message)
+	}
+}
+
+func TestOpenAIEmbeddings_Registry_FallbackOnEmptyModel(t *testing.T) {
+	var capturedTexts []string
+	e5Emb := &mockEmbedder{
+		embedFn: func(_ context.Context, texts []string) ([][]float32, error) {
+			capturedTexts = texts
+			return [][]float32{{0.5}}, nil
+		},
+	}
+
+	reg := embedder.NewRegistry("multilingual-e5-large")
+	reg.Register("multilingual-e5-large", e5Emb)
+
+	h := &Handler{
+		logger:        discardLogger(),
+		embedRegistry: reg,
+	}
+
+	// No model specified — should use fallback (e5) and add passage prefix.
+	body := `{"input": "hello"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.OpenAIEmbeddings(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	if len(capturedTexts) != 1 || capturedTexts[0] != "passage: hello" {
+		t.Errorf("expected 'passage: hello', got %v", capturedTexts)
+	}
+
+	var resp openaiEmbeddingResponse
+	_ = json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Model != "multilingual-e5-large" {
+		t.Errorf("model=%q, want multilingual-e5-large", resp.Model)
+	}
+}
+
+// --- applyModelPrefix unit tests ---
+
+func TestApplyModelPrefix_E5(t *testing.T) {
+	result := applyModelPrefix([]string{"hello"}, "multilingual-e5-large")
+	if result[0] != "passage: hello" {
+		t.Errorf("got %q, want 'passage: hello'", result[0])
+	}
+}
+
+func TestApplyModelPrefix_CodeModel(t *testing.T) {
+	result := applyModelPrefix([]string{"func main()"}, "jina-code-v2")
+	if result[0] != "func main()" {
+		t.Errorf("got %q, want raw text", result[0])
+	}
+}
+
+func TestApplyModelPrefix_UnknownE5Variant(t *testing.T) {
+	result := applyModelPrefix([]string{"text"}, "some-e5-model")
+	if result[0] != "passage: text" {
+		t.Errorf("got %q, want 'passage: text' for e5 variant", result[0])
 	}
 }

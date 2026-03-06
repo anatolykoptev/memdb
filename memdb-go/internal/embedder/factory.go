@@ -67,7 +67,11 @@ func New(cfg Config, logger *slog.Logger) (Embedder, error) {
 		if cfg.ONNXModelDir == "" {
 			return nil, errors.New("embedder: onnx requires MEMDB_ONNX_MODEL_DIR")
 		}
-		e, err := NewONNXEmbedder(cfg.ONNXModelDir, logger)
+		modelCfg := DefaultONNXConfig()
+		if mc, ok := knownONNXModels[cfg.Model]; ok {
+			modelCfg = mc
+		}
+		e, err := NewONNXEmbedder(cfg.ONNXModelDir, modelCfg, logger)
 		if err != nil {
 			return nil, fmt.Errorf("embedder: onnx init: %w", err)
 		}

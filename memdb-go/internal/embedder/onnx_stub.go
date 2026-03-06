@@ -12,7 +12,7 @@ import (
 type ONNXEmbedder struct{}
 
 // NewONNXEmbedder returns an error when CGO is disabled.
-func NewONNXEmbedder(modelDir string, logger *slog.Logger) (*ONNXEmbedder, error) {
+func NewONNXEmbedder(modelDir string, _ ONNXModelConfig, logger *slog.Logger) (*ONNXEmbedder, error) {
 	return nil, fmt.Errorf("ONNX embedder requires CGO (libtokenizers + libonnxruntime)")
 }
 

@@ -53,7 +53,7 @@ func main() {
 
 	// Initialize ONNX embedder
 	logger.Info("initializing ONNX embedder", slog.String("model_dir", modelDir))
-	emb, err := embedder.NewONNXEmbedder(modelDir, logger)
+	emb, err := embedder.NewONNXEmbedder(modelDir, embedder.DefaultONNXConfig(), logger)
 	if err != nil {
 		logger.Error("embedder init failed", slog.Any("error", err))
 		os.Exit(1)
