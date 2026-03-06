@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/daulet/tokenizers"
@@ -40,9 +41,12 @@ func NewONNXEmbedder(modelDir string, cfg ONNXModelConfig, logger *slog.Logger) 
 	// Point to the shared library. This is a no-op if already set.
 	ort.SetSharedLibraryPath("/usr/lib/libonnxruntime.so")
 
-	// InitializeEnvironment is idempotent — returns nil on subsequent calls.
+	// InitializeEnvironment must be called once. Ignore "already initialized" errors
+	// when loading multiple models in the same process.
 	if err := ort.InitializeEnvironment(); err != nil {
-		return nil, fmt.Errorf("onnx: initialize environment: %w", err)
+		if !strings.Contains(err.Error(), "already been initialized") {
+			return nil, fmt.Errorf("onnx: initialize environment: %w", err)
+		}
 	}
 
 	// Load the HuggingFace tokenizer.
