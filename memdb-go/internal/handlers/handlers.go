@@ -37,6 +37,7 @@ type Handler struct {
 	redis         *db.Redis                // nil = not initialized
 	wmCache       *db.WorkingMemoryCache   // nil = VSET disabled, use postgres for candidates
 	embedder      embedder.Embedder        // nil = native search disabled
+	embedRegistry *embedder.Registry       // nil = single-model mode (uses embedder field)
 	searchService *search.SearchService    // nil = search falls back to proxy
 	llmExtractor  *llm.LLMExtractor        // nil = mode=fine falls back to proxy
 	llmChat       *llm.Client              // nil = chat falls back to proxy
@@ -68,6 +69,10 @@ func (h *Handler) SetDBClients(pg *db.Postgres, qd *db.Qdrant, rd *db.Redis) {
 func (h *Handler) SetEmbedder(e embedder.Embedder) {
 	h.embedder = e
 }
+
+// SetEmbedRegistry sets the multi-model embedder registry for /v1/embeddings.
+// When set, the embeddings handler resolves models by name from the registry.
+func (h *Handler) SetEmbedRegistry(r *embedder.Registry) { h.embedRegistry = r }
 
 // SetSearchService sets the unified search service for native search handlers.
 func (h *Handler) SetSearchService(svc *search.SearchService) {

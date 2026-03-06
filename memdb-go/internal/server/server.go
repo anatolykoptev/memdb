@@ -110,6 +110,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 }
 
 // initEmbedder initializes the embedder via factory (non-fatal if unavailable).
+// When ONNXModelDirCode is set, also loads a second ONNX model and creates a Registry.
 func initEmbedder(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) embedder.Embedder {
 	embCfg := embedder.Config{
 		Type:         cfg.EmbedderType,
@@ -127,6 +128,29 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) 
 		return nil
 	}
 	h.SetEmbedder(e)
+
+	// Multi-model registry: if code model dir is configured, load second ONNX model.
+	if cfg.ONNXModelDirCode != "" {
+		registry := embedder.NewRegistry("multilingual-e5-large")
+		registry.Register("multilingual-e5-large", e)
+
+		codeCfg, ok := embedder.KnownONNXModels()["jina-code-v2"]
+		if !ok {
+			codeCfg = embedder.ONNXModelConfig{Dim: 768, MaxLen: 512, PadID: 0}
+		}
+		codeEmb, codeErr := embedder.NewONNXEmbedder(cfg.ONNXModelDirCode, codeCfg, logger)
+		if codeErr != nil {
+			logger.Warn("code embedder init failed", slog.Any("error", codeErr))
+		} else {
+			registry.Register("jina-code-v2", codeEmb)
+			logger.Info("code embedder loaded",
+				slog.String("model", "jina-code-v2"),
+				slog.Int("dim", codeCfg.Dim),
+			)
+		}
+		h.SetEmbedRegistry(registry)
+	}
+
 	return e
 }
 

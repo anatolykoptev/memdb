@@ -1,14 +1,10 @@
 //go:build cgo
 
 // Package embedder provides text embedding backends.
-//
-// ONNXEmbedder runs multilingual-e5-large locally via ONNX Runtime,
-// producing 1024-dimensional embeddings identical to the Python pipeline.
 package embedder
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -18,33 +14,25 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 )
 
-const (
-	e5Dim            = 1024 // multilingual-e5-large output dimension
-	e5MaxLen         = 512  // maximum token sequence length
-	e5PadID          = 1    // XLM-RoBERTa pad token id
-	onnxIntraOpThreads = 4  // intra-op parallelism: 4 threads within a single ONNX op
-)
+const onnxIntraOpThreads = 4 // intra-op parallelism: 4 threads within a single ONNX op
 
-// ONNXEmbedder runs a quantized multilingual-e5-large ONNX model.
+// ONNXEmbedder runs a quantized ONNX embedding model.
 // It is safe for concurrent use; inference calls are serialized by a mutex.
 type ONNXEmbedder struct {
 	session   *ort.DynamicAdvancedSession
 	tokenizer *tokenizers.Tokenizer
-	dim       int
-	maxLen    int
-	logger    *slog.Logger
-	mu        sync.Mutex
+	dim            int
+	maxLen         int
+	padID          int64
+	hasTokenTypeID bool
+	logger         *slog.Logger
+	mu             sync.Mutex
 }
 
 // NewONNXEmbedder loads the ONNX model and HuggingFace tokenizer from modelDir.
-//
-// Expected files inside modelDir:
-//   - model_quantized.onnx   — the quantized ONNX model
-//   - tokenizer.json         — HuggingFace tokenizer config
-//
-// The ONNX Runtime shared library must be installed at /usr/lib/libonnxruntime.so
-// (or the path must be set before calling this function).
-func NewONNXEmbedder(modelDir string, logger *slog.Logger) (*ONNXEmbedder, error) {
+// Expects model_quantized.onnx and tokenizer.json inside modelDir.
+// The ONNX Runtime shared library must be at /usr/lib/libonnxruntime.so.
+func NewONNXEmbedder(modelDir string, cfg ONNXModelConfig, logger *slog.Logger) (*ONNXEmbedder, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -76,6 +64,9 @@ func NewONNXEmbedder(modelDir string, logger *slog.Logger) (*ONNXEmbedder, error
 
 	modelPath := filepath.Join(modelDir, "model_quantized.onnx")
 	inputNames := []string{"input_ids", "attention_mask"}
+	if cfg.HasTokenTypeID {
+		inputNames = append(inputNames, "token_type_ids")
+	}
 	outputNames := []string{"last_hidden_state"}
 
 	session, err := ort.NewDynamicAdvancedSession(
@@ -93,21 +84,24 @@ func NewONNXEmbedder(modelDir string, logger *slog.Logger) (*ONNXEmbedder, error
 
 	logger.Info("onnx embedder loaded",
 		slog.String("model", modelPath),
-		slog.Int("dim", e5Dim),
-		slog.Int("max_len", e5MaxLen),
+		slog.Int("dim", cfg.Dim),
+		slog.Int("max_len", cfg.MaxLen),
+		slog.Int("pad_id", cfg.PadID),
 	)
 
 	return &ONNXEmbedder{
-		session:   session,
-		tokenizer: tk,
-		dim:       e5Dim,
-		maxLen:    e5MaxLen,
-		logger:    logger,
+		session:        session,
+		tokenizer:      tk,
+		dim:            cfg.Dim,
+		maxLen:         cfg.MaxLen,
+		padID:          int64(cfg.PadID),
+		hasTokenTypeID: cfg.HasTokenTypeID,
+		logger:         logger,
 	}, nil
 }
 
 // Embed produces L2-normalized mean-pooled embeddings for the given texts.
-// It returns one 1024-dimensional vector per input text.
+// It returns one vector per input text with dimension matching the model config.
 func (e *ONNXEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
@@ -172,9 +166,9 @@ func (e *ONNXEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 			inputIDs[offset+s] = int64(allIDs[b][s])
 			attentionMask[offset+s] = int64(allMasks[b][s])
 		}
-		// Pad the remainder with pad token ID=1 and attention mask=0.
+		// Pad the remainder with the model's pad token ID and attention mask=0.
 		for s := seqLen; s < maxSeqLen; s++ {
-			inputIDs[offset+s] = e5PadID
+			inputIDs[offset+s] = e.padID
 			attentionMask[offset+s] = 0
 		}
 	}
@@ -199,92 +193,11 @@ func (e *ONNXEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 	return embeddings, nil
 }
 
-// runInference creates tensors, runs the ONNX session, and extracts the hidden
-// state. Caller must hold e.mu.
-func (e *ONNXEmbedder) runInference(
-	batchSize, seqLen int,
-	inputIDs, attentionMask []int64,
-) ([]float32, error) {
-
-	shape := ort.NewShape(int64(batchSize), int64(seqLen))
-
-	idsTensor, err := ort.NewTensor(shape, inputIDs)
-	if err != nil {
-		return nil, fmt.Errorf("onnx: create input_ids tensor: %w", err)
-	}
-	defer func() { _ = idsTensor.Destroy() }()
-
-	maskTensor, err := ort.NewTensor(shape, attentionMask)
-	if err != nil {
-		return nil, fmt.Errorf("onnx: create attention_mask tensor: %w", err)
-	}
-	defer func() { _ = maskTensor.Destroy() }()
-
-	// Auto-allocate output: pass nil and let ONNX Runtime determine the shape.
-	outputs := []ort.Value{nil}
-
-	err = e.session.Run(
-		[]ort.Value{idsTensor, maskTensor},
-		outputs,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("onnx: session run: %w", err)
-	}
-
-	// The output is auto-allocated; we must destroy it when done.
-	if outputs[0] == nil {
-		return nil, errors.New("onnx: session produced nil output")
-	}
-	defer func() { _ = outputs[0].Destroy() }()
-
-	// Extract the flat float32 data from the output tensor.
-	// The output shape is [batchSize, seqLen, dim].
-	outputTensor, ok := outputs[0].(*ort.Tensor[float32])
-	if !ok {
-		return nil, errors.New("onnx: unexpected output tensor type, expected *Tensor[float32]")
-	}
-
-	data := outputTensor.GetData()
-	expected := batchSize * seqLen * e.dim
-	if len(data) != expected {
-		return nil, fmt.Errorf("onnx: output size mismatch: got %d, expected %d (%dx%dx%d)",
-			len(data), expected, batchSize, seqLen, e.dim)
-	}
-
-	// Copy the data so we can safely destroy the tensor.
-	result := make([]float32, len(data))
-	copy(result, data)
-
-	return result, nil
-}
-
 // EmbedQuery embeds a single query string (search/retrieval use case).
 // Delegates to Embed — ONNX model handles query vs document identically.
 func (e *ONNXEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
 	return EmbedQueryViaEmbed(ctx, e, text)
 }
 
-// Dimension returns the embedding vector dimension (1024 for multilingual-e5-large).
+// Dimension returns the embedding vector dimension.
 func (e *ONNXEmbedder) Dimension() int { return e.dim }
-
-// Close releases the ONNX session, tokenizer, and runtime environment.
-func (e *ONNXEmbedder) Close() error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	if e.session != nil {
-		_ = e.session.Destroy()
-		e.session = nil
-	}
-	if e.tokenizer != nil {
-		e.tokenizer.Close()
-		e.tokenizer = nil
-	}
-
-	// DestroyEnvironment cleans up the global ONNX Runtime state.
-	// Safe to call even if other sessions have already been destroyed.
-	_ = ort.DestroyEnvironment()
-
-	e.logger.Info("onnx embedder closed")
-	return nil
-}

@@ -50,7 +50,8 @@ type Config struct {
 
 	// Embedder
 	EmbedderType  string `json:"embedder_type"`   // "onnx", "voyage", or "ollama"
-	ONNXModelDir  string `json:"onnx_model_dir"`  // path to ONNX model files
+	ONNXModelDir     string `json:"onnx_model_dir"`      // path to ONNX model files
+	ONNXModelDirCode string `json:"onnx_model_dir_code"` // path to code ONNX model (optional)
 	VoyageAPIKey  string `json:"voyage_api_key"`   // kept for rollback
 	EmbedderModel string `json:"embedder_model"`   // model name (voyage or ollama)
 	OllamaURL     string `json:"ollama_url"`       // Ollama server URL (e.g. http://ollama:11434)
@@ -133,7 +134,8 @@ func Load() *Config {
 		DBRedisURL:  envStr("MEMDB_DB_REDIS_URL", ""),
 
 		EmbedderType:  envStr("MEMDB_EMBEDDER_TYPE", "onnx"),
-		ONNXModelDir:  envStr("MEMDB_ONNX_MODEL_DIR", "/models"),
+		ONNXModelDir:     envStr("MEMDB_ONNX_MODEL_DIR", "/models"),
+		ONNXModelDirCode: envStr("MEMDB_ONNX_MODEL_DIR_CODE", ""),
 		VoyageAPIKey:  envStr("VOYAGE_API_KEY", ""),
 		EmbedderModel: envStr("MEMDB_EMBEDDER_MODEL", "voyage-4-lite"),
 		OllamaURL:     envStr("MEMDB_OLLAMA_URL", "http://localhost:11434"),
