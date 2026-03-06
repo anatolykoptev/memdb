@@ -58,6 +58,7 @@ type Config struct {
 	OllamaDim     int    `json:"ollama_dim"`       // embedding dimension override (0 = use model default)
 	OllamaPrefix  string `json:"ollama_prefix"`    // client-side text prefix ("" = no prefix, raw text like ONNX)
 	OllamaQuery   string `json:"ollama_query"`     // client-side query prefix for EmbedQuery ("" = same as OllamaPrefix)
+	EmbedURL      string `json:"embed_url"`        // HTTP embed-server sidecar URL (for type="http")
 
 	// API settings
 	EnableChatAPI bool `json:"enable_chat_api"`
@@ -142,6 +143,7 @@ func Load() *Config {
 		OllamaDim:     envInt("MEMDB_OLLAMA_DIM", 0),
 		OllamaPrefix:  envStr("MEMDB_OLLAMA_PREFIX", ""),
 		OllamaQuery:   envStr("MEMDB_OLLAMA_QUERY_PREFIX", ""),
+		EmbedURL:      envStr("MEMDB_EMBED_URL", ""),
 
 		EnableChatAPI: envBool("ENABLE_CHAT_API", false),
 

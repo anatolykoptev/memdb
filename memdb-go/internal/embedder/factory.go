@@ -9,14 +9,16 @@ import (
 // Config holds all embedder configuration in one typed struct.
 // Populated from environment variables via config.Config.
 type Config struct {
-	Type         string // "onnx" | "voyage" | "ollama"
+	Type         string // "onnx" | "voyage" | "ollama" | "http"
 	ONNXModelDir string
 	VoyageAPIKey string
-	Model        string // voyage or ollama model name
+	Model        string // voyage, ollama, or http model name
 	OllamaURL    string
 	OllamaDim    int    // 0 = auto-detect from first response
 	OllamaPrefix string // client-side document prefix (e.g. "passage: ")
 	OllamaQuery  string // client-side query prefix (e.g. "query: ")
+	HTTPBaseURL  string // for type="http" — URL of embed-server sidecar
+	HTTPDim      int    // dimension override (default 1024)
 }
 
 // New constructs the appropriate Embedder from cfg.
@@ -78,7 +80,23 @@ func New(cfg Config, logger *slog.Logger) (Embedder, error) {
 		logger.Info("embedder: onnx", slog.String("model_dir", cfg.ONNXModelDir))
 		return e, nil
 
+	case "http":
+		if cfg.HTTPBaseURL == "" {
+			return nil, errors.New("embedder: http requires MEMDB_EMBED_URL")
+		}
+		dim := cfg.HTTPDim
+		if dim == 0 {
+			dim = 1024
+		}
+		model := cfg.Model
+		if model == "" {
+			model = "multilingual-e5-large"
+		}
+		e := NewHTTPEmbedder(cfg.HTTPBaseURL, model, dim, logger)
+		logger.Info("embedder: http", slog.String("url", cfg.HTTPBaseURL), slog.String("model", model))
+		return e, nil
+
 	default:
-		return nil, fmt.Errorf("embedder: unknown type %q (valid: onnx, voyage, ollama)", cfg.Type)
+		return nil, fmt.Errorf("embedder: unknown type %q (valid: onnx, voyage, ollama, http)", cfg.Type)
 	}
 }
