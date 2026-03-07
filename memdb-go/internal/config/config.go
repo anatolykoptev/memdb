@@ -59,6 +59,7 @@ type Config struct {
 	OllamaPrefix  string `json:"ollama_prefix"`    // client-side text prefix ("" = no prefix, raw text like ONNX)
 	OllamaQuery   string `json:"ollama_query"`     // client-side query prefix for EmbedQuery ("" = same as OllamaPrefix)
 	EmbedURL      string `json:"embed_url"`        // HTTP embed-server sidecar URL (for type="http")
+	EmbedURLCode  string `json:"embed_url_code"`   // separate sidecar URL for code model (optional)
 
 	// API settings
 	EnableChatAPI bool `json:"enable_chat_api"`
@@ -144,6 +145,7 @@ func Load() *Config {
 		OllamaPrefix:  envStr("MEMDB_OLLAMA_PREFIX", ""),
 		OllamaQuery:   envStr("MEMDB_OLLAMA_QUERY_PREFIX", ""),
 		EmbedURL:      envStr("MEMDB_EMBED_URL", ""),
+		EmbedURLCode:  envStr("MEMDB_EMBED_URL_CODE", ""),
 
 		EnableChatAPI: envBool("ENABLE_CHAT_API", false),
 

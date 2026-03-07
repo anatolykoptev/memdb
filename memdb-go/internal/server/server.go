@@ -130,16 +130,21 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) 
 	}
 	h.SetEmbedder(e)
 
-	// Multi-model registry: HTTP embedder uses a single sidecar for all models;
-	// ONNX uses separate model directories.
+	// Multi-model registry: HTTP embedder uses sidecar(s) for models;
+	// EmbedURLCode overrides jina URL when set (separate Python sidecar).
 	if cfg.EmbedderType == "http" && cfg.EmbedURL != "" {
 		registry := embedder.NewRegistry("multilingual-e5-large")
 		registry.Register("multilingual-e5-large", e)
 
-		codeEmb := embedder.NewHTTPEmbedder(cfg.EmbedURL, "jina-code-v2", 768, logger)
+		codeURL := cfg.EmbedURL
+		if cfg.EmbedURLCode != "" {
+			codeURL = cfg.EmbedURLCode
+		}
+		codeEmb := embedder.NewHTTPEmbedder(codeURL, "jina-code-v2", 768, logger)
 		registry.Register("jina-code-v2", codeEmb)
 		logger.Info("code embedder loaded (http)",
 			slog.String("model", "jina-code-v2"),
+			slog.String("url", codeURL),
 			slog.Int("dim", 768),
 		)
 		h.SetEmbedRegistry(registry)
