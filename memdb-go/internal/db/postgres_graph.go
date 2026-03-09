@@ -9,7 +9,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db/queries"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
 )
 
 // GraphRecallResult holds a single result from graph-based recall.

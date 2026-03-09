@@ -23,8 +23,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/qdrant/go-client/qdrant"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
-	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 )
 
 const (

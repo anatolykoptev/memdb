@@ -33,7 +33,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/rpc"
 )
 
 // redisClient is the subset of *redis.Client methods used by stream-counting helpers.

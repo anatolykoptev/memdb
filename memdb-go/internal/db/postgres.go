@@ -20,7 +20,7 @@ import (
 "github.com/jackc/pgx/v5"
 "github.com/jackc/pgx/v5/pgxpool"
 
-"github.com/MemDBai/MemDB/memdb-go/internal/db/queries"
+"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
 )
 
 // graphName is the fixed PolarDB graph name. All queries use this constant.

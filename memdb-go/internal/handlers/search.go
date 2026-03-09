@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/search"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
 
 const logQueryTruncLen = 60 // max chars for query logging

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 )
 
 // openaiEmbeddingRequest is the OpenAI-compatible embedding request format.

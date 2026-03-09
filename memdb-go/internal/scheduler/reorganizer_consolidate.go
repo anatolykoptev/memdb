@@ -13,7 +13,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
 const (

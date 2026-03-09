@@ -28,8 +28,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
-	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 // testLLMClient creates an llm.Client pointing to a test HTTP server.

@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
 // fastAddContext holds shared state for the fast-add pipeline to avoid long parameter lists.

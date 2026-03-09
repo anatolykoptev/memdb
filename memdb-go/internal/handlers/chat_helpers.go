@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/search"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
 
 const (
@@ -58,7 +58,10 @@ func (h *Handler) chatSearchMemories(ctx context.Context, req *nativeChatRequest
 	}
 	filtered := filterMemoriesByThreshold(memories, threshold, chatMinPersonalMem)
 
-	return filtered, prefString, nil
+	// Post-retrieval enhancement: disambiguate pronouns, resolve relative times, merge related.
+	enhanced := search.EnhanceMemories(ctx, *req.Query, filtered, h.searchService.Enhance)
+
+	return enhanced, prefString, nil
 }
 
 // chatResolveDedup determines the dedup mode for chat search.

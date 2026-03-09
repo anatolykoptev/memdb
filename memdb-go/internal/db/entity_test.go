@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db/queries"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
 )
 
 // --- NormalizeEntityID tests ---

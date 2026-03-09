@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 // --- 3.5.1: textHash ---

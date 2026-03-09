@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db/queries"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
 )
 
 // VectorSearchResult holds a single result from vector or fulltext search.

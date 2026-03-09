@@ -16,8 +16,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/config"
-	"github.com/MemDBai/MemDB/memdb-go/internal/server"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/server"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
