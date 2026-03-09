@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db/queries"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
 )
 
 // EntitySimilarityThreshold is the minimum cosine similarity (0–1) for two entity names

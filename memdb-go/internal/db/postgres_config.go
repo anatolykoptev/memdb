@@ -11,7 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db/queries"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
 )
 
 // EnsureUserConfigsTable creates the user_configs table if it does not exist.

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
-	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/rpc"
 )
 
 // newMockPython creates a mock Python backend that returns a fixed proxied response.

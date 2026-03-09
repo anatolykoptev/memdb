@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/search"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
 
 const (

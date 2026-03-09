@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/cache"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/cache"
 )
 
 // CacheConfig defines which paths to cache and their TTLs.

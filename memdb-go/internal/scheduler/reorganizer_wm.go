@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
 const wmQueryLogPreviewLen = 60 // max chars of query to log as preview

@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db/queries"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
 )
 
 // MemNode is a lightweight struct for id+memory text retrieval.

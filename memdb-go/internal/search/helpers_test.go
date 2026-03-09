@@ -3,7 +3,7 @@ package search
 import (
 	"testing"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
 func TestParseProperties_Valid(t *testing.T) {

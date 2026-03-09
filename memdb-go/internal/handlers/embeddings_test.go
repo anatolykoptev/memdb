@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 )
 
 // mockEmbedder implements embedder.Embedder for testing the embeddings handler.

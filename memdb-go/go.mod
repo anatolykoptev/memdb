@@ -1,4 +1,4 @@
-module github.com/MemDBai/MemDB/memdb-go
+module github.com/anatolykoptev/memdb/memdb-go
 
 go 1.26rc3
 
@@ -6,6 +6,7 @@ require (
 	connectrpc.com/connect v1.19.1
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/anatolykoptev/go-engine v1.3.1
+	github.com/anatolykoptev/go-kit v0.9.0
 	github.com/anatolykoptev/go-stealth v1.3.1
 	github.com/daulet/tokenizers v1.25.0
 	github.com/google/uuid v1.6.0
@@ -30,7 +31,6 @@ require (
 
 require (
 	github.com/PuerkitoBio/goquery v1.11.0 // indirect
-	github.com/anatolykoptev/go-kit v0.9.0 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect

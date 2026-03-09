@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/search"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
 
 // --- Validated handler methods ---
@@ -32,25 +32,6 @@ func (h *Handler) ValidatedSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.proxyWithBody(w, r, normalizeSearch(body))
-}
-
-// ValidatedAdd validates and proxies POST /product/add.
-func (h *Handler) ValidatedAdd(w http.ResponseWriter, r *http.Request) {
-	body, ok := h.readBody(w, r)
-	if !ok {
-		return
-	}
-
-	var req addRequest
-	if !h.decodeJSON(w, body, &req) {
-		return
-	}
-
-	if !h.checkErrors(w, validateAddRequest(req.UserID, req.AsyncMode, req.Mode)) {
-		return
-	}
-
-	h.proxyWithBody(w, r, normalizeAdd(body))
 }
 
 // ValidatedFeedback validates and proxies POST /product/feedback.

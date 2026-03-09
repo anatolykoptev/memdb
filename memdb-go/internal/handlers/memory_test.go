@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
 // TestNativeGetMemoryByIDs_NoPostgres verifies validation still works when

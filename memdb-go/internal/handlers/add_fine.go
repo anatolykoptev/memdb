@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
-	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 // candidateConvHeadChars is the character limit for the conversation head used
@@ -80,6 +80,13 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 		slog.String("model", h.llmExtractor.Model()),
 	)
 
+	// Step 3.5: hallucination filter — validate facts against conversation (non-fatal)
+	facts = h.filterHallucinatedFacts(ctx, conversation, facts)
+	if len(facts) == 0 {
+		h.logger.Debug("fine add: all facts filtered as hallucinations", slog.String("cube_id", cubeID))
+		return nil, nil
+	}
+
 	// Step 4a: filter exact duplicates by content-hash before embedding (saves ONNX inference).
 	facts = h.filterAddsByContentHash(ctx, facts, cubeID)
 
@@ -117,7 +124,13 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 	// EpisodicMemory nodes improve multi-hop temporal reasoning on later queries.
 	h.generateEpisodicSummary(cubeID, sessionID, conversation, now, len(facts))
 
-	// Step 8: generate / update User profile summary in background
+	// Step 8: extract skill memories in background (non-blocking, non-fatal)
+	h.generateSkillMemory(cubeID, conversation, len(req.Messages))
+
+	// Step 8.5: extract tool trajectory in background (non-blocking, non-fatal)
+	h.generateToolTrajectory(cubeID, conversation)
+
+	// Step 9: generate / update User profile summary in background
 	if h.profiler != nil {
 		h.profiler.TriggerRefresh(cubeID)
 	}

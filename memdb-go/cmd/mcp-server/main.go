@@ -18,9 +18,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/config"
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
-	"github.com/MemDBai/MemDB/memdb-go/internal/mcptools"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/mcptools"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

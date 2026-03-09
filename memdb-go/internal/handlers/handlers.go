@@ -12,12 +12,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
-	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
-	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
-	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
-	"github.com/MemDBai/MemDB/memdb-go/internal/scheduler"
-	"github.com/MemDBai/MemDB/memdb-go/internal/search"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/rpc"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 	"golang.org/x/sync/semaphore"
 )
 

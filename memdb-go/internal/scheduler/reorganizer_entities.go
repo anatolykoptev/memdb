@@ -10,8 +10,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
-	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 const entityLinkTimeout = 15 * time.Second // timeout for background entity linking goroutine

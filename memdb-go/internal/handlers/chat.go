@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
-	"github.com/MemDBai/MemDB/memdb-go/internal/rpc"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/rpc"
 )
 
 const (

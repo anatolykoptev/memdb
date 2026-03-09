@@ -7,12 +7,12 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/config"
-	"github.com/MemDBai/MemDB/memdb-go/internal/db"
-	"github.com/MemDBai/MemDB/memdb-go/internal/embedder"
-	"github.com/MemDBai/MemDB/memdb-go/internal/handlers"
-	"github.com/MemDBai/MemDB/memdb-go/internal/llm"
-	"github.com/MemDBai/MemDB/memdb-go/internal/scheduler"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/handlers"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
 )
 
 // initDBClients connects to databases for native handlers.

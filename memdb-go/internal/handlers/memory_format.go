@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/MemDBai/MemDB/memdb-go/internal/search"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
 
 // prefCollectionsGetMemory lists the Qdrant collections for preference memory.

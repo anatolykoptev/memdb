@@ -11,7 +11,7 @@ import (
 	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	v1 "github.com/MemDBai/MemDB/memdb-go/gen/proto/memdb/v1"
+	v1 "github.com/anatolykoptev/memdb/memdb-go/gen/proto/memdb/v1"
 	http "net/http"
 	strings "strings"
 )
