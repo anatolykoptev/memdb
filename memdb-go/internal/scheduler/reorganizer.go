@@ -32,7 +32,8 @@ const (
 	wmRefreshTopK = 10
 
 	// wmRefreshEmbedTimeout is the deadline for embedding the query in RefreshWorkingMemory.
-	wmRefreshEmbedTimeout = 10 * time.Second
+	// 30s to handle ARM under load (e5-large ONNX can spike to 10s+ with CPU contention).
+	wmRefreshEmbedTimeout = 30 * time.Second
 
 	// importanceDecayFactor is the multiplier applied to importance_score each periodic cycle.
 	// 0.95 per 6h ≈ 0.70 after 24h, 0.13 after 7 days without retrieval → natural fade.
