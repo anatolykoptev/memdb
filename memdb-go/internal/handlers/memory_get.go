@@ -232,8 +232,8 @@ func (h *Handler) NativePostGetMemory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(req.Filter) > 0 {
-		h.logger.Debug("native post_get_memory: filter specified, proxying")
-		h.proxyWithBody(w, r, body)
+		h.logger.Debug("native post_get_memory: filter specified, using native filter handler")
+		h.handlePostGetMemoryWithFilter(w, r, body, req)
 		return
 	}
 
