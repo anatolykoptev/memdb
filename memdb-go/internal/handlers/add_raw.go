@@ -131,6 +131,7 @@ func buildRawNode(
 		Memory:     text,
 		MemoryType: memTypeLongTerm,
 		UserName:   fac.cubeID,
+		UserID:     fac.userID, // Phase 2: person identity slot
 		AgentID:    fac.agentID,
 		SessionID:  fac.sessionID,
 		Mode:       modeRaw,
