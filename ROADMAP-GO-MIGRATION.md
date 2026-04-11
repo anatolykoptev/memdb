@@ -257,18 +257,25 @@ Python `GeneralScheduler` регистрирует 8 handlers:
 Реализовано: `SearchFine()` + `LLMFilter()` + `LLMRecallHint()` + SearXNG internet search.
 Все proxy fallback удалены из `NativeSearch`.
 
-#### 4.7 Delete: file_ids + complex filter (приоритет: 🟡)
+#### 4.7 Delete: file_ids + complex filter ✅ апрель 2026
 
-| # | Задача | Effort |
-|---|--------|--------|
-| 4.7.1 | Delete by file_ids в Postgres | S |
-| 4.7.2 | Delete by complex filter в Postgres | M |
+| # | Задача | Статус | Commit |
+|---|--------|--------|--------|
+| 4.7.1 | Delete by file_ids в Postgres | ✅ | `16d767b` |
+| 4.7.2 | Delete by complex filter в Postgres (AGE WHERE) | ✅ | `16d767b` |
+| 4.7.3 | `internal/filter/` пакет — AGE filter DSL (port из `polardb/filters.py`) + fuzz test | ✅ | `5b03e92` |
 
-#### 4.8 Get memory: complex filter (приоритет: 🟡)
+Реализовано: `internal/filter/` (Parse + BuildAGEWhereConditions, 8 файлов, 1122 строки, 46 unit + fuzz), `Postgres.DeleteByFilter`/`DeleteByFileIDs` с валидацией cube_ids regex и транзакционным pre-query → DELETE. `proxyWithBody` fallback убран. E2E верифицировано на production (`2026-04-11`).
 
-| # | Задача | Effort |
-|---|--------|--------|
-| 4.8.1 | Filter parser для `POST /product/get_memory` | M |
+#### 4.8 Get memory: complex filter ✅ апрель 2026
+
+| # | Задача | Статус | Commit |
+|---|--------|--------|--------|
+| 4.8.1 | `Postgres.GetMemoriesByFilter` + `NativePostGetMemory` | ✅ | `285b21c` |
+| 4.8.2 | Cache key = sha256(canonical filter) — no cross-user poisoning | ✅ | `285b21c` |
+| 4.8.3 | Limit clamp ≤1000, default 100 | ✅ | `285b21c` |
+
+Ответ в Python-совместимой схеме `{text_mem, pref_mem, tool_mem, skill_mem}`. `ProxyToProduct` fallback убран. E2E верифицировано в production.
 
 #### 4.9 Тесты
 
@@ -278,13 +285,18 @@ Python `GeneralScheduler` регистрирует 8 handlers:
 | 4.9.2 | Integration test: E2E verify nodes created | M |
 | 4.9.3 | Python parity check (10 conversations) | S |
 
-#### 4.10 MCP `add_memory` + `chat` в internal Go handler (приоритет: 🟡)
+#### 4.10a MCP `add_memory` + `chat` → memdb-go (HTTP loopback) ✅ апрель 2026
 
-| # | Задача | Effort |
-|---|--------|--------|
-| 4.10.1 | `mcptools/add.go`: вызвать `handlers.NativeAdd` напрямую (или через internal HTTP loopback) | S |
-| 4.10.2 | `mcptools/chat.go`: вызвать `handlers.NativeChatComplete` | S |
-| 4.10.3 | Удалить `MEMDB_PYTHON_URL` из mcp-server runtime deps | S |
+| # | Задача | Статус | Commit |
+|---|--------|--------|--------|
+| 4.10a.1 | Split `RegisterProxyTools` → `RegisterNativeGoProxyTools` (add_memory, chat, clear_chat_history) + `RegisterPythonProxyTools` (cube tools) | ✅ | `983ad02` |
+| 4.10a.2 | cmd/mcp-server/main.go: передать `memdbGoURL` для Go-native MCP tools, `PythonBackendURL` для legacy cube tools | ✅ | `983ad02` |
+
+Прагматичное решение Option B (loopback HTTP к memdb-go:8080) вместо тяжёлого service-layer рефакторинга. Три MCP tools теперь идут в memdb-go, 6 остальных (cube tools) пока в Python — это блок 4.11. **Известный flag**: `doc_path` в `AddMemoryProxyInput` молча игнорируется Go NativeAdd — см. Task #7 follow-up.
+
+#### 4.10b MCP add_memory + chat — полный service layer (🟢 отложено)
+
+Option C из research (extract `AddMemories`/`ChatComplete` service functions, unified wiring между REST и MCP без HTTP hop'а) — отложено до стабилизации Phase 4.5/4.11. Ценность низкая, так как loopback HTTP hop на localhost < 1ms, а рефакторинг требует переделки construction в `cmd/mcp-server/main.go`.
 
 #### 4.11 MCP cube tools Go-native или sunset (приоритет: 🔵)
 
@@ -294,24 +306,31 @@ Python `GeneralScheduler` регистрирует 8 handlers:
 | 4.11.2 | Если нужны — портировать `mem_cube/single_cube.py` (33.7K) в `internal/handlers/cubes.go` | L |
 | 4.11.3 | Если нет — удалить MCP tools и endpoints | S |
 
-#### 4.12 Убрать `llm/complete` thin proxy (приоритет: 🟢) ✅ апрель 2026
+#### 4.12 Убрать `llm/complete` thin proxy ✅ апрель 2026
 
-| # | Задача | Effort |
-|---|--------|--------|
-| 4.12.1 | `ProxyLLMComplete` → `NativeLLMComplete`, делегирует `llm.Client.Passthrough`; пакетные переменные убраны | S |
+| # | Задача | Статус | Commit |
+|---|--------|--------|--------|
+| 4.12.1 | `ProxyLLMComplete` → `NativeLLMComplete`, делегирует `llm.Client.Passthrough` | ✅ | `9de89c3` + `ae88370` |
+| 4.12.2 | Пакетные переменные `llmClient`/`llmProxyURL`/`llmDefaultModel` убраны | ✅ | `9de89c3` |
+| 4.12.3 | `add_episodic.callEpisodicSummarizer` — теперь принимает `*llm.Client` | ✅ | `9de89c3` |
+
+**Uncovered bug (recovered):** T2 агент оставил `llm.Client.Passthrough` в dirty tree не закоммиченным. Dozor `git reset --hard` стёр метод после первого webhook'а, production билд падал на `Passthrough undefined`. Восстановлено в `ae88370` (вместе с dangling `server.go:SetLLMProxy` reference и `ValidatedAdd → NativeAdd` rename в тестах).
 
 #### Порядок
 
 ```
-4.5 (feedback — M) ← БЛОКЕР
-  → 4.7-4.8 (delete/get filter — M) ← БЛОКЕР
-    → 4.10 (MCP add+chat — S)
-      → 4.12 (llm/complete — S)
-        → 4.11 (cube tools: решение + реализация/удаление)
-          → 4.9 (tests)
+✅ 4.7 (delete filter)   ─┐
+✅ 4.8 (get filter)       ├─ Неделя 1 (апрель 2026) ✅
+✅ 4.10a (MCP add+chat)  ─┤
+✅ 4.12 (llm/complete)   ─┘
+  → 4.5 (feedback — L) ← последний БЛОКЕР Фазы 5
+    → 4.11 (cube tools: решение — S, порт или sunset — L или S)
+      → 4.9 (tests, E2E parity)
+        → 4.10b (optional service layer refactor, 🟢 оптимизация)
+          → Фаза 5 (удаление memdb-api)
 ```
 
-**Оценка:** 2-3 недели до Фазы 5. (4.6 завершена)
+**Оценка:** Неделя 1 ✅. Остаётся 4.5 (2-3 недели) + 4.11 (решение 30 мин, реализация зависит).
 
 ---
 
@@ -328,8 +347,12 @@ Python `GeneralScheduler` регистрирует 8 handlers:
 - [x] Skill extraction при add — Go-native
 - [x] Tool trajectory при add — Go-native (`add_tool.go`, `tool_trajectory.go`)
 - [x] Python proxy удалён из `/product/add` — HTTP errors
-- [ ] **Feedback** — Go-native processing (Фаза 4.5) ← БЛОКЕР
+- [ ] **Feedback** — Go-native processing (Фаза 4.5) ← последний БЛОКЕР
 - [x] **Search mode=fine + internet** — Go-native (Фаза 4.6) ✅ март 2026
+- [x] **Delete by file_ids / complex filter** — Go-native (Фаза 4.7) ✅ апрель 2026
+- [x] **Get memory with complex filter** — Go-native (Фаза 4.8) ✅ апрель 2026
+- [x] **MCP add_memory + chat → memdb-go** — Фаза 4.10a ✅ апрель 2026
+- [x] **`/product/llm/complete` → CLIProxyAPI напрямую** — Фаза 4.12 ✅ апрель 2026
 - [ ] **Delete by file_ids/filter** — Go-native (Фаза 4.7) ← БЛОКЕР
 - [ ] **Get memory with filter** — Go-native (Фаза 4.8) ← БЛОКЕР
 - [ ] **MCP `add_memory` + `chat`** — переключить на internal Go handler вместо HTTP→Python (Фаза 4.10) ← новый пункт
