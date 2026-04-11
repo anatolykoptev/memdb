@@ -37,12 +37,12 @@ type SearchService struct {
 	Iterative   IterativeConfig
 	Enhance     EnhanceConfig
 	// Internet performs web search via SearXNG. nil = disabled.
-	Internet    *InternetSearcher
+	Internet *InternetSearcher
 	// Fine configures LLM fine-mode (filter + recall). Zero value = disabled.
-	Fine        FineConfig
+	Fine FineConfig
 	// Profiler generates and serves Memobase-style user profile summaries.
 	// When non-nil, profile_mem is populated in every search response.
-	Profiler    *scheduler.Profiler
+	Profiler *scheduler.Profiler
 }
 
 // NewSearchService creates a SearchService. Any dependency may be nil (caller
@@ -63,9 +63,14 @@ func (s *SearchService) CanSearch() bool {
 
 // SearchParams configures a single search invocation.
 type SearchParams struct {
-	Query            string
-	UserName         string
-	CubeID           string
+	Query    string
+	UserName string
+	CubeID   string
+	// CubeIDs enables cross-domain (multi-cube) vector search. When len>0, the
+	// vector search filter switches from user_name = CubeID to user_name = ANY(CubeIDs).
+	// Leave empty for single-cube search (default). CubeID is kept as a fallback
+	// for code paths (response building, profiler, etc.) that still use one cube.
+	CubeIDs          []string
 	AgentID          string
 	TopK             int     // text budget (default DefaultTextTopK)
 	SkillTopK        int     // skill budget (default DefaultSkillTopK)
@@ -79,9 +84,9 @@ type SearchParams struct {
 	IncludePref      bool
 	IncludeTool      bool
 	IncludeEmbedding bool
-	NumStages        int     // iterative expansion stages (0 = disabled, 2 = fast, 3 = fine)
-	LLMRerank        bool    // enable LLM-based reranking (adds ~3-4s latency)
-	InternetSearch   bool    // enable web search via SearXNG
+	NumStages        int  // iterative expansion stages (0 = disabled, 2 = fast, 3 = fine)
+	LLMRerank        bool // enable LLM-based reranking (adds ~3-4s latency)
+	InternetSearch   bool // enable web search via SearXNG
 }
 
 // SearchOutput holds the formatted result plus optional embedding sidecar.
@@ -91,18 +96,18 @@ type SearchOutput struct {
 
 // parallelSearchResults holds all results from the parallel DB phase.
 type parallelSearchResults struct {
-	textVec           []db.VectorSearchResult
-	textFT            []db.VectorSearchResult
-	skillVec          []db.VectorSearchResult
-	skillFT           []db.VectorSearchResult
-	toolVec           []db.VectorSearchResult
-	toolFT            []db.VectorSearchResult
-	prefResults       []db.QdrantSearchResult
-	graphKeyResults   []db.GraphRecallResult
-	graphTagResults   []db.GraphRecallResult
+	textVec            []db.VectorSearchResult
+	textFT             []db.VectorSearchResult
+	skillVec           []db.VectorSearchResult
+	skillFT            []db.VectorSearchResult
+	toolVec            []db.VectorSearchResult
+	toolFT             []db.VectorSearchResult
+	prefResults        []db.QdrantSearchResult
+	graphKeyResults    []db.GraphRecallResult
+	graphTagResults    []db.GraphRecallResult
 	entityGraphResults []db.GraphRecallResult
-	workingMemItems   []db.VectorSearchResult
-	internetResults   []InternetResult
+	workingMemItems    []db.VectorSearchResult
+	internetResults    []InternetResult
 }
 
 // searchBudget holds the inflated top-k values for dedup modes.
@@ -268,9 +273,12 @@ func (s *SearchService) spawnTextSearches(
 ) {
 	g.Go(func() error {
 		var err error
-		if hasCutoff {
+		switch {
+		case hasCutoff:
 			psr.textVec, err = s.postgres.VectorSearchWithCutoff(ctx, queryVec, p.UserName, TextScopes, budget.textK, cutoffISO, p.AgentID)
-		} else {
+		case len(p.CubeIDs) > 1:
+			psr.textVec, err = s.postgres.VectorSearchMultiCube(ctx, queryVec, p.CubeIDs, TextScopes, p.AgentID, budget.textK)
+		default:
 			psr.textVec, err = s.postgres.VectorSearch(ctx, queryVec, p.UserName, TextScopes, p.AgentID, budget.textK)
 		}
 		return err
