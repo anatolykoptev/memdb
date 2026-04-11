@@ -49,8 +49,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	searchSvc, profiler := initSearchService(cfg, pg, qd, emb, rd, h, logger)
 	h.SetSearchService(searchSvc)
 
-	// Configure LLM proxy (CLIProxyAPI) and initialize LLM extractor
-	handlers.SetLLMProxy(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel)
+	// Initialize LLM extractor (chat client with CLIProxyAPI config is wired below).
 	extractor := initLLMExtractor(cfg, h, logger)
 
 	// Initialize chat LLM client (reuses CLIProxyAPI config, same default model)
@@ -280,8 +279,8 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	mux.HandleFunc("POST /product/chat/stream", h.NativeChatStream)
 	mux.HandleFunc("POST /product/chat/stream/playground", h.ProxyToProduct)
 
-	// LLM proxy — direct CLIProxyAPI (no memory retrieval)
-	mux.HandleFunc("POST /product/llm/complete", h.ProxyLLMComplete)
+	// LLM passthrough — direct CLIProxyAPI (no memory retrieval)
+	mux.HandleFunc("POST /product/llm/complete", h.NativeLLMComplete)
 
 	// Suggestions
 	mux.HandleFunc("POST /product/suggestions", h.ProxyToProduct)

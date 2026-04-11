@@ -10,6 +10,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -23,11 +24,104 @@ import (
 )
 
 const (
-	maxRetries      = 3
-	initialDelay    = 2 * time.Second
-	maxDelay        = 30 * time.Second
-	jitterDivisor   = 4 // jitter = rand(0, delay/jitterDivisor) for retry backoff
+	maxRetries    = 3
+	initialDelay  = 2 * time.Second
+	maxDelay      = 30 * time.Second
+	jitterDivisor = 4 // jitter = rand(0, delay/jitterDivisor) for retry backoff
+
+	passthroughInitBuf = 64 * 1024  // 64 KB initial SSE scanner buffer
+	passthroughMaxBuf  = 512 * 1024 // 512 KB max SSE scanner buffer
 )
+
+// passthroughSSEClient has no Timeout — SSE streams terminate via ctx cancellation,
+// not wall-clock. Shared across Passthrough calls.
+var passthroughSSEClient = &http.Client{}
+
+// Passthrough forwards an already-serialized OpenAI-compatible chat completion body
+// to the configured upstream, copying status and headers back to w. When isStream is
+// true the response body is streamed line-by-line (SSE) with explicit Flusher pumps.
+//
+// On transport error the response is a JSON 502. All errors are logged via logger.
+// Intended for the /product/llm/complete HTTP adapter — no retries, no fallback
+// models, no memory retrieval.
+func (c *Client) Passthrough(ctx context.Context, body []byte, isStream bool, w http.ResponseWriter, logger *slog.Logger) {
+	target := c.baseURL + "/v1/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
+	if err != nil {
+		logger.Error("llm passthrough: create request failed", slog.Any("error", err))
+		writeJSONError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	client := c.httpClient
+	if isStream {
+		client = passthroughSSEClient
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.Error("llm passthrough: request failed",
+			slog.String("target", target), slog.Any("error", err))
+		writeJSONError(w, http.StatusBadGateway, "llm service unavailable")
+		return
+	}
+	defer resp.Body.Close()
+
+	for key, values := range resp.Header {
+		for _, v := range values {
+			w.Header().Add(key, v)
+		}
+	}
+
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(resp.StatusCode)
+		streamSSELines(ctx, w, resp.Body, logger)
+		return
+	}
+
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+
+// streamSSELines proxies an SSE body to the client using line-oriented scanning.
+// Guarantees SSE field boundaries are never split across reads.
+func streamSSELines(ctx context.Context, w http.ResponseWriter, body io.Reader, logger *slog.Logger) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return
+	}
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, passthroughInitBuf), passthroughMaxBuf)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		if !scanner.Scan() {
+			if err := scanner.Err(); err != nil {
+				logger.Debug("llm passthrough sse: scanner error", slog.Any("error", err))
+			}
+			return
+		}
+		fmt.Fprintf(w, "%s\n", scanner.Text())
+		flusher.Flush()
+	}
+}
+
+// writeJSONError is a tiny helper so Passthrough does not depend on handlers.writeJSON.
+func writeJSONError(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_, _ = fmt.Fprintf(w, `{"code":%d,"message":%q,"data":null}`, code, msg)
+}
 
 // Client is an OpenAI-compatible chat completion client with retry and
 // model fallback on quota errors.
@@ -95,9 +189,9 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 type retryDecision int
 
 const (
-	retryStop         retryDecision = iota // no more retries for this model
-	retryContinue                          // retry with same model (transient)
-	retryNextModel                         // switch to next model (quota)
+	retryStop      retryDecision = iota // no more retries for this model
+	retryContinue                       // retry with same model (transient)
+	retryNextModel                      // switch to next model (quota)
 )
 
 // chatModelLoop runs the retry loop for one model.
@@ -229,13 +323,17 @@ func (e *APIError) Error() string {
 }
 
 // IsAuth returns true for 401/403 authentication errors.
-func (e *APIError) IsAuth() bool { return e.StatusCode == http.StatusUnauthorized || e.StatusCode == http.StatusForbidden }
+func (e *APIError) IsAuth() bool {
+	return e.StatusCode == http.StatusUnauthorized || e.StatusCode == http.StatusForbidden
+}
 
 // IsRateLimit returns true for 429 rate limit errors.
 func (e *APIError) IsRateLimit() bool { return e.StatusCode == http.StatusTooManyRequests }
 
 // IsTransient returns true for errors worth retrying (429, 5xx).
-func (e *APIError) IsTransient() bool { return e.IsRateLimit() || e.StatusCode >= http.StatusInternalServerError }
+func (e *APIError) IsTransient() bool {
+	return e.IsRateLimit() || e.StatusCode >= http.StatusInternalServerError
+}
 
 // isQuotaError returns true for 429 or body containing "quota"/"rate limit".
 func (e *APIError) isQuotaError() bool {
