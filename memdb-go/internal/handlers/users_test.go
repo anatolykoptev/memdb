@@ -172,6 +172,30 @@ func TestNativeUpdateUserConfig_EmptyBody(t *testing.T) {
 	}
 }
 
-
 // Integration tests with real Redis+Postgres would cover cache hit/miss paths
 // for NativeListUsers, NativeInstancesCount.
+
+// --- NativeListCubesByTag tests ---
+
+func TestNativeListCubesByTag_MissingTag(t *testing.T) {
+	h := testValidateHandler()
+	req := httptest.NewRequest(http.MethodGet, "/product/cubes", nil)
+	w := httptest.NewRecorder()
+	h.NativeListCubesByTag(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "tag") {
+		t.Errorf("expected tag-required error, got: %s", w.Body.String())
+	}
+}
+
+func TestNativeListCubesByTag_NoPostgres(t *testing.T) {
+	h := testValidateHandler() // nil postgres
+	req := httptest.NewRequest(http.MethodGet, "/product/cubes?tag=mode:raw", nil)
+	w := httptest.NewRecorder()
+	h.NativeListCubesByTag(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 (nil postgres)", w.Code)
+	}
+}
