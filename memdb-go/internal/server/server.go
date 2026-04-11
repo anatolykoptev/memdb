@@ -17,8 +17,8 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 	mw "github.com/anatolykoptev/memdb/memdb-go/internal/server/middleware"
 
-	enginesearch "github.com/anatolykoptev/go-engine/search"
 	"github.com/anatolykoptev/go-engine/fetch"
+	enginesearch "github.com/anatolykoptev/go-engine/search"
 	"github.com/anatolykoptev/go-stealth/proxypool"
 )
 
@@ -317,6 +317,7 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	// User management — native with proxy fallback
 	mux.HandleFunc("POST /product/users/register", h.NativeRegisterUser)
 	mux.HandleFunc("GET /product/users", h.NativeListUsers)
+	mux.HandleFunc("GET /product/cubes", h.NativeListCubesByTag)
 	mux.HandleFunc("GET /product/users/{user_id}", h.NativeGetUser)
 	mux.HandleFunc("GET /product/users/{user_id}/config", h.NativeGetUserConfig)
 	mux.HandleFunc("PUT /product/users/{user_id}/config", h.NativeUpdateUserConfig)

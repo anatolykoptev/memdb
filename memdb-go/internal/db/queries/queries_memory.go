@@ -20,6 +20,20 @@ SELECT COUNT(DISTINCT properties->>'user_name')
 FROM %[1]s."Memory"
 WHERE properties->>'status' = 'activated'`
 
+// ListCubesByTag returns distinct cube IDs (user_name in node properties)
+// where at least one activated memory has the given tag in properties->'tags'.
+// Used by go-wowa to hydrate its knownCubes set at startup — it asks for
+// cubes tagged "mode:raw" (experience memory marker).
+//
+// Args: $1 = tag (text)
+const ListCubesByTag = `
+SELECT DISTINCT properties->>'user_name' AS cube_id
+FROM %[1]s."Memory"
+WHERE properties->>'status' = 'activated'
+  AND properties->>'user_name' IS NOT NULL
+  AND properties->'tags' @> to_jsonb(ARRAY[$1]::text[])
+ORDER BY cube_id`
+
 // ExistUser checks if a user has any activated memories.
 // Args: $1 = user_name (text)
 const ExistUser = `
@@ -126,7 +140,8 @@ WHERE id = $1
   AND properties->>'status' = 'activated'`
 
 // SoftDeleteMerged marks a memory as merged into another, following MemOS lifecycle:
-//   activated → merged (not deleted — still queryable for audit/history)
+//
+//	activated → merged (not deleted — still queryable for audit/history)
 //
 // Sets: status="merged", merged_into_id=<winner_id>, updated_at=<now>
 // Args: $1 = memory_id (properties->>'id'), $2 = merged_into_id (text), $3 = updated_at (text)

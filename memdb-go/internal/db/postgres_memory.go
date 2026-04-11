@@ -551,3 +551,23 @@ func (p *Postgres) CleanupWorkingMemoryWithIDs(ctx context.Context, userName str
 	}
 	return ids, rows.Err()
 }
+
+// ListCubesByTag returns distinct cube IDs whose activated memories include
+// the given tag in their properties->'tags' array.
+func (p *Postgres) ListCubesByTag(ctx context.Context, tag string) ([]string, error) {
+	q := fmt.Sprintf(queries.ListCubesByTag, graphName)
+	rows, err := p.pool.Query(ctx, q, tag)
+	if err != nil {
+		return nil, fmt.Errorf("list cubes by tag: %w", err)
+	}
+	defer rows.Close()
+	var cubes []string
+	for rows.Next() {
+		var cube string
+		if err := rows.Scan(&cube); err != nil {
+			return nil, err
+		}
+		cubes = append(cubes, cube)
+	}
+	return cubes, rows.Err()
+}

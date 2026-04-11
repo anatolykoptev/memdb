@@ -367,3 +367,62 @@ func (h *Handler) NativeGetUserNamesByMemoryIDs(w http.ResponseWriter, r *http.R
 		"data":    result,
 	})
 }
+
+// NativeListCubesByTag handles GET /product/cubes?tag=<tag> natively.
+// Returns distinct cube IDs (user_name in node properties) that have at
+// least one activated memory carrying the given tag in properties->'tags'.
+// Used by go-wowa experience memory to hydrate its knownCubes set on start.
+//
+// Cache: time-bounded via usersCacheTTL (120s), not write-invalidated on
+// tag-writing inserts. That is acceptable because the only caller hydrates
+// once at process startup; a 120s window for a newly-registered cube to
+// become visible is tolerable.
+func (h *Handler) NativeListCubesByTag(w http.ResponseWriter, r *http.Request) {
+	tag := r.URL.Query().Get("tag")
+	if tag == "" {
+		h.writeJSON(w, http.StatusBadRequest, map[string]any{
+			"code":    400,
+			"message": "tag query parameter is required",
+			"data":    nil,
+		})
+		return
+	}
+
+	if h.postgres == nil {
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "postgres unavailable",
+			"data":    nil,
+		})
+		return
+	}
+
+	ctx := r.Context()
+	cacheKey := cachePrefix + "cubes:tag:" + tag
+	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(cached) //nolint:errcheck
+		return
+	}
+
+	cubes, err := h.postgres.ListCubesByTag(ctx, tag)
+	if err != nil {
+		h.logger.Error("list cubes by tag failed", slog.Any("error", err))
+		h.writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"code":    500,
+			"message": "list cubes failed: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+	if cubes == nil {
+		cubes = []string{}
+	}
+
+	resp := map[string]any{"code": 200, "message": "ok", "data": cubes}
+	if encoded, err := json.Marshal(resp); err == nil {
+		h.cacheSet(ctx, cacheKey, encoded, usersCacheTTL)
+	}
+	h.writeJSON(w, http.StatusOK, resp)
+}
