@@ -37,7 +37,7 @@ const (
 // generateEpisodicSummary asynchronously creates an EpisodicMemory node for the session.
 // Called after fact insertion — non-blocking (fire-and-forget via goroutine).
 // The node captures a 3-5 sentence overview of the conversation window.
-func (h *Handler) generateEpisodicSummary(cubeID, sessionID, conversation, now string, factCount int) {
+func (h *Handler) generateEpisodicSummary(cubeID, userID, sessionID, conversation, now string, factCount int) {
 	if h.llmExtractor == nil || h.llmChat == nil || h.postgres == nil || h.embedder == nil {
 		return
 	}
@@ -80,13 +80,15 @@ func (h *Handler) generateEpisodicSummary(cubeID, sessionID, conversation, now s
 			"id":          id,
 			"memory":      summary,
 			"memory_type": episodicMemoryType,
-			"user_name":   cubeID,
-			"session_id":  sessionID,
-			"status":      "activated",
-			"created_at":  now,
-			"updated_at":  now,
-			"confidence":  0.9,
-			"source":      "episodic_summarizer",
+			// user_name is the cube partition key (upstream MemOS convention; populated from cube_id)
+			"user_name":  cubeID,
+			"user_id":    userID,
+			"session_id": sessionID,
+			"status":     "activated",
+			"created_at": now,
+			"updated_at": now,
+			"confidence": 0.9,
+			"source":     "episodic_summarizer",
 		}
 		propsJSON, err := json.Marshal(props)
 		if err != nil {

@@ -22,7 +22,7 @@ func (h *Handler) processKeywordReplace(ctx context.Context, cubeID string, resu
 	}
 
 	memTypes := []string{"LongTermMemory", "UserMemory"}
-	results, err := h.postgres.FulltextSearch(ctx, result.Original, cubeID, memTypes, "", 100)
+	results, err := h.postgres.FulltextSearch(ctx, result.Original, cubeID, cubeID, memTypes, "", 100)
 	if err != nil {
 		return nil, fmt.Errorf("keyword replace search: %w", err)
 	}
@@ -64,7 +64,7 @@ func (h *Handler) processKeywordReplace(ctx context.Context, cubeID string, resu
 // Finds related existing memories, decides operations, validates, and executes.
 func (h *Handler) processSemanticFeedback(
 	ctx context.Context,
-	cubeID string,
+	cubeID, userID string,
 	items []feedbackItem,
 	chatHistory, now string,
 ) ([]addResponseItem, error) {
@@ -90,7 +90,7 @@ func (h *Handler) processSemanticFeedback(
 		}
 
 		// Find existing memories related to this feedback
-		results, err := h.postgres.VectorSearch(ctx, vecs[i], cubeID, memTypes, "", 10)
+		results, err := h.postgres.VectorSearch(ctx, vecs[i], cubeID, cubeID, memTypes, "", 10)
 		if err != nil {
 			h.logger.Debug("feedback: vector search failed", slog.Any("error", err))
 			continue
@@ -113,7 +113,7 @@ func (h *Handler) processSemanticFeedback(
 		ops = h.validateUpdateOps(ctx, ops, results)
 
 		// Execute operations
-		execItems, err := h.executeMemoryOps(ctx, cubeID, ops, item.tags, now)
+		execItems, err := h.executeMemoryOps(ctx, cubeID, userID, ops, item.tags, now)
 		if err != nil {
 			h.logger.Debug("feedback: execute ops failed", slog.Any("error", err))
 			continue
@@ -189,7 +189,7 @@ func (h *Handler) validateUpdateOps(ctx context.Context, ops []llm.MemoryOperati
 }
 
 // executeMemoryOps executes ADD and UPDATE operations.
-func (h *Handler) executeMemoryOps(ctx context.Context, cubeID string, ops []llm.MemoryOperation, tags []string, now string) ([]addResponseItem, error) {
+func (h *Handler) executeMemoryOps(ctx context.Context, cubeID, userID string, ops []llm.MemoryOperation, tags []string, now string) ([]addResponseItem, error) {
 	var items []addResponseItem
 	var nodes []db.MemoryInsertNode
 
@@ -233,13 +233,15 @@ func (h *Handler) executeMemoryOps(ctx context.Context, cubeID string, ops []llm
 				"id":          id,
 				"memory":      op.Text,
 				"memory_type": "LongTermMemory",
-				"user_name":   cubeID,
-				"status":      "activated",
-				"created_at":  now,
-				"updated_at":  now,
-				"confidence":  0.9,
-				"source":      "feedback",
-				"tags":        tags,
+				// user_name is the cube partition key (upstream MemOS convention; populated from cube_id)
+				"user_name":  cubeID,
+				"user_id":    userID,
+				"status":     "activated",
+				"created_at": now,
+				"updated_at": now,
+				"confidence": 0.9,
+				"source":     "feedback",
+				"tags":       tags,
 			}
 			propsJSON, err := json.Marshal(props)
 			if err != nil {
@@ -269,7 +271,7 @@ func (h *Handler) executeMemoryOps(ctx context.Context, cubeID string, ops []llm
 }
 
 // processPureAdd runs normal extraction pipeline on feedback text.
-func (h *Handler) processPureAdd(ctx context.Context, cubeID, feedbackContent string) ([]addResponseItem, error) {
+func (h *Handler) processPureAdd(ctx context.Context, cubeID, userID, feedbackContent string) ([]addResponseItem, error) {
 	if h.llmExtractor == nil {
 		return nil, nil
 	}
@@ -310,13 +312,15 @@ func (h *Handler) processPureAdd(ctx context.Context, cubeID, feedbackContent st
 			"id":          id,
 			"memory":      f.Memory,
 			"memory_type": f.Type,
-			"user_name":   cubeID,
-			"status":      "activated",
-			"created_at":  now,
-			"updated_at":  now,
-			"confidence":  f.Confidence,
-			"source":      "feedback_pure_add",
-			"tags":        f.Tags,
+			// user_name is the cube partition key (upstream MemOS convention; populated from cube_id)
+			"user_name":  cubeID,
+			"user_id":    userID,
+			"status":     "activated",
+			"created_at": now,
+			"updated_at": now,
+			"confidence": f.Confidence,
+			"source":     "feedback_pure_add",
+			"tags":       f.Tags,
 		}
 		propsJSON, err := json.Marshal(props)
 		if err != nil {

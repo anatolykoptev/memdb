@@ -22,7 +22,7 @@ const (
 )
 
 // generateSkillMemory asynchronously extracts skill memories from the conversation.
-func (h *Handler) generateSkillMemory(cubeID, conversation string, messageCount int) {
+func (h *Handler) generateSkillMemory(cubeID, userID, conversation string, messageCount int) {
 	if h.llmChat == nil || h.postgres == nil || h.embedder == nil {
 		return
 	}
@@ -55,13 +55,13 @@ func (h *Handler) generateSkillMemory(cubeID, conversation string, messageCount 
 			if chunk.Messages == "" {
 				continue
 			}
-			h.processSkillChunk(ctx, cubeID, chunk)
+			h.processSkillChunk(ctx, cubeID, userID, chunk)
 		}
 	}()
 }
 
 // processSkillChunk handles a single task chunk: recall → extract → store.
-func (h *Handler) processSkillChunk(ctx context.Context, cubeID string, chunk llm.TaskChunk) {
+func (h *Handler) processSkillChunk(ctx context.Context, cubeID, userID string, chunk llm.TaskChunk) {
 	existing := h.recallExistingSkills(ctx, cubeID, chunk.TaskName)
 	skill, err := llm.ExtractSkill(ctx, h.llmChat, chunk.Messages, existing)
 	if err != nil {
@@ -89,7 +89,7 @@ func (h *Handler) processSkillChunk(ctx context.Context, cubeID string, chunk ll
 	id := uuid.New().String()
 	now := nowTimestamp()
 
-	props := buildSkillProperties(id, cubeID, now, skill)
+	props := buildSkillProperties(id, cubeID, userID, now, skill)
 	propsJSON, err := json.Marshal(props)
 	if err != nil {
 		return
@@ -121,7 +121,7 @@ func (h *Handler) recallExistingSkills(ctx context.Context, cubeID, taskName str
 		return nil
 	}
 
-	results, err := h.postgres.VectorSearch(ctx, vecs[0], cubeID, []string{"SkillMemory"}, "", 5)
+	results, err := h.postgres.VectorSearch(ctx, vecs[0], cubeID, cubeID, []string{"SkillMemory"}, "", 5)
 	if err != nil {
 		h.logger.Debug("skill extraction: recall failed",
 			slog.String("task", taskName), slog.Any("error", err))
@@ -161,12 +161,14 @@ func parseExistingSkill(propsJSON string) llm.ExistingSkill {
 }
 
 // buildSkillProperties constructs the JSONB properties for a SkillMemory node.
-func buildSkillProperties(id, cubeID, now string, skill *llm.SkillMemory) map[string]any {
+func buildSkillProperties(id, cubeID, userID, now string, skill *llm.SkillMemory) map[string]any {
 	props := map[string]any{
 		"id":          id,
 		"memory":      skill.Description,
 		"memory_type": "SkillMemory",
+		// user_name is the cube partition key (upstream MemOS convention; populated from cube_id)
 		"user_name":   cubeID,
+		"user_id":     userID,
 		"status":      "activated",
 		"created_at":  now,
 		"updated_at":  now,

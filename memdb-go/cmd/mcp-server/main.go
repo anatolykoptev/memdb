@@ -13,11 +13,7 @@ package main
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
-	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
@@ -59,7 +55,7 @@ func main() {
 
 	ctx := context.Background()
 
-	// Postgres (memory CRUD and user tools) + Qdrant (preference cleanup on delete).
+	// Postgres (memory CRUD, user, and cube tools) + Qdrant (preference cleanup on delete).
 	var pg *db.Postgres
 	if cfg.PostgresURL != "" {
 		var err error
@@ -87,19 +83,19 @@ func main() {
 	// Search is proxied to memdb-go (which has the ONNX embedder).
 	memdbGoURL := cfg.MemDBGoURL
 	if memdbGoURL == "" {
-		// Fallback: use python backend if memdb-go URL not set.
 		memdbGoURL = cfg.PythonBackendURL
 		logger.Warn("MEMDB_GO_URL not set, search will proxy to python backend")
 	}
 	mcptools.RegisterSearchTool(server, memdbGoURL, cfg.InternalServiceSecret, logger)
 	mcptools.RegisterMemoryTools(server, pg, qd, logger)
 	mcptools.RegisterUserTools(server, pg, logger)
+	mcptools.RegisterCubeTools(server, pg, logger)
 	mcptools.RegisterNativeGoProxyTools(server, memdbGoURL, cfg.InternalServiceSecret, logger)
 	mcptools.RegisterPythonProxyTools(server, cfg.PythonBackendURL, cfg.InternalServiceSecret, logger)
 
-	const mcpNativeToolCount = 6      // search + get/update/delete/delete_all + users (get_user_info, create_user)
+	const mcpNativeToolCount = 10     // search + memory CRUD + users + cubes (create/list/delete/get_user_cubes)
 	const mcpGoProxyToolCount = 3     // add_memory, chat, clear_chat_history → memdb-go native backend
-	const mcpPythonProxyToolCount = 7 // create_cube, register_cube, unregister_cube, share_cube, dump_cube, control_memory_scheduler → Python legacy
+	const mcpPythonProxyToolCount = 1 // control_memory_scheduler → Python legacy
 	logger.Info("MCP tools registered",
 		slog.Int("native", mcpNativeToolCount),
 		slog.Int("go_proxy", mcpGoProxyToolCount),
@@ -110,114 +106,5 @@ func main() {
 		runStdio(ctx, server, logger, pg)
 	} else {
 		runHTTP(ctx, server, port, logger, pg)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// STDIO transport
-// ---------------------------------------------------------------------------
-
-func runStdio(ctx context.Context, server *mcp.Server, logger *slog.Logger, pg *db.Postgres) {
-	logger.Info("running in STDIO mode")
-
-	sigCtx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	session, err := server.Connect(sigCtx, &mcp.StdioTransport{}, nil)
-	if err != nil {
-		logger.Error("stdio connect failed", slog.Any("error", err))
-		cancel()
-		os.Exit(1) //nolint:gocritic // cancel() already called explicitly above
-	}
-
-	if err := session.Wait(); err != nil {
-		logger.Info("stdio session ended", slog.Any("reason", err))
-	} else {
-		logger.Info("stdio session ended")
-	}
-
-	cleanup(pg)
-}
-
-// ---------------------------------------------------------------------------
-// HTTP transport (default)
-// ---------------------------------------------------------------------------
-
-func runHTTP(ctx context.Context, server *mcp.Server, port string, logger *slog.Logger, pg *db.Postgres) {
-	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
-		return server
-	}, &mcp.StreamableHTTPOptions{
-		Stateless: true,
-	})
-
-	mux := http.NewServeMux()
-	mux.Handle("/mcp", handler)
-	mux.Handle("/mcp/", handler)
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok","service":"memdb-mcp","version":"1.0.0"}`))
-	})
-
-	srv := &http.Server{
-		Addr:         ":" + port,
-		Handler:      mux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
-	}
-
-	sigCtx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
-
-	go func() {
-		logger.Info("MCP server listening", slog.String("addr", srv.Addr))
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("server failed", slog.Any("error", err))
-			os.Exit(1)
-		}
-	}()
-
-	<-sigCtx.Done()
-	logger.Info("shutdown signal received")
-
-	const shutdownTimeout = 15 * time.Second
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer shutdownCancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("shutdown error", slog.Any("error", err))
-	}
-
-	cleanup(pg)
-	logger.Info("memdb-mcp shut down")
-}
-
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
-func cleanup(pg *db.Postgres) {
-	if pg != nil {
-		pg.Close()
-	}
-}
-
-func hasFlag(name string) bool {
-	for _, arg := range os.Args[1:] {
-		if arg == name {
-			return true
-		}
-	}
-	return false
-}
-
-func parseLogLevel(level string) slog.Level {
-	switch level {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
 	}
 }

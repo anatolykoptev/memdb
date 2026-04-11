@@ -95,7 +95,7 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 
 	// Step 5: apply actions
 	sources := buildSourcesFromMessages(req.Messages)
-	allNodes, items, vsetInserts := h.applyFineActions(ctx, embedded, cubeID, stringOrEmpty(req.AgentID), sessionID, now, info, req.CustomTags, sources)
+	allNodes, items, vsetInserts := h.applyFineActions(ctx, embedded, cubeID, *req.UserID, stringOrEmpty(req.AgentID), sessionID, now, info, req.CustomTags, sources)
 
 	if len(allNodes) > 0 {
 		if err := h.postgres.InsertMemoryNodes(ctx, allNodes); err != nil {
@@ -122,13 +122,13 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 
 	// Step 7: generate episodic session summary in background (non-blocking, non-fatal)
 	// EpisodicMemory nodes improve multi-hop temporal reasoning on later queries.
-	h.generateEpisodicSummary(cubeID, sessionID, conversation, now, len(facts))
+	h.generateEpisodicSummary(cubeID, *req.UserID, sessionID, conversation, now, len(facts))
 
 	// Step 8: extract skill memories in background (non-blocking, non-fatal)
-	h.generateSkillMemory(cubeID, conversation, len(req.Messages))
+	h.generateSkillMemory(cubeID, *req.UserID, conversation, len(req.Messages))
 
 	// Step 8.5: extract tool trajectory in background (non-blocking, non-fatal)
-	h.generateToolTrajectory(cubeID, conversation)
+	h.generateToolTrajectory(cubeID, *req.UserID, conversation)
 
 	// Step 9: generate / update User profile summary in background
 	if h.profiler != nil {
@@ -237,7 +237,7 @@ func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID,
 	}
 
 	// Tier 2: Postgres pgvector (LongTermMemory + UserMemory)
-	results, err := h.postgres.VectorSearch(ctx, embedding, cubeID,
+	results, err := h.postgres.VectorSearch(ctx, embedding, cubeID, cubeID,
 		[]string{"LongTermMemory", "UserMemory"}, agentID, 10)
 	if err != nil {
 		h.logger.Debug("fine add: postgres vector search failed",
@@ -319,7 +319,7 @@ func (h *Handler) embedFacts(ctx context.Context, facts []llm.ExtractedFact) []e
 func (h *Handler) applyFineActions(
 	ctx context.Context,
 	embedded []embeddedFact,
-	cubeID, agentID, sessionID, now string,
+	cubeID, userID, agentID, sessionID, now string,
 	info map[string]any,
 	customTags []string,
 	sources []map[string]any,
@@ -342,13 +342,13 @@ func (h *Handler) applyFineActions(
 		case llm.MemUpdate:
 			h.applyUpdateAction(ctx, f.TargetID, f.Memory, ef.embVec, now)
 			embedded[i].ltmID = f.TargetID
-			if node, vsi, ok := buildUpdateWMNode(f, ef, cubeID, agentID, sessionID, now, info, customTags, sources); ok {
+			if node, vsi, ok := buildUpdateWMNode(f, ef, cubeID, userID, agentID, sessionID, now, info, customTags, sources); ok {
 				allNodes = append(allNodes, node)
 				vsetInserts = append(vsetInserts, vsi)
 			}
 
 		default: // llm.MemAdd
-			nodes, item := buildAddNodes(f, ef.embVec, ef.embedding, cubeID, agentID, sessionID, now, info, customTags, sources)
+			nodes, item := buildAddNodes(f, ef.embVec, ef.embedding, cubeID, userID, agentID, sessionID, now, info, customTags, sources)
 			allNodes = append(allNodes, nodes...)
 			if item != nil {
 				items = append(items, *item)
@@ -371,7 +371,7 @@ func (h *Handler) applyFineActions(
 func buildUpdateWMNode(
 	f llm.ExtractedFact,
 	ef embeddedFact,
-	cubeID, agentID, sessionID, now string,
+	cubeID, userID, agentID, sessionID, now string,
 	info map[string]any,
 	customTags []string,
 	sources []map[string]any,
@@ -393,7 +393,7 @@ func buildUpdateWMNode(
 		factInfo["content_hash"] = f.ContentHash
 	}
 	wmJSON, err := marshalProps(buildMemoryPropertiesAt(
-		wmID, f.Memory, "WorkingMemory", cubeID, agentID, sessionID, now, createdAt,
+		wmID, f.Memory, "WorkingMemory", cubeID, userID, agentID, sessionID, now, createdAt,
 		factInfo, allTags, sources, "",
 	))
 	if err != nil {
@@ -469,7 +469,7 @@ func (h *Handler) applyUpdateAction(ctx context.Context, targetID, memory, embVe
 // Returns nil nodes + nil item if embVec is empty (embed failed).
 func buildAddNodes(
 	f llm.ExtractedFact, embVec string, embedding []float32,
-	cubeID, agentID, sessionID, now string,
+	cubeID, userID, agentID, sessionID, now string,
 	info map[string]any, customTags []string,
 	sources []map[string]any,
 ) ([]db.MemoryInsertNode, *addResponseItem) {
@@ -501,11 +501,11 @@ func buildAddNodes(
 	allTags = append(allTags, f.Tags...)
 
 	wmJSON, err1 := marshalProps(buildMemoryPropertiesAt(
-		wmID, f.Memory, "WorkingMemory", cubeID, agentID, sessionID, now, createdAt,
+		wmID, f.Memory, "WorkingMemory", cubeID, userID, agentID, sessionID, now, createdAt,
 		factInfo, allTags, sources, "",
 	))
 	ltJSON, err2 := marshalProps(buildMemoryPropertiesAt(
-		ltID, f.Memory, f.Type, cubeID, agentID, sessionID, now, createdAt,
+		ltID, f.Memory, f.Type, cubeID, userID, agentID, sessionID, now, createdAt,
 		factInfo, allTags, sources, background,
 	))
 	if err1 != nil || err2 != nil {

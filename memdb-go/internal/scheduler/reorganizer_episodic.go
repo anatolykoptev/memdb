@@ -27,7 +27,7 @@ const (
 // generateEpisodicSummary asynchronously creates an EpisodicMemory node for the session.
 // Uses r.callLLM() for summarization and r.embedder for embedding.
 // Runs in background goroutine (45s timeout). Non-fatal.
-func (r *Reorganizer) generateEpisodicSummary(cubeID, sessionID, conversation, now string) {
+func (r *Reorganizer) generateEpisodicSummary(userID, cubeID, sessionID, conversation, now string) {
 	if r.embedder == nil {
 		return
 	}
@@ -78,7 +78,8 @@ func (r *Reorganizer) generateEpisodicSummary(cubeID, sessionID, conversation, n
 			"id":          id,
 			"memory":      summary,
 			"memory_type": episodicMemType,
-			"user_name":   cubeID,
+			"user_name":   cubeID, // partition key (upstream convention)
+			"user_id":     userID, // person identity — Phase 2 split
 			"session_id":  sessionID,
 			"status":      "activated",
 			"created_at":  now,

@@ -27,7 +27,8 @@ CREATE INDEX IF NOT EXISTS memory_edges_to_idx ON memory_edges(to_id, relation)`
 
 // InsertMemoryEdge inserts a directed edge between two memory nodes (idempotent).
 // Args: $1 = from_id (text), $2 = to_id (text), $3 = relation (text),
-//       $4 = created_at (text), $5 = valid_at (text, empty string = NULL)
+//
+//	$4 = created_at (text), $5 = valid_at (text, empty string = NULL)
 const InsertMemoryEdge = `
 INSERT INTO memory_edges (from_id, to_id, relation, created_at, valid_at)
 VALUES ($1, $2, $3, $4, NULLIF($5, ''))
@@ -36,7 +37,9 @@ ON CONFLICT (from_id, to_id, relation) DO NOTHING`
 // GraphRecallByEdge returns memory nodes reachable from seed_ids via edges of a given relation.
 // Used to traverse EXTRACTED_FROM, MERGED_INTO, and CONTRADICTS relationships in graph recall.
 // Bi-temporal filter: only follows edges where invalid_at IS NULL (currently valid edges).
-// Args: $1 = seed_ids (text[]), $2 = relation (text), $3 = user_name (text), $4 = limit (int)
+// Args: $1 = seed_ids (text[]), $2 = relation (text), $3 = user_name (text),
+//
+//	$4 = user_id (text), $5 = limit (int)
 const GraphRecallByEdge = `
 SELECT m.id::text,
        (m.properties - 'sources')::text
@@ -46,8 +49,9 @@ WHERE e.from_id = ANY($1)
   AND e.relation = $2
   AND e.invalid_at IS NULL
   AND m.properties->>'user_name' = $3
+  AND m.properties->>'user_id'   = $4
   AND m.properties->>'status' = 'activated'
-LIMIT $4`
+LIMIT $5`
 
 // FilterExistingContentHashes returns content_hash values that already exist for a user.
 // Used to batch-deduplicate before insert without per-item DB round-trips.

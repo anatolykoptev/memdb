@@ -112,7 +112,7 @@ func (r *Reorganizer) CompactWorkingMemory(ctx context.Context, cubeID string) (
 	// Step 5: insert EpisodicMemory LTM node.
 	episodicID := r.generateUUID()
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000000")
-	propsJSON := r.buildEpisodicProps(episodicID, summary, cubeID, now, len(toSummarize))
+	propsJSON := r.buildEpisodicProps(episodicID, summary, cubeID, cubeID, now, len(toSummarize))
 
 	if err := r.postgres.InsertMemoryNodes(ctx, []db.MemoryInsertNode{
 		{ID: episodicID, PropertiesJSON: propsJSON, EmbeddingVec: embStr},
@@ -200,14 +200,14 @@ func extractJSONSummary(raw string) (string, error) {
 }
 
 // buildEpisodicProps builds the JSONB properties for an EpisodicMemory node.
-func (r *Reorganizer) buildEpisodicProps(id, summary, cubeID, now string, sourceCount int) []byte {
+func (r *Reorganizer) buildEpisodicProps(id, summary, userID, cubeID, now string, sourceCount int) []byte {
 	props := map[string]any{
 		"id":               id,
 		"memory":           summary,
 		"memory_type":      "EpisodicMemory",
 		"status":           "activated",
-		"user_name":        cubeID,
-		"user_id":          cubeID,
+		"user_name":        cubeID, // partition key (upstream convention)
+		"user_id":          userID, // person identity — Phase 2 split
 		"created_at":       now,
 		"updated_at":       now,
 		"tags":             []string{"mode:compacted"},

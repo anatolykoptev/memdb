@@ -142,7 +142,7 @@ func TestBuildMemoryProperties_AllFieldsPresent(t *testing.T) {
 
 	props := buildMemoryProperties(
 		"test-uuid", "hello world", "LongTermMemory",
-		"memos", "", "session-1", "2026-02-16T10:00:00",
+		"memos", "user-1", "", "session-1", "2026-02-16T10:00:00",
 		info, []string{"custom:tag"}, sources, "[working_binding:wm-uuid]",
 	)
 
@@ -201,7 +201,7 @@ func TestBuildMemoryProperties_SourcesSerialized(t *testing.T) {
 	}
 
 	props := buildMemoryProperties(
-		"id", "text", "LongTermMemory", "user", "", "", "now",
+		"id", "text", "LongTermMemory", "user", "user", "", "", "now",
 		nil, nil, sources, "",
 	)
 

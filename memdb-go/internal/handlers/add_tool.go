@@ -22,7 +22,7 @@ const (
 
 // generateToolTrajectory asynchronously extracts tool call trajectories from the conversation.
 // Fire-and-forget: errors are logged but never returned to the caller.
-func (h *Handler) generateToolTrajectory(cubeID, conversation string) {
+func (h *Handler) generateToolTrajectory(cubeID, userID, conversation string) {
 	if h.llmChat == nil || h.postgres == nil || h.embedder == nil {
 		return
 	}
@@ -47,13 +47,13 @@ func (h *Handler) generateToolTrajectory(cubeID, conversation string) {
 			slog.Int("count", len(items)), slog.String("cube_id", cubeID))
 
 		for i := range items {
-			h.storeToolTrajectory(ctx, cubeID, &items[i])
+			h.storeToolTrajectory(ctx, cubeID, userID, &items[i])
 		}
 	}()
 }
 
 // storeToolTrajectory embeds and persists a single trajectory item.
-func (h *Handler) storeToolTrajectory(ctx context.Context, cubeID string, item *llm.TrajectoryItem) {
+func (h *Handler) storeToolTrajectory(ctx context.Context, cubeID, userID string, item *llm.TrajectoryItem) {
 	// Choose text to embed: trajectory summary, or experience as fallback.
 	embedText := item.Trajectory
 	if embedText == "" {
@@ -72,7 +72,7 @@ func (h *Handler) storeToolTrajectory(ctx context.Context, cubeID string, item *
 	id := uuid.New().String()
 	now := nowTimestamp()
 
-	props := buildToolTrajectoryProperties(id, cubeID, now, item)
+	props := buildToolTrajectoryProperties(id, cubeID, userID, now, item)
 	propsJSON, err := json.Marshal(props)
 	if err != nil {
 		return
@@ -104,12 +104,14 @@ func hasToolContent(conversation string) bool {
 }
 
 // buildToolTrajectoryProperties constructs the JSONB properties for a ToolTrajectoryMemory node.
-func buildToolTrajectoryProperties(id, cubeID, now string, item *llm.TrajectoryItem) map[string]any {
+func buildToolTrajectoryProperties(id, cubeID, userID, now string, item *llm.TrajectoryItem) map[string]any {
 	return map[string]any{
-		"id":               id,
-		"memory":           item.Experience,
-		"memory_type":      "ToolTrajectoryMemory",
+		"id":          id,
+		"memory":      item.Experience,
+		"memory_type": "ToolTrajectoryMemory",
+		// user_name is the cube partition key (upstream MemOS convention; populated from cube_id)
 		"user_name":        cubeID,
+		"user_id":          userID,
 		"status":           "activated",
 		"created_at":       now,
 		"updated_at":       now,

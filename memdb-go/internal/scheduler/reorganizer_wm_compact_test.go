@@ -36,7 +36,7 @@ func TestWMCompactConstants(t *testing.T) {
 
 func TestBuildEpisodicProps_Fields(t *testing.T) {
 	r := &Reorganizer{}
-	data := r.buildEpisodicProps("id-1", "The user discussed Go.", "cube-1", "2026-02-19T12:00:00.000000", 42)
+	data := r.buildEpisodicProps("id-1", "The user discussed Go.", "test-person", "cube-1", "2026-02-19T12:00:00.000000", 42)
 
 	var props map[string]any
 	if err := json.Unmarshal(data, &props); err != nil {
@@ -48,8 +48,8 @@ func TestBuildEpisodicProps_Fields(t *testing.T) {
 		"memory":      "The user discussed Go.",
 		"memory_type": "EpisodicMemory",
 		"status":      "activated",
-		"user_name":   "cube-1",
-		"user_id":     "cube-1",
+		"user_name":   "cube-1",      // cube partition key
+		"user_id":     "test-person", // person identity — Phase 2 split
 	}
 	for k, want := range checks {
 		got, ok := props[k]
@@ -86,7 +86,7 @@ func TestBuildEpisodicProps_Fields(t *testing.T) {
 func TestBuildEpisodicProps_ValidJSON(t *testing.T) {
 	r := &Reorganizer{}
 	for _, summary := range []string{"", "Short.", strings.Repeat("x", 2000)} {
-		data := r.buildEpisodicProps("id", summary, "cube", "2026-01-01T00:00:00.000000", 5)
+		data := r.buildEpisodicProps("id", summary, "cube", "cube", "2026-01-01T00:00:00.000000", 5)
 		if !json.Valid(data) {
 			t.Errorf("invalid JSON for summary len %d", len(summary))
 		}
@@ -228,7 +228,7 @@ func TestLLMSummarizeWM_UserMessageFormat(t *testing.T) {
 func TestEpisodicMemory_NotInWMType(t *testing.T) {
 	// EpisodicMemory must NOT be memory_type=WorkingMemory
 	r := &Reorganizer{}
-	data := r.buildEpisodicProps("id", "summary", "cube", "2026-01-01T00:00:00.000000", 5)
+	data := r.buildEpisodicProps("id", "summary", "cube", "cube", "2026-01-01T00:00:00.000000", 5)
 	var props map[string]any
 	_ = json.Unmarshal(data, &props)
 	if props["memory_type"] == "WorkingMemory" {

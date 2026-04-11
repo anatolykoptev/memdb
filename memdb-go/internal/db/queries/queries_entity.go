@@ -53,15 +53,16 @@ WHERE user_name = $1
 // edge pointing to any of the given entity IDs for a user.
 // Bi-temporal filter: only returns edges where invalid_at IS NULL (currently valid facts).
 // Invalidated edges (from deleted/superseded memories) are excluded from recall.
-// Args: $1 = user_name (text), $2 = entity_ids (text[]), $3 = limit (int)
+// Args: $1 = user_name (text), $2 = user_id (text), $3 = entity_ids (text[]), $4 = limit (int)
 const GetMemoriesByEntityIDs = `
 SELECT m.id::text,
        (m.properties - 'sources')::text
 FROM %[1]s."Memory" m
 JOIN memory_edges e ON m.id::text = e.from_id
-WHERE e.to_id = ANY($2)
+WHERE e.to_id = ANY($3)
   AND e.relation = 'MENTIONS_ENTITY'
   AND e.invalid_at IS NULL
   AND m.properties->>'user_name' = $1
+  AND m.properties->>'user_id'   = $2
   AND m.properties->>'status' = 'activated'
-LIMIT $3`
+LIMIT $4`

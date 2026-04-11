@@ -115,6 +115,27 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 
 	var allItems []addResponseItem
 	for _, cubeID := range cubeIDs {
+		// Phase 2: hybrid auto-create. First write to a new cube implicitly
+		// creates a cubes row with minimal defaults and logs a warn so that
+		// operators can notice clients that should be calling create_cube
+		// explicitly with metadata.
+		if h.cubeStore != nil {
+			created, ensureErr := h.cubeStore.EnsureCubeExists(ctx, cubeID, userID)
+			if ensureErr != nil {
+				// best-effort: log and continue. The memory write proceeds.
+				h.logger.Error("ensure cube failed",
+					slog.String("cube_id", cubeID),
+					slog.String("owner_id", userID),
+					slog.Any("error", ensureErr),
+				)
+			} else if created {
+				h.logger.Warn("cube auto-created without explicit create_cube",
+					slog.String("cube_id", cubeID),
+					slog.String("owner_id", userID),
+				)
+			}
+		}
+
 		items, err := h.nativeAddForCube(ctx, &req, cubeID)
 		if err != nil {
 			h.logger.Error("native add failed",

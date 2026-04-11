@@ -217,7 +217,8 @@ func (h *Handler) runFinePipeline(ctx context.Context, conversation, cubeID stri
 	embedded := h.embedFacts(ctx, facts)
 
 	// Step 5: apply actions (no session/agent context for buffered adds)
-	allNodes, items, vsetInserts := h.applyFineActions(ctx, embedded, cubeID, "", "", now, nil, nil, nil)
+	// Buffer flush has no original request — use cubeID as userID fallback (no person identity available).
+	allNodes, items, vsetInserts := h.applyFineActions(ctx, embedded, cubeID, cubeID, "", "", now, nil, nil, nil)
 
 	if len(allNodes) > 0 {
 		if err := h.postgres.InsertMemoryNodes(ctx, allNodes); err != nil {
@@ -239,7 +240,8 @@ func (h *Handler) runFinePipeline(ctx context.Context, conversation, cubeID stri
 	h.cleanupWorkingMemory(ctx, cubeID)
 
 	// Episodic summary for the entire batch
-	h.generateEpisodicSummary(cubeID, "", conversation, now, len(facts))
+	// Buffer flush has no original request — use cubeID as userID fallback.
+	h.generateEpisodicSummary(cubeID, cubeID, "", conversation, now, len(facts))
 
 	// Profile refresh
 	if h.profiler != nil {

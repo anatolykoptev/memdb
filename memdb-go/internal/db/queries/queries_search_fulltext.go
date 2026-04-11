@@ -1,0 +1,54 @@
+package queries
+
+// queries_search_fulltext.go — fulltext (tsvector) search SQL constants.
+// Covers: FulltextSearch, FulltextSearchWithCutoff.
+
+// FulltextSearch performs tsvector fulltext search on the properties_tsvector_zh column.
+// The tsquery parameter $1 should be a properly formatted tsquery string for the 'simple'
+// configuration (e.g. 'word1 & word2'). Results are ranked by ts_rank.
+//
+// Args: $1 = tsquery string (text),
+//
+//	$2 = user_name (text),
+//	$3 = user_id (text),
+//	$4 = memory_types (text[]),
+//	$5 = limit (int),
+//	$6 = agent_id (text, '' for any)
+const FulltextSearch = `
+SELECT id::text,
+       (properties - 'sources')::text,
+       ts_rank(properties_tsvector_zh, to_tsquery('simple', $1)) AS rank
+FROM %[1]s."Memory"
+WHERE properties_tsvector_zh @@ to_tsquery('simple', $1)
+  AND properties->>'status' = 'activated'
+  AND properties->>'user_name' = $2
+  AND properties->>'user_id'   = $3
+  AND properties->>'memory_type' = ANY($4)
+  AND ($6::text = '' OR properties->>'agent_id' = $6)
+ORDER BY rank DESC
+LIMIT $5`
+
+// FulltextSearchWithCutoff is FulltextSearch with an additional created_at filter for temporal scope.
+//
+// Args: $1 = tsquery string (text),
+//
+//	$2 = user_name (text),
+//	$3 = user_id (text),
+//	$4 = memory_types (text[]),
+//	$5 = limit (int),
+//	$6 = cutoff ISO timestamp (text),
+//	$7 = agent_id (text, '' for any)
+const FulltextSearchWithCutoff = `
+SELECT id::text,
+       (properties - 'sources')::text,
+       ts_rank(properties_tsvector_zh, to_tsquery('simple', $1)) AS rank
+FROM %[1]s."Memory"
+WHERE properties_tsvector_zh @@ to_tsquery('simple', $1)
+  AND properties->>'status' = 'activated'
+  AND properties->>'user_name' = $2
+  AND properties->>'user_id'   = $3
+  AND properties->>'memory_type' = ANY($4)
+  AND ($7::text = '' OR properties->>'agent_id' = $7)
+  AND (properties->>'created_at') >= $6
+ORDER BY rank DESC
+LIMIT $5`

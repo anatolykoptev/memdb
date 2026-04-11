@@ -23,6 +23,7 @@ import (
 //  7. For each valid judgement → build feedback items
 //  8. Process semantic feedback → find related memories → decide ops → execute
 func (h *Handler) handleFeedback(ctx context.Context, cubeID string, req *fullAddRequest) ([]addResponseItem, error) {
+	userID := *req.UserID
 	if len(req.Messages) == 0 {
 		return nil, nil
 	}
@@ -51,18 +52,18 @@ func (h *Handler) handleFeedback(ctx context.Context, cubeID string, req *fullAd
 	// Step 2: no chat history → treat as pure add
 	if chatHistory == "" {
 		h.logger.Debug("feedback: no chat history, running pure add")
-		return h.processPureAdd(ctx, cubeID, feedbackContent)
+		return h.processPureAdd(ctx, cubeID, userID, feedbackContent)
 	}
 
 	// Step 3: judge feedback quality and extract corrected info
 	if h.llmChat == nil {
-		return h.processPureAdd(ctx, cubeID, feedbackContent)
+		return h.processPureAdd(ctx, cubeID, userID, feedbackContent)
 	}
 
 	judgements, err := llm.JudgeFeedback(ctx, h.llmChat, chatHistory, feedbackContent, now)
 	if err != nil {
 		h.logger.Debug("feedback: judgement failed, falling back to pure add", slog.Any("error", err))
-		return h.processPureAdd(ctx, cubeID, feedbackContent)
+		return h.processPureAdd(ctx, cubeID, userID, feedbackContent)
 	}
 
 	// Filter valid judgements
@@ -86,7 +87,7 @@ func (h *Handler) handleFeedback(ctx context.Context, cubeID string, req *fullAd
 	if len(validItems) == 0 {
 		if allIrrelevant {
 			h.logger.Debug("feedback: all irrelevant, running pure add")
-			return h.processPureAdd(ctx, cubeID, feedbackContent)
+			return h.processPureAdd(ctx, cubeID, userID, feedbackContent)
 		}
 		h.logger.Debug("feedback: no valid items extracted")
 		return nil, nil
@@ -95,7 +96,7 @@ func (h *Handler) handleFeedback(ctx context.Context, cubeID string, req *fullAd
 	h.logger.Debug("feedback: valid items extracted", slog.Int("count", len(validItems)))
 
 	// Step 4: process semantic feedback
-	return h.processSemanticFeedback(ctx, cubeID, validItems, chatHistory, now)
+	return h.processSemanticFeedback(ctx, cubeID, userID, validItems, chatHistory, now)
 }
 
 // feedbackItem holds extracted feedback info ready for semantic processing.
