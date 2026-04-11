@@ -27,6 +27,30 @@ WHERE properties->>'status' = 'activated'
 ORDER BY embedding::halfvec(1024) <=> $1::halfvec(1024) ASC
 LIMIT $4`
 
+// VectorSearchMultiCube is VectorSearch across multiple cubes (user_names).
+// Enables cross-domain search: the experience memory transfers learning from
+// cube A to cube B when both are in the caller's readable_cube_ids list.
+//
+// Args: $1 = vector string literal (text, cast to halfvec(1024)),
+//
+//	$2 = user_names (text[]) — list of cube IDs to search across,
+//	$3 = memory_types (text[]),
+//	$4 = limit (int),
+//	$5 = agent_id (text, '' for any)
+const VectorSearchMultiCube = `
+SELECT id::text,
+       (properties - 'sources')::text,
+       1 - (embedding::halfvec(1024) <=> $1::halfvec(1024)) AS score,
+       embedding::text
+FROM %[1]s."Memory"
+WHERE properties->>'status' = 'activated'
+  AND properties->>'user_name' = ANY($2::text[])
+  AND properties->>'memory_type' = ANY($3)
+  AND ($5::text = '' OR properties->>'agent_id' = $5)
+  AND embedding IS NOT NULL
+ORDER BY embedding::halfvec(1024) <=> $1::halfvec(1024) ASC
+LIMIT $4`
+
 // FulltextSearch performs tsvector fulltext search on the properties_tsvector_zh column.
 // The tsquery parameter $1 should be a properly formatted tsquery string for the 'simple'
 // configuration (e.g. 'word1 & word2'). Results are ranked by ts_rank.

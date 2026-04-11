@@ -82,6 +82,31 @@ func (p *Postgres) VectorSearch(ctx context.Context, vector []float32, userName 
 	return results, rows.Err()
 }
 
+// VectorSearchMultiCube performs cosine similarity search across multiple cubes
+// (user_names). Used for cross-domain experience memory: a successful flow on
+// site A can be found when handling site B if both are in userNames.
+// Behaviour is otherwise identical to VectorSearch.
+func (p *Postgres) VectorSearchMultiCube(ctx context.Context, vector []float32, userNames []string, memoryTypes []string, agentID string, limit int) ([]VectorSearchResult, error) {
+	vecStr := FormatVector(vector)
+	q := fmt.Sprintf(queries.VectorSearchMultiCube, graphName)
+	rows, err := p.pool.Query(ctx, q, vecStr, userNames, memoryTypes, limit, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("vector search multi-cube: %w", err)
+	}
+	defer rows.Close()
+
+	var results []VectorSearchResult
+	for rows.Next() {
+		var r VectorSearchResult
+		if err := rows.Scan(&r.ID, &r.Properties, &r.Score, &r.EmbeddingStr); err != nil {
+			return nil, fmt.Errorf("vector search multi-cube scan: %w", err)
+		}
+		r.Embedding = ParseVectorString(r.EmbeddingStr)
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
 // FulltextSearch performs tsvector fulltext search across multiple memory types.
 // The tsquery should be pre-built (e.g. "token1 | token2 | token3").
 func (p *Postgres) FulltextSearch(ctx context.Context, tsquery string, userName string, memoryTypes []string, agentID string, limit int) ([]VectorSearchResult, error) {

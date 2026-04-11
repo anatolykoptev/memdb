@@ -144,6 +144,108 @@ func TestNativeSearch_ValidationError(t *testing.T) {
 	assertValidationError(t, w, "query is required")
 }
 
+// TestBuildSearchParams_CubeIDs verifies that readable_cube_ids from the
+// request is propagated to SearchParams correctly:
+//   - absent → CubeID = UserName, CubeIDs empty
+//   - single entry → CubeID = entry, CubeIDs empty (single-cube path)
+//   - multiple entries → CubeID = first entry, CubeIDs = full slice (multi-cube path)
+func TestBuildSearchParams_CubeIDs(t *testing.T) {
+	ptrStr := func(s string) *string { return &s }
+	ptrSlice := func(ss ...string) *[]string { s := append([]string(nil), ss...); return &s }
+
+	cases := []struct {
+		name         string
+		userID       string
+		cubeIDs      *[]string
+		wantUserName string
+		wantCubeID   string
+		wantCubeIDs  []string
+	}{
+		{
+			name:         "no readable_cube_ids → cube == user",
+			userID:       "memos",
+			cubeIDs:      nil,
+			wantUserName: "memos",
+			wantCubeID:   "memos",
+			wantCubeIDs:  nil,
+		},
+		{
+			name:         "single cube → CubeIDs stays empty",
+			userID:       "memos",
+			cubeIDs:      ptrSlice("blumenthalarts.org"),
+			wantUserName: "memos",
+			wantCubeID:   "blumenthalarts.org",
+			wantCubeIDs:  nil,
+		},
+		{
+			name:         "multi cube → CubeIDs populated, CubeID = first",
+			userID:       "memos",
+			cubeIDs:      ptrSlice("blumenthalarts.org", "carolinatix.org", "example.com"),
+			wantUserName: "memos",
+			wantCubeID:   "blumenthalarts.org",
+			wantCubeIDs:  []string{"blumenthalarts.org", "carolinatix.org", "example.com"},
+		},
+		{
+			name:         "empty slice → treated as absent",
+			userID:       "memos",
+			cubeIDs:      ptrSlice(),
+			wantUserName: "memos",
+			wantCubeID:   "memos",
+			wantCubeIDs:  nil,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := searchRequest{
+				Query:           ptrStr("anything"),
+				UserID:          ptrStr(tc.userID),
+				ReadableCubeIDs: tc.cubeIDs,
+			}
+			params, err := buildSearchParams(req)
+			if err != nil {
+				t.Fatalf("buildSearchParams: %v", err)
+			}
+			if params.UserName != tc.wantUserName {
+				t.Errorf("UserName = %q, want %q", params.UserName, tc.wantUserName)
+			}
+			if params.CubeID != tc.wantCubeID {
+				t.Errorf("CubeID = %q, want %q", params.CubeID, tc.wantCubeID)
+			}
+			if len(params.CubeIDs) != len(tc.wantCubeIDs) {
+				t.Errorf("CubeIDs len = %d, want %d (got %v)", len(params.CubeIDs), len(tc.wantCubeIDs), params.CubeIDs)
+				return
+			}
+			for i, want := range tc.wantCubeIDs {
+				if params.CubeIDs[i] != want {
+					t.Errorf("CubeIDs[%d] = %q, want %q", i, params.CubeIDs[i], want)
+				}
+			}
+		})
+	}
+}
+
+// TestBuildSearchParams_CubeIDsClonedFromRequest verifies buildSearchParams
+// does not alias the request slice — mutating the returned CubeIDs must not
+// affect the caller's slice (and vice versa).
+func TestBuildSearchParams_CubeIDsClonedFromRequest(t *testing.T) {
+	ptrStr := func(s string) *string { return &s }
+	in := []string{"a.com", "b.com", "c.com"}
+	req := searchRequest{
+		Query:           ptrStr("q"),
+		UserID:          ptrStr("memos"),
+		ReadableCubeIDs: &in,
+	}
+	params, err := buildSearchParams(req)
+	if err != nil {
+		t.Fatalf("buildSearchParams: %v", err)
+	}
+	params.CubeIDs[0] = "MUTATED"
+	if in[0] == "MUTATED" {
+		t.Error("buildSearchParams aliased the request slice; expected a clone")
+	}
+}
+
 // TestNativeSearch_MissingUserID verifies that a request without user_id
 // returns a 400 validation error.
 func TestNativeSearch_MissingUserID(t *testing.T) {

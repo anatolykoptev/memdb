@@ -135,8 +135,13 @@ func (h *Handler) logSearchResult(result *search.SearchResult, query, dedup stri
 func buildSearchParams(req searchRequest) (search.SearchParams, error) {
 	userName := *req.UserID
 	cubeID := userName
+	var cubeIDs []string
 	if req.ReadableCubeIDs != nil && len(*req.ReadableCubeIDs) > 0 {
 		cubeID = (*req.ReadableCubeIDs)[0]
+		if len(*req.ReadableCubeIDs) > 1 {
+			// Clone to avoid aliasing the request slice.
+			cubeIDs = append([]string(nil), (*req.ReadableCubeIDs)...)
+		}
 	}
 
 	// 1. Start with hardcoded defaults.
@@ -144,6 +149,7 @@ func buildSearchParams(req searchRequest) (search.SearchParams, error) {
 		Query:            strings.TrimSpace(*req.Query),
 		UserName:         userName,
 		CubeID:           cubeID,
+		CubeIDs:          cubeIDs,
 		AgentID:          stringOrEmpty(req.AgentID),
 		TopK:             search.DefaultTextTopK,
 		SkillTopK:        search.DefaultSkillTopK,
