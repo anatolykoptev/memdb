@@ -57,8 +57,11 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 	// Check cache (includes mode in key)
 	profileKey := derefStringOr(req.Profile, "default")
 	modeKey := derefStringOr(req.Mode, "fast")
-	cacheKey := fmt.Sprintf("%ssearch:%s:%s:%s:%s:%d:%d:%d:%s",
-		cachePrefix, profileKey, modeKey, params.UserName,
+	// Include CubeID in the cache key: two requests for the same user but different
+	// readable_cube_ids must not collide. UserName is kept for audit/debug purposes
+	// but CubeID is the actual storage scope used by the read path.
+	cacheKey := fmt.Sprintf("%ssearch:%s:%s:%s:%s:%s:%d:%d:%d:%s",
+		cachePrefix, profileKey, modeKey, params.UserName, params.CubeID,
 		hashQuery(params.Query), params.TopK, params.SkillTopK, params.PrefTopK, params.Dedup)
 	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -132,6 +135,14 @@ func (h *Handler) logSearchResult(result *search.SearchResult, query, dedup stri
 
 // buildSearchParams extracts SearchParams from a validated searchRequest.
 // Three-tier precedence: hardcoded defaults < profile overrides < per-request fields.
+//
+// NAMING NOTE: SearchParams.UserName holds the user_id (identity scope) and
+// SearchParams.CubeID holds the cube identifier (storage bucket scope).
+// The db layer's `user_name` JSONB property is a historical misnomer — writes
+// (handlers/add_*.go, scheduler/reorganizer_*.go) store cube_id in the
+// `user_name` slot. Read-side fix landed 2026-04-11: postgres filters must
+// be built from p.CubeID, not p.UserName, so the filter matches the stored
+// value regardless of whether user_id == cube_id.
 func buildSearchParams(req searchRequest) (search.SearchParams, error) {
 	userName := *req.UserID
 	cubeID := userName

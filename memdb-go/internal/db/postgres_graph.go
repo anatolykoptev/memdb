@@ -178,12 +178,12 @@ WHERE memory_id = $1
 }
 
 // GraphRecallByEdge returns memory nodes reachable from seed IDs via directed edges of a given relation.
-func (p *Postgres) GraphRecallByEdge(ctx context.Context, seedIDs []string, relation, userName string, limit int) ([]GraphRecallResult, error) {
+func (p *Postgres) GraphRecallByEdge(ctx context.Context, seedIDs []string, relation, cubeID string, limit int) ([]GraphRecallResult, error) {
 	if len(seedIDs) == 0 {
 		return nil, nil
 	}
 	q := fmt.Sprintf(queries.GraphRecallByEdge, graphName)
-	rows, err := p.pool.Query(ctx, q, seedIDs, relation, userName, limit)
+	rows, err := p.pool.Query(ctx, q, seedIDs, relation, cubeID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("graph recall by edge: %w", err)
 	}
@@ -201,12 +201,12 @@ func (p *Postgres) GraphRecallByEdge(ctx context.Context, seedIDs []string, rela
 }
 
 // GraphRecallByKey finds nodes where properties->>'key' matches any given key.
-func (p *Postgres) GraphRecallByKey(ctx context.Context, userName string, memoryTypes []string, keys []string, agentID string, limit int) ([]GraphRecallResult, error) {
+func (p *Postgres) GraphRecallByKey(ctx context.Context, cubeID string, memoryTypes []string, keys []string, agentID string, limit int) ([]GraphRecallResult, error) {
 	if len(keys) == 0 {
 		return nil, nil
 	}
 	q := fmt.Sprintf(queries.GraphRecallByKey, graphName)
-	rows, err := p.pool.Query(ctx, q, userName, memoryTypes, keys, limit, agentID)
+	rows, err := p.pool.Query(ctx, q, cubeID, memoryTypes, keys, limit, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("graph recall by key: %w", err)
 	}
@@ -224,12 +224,12 @@ func (p *Postgres) GraphRecallByKey(ctx context.Context, userName string, memory
 }
 
 // GraphRecallByTags finds nodes with >= 2 overlapping tags.
-func (p *Postgres) GraphRecallByTags(ctx context.Context, userName string, memoryTypes []string, tags []string, agentID string, limit int) ([]GraphRecallResult, error) {
+func (p *Postgres) GraphRecallByTags(ctx context.Context, cubeID string, memoryTypes []string, tags []string, agentID string, limit int) ([]GraphRecallResult, error) {
 	if len(tags) < 2 {
 		return nil, nil
 	}
 	q := fmt.Sprintf(queries.GraphRecallByTags, graphName)
-	rows, err := p.pool.Query(ctx, q, userName, memoryTypes, tags, limit, agentID)
+	rows, err := p.pool.Query(ctx, q, cubeID, memoryTypes, tags, limit, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("graph recall by tags: %w", err)
 	}
@@ -250,12 +250,12 @@ func (p *Postgres) GraphRecallByTags(ctx context.Context, userName string, memor
 // working_binding relationships in the properties->>'background' field.
 // Returns neighboring nodes not already in the seed set.
 // Non-fatal: returns nil on error (caller logs and continues).
-func (p *Postgres) GraphBFSTraversal(ctx context.Context, seedIDs []string, userName string, memoryTypes []string, depth, limit int, agentID string) ([]GraphRecallResult, error) {
+func (p *Postgres) GraphBFSTraversal(ctx context.Context, seedIDs []string, cubeID string, memoryTypes []string, depth, limit int, agentID string) ([]GraphRecallResult, error) {
 	if len(seedIDs) == 0 || depth <= 0 {
 		return nil, nil
 	}
 	q := fmt.Sprintf(queries.GraphBFSTraversal, graphName)
-	rows, err := p.pool.Query(ctx, q, seedIDs, userName, memoryTypes, depth, limit, agentID)
+	rows, err := p.pool.Query(ctx, q, seedIDs, cubeID, memoryTypes, depth, limit, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("graph bfs traversal: %w", err)
 	}

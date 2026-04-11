@@ -61,10 +61,10 @@ func ParseVectorString(s string) []float32 {
 
 // VectorSearch performs cosine similarity search across multiple memory types.
 // Returns results sorted by similarity score (descending).
-func (p *Postgres) VectorSearch(ctx context.Context, vector []float32, userName string, memoryTypes []string, agentID string, limit int) ([]VectorSearchResult, error) {
+func (p *Postgres) VectorSearch(ctx context.Context, vector []float32, cubeID string, memoryTypes []string, agentID string, limit int) ([]VectorSearchResult, error) {
 	vecStr := FormatVector(vector)
 	q := fmt.Sprintf(queries.VectorSearch, graphName)
-	rows, err := p.pool.Query(ctx, q, vecStr, userName, memoryTypes, limit, agentID)
+	rows, err := p.pool.Query(ctx, q, vecStr, cubeID, memoryTypes, limit, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
@@ -82,14 +82,14 @@ func (p *Postgres) VectorSearch(ctx context.Context, vector []float32, userName 
 	return results, rows.Err()
 }
 
-// VectorSearchMultiCube performs cosine similarity search across multiple cubes
-// (user_names). Used for cross-domain experience memory: a successful flow on
-// site A can be found when handling site B if both are in userNames.
+// VectorSearchMultiCube performs cosine similarity search across multiple cubes.
+// Used for cross-domain experience memory: a successful flow on
+// site A can be found when handling site B if both are in cubeIDs.
 // Behaviour is otherwise identical to VectorSearch.
-func (p *Postgres) VectorSearchMultiCube(ctx context.Context, vector []float32, userNames []string, memoryTypes []string, agentID string, limit int) ([]VectorSearchResult, error) {
+func (p *Postgres) VectorSearchMultiCube(ctx context.Context, vector []float32, cubeIDs []string, memoryTypes []string, agentID string, limit int) ([]VectorSearchResult, error) {
 	vecStr := FormatVector(vector)
 	q := fmt.Sprintf(queries.VectorSearchMultiCube, graphName)
-	rows, err := p.pool.Query(ctx, q, vecStr, userNames, memoryTypes, limit, agentID)
+	rows, err := p.pool.Query(ctx, q, vecStr, cubeIDs, memoryTypes, limit, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("vector search multi-cube: %w", err)
 	}
@@ -109,12 +109,12 @@ func (p *Postgres) VectorSearchMultiCube(ctx context.Context, vector []float32, 
 
 // FulltextSearch performs tsvector fulltext search across multiple memory types.
 // The tsquery should be pre-built (e.g. "token1 | token2 | token3").
-func (p *Postgres) FulltextSearch(ctx context.Context, tsquery string, userName string, memoryTypes []string, agentID string, limit int) ([]VectorSearchResult, error) {
+func (p *Postgres) FulltextSearch(ctx context.Context, tsquery string, cubeID string, memoryTypes []string, agentID string, limit int) ([]VectorSearchResult, error) {
 	if tsquery == "" {
 		return nil, nil
 	}
 	q := fmt.Sprintf(queries.FulltextSearch, graphName)
-	rows, err := p.pool.Query(ctx, q, tsquery, userName, memoryTypes, limit, agentID)
+	rows, err := p.pool.Query(ctx, q, tsquery, cubeID, memoryTypes, limit, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("fulltext search: %w", err)
 	}
@@ -132,10 +132,10 @@ func (p *Postgres) FulltextSearch(ctx context.Context, tsquery string, userName 
 }
 
 // VectorSearchWithCutoff performs VectorSearch with a temporal created_at cutoff.
-func (p *Postgres) VectorSearchWithCutoff(ctx context.Context, vector []float32, userName string, memoryTypes []string, limit int, cutoff string, agentID string) ([]VectorSearchResult, error) {
+func (p *Postgres) VectorSearchWithCutoff(ctx context.Context, vector []float32, cubeID string, memoryTypes []string, limit int, cutoff string, agentID string) ([]VectorSearchResult, error) {
 	vecStr := FormatVector(vector)
 	q := fmt.Sprintf(queries.VectorSearchWithCutoff, graphName)
-	rows, err := p.pool.Query(ctx, q, vecStr, userName, memoryTypes, limit, cutoff, agentID)
+	rows, err := p.pool.Query(ctx, q, vecStr, cubeID, memoryTypes, limit, cutoff, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("vector search with cutoff: %w", err)
 	}
@@ -154,12 +154,12 @@ func (p *Postgres) VectorSearchWithCutoff(ctx context.Context, vector []float32,
 }
 
 // FulltextSearchWithCutoff performs FulltextSearch with a temporal created_at cutoff.
-func (p *Postgres) FulltextSearchWithCutoff(ctx context.Context, tsquery string, userName string, memoryTypes []string, limit int, cutoff string, agentID string) ([]VectorSearchResult, error) {
+func (p *Postgres) FulltextSearchWithCutoff(ctx context.Context, tsquery string, cubeID string, memoryTypes []string, limit int, cutoff string, agentID string) ([]VectorSearchResult, error) {
 	if tsquery == "" {
 		return nil, nil
 	}
 	q := fmt.Sprintf(queries.FulltextSearchWithCutoff, graphName)
-	rows, err := p.pool.Query(ctx, q, tsquery, userName, memoryTypes, limit, cutoff, agentID)
+	rows, err := p.pool.Query(ctx, q, tsquery, cubeID, memoryTypes, limit, cutoff, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("fulltext search with cutoff: %w", err)
 	}
@@ -178,9 +178,9 @@ func (p *Postgres) FulltextSearchWithCutoff(ctx context.Context, tsquery string,
 
 // GetWorkingMemory returns all activated WorkingMemory items for a user, ordered by recency.
 // Returns embeddings so callers can compute cosine similarity against the query vector.
-func (p *Postgres) GetWorkingMemory(ctx context.Context, userName string, limit int, agentID string) ([]VectorSearchResult, error) {
+func (p *Postgres) GetWorkingMemory(ctx context.Context, cubeID string, limit int, agentID string) ([]VectorSearchResult, error) {
 	q := fmt.Sprintf(queries.GetWorkingMemory, graphName)
-	rows, err := p.pool.Query(ctx, q, userName, limit, agentID)
+	rows, err := p.pool.Query(ctx, q, cubeID, limit, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("get working memory: %w", err)
 	}
