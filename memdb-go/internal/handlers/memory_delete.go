@@ -73,14 +73,16 @@ func (h *Handler) NativeDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Native path: delete by memory_ids — requires user_id.
-	if req.UserID == nil || *req.UserID == "" {
-		h.writeValidationError(w, []string{"user_id is required for memory_ids delete"})
+	// Native path: delete by memory_ids — requires user_id or writable_cube_ids.
+	cubeIDs := resolveDeleteCubeIDs(&req)
+	if len(cubeIDs) == 0 {
+		h.writeValidationError(w, []string{"user_id or writable_cube_ids is required for memory_ids delete"})
 		return
 	}
+	cubeID := cubeIDs[0]
 
 	ctx := r.Context()
-	deleted, err := h.postgres.DeleteByPropertyIDs(ctx, *req.MemoryIDs, *req.UserID)
+	deleted, err := h.postgres.DeleteByPropertyIDs(ctx, *req.MemoryIDs, cubeID)
 	if err != nil {
 		h.logger.Error("native delete by memory_ids failed", slog.Any("error", err))
 		h.writeJSON(w, http.StatusInternalServerError, map[string]any{
@@ -92,8 +94,8 @@ func (h *Handler) NativeDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.deleteFromPreferenceCollections(r.Context(), *req.MemoryIDs)
-	h.evictFromVSetBatch(ctx, *req.UserID, *req.MemoryIDs)
-	h.invalidateDeleteCaches(ctx, *req.UserID, *req.MemoryIDs)
+	h.evictFromVSetBatch(ctx, cubeID, *req.MemoryIDs)
+	h.invalidateDeleteCaches(ctx, cubeID, *req.MemoryIDs)
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
 		"code":    200,

@@ -70,6 +70,10 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 
 	// Validate required fields
 	errs := validateAddRequest(req.UserID, req.AsyncMode, req.Mode)
+	isAsync := req.AsyncMode != nil && *req.AsyncMode == modeAsync
+	if !isAsync && len(req.Messages) == 0 {
+		errs = append(errs, "messages must not be empty")
+	}
 	if len(req.Messages) > maxMessages {
 		errs = append(errs, fmt.Sprintf("messages must not exceed %d items", maxMessages))
 	}
@@ -90,7 +94,6 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ingestion queue: limit concurrent sync adds (async bypasses — already rate-limited by Redis Streams)
-	isAsync := req.AsyncMode != nil && *req.AsyncMode == modeAsync
 	if !isAsync && h.addSem != nil {
 		if !h.acquireAddSlot(r.Context()) {
 			h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
