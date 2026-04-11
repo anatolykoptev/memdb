@@ -148,12 +148,12 @@ func TestValidatedSearch_NegativePrefTopK(t *testing.T) {
 
 // --- Add validation tests ---
 
-func TestValidatedAdd_MissingUserID(t *testing.T) {
+func TestNativeAdd_Validation_MissingUserID(t *testing.T) {
 	h := testValidateHandler()
 
 	req := httptest.NewRequest(http.MethodPost, "/product/add", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
-	h.ValidatedAdd(w, req)
+	h.NativeAdd(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", w.Code)
@@ -163,13 +163,13 @@ func TestValidatedAdd_MissingUserID(t *testing.T) {
 	}
 }
 
-func TestValidatedAdd_InvalidAsyncMode(t *testing.T) {
+func TestNativeAdd_Validation_InvalidAsyncMode(t *testing.T) {
 	h := testValidateHandler()
 
 	req := httptest.NewRequest(http.MethodPost, "/product/add",
 		strings.NewReader(`{"user_id":"memos","async_mode":"bad"}`))
 	w := httptest.NewRecorder()
-	h.ValidatedAdd(w, req)
+	h.NativeAdd(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", w.Code)
@@ -179,13 +179,13 @@ func TestValidatedAdd_InvalidAsyncMode(t *testing.T) {
 	}
 }
 
-func TestValidatedAdd_InvalidMode(t *testing.T) {
+func TestNativeAdd_Validation_InvalidMode(t *testing.T) {
 	h := testValidateHandler()
 
 	req := httptest.NewRequest(http.MethodPost, "/product/add",
 		strings.NewReader(`{"user_id":"memos","mode":"turbo"}`))
 	w := httptest.NewRecorder()
-	h.ValidatedAdd(w, req)
+	h.NativeAdd(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", w.Code)
