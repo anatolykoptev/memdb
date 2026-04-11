@@ -5,8 +5,9 @@
 // Memory CRUD and user tools use Postgres directly.
 //
 // Usage:
-//   memdb-mcp          # HTTP mode on MEMDB_MCP_PORT (default 8001)
-//   memdb-mcp --stdio  # STDIO mode for direct integration (e.g. Claude Code)
+//
+//	memdb-mcp          # HTTP mode on MEMDB_MCP_PORT (default 8001)
+//	memdb-mcp --stdio  # STDIO mode for direct integration (e.g. Claude Code)
 package main
 
 import (
@@ -93,11 +94,17 @@ func main() {
 	mcptools.RegisterSearchTool(server, memdbGoURL, cfg.InternalServiceSecret, logger)
 	mcptools.RegisterMemoryTools(server, pg, qd, logger)
 	mcptools.RegisterUserTools(server, pg, logger)
-	mcptools.RegisterProxyTools(server, cfg.PythonBackendURL, cfg.InternalServiceSecret, logger)
+	mcptools.RegisterNativeGoProxyTools(server, memdbGoURL, cfg.InternalServiceSecret, logger)
+	mcptools.RegisterPythonProxyTools(server, cfg.PythonBackendURL, cfg.InternalServiceSecret, logger)
 
-	const mcpNativeToolCount = 6  // search + get/update/delete/delete_all + users (get_user_info, create_user)
-	const mcpProxyToolCount  = 10 // add_memory, chat, create_cube, register_cube, unregister_cube, etc.
-	logger.Info("MCP tools registered", slog.Int("native", mcpNativeToolCount), slog.Int("proxy", mcpProxyToolCount))
+	const mcpNativeToolCount = 6      // search + get/update/delete/delete_all + users (get_user_info, create_user)
+	const mcpGoProxyToolCount = 3     // add_memory, chat, clear_chat_history → memdb-go native backend
+	const mcpPythonProxyToolCount = 7 // create_cube, register_cube, unregister_cube, share_cube, dump_cube, control_memory_scheduler → Python legacy
+	logger.Info("MCP tools registered",
+		slog.Int("native", mcpNativeToolCount),
+		slog.Int("go_proxy", mcpGoProxyToolCount),
+		slog.Int("python_proxy", mcpPythonProxyToolCount),
+	)
 
 	if stdioMode {
 		runStdio(ctx, server, logger, pg)
