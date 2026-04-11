@@ -5,8 +5,10 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -195,6 +197,61 @@ func (p *Postgres) GetAllMemories(ctx context.Context, userName, memoryType stri
 		return nil, 0, err
 	}
 	return results, total, nil
+}
+
+// GetMemoriesByFilter fetches activated memories for one or more cube IDs that match
+// the given SQL WHERE conditions (produced by filter.BuildAGEWhereConditions).
+//
+// cubeIDs are OR-joined as user_name equality conditions; filterConditions are AND-joined
+// on top. The combined WHERE also always includes status='activated'. limit is clamped
+// to [1,1000] by the caller (handler enforces ≤1000; we enforce ≥1 here).
+//
+// Returns a slice of raw property maps (one per matching node). Properties JSONB is
+// deserialized from the ::text scan; embedding is not fetched.
+func (p *Postgres) GetMemoriesByFilter(ctx context.Context, cubeIDs []string, filterConditions []string, limit int) ([]map[string]any, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+
+	// Build user_name OR conditions (plain SQL — properties is JSONB, not agtype).
+	userConds := make([]string, 0, len(cubeIDs))
+	for _, id := range cubeIDs {
+		escaped := strings.ReplaceAll(id, "'", "''")
+		userConds = append(userConds, fmt.Sprintf("properties->>'user_name' = '%s'", escaped))
+	}
+
+	// Assemble WHERE: (user_name OR ...) AND status='activated' AND <filter...>
+	parts := make([]string, 0, 2+len(filterConditions))
+	if len(userConds) == 1 {
+		parts = append(parts, userConds[0])
+	} else {
+		parts = append(parts, "("+strings.Join(userConds, " OR ")+")")
+	}
+	parts = append(parts, "properties->>'status' = 'activated'")
+	parts = append(parts, filterConditions...)
+
+	whereSQL := strings.Join(parts, " AND ")
+	q := fmt.Sprintf(queries.GetMemoriesByFilterSQL, graphName, whereSQL, limit)
+
+	rows, err := p.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("get memories by filter: %w", err)
+	}
+	defer rows.Close()
+
+	var results []map[string]any
+	for rows.Next() {
+		var propsStr string
+		if err := rows.Scan(&propsStr); err != nil {
+			return nil, fmt.Errorf("get memories by filter scan: %w", err)
+		}
+		var props map[string]any
+		if err := json.Unmarshal([]byte(propsStr), &props); err != nil {
+			continue // skip malformed rows
+		}
+		results = append(results, props)
+	}
+	return results, rows.Err()
 }
 
 // DeleteByPropertyIDs deletes nodes matching the given property IDs and user name.

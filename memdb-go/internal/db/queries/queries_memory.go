@@ -364,6 +364,21 @@ WHERE a.properties->>'user_name' = $1
 ORDER BY score DESC
 LIMIT $3`
 
+// --- Filter-based GET (T5: native post_get_memory with complex filters) ---
+
+// GetMemoriesByFilterSQL is a SQL template for fetching memories matching user_name
+// conditions (OR-joined) AND filter conditions (AND-joined) with a LIMIT clause.
+// The WHERE template takes no $N parameters — all conditions are inlined by the caller
+// using the filter package (which escapes values at render time). The LIMIT value is
+// also inlined (integer, validated to ≤1000 by the handler).
+//
+// Usage: fmt.Sprintf(GetMemoriesByFilterSQL, graphName, whereSQLLiteral, limitInt)
+const GetMemoriesByFilterSQL = `
+SELECT properties::text
+FROM %[1]s."Memory"
+WHERE %[2]s
+LIMIT %[3]d`
+
 // --- Admin: raw memory detection ---
 
 // FindRawMemories returns activated LTM/UserMemory nodes that contain raw conversation
