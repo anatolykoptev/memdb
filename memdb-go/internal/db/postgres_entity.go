@@ -118,11 +118,11 @@ SET name        = EXCLUDED.name,
 
 // FindEntitiesByNormalizedID returns entity IDs that match any of the given
 // normalized names for a user. Used by SearchService for entity-graph recall.
-func (p *Postgres) FindEntitiesByNormalizedID(ctx context.Context, normalizedIDs []string, userName string) ([]string, error) {
+func (p *Postgres) FindEntitiesByNormalizedID(ctx context.Context, normalizedIDs []string, cubeID string) ([]string, error) {
 	if len(normalizedIDs) == 0 {
 		return nil, nil
 	}
-	rows, err := p.pool.Query(ctx, queries.FindEntitiesByNormalizedID, userName, normalizedIDs)
+	rows, err := p.pool.Query(ctx, queries.FindEntitiesByNormalizedID, cubeID, normalizedIDs)
 	if err != nil {
 		return nil, fmt.Errorf("find entities by id: %w", err)
 	}
@@ -141,12 +141,12 @@ func (p *Postgres) FindEntitiesByNormalizedID(ctx context.Context, normalizedIDs
 
 // GetMemoriesByEntityIDs returns activated memory nodes that mention any of the
 // given entity IDs via MENTIONS_ENTITY edges. Used for entity-graph recall in search.
-func (p *Postgres) GetMemoriesByEntityIDs(ctx context.Context, entityIDs []string, userName string, limit int) ([]GraphRecallResult, error) {
+func (p *Postgres) GetMemoriesByEntityIDs(ctx context.Context, entityIDs []string, cubeID string, limit int) ([]GraphRecallResult, error) {
 	if len(entityIDs) == 0 {
 		return nil, nil
 	}
 	q := fmt.Sprintf(queries.GetMemoriesByEntityIDs, graphName)
-	rows, err := p.pool.Query(ctx, q, userName, entityIDs, limit)
+	rows, err := p.pool.Query(ctx, q, cubeID, entityIDs, limit)
 	if err != nil {
 		return nil, fmt.Errorf("get memories by entity ids: %w", err)
 	}

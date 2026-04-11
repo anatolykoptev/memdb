@@ -15,6 +15,25 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
 )
 
+// postgresClient is the subset of db.Postgres methods used by SearchService.
+// Introducing the interface enables unit tests to inject a mock without a real
+// Postgres connection. The concrete *db.Postgres satisfies this interface.
+type postgresClient interface {
+	VectorSearch(ctx context.Context, vector []float32, cubeID string, memoryTypes []string, agentID string, limit int) ([]db.VectorSearchResult, error)
+	VectorSearchMultiCube(ctx context.Context, vector []float32, cubeIDs []string, memoryTypes []string, agentID string, limit int) ([]db.VectorSearchResult, error)
+	VectorSearchWithCutoff(ctx context.Context, vector []float32, cubeID string, memoryTypes []string, limit int, cutoff string, agentID string) ([]db.VectorSearchResult, error)
+	FulltextSearch(ctx context.Context, tsquery string, cubeID string, memoryTypes []string, agentID string, limit int) ([]db.VectorSearchResult, error)
+	FulltextSearchWithCutoff(ctx context.Context, tsquery string, cubeID string, memoryTypes []string, limit int, cutoff string, agentID string) ([]db.VectorSearchResult, error)
+	GetWorkingMemory(ctx context.Context, cubeID string, limit int, agentID string) ([]db.VectorSearchResult, error)
+	GraphRecallByKey(ctx context.Context, cubeID string, memoryTypes []string, keys []string, agentID string, limit int) ([]db.GraphRecallResult, error)
+	GraphRecallByTags(ctx context.Context, cubeID string, memoryTypes []string, tags []string, agentID string, limit int) ([]db.GraphRecallResult, error)
+	GraphRecallByEdge(ctx context.Context, seedIDs []string, relation, cubeID string, limit int) ([]db.GraphRecallResult, error)
+	GraphBFSTraversal(ctx context.Context, seedIDs []string, cubeID string, memoryTypes []string, depth, limit int, agentID string) ([]db.GraphRecallResult, error)
+	FindEntitiesByNormalizedID(ctx context.Context, normalizedIDs []string, cubeID string) ([]string, error)
+	GetMemoriesByEntityIDs(ctx context.Context, entityIDs []string, cubeID string, limit int) ([]db.GraphRecallResult, error)
+	IncrRetrievalCount(ctx context.Context, ids []string, now string) error
+}
+
 // contradictsEdgeSeedN is the number of top results used as seed IDs
 // for the CONTRADICTS edge recall step.
 const contradictsEdgeSeedN = 20
@@ -29,7 +48,7 @@ const (
 // SearchService performs the full search pipeline: embed → parallel DB queries →
 // merge → format → rerank → filter → dedup → trim → build response.
 type SearchService struct {
-	postgres    *db.Postgres
+	postgres    postgresClient
 	qdrant      *db.Qdrant
 	embedder    embedder.Embedder
 	logger      *slog.Logger
@@ -47,13 +66,19 @@ type SearchService struct {
 
 // NewSearchService creates a SearchService. Any dependency may be nil (caller
 // should check CanSearch before calling Search).
+// pg must satisfy postgresClient; the concrete *db.Postgres does.
 func NewSearchService(pg *db.Postgres, qd *db.Qdrant, emb embedder.Embedder, logger *slog.Logger) *SearchService {
-	return &SearchService{
-		postgres: pg,
+	s := &SearchService{
 		qdrant:   qd,
 		embedder: emb,
 		logger:   logger,
 	}
+	// Assign only when non-nil to keep the interface nil when no postgres is provided,
+	// so s.postgres != nil checks remain correct (typed-nil-in-interface pitfall).
+	if pg != nil {
+		s.postgres = pg
+	}
+	return s
 }
 
 // CanSearch returns true if the minimum dependencies (embedder + postgres) are available.
@@ -275,11 +300,15 @@ func (s *SearchService) spawnTextSearches(
 		var err error
 		switch {
 		case hasCutoff:
-			psr.textVec, err = s.postgres.VectorSearchWithCutoff(ctx, queryVec, p.UserName, TextScopes, budget.textK, cutoffISO, p.AgentID)
+			// Filter by CubeID: postgres filters by the `user_name` JSONB property,
+			// which writes populate from cube_id. CubeID comes from readable_cube_ids,
+			// falling back to user_id when no cube is specified. See handlers/search.go
+			// buildSearchParams for the naming note.
+			psr.textVec, err = s.postgres.VectorSearchWithCutoff(ctx, queryVec, p.CubeID, TextScopes, budget.textK, cutoffISO, p.AgentID)
 		case len(p.CubeIDs) > 1:
 			psr.textVec, err = s.postgres.VectorSearchMultiCube(ctx, queryVec, p.CubeIDs, TextScopes, p.AgentID, budget.textK)
 		default:
-			psr.textVec, err = s.postgres.VectorSearch(ctx, queryVec, p.UserName, TextScopes, p.AgentID, budget.textK)
+			psr.textVec, err = s.postgres.VectorSearch(ctx, queryVec, p.CubeID, TextScopes, p.AgentID, budget.textK)
 		}
 		return err
 	})
@@ -287,9 +316,9 @@ func (s *SearchService) spawnTextSearches(
 		g.Go(func() error {
 			var err error
 			if hasCutoff {
-				psr.textFT, err = s.postgres.FulltextSearchWithCutoff(ctx, tsquery, p.UserName, TextScopes, budget.textK, cutoffISO, p.AgentID)
+				psr.textFT, err = s.postgres.FulltextSearchWithCutoff(ctx, tsquery, p.CubeID, TextScopes, budget.textK, cutoffISO, p.AgentID)
 			} else {
-				psr.textFT, err = s.postgres.FulltextSearch(ctx, tsquery, p.UserName, TextScopes, p.AgentID, budget.textK)
+				psr.textFT, err = s.postgres.FulltextSearch(ctx, tsquery, p.CubeID, TextScopes, p.AgentID, budget.textK)
 			}
 			return err
 		})
@@ -304,13 +333,14 @@ func (s *SearchService) spawnSkillToolSearches(
 	if p.IncludeSkill && p.SkillTopK > 0 {
 		g.Go(func() error {
 			var err error
-			psr.skillVec, err = s.postgres.VectorSearch(ctx, queryVec, p.UserName, SkillScopes, p.AgentID, budget.skillK)
+			// Filter by CubeID (see spawnTextSearches for the naming note).
+			psr.skillVec, err = s.postgres.VectorSearch(ctx, queryVec, p.CubeID, SkillScopes, p.AgentID, budget.skillK)
 			return err
 		})
 		if tsquery != "" {
 			g.Go(func() error {
 				var err error
-				psr.skillFT, err = s.postgres.FulltextSearch(ctx, tsquery, p.UserName, SkillScopes, p.AgentID, budget.skillK)
+				psr.skillFT, err = s.postgres.FulltextSearch(ctx, tsquery, p.CubeID, SkillScopes, p.AgentID, budget.skillK)
 				return err
 			})
 		}
@@ -318,13 +348,14 @@ func (s *SearchService) spawnSkillToolSearches(
 	if p.IncludeTool && p.ToolTopK > 0 {
 		g.Go(func() error {
 			var err error
-			psr.toolVec, err = s.postgres.VectorSearch(ctx, queryVec, p.UserName, ToolScopes, p.AgentID, budget.toolK)
+			// Filter by CubeID (see spawnTextSearches for the naming note).
+			psr.toolVec, err = s.postgres.VectorSearch(ctx, queryVec, p.CubeID, ToolScopes, p.AgentID, budget.toolK)
 			return err
 		})
 		if tsquery != "" {
 			g.Go(func() error {
 				var err error
-				psr.toolFT, err = s.postgres.FulltextSearch(ctx, tsquery, p.UserName, ToolScopes, p.AgentID, budget.toolK)
+				psr.toolFT, err = s.postgres.FulltextSearch(ctx, tsquery, p.CubeID, ToolScopes, p.AgentID, budget.toolK)
 				return err
 			})
 		}
@@ -359,7 +390,8 @@ func (s *SearchService) spawnWorkingMemAndGraph(
 ) {
 	g.Go(func() error {
 		var err error
-		psr.workingMemItems, err = s.postgres.GetWorkingMemory(ctx, p.UserName, WorkingMemoryLimit, p.AgentID)
+		// Filter by CubeID (see spawnTextSearches for the naming note).
+		psr.workingMemItems, err = s.postgres.GetWorkingMemory(ctx, p.CubeID, WorkingMemoryLimit, p.AgentID)
 		if err != nil {
 			s.logger.Debug("working memory fetch failed", slog.Any("error", err))
 		}
@@ -368,7 +400,7 @@ func (s *SearchService) spawnWorkingMemAndGraph(
 	if len(tokens) > 0 {
 		g.Go(func() error {
 			var err error
-			psr.graphKeyResults, err = s.postgres.GraphRecallByKey(ctx, p.UserName, GraphRecallScopes, tokens, p.AgentID, GraphRecallLimit)
+			psr.graphKeyResults, err = s.postgres.GraphRecallByKey(ctx, p.CubeID, GraphRecallScopes, tokens, p.AgentID, GraphRecallLimit)
 			if err != nil {
 				s.logger.Debug("graph recall by key failed", slog.Any("error", err))
 			}
@@ -379,11 +411,11 @@ func (s *SearchService) spawnWorkingMemAndGraph(
 			for i, t := range tokens {
 				normalized[i] = db.NormalizeEntityID(t)
 			}
-			entityIDs, err := s.postgres.FindEntitiesByNormalizedID(ctx, normalized, p.UserName)
+			entityIDs, err := s.postgres.FindEntitiesByNormalizedID(ctx, normalized, p.CubeID)
 			if err != nil || len(entityIDs) == 0 {
 				return nil
 			}
-			psr.entityGraphResults, err = s.postgres.GetMemoriesByEntityIDs(ctx, entityIDs, p.UserName, GraphRecallLimit)
+			psr.entityGraphResults, err = s.postgres.GetMemoriesByEntityIDs(ctx, entityIDs, p.CubeID, GraphRecallLimit)
 			if err != nil {
 				s.logger.Debug("entity graph recall failed", slog.Any("error", err))
 			}
@@ -393,7 +425,7 @@ func (s *SearchService) spawnWorkingMemAndGraph(
 	if len(tokens) >= 2 {
 		g.Go(func() error {
 			var err error
-			psr.graphTagResults, err = s.postgres.GraphRecallByTags(ctx, p.UserName, GraphRecallScopes, tokens, p.AgentID, GraphRecallLimit)
+			psr.graphTagResults, err = s.postgres.GraphRecallByTags(ctx, p.CubeID, GraphRecallScopes, tokens, p.AgentID, GraphRecallLimit)
 			if err != nil {
 				s.logger.Debug("graph recall by tags failed", slog.Any("error", err))
 			}
@@ -464,7 +496,7 @@ func (s *SearchService) runBFSExpansion(ctx context.Context, textVec []db.Vector
 	for _, r := range textVec[:seedN] {
 		seedIDs = append(seedIDs, r.ID)
 	}
-	bfs, err := s.postgres.GraphBFSTraversal(ctx, seedIDs, p.UserName, GraphRecallScopes, 2, GraphRecallLimit, p.AgentID)
+	bfs, err := s.postgres.GraphBFSTraversal(ctx, seedIDs, p.CubeID, GraphRecallScopes, 2, GraphRecallLimit, p.AgentID)
 	if err != nil {
 		s.logger.Debug("graph bfs traversal failed", slog.Any("error", err))
 		return nil
@@ -517,7 +549,7 @@ func (s *SearchService) applyContradictsPenalty(ctx context.Context, textMerged 
 	for _, r := range textMerged[:seedN] {
 		seedIDs = append(seedIDs, r.ID)
 	}
-	contradicted, err := s.postgres.GraphRecallByEdge(ctx, seedIDs, db.EdgeContradicts, p.UserName, contradictsEdgeSeedN)
+	contradicted, err := s.postgres.GraphRecallByEdge(ctx, seedIDs, db.EdgeContradicts, p.CubeID, contradictsEdgeSeedN)
 	if err != nil || len(contradicted) == 0 {
 		return textMerged
 	}
@@ -540,7 +572,7 @@ func (s *SearchService) runIterativeExpansion(ctx context.Context, queryVec []fl
 			return nil, err
 		}
 		subVec := vecs[0]
-		results, err := s.postgres.VectorSearch(subCtx, subVec, p.UserName, TextScopes, p.AgentID, p.TopK*InflateFactor)
+		results, err := s.postgres.VectorSearch(subCtx, subVec, p.CubeID, TextScopes, p.AgentID, p.TopK*InflateFactor)
 		if err != nil {
 			return nil, err
 		}
