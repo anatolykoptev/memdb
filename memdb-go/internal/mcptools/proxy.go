@@ -73,35 +73,44 @@ func proxyCall(ctx context.Context, pythonURL string, endpoint string, serviceSe
 	return TextResult{Result: result}, nil
 }
 
-// RegisterProxyTools registers MCP tools that proxy to the Python backend.
-func RegisterProxyTools(server *mcp.Server, pythonURL string, serviceSecret string, logger *slog.Logger) {
+// RegisterNativeGoProxyTools registers MCP tools that proxy to the memdb-go native backend.
+// Covers add_memory, chat, and clear_chat_history — all backed by Go-native endpoints on memdb-go.
+//
+// NOTE: clear_chat_history incorrectly maps to /product/chat/complete (same as chat).
+// This is a pre-existing bug inherited from the original RegisterProxyTools; left as-is
+// pending a dedicated clear-history endpoint on memdb-go.
+func RegisterNativeGoProxyTools(server *mcp.Server, memdbGoURL string, serviceSecret string, logger *slog.Logger) {
 	// add_memory
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_memory",
-		Description: "Add memories from text content, document files, or conversation messages. (proxied to Python backend)",
+		Description: "Add memories from text content, document files, or conversation messages. (proxied to memdb-go native backend)",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryProxyInput) (*mcp.CallToolResult, TextResult, error) {
-		result, err := proxyCall(ctx, pythonURL, "/product/add", serviceSecret, "add_memory", input, logger)
+		result, err := proxyCall(ctx, memdbGoURL, "/product/add", serviceSecret, "add_memory", input, logger)
 		return nil, result, err
 	})
 
 	// chat
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "chat",
-		Description: "Chat with MemDB system using memory-enhanced responses with semantic search. (proxied to Python backend)",
+		Description: "Chat with MemDB system using memory-enhanced responses with semantic search. (proxied to memdb-go native backend)",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ChatProxyInput) (*mcp.CallToolResult, TextResult, error) {
-		result, err := proxyCall(ctx, pythonURL, "/product/chat/complete", serviceSecret, "chat", input, logger)
+		result, err := proxyCall(ctx, memdbGoURL, "/product/chat/complete", serviceSecret, "chat", input, logger)
 		return nil, result, err
 	})
 
 	// clear_chat_history
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "clear_chat_history",
-		Description: "Reset conversation history while keeping memory cubes and stored memories intact. (proxied to Python backend)",
+		Description: "Reset conversation history while keeping memory cubes and stored memories intact. (proxied to memdb-go native backend)",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input ClearChatHistoryProxyInput) (*mcp.CallToolResult, TextResult, error) {
-		result, err := proxyCall(ctx, pythonURL, "/product/chat/complete", serviceSecret, "clear_chat_history", input, logger)
+		result, err := proxyCall(ctx, memdbGoURL, "/product/chat/complete", serviceSecret, "clear_chat_history", input, logger)
 		return nil, result, err
 	})
+}
 
+// RegisterPythonProxyTools registers MCP tools that proxy to the Python legacy backend.
+// Covers cube management and scheduler control — not yet ported to Go.
+func RegisterPythonProxyTools(server *mcp.Server, pythonURL string, serviceSecret string, logger *slog.Logger) {
 	// create_cube
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_cube",
