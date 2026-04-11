@@ -80,11 +80,17 @@ func proxyCall(ctx context.Context, pythonURL string, endpoint string, serviceSe
 // This is a pre-existing bug inherited from the original RegisterProxyTools; left as-is
 // pending a dedicated clear-history endpoint on memdb-go.
 func RegisterNativeGoProxyTools(server *mcp.Server, memdbGoURL string, serviceSecret string, logger *slog.Logger) {
-	// add_memory
+	// add_memory — routes to memdb-go /product/add (NativeAdd). doc_path is currently
+	// unsupported by the Go backend (markitdown PDF/Word/Excel parser is a Phase-4.11
+	// feature gap). Fail fast instead of silently dropping the field — see MemDB
+	// Task #7 (doc_path semantic drift follow-up).
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "add_memory",
-		Description: "Add memories from text content, document files, or conversation messages. (proxied to memdb-go native backend)",
+		Description: "Add memories from text content or conversation messages. doc_path is not yet supported — pre-extract text client-side and pass it via memory_content. (proxied to memdb-go native backend)",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, input AddMemoryProxyInput) (*mcp.CallToolResult, TextResult, error) {
+		if input.DocPath != "" {
+			return nil, TextResult{}, fmt.Errorf("add_memory: doc_path is not yet supported by the Go backend; extract text client-side and pass it via memory_content")
+		}
 		result, err := proxyCall(ctx, memdbGoURL, "/product/add", serviceSecret, "add_memory", input, logger)
 		return nil, result, err
 	})
