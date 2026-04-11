@@ -10,7 +10,7 @@ Two Go binaries + one Python legacy service, all in Docker:
 | `memdb-mcp` | Go MCP server (stdio + streamable-http) | 8001 | ✅ Go |
 | `memdb-api` | Python FastAPI: add pipeline, LLM extraction, scheduler | 8000 | ⚠️ Legacy |
 
-Supporting: `postgres+AGE` (5432), `qdrant` (6333), `redis` (6379), `rabbitmq` (5672), `cliproxyapi` (8317), `go-search` (8890).
+Supporting: `postgres+AGE` (5432), `qdrant` (6333), `redis` (6379), `cliproxyapi` (8317), `go-search` (8890). _RabbitMQ удалён в Фазе 3.3 — Redis Streams теперь используется для scheduler queue._
 
 Postgres is **not exposed** to host — only accessible inside Docker network.
 
@@ -64,10 +64,20 @@ cd memdb-go && CGO_ENABLED=0 go build -o /home/krolik/bin/mcp-stdio-proxy ./cmd/
 cd memdb-go && go test ./internal/...
 ```
 
-Docker (from `/home/krolik/krolik-server`):
+### Deploy: push to `main` → dozor auto-rebuilds
+
+**Do NOT run `docker compose build` manually.** Push commits to `main` on GitHub — the dozor webhook (`deploy.krolik.run/deploy/github`) rebuilds `memdb-go` and `memdb-mcp` automatically via `~/.dozor/deploy-repos.yaml`. Serial queue — no concurrent builds.
+
 ```bash
-docker compose build memdb-mcp && docker compose up -d memdb-mcp
-docker compose build memdb-go && docker compose up -d memdb-go
+git push origin main   # triggers dozor rebuild for both memdb-go + memdb-mcp
+```
+
+Watch dozor logs: `journalctl --user -u dozor -f | grep memdb`.
+
+Manual `docker compose build` is only allowed for: hot-fix without push, build-flag debugging, or when dozor is down. In those cases use:
+```bash
+cd ~/deploy/krolik-server && docker compose build memdb-go memdb-mcp && \
+  docker compose up -d --no-deps --force-recreate memdb-go memdb-mcp
 ```
 
 ## Key Env Vars (memdb-go / memdb-mcp)
@@ -84,12 +94,30 @@ docker compose build memdb-go && docker compose up -d memdb-go
 | `AUTH_ENABLED` | Enable Bearer token auth |
 | `MASTER_KEY_HASH` | SHA-256 of master API key |
 
+## ONNX Model Optimization
+
+Models in `~/deploy/krolik-server/models/` are **graph-optimized** (O3 fusion: SkipLayerNormalization, Gelu). This gave ~300x speedup on ARM Neoverse-N1.
+
+**When adding or updating ONNX models, ALWAYS optimize before deploying:**
+
+```bash
+python3 -c "
+from onnxruntime.transformers.optimizer import optimize_model
+m = optimize_model('model_quantized.onnx', model_type='bert', num_heads=NUM_HEADS, hidden_size=HIDDEN_SIZE)
+m.save_model_to_file('model_optimized.onnx')
+"
+# num_heads/hidden_size: e5-large=16/1024, jina-code-v2=12/768, e5-small=12/384
+```
+
+Without optimization, inference takes ~47s/request instead of ~0.15s on ARM (no AVX).
+
 ## Go Migration Status
 
-See `ROADMAP-GO-MIGRATION.md` for full plan. Summary:
-- **Done**: auth, ONNX embedder, search pipeline, REST CRUD, MCP server, stdio transport
-- **In progress (Phase 1)**: Go-native `add` pipeline (LLM extraction, dedup, graph insert) — currently proxied to Python
-- **Remaining**: memory reorganizer, skill/tool memory, Python deprecation
+See `ROADMAP-GO-MIGRATION.md` for full plan. Summary (апрель 2026):
+- **Done**: auth, ONNX embedder, full search pipeline (fast + fine + internet/SearXNG), REST CRUD, MCP server, stdio transport, Go-native `add` pipeline (unified LLM extractor v2, classifier, hallucination filter, confidence/dedup, valid_at), WorkingMemory VSET hot cache, Redis Streams scheduler worker, Memory Reorganizer, skill extraction, tool trajectory extraction, chat complete/stream
+- **Phase 4 blockers remaining**: (1) native feedback handler — `mem_feedback/feedback.py` 47K still proxied; (2) `delete_memory` with `file_ids` / complex filter; (3) `get_memory` with complex filter
+- **MCP proxy still → Python**: `add_memory` + `chat` (trivial fix, internal REST already native), cube tools (`create/share/dump/register/unregister_cube`), `llm/complete` thin proxy
+- **Python-only modules without Go counterpart**: multi-modal parsers (10 files, ~150K), `markitdown` (PDF/Word/Excel), chunkers, BGE HTTP reranker strategies, `deepsearch_agent`, full tree_text_memory retrieve/organize — these are **feature gaps**, not Phase 5 blockers
 
 ## Module
 
