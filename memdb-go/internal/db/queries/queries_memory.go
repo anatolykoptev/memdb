@@ -389,3 +389,21 @@ WHERE properties->>'user_name' = $1
   AND properties->>'memory_type' = ANY($2)
   AND properties->>'status' = 'activated'
   AND position('assistant: [20' IN properties->>'memory') > 0`
+
+// UpdateMemoryPropsAndEmbedding replaces the properties JSONB blob AND the
+// embedding vector for a single memory node, scoped to (id, user_name).
+// The table id column equals properties->>'id' (UUID), so we filter by id
+// directly (same pattern as DeleteByPropertyIDs, GetMemoryByPropertyID).
+// Used by NativeUpdateMemory to atomically rewrite a memory without the
+// delete-then-add race window.
+//
+// Args: $1 = memory_id (text, UUID = table id), $2 = user_name (cube id),
+//
+//	$3 = properties JSON (bytes), $4 = embedding vector literal (text)
+const UpdateMemoryPropsAndEmbedding = `
+UPDATE %[1]s."Memory"
+SET properties = $3::jsonb,
+    embedding  = $4::halfvec(1024)
+WHERE id = $1
+  AND properties->>'user_name' = $2
+RETURNING id`

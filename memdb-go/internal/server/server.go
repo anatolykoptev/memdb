@@ -300,6 +300,7 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	mux.HandleFunc("POST /product/get_memory_by_ids", h.NativeGetMemoryByIDs)
 	mux.HandleFunc("POST /product/delete_memory", h.NativeDelete)
 	mux.HandleFunc("POST /product/delete_all_memories", h.NativeDeleteAll)
+	mux.HandleFunc("POST /product/update_memory", h.NativeUpdateMemory)
 
 	// Feedback — validated
 	mux.HandleFunc("POST /product/feedback", h.ValidatedFeedback)

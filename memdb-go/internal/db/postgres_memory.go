@@ -552,6 +552,22 @@ func (p *Postgres) CleanupWorkingMemoryWithIDs(ctx context.Context, userName str
 	return ids, rows.Err()
 }
 
+// UpdateMemoryByID atomically replaces properties + embedding for a memory
+// node scoped by (memory_id, cube_id). Returns an error wrapping "memory not
+// found" when the row does not exist or the cube_id does not match.
+func (p *Postgres) UpdateMemoryByID(ctx context.Context, memoryID, cubeID string, propsJSON []byte, embedding string) error {
+	q := fmt.Sprintf(queries.UpdateMemoryPropsAndEmbedding, graphName)
+	var returnedID string
+	err := p.pool.QueryRow(ctx, q, memoryID, cubeID, propsJSON, embedding).Scan(&returnedID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("memory not found: id=%s cube=%s", memoryID, cubeID)
+		}
+		return fmt.Errorf("update memory: %w", err)
+	}
+	return nil
+}
+
 // ListCubesByTag returns distinct cube IDs whose activated memories include
 // the given tag in their properties->'tags' array.
 func (p *Postgres) ListCubesByTag(ctx context.Context, tag string) ([]string, error) {
