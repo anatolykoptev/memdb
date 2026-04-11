@@ -30,6 +30,7 @@ func (h *Handler) nativeRawAddForCube(ctx context.Context, req *fullAddRequest, 
 
 	fac := fastAddContext{
 		cubeID:     cubeID,
+		userID:     *req.UserID, // Phase 2: person identity threaded into raw write path
 		agentID:    stringOrEmpty(req.AgentID),
 		sessionID:  stringOrEmpty(req.SessionID),
 		now:        nowTimestamp(),
