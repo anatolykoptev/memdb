@@ -17,6 +17,7 @@ const (
 	modeFast        = "fast"
 	modeFine        = "fine"
 	modeAsync       = "async"
+	modeRaw         = "raw"
 )
 
 // extractedMemory is a single memory window produced by the sliding-window algorithm.

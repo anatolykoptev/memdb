@@ -1,11 +1,12 @@
 // Package handlers — native memory add pipeline.
 //
 // File layout (Single Responsibility):
-//   add.go           — HTTP handler, validation, routing, shared helpers
-//   add_fast.go      — fast-mode pipeline (sliding-window → embed → dedup → insert)
-//   add_fine.go      — fine-mode pipeline (LLM extraction+dedup → embed → insert)
-//   add_windowing.go — sliding-window extraction of messages into text chunks
-//   add_props.go     — memory node property construction and source serialization
+//
+//	add.go           — HTTP handler, validation, routing, shared helpers
+//	add_fast.go      — fast-mode pipeline (sliding-window → embed → dedup → insert)
+//	add_fine.go      — fine-mode pipeline (LLM extraction+dedup → embed → insert)
+//	add_windowing.go — sliding-window extraction of messages into text chunks
+//	add_props.go     — memory node property construction and source serialization
 package handlers
 
 import (
@@ -157,8 +158,8 @@ func (h *Handler) canHandleNativeAdd(req *fullAddRequest) bool {
 	if req.IsFeedback != nil && *req.IsFeedback {
 		return false
 	}
-	// mode=fast is always native
-	if req.Mode != nil && *req.Mode == modeFast {
+	// mode=fast and mode=raw are always native (no LLM needed)
+	if req.Mode != nil && (*req.Mode == modeFast || *req.Mode == modeRaw) {
 		return true
 	}
 	// mode=fine (or nil default) requires llmExtractor
@@ -205,6 +206,9 @@ func (h *Handler) acquireAddSlot(ctx context.Context) bool {
 func (h *Handler) nativeAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
 	if req.AsyncMode != nil && *req.AsyncMode == modeAsync {
 		return h.nativeAsyncAddForCube(ctx, req, cubeID)
+	}
+	if req.Mode != nil && *req.Mode == modeRaw {
+		return h.nativeRawAddForCube(ctx, req, cubeID)
 	}
 	if req.Mode != nil && *req.Mode == modeFast {
 		return h.nativeFastAddForCube(ctx, req, cubeID)

@@ -349,9 +349,9 @@ func validateAddRequest(userID, asyncMode, mode *string) []string {
 	}
 	if mode != nil {
 		switch *mode {
-		case modeFast, modeFine:
+		case modeFast, modeFine, modeRaw:
 		default:
-			errs = append(errs, "mode must be one of: fast, fine")
+			errs = append(errs, "mode must be one of: fast, fine, raw")
 		}
 	}
 	return errs
