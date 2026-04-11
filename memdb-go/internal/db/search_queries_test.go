@@ -25,7 +25,7 @@ func TestVectorSearchMultiCube_SQLShape(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if !strings.Contains(queries.VectorSearchMultiCube, c.needle) {
+			if !strings.Contains(queries.VectorSearchMultiCube, c.needle) { //nolint:gocritic // haystack/needle order is correct
 				t.Errorf("VectorSearchMultiCube missing %q", c.needle)
 			}
 		})
