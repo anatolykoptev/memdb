@@ -12,14 +12,11 @@ package handlers
 //   retrieve than 20 individual LongTermMemory facts.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 
@@ -30,18 +27,18 @@ import (
 )
 
 const (
-	episodicMemoryType        = "EpisodicMemory"
-	episodicSummaryTimeout    = 45 * time.Second
-	entityLinkTimeout         = 15 * time.Second
-	episodicConvMaxChars      = 6000 // ~4000 tokens; truncate to avoid prompt overflow
-	episodicRespBodyLimit     = 16 * 1024 // 16 KB max LLM response body
+	episodicMemoryType     = "EpisodicMemory"
+	episodicSummaryTimeout = 45 * time.Second
+	entityLinkTimeout      = 15 * time.Second
+	episodicConvMaxChars   = 6000 // ~4000 tokens; truncate to avoid prompt overflow
+	episodicMaxTokens      = 300  // max tokens for episodic summary response
 )
 
 // generateEpisodicSummary asynchronously creates an EpisodicMemory node for the session.
 // Called after fact insertion — non-blocking (fire-and-forget via goroutine).
 // The node captures a 3-5 sentence overview of the conversation window.
 func (h *Handler) generateEpisodicSummary(cubeID, sessionID, conversation, now string, factCount int) {
-	if h.llmExtractor == nil || h.postgres == nil || h.embedder == nil {
+	if h.llmExtractor == nil || h.llmChat == nil || h.postgres == nil || h.embedder == nil {
 		return
 	}
 	if factCount == 0 {
@@ -60,7 +57,7 @@ func (h *Handler) generateEpisodicSummary(cubeID, sessionID, conversation, now s
 		ctx, cancel := context.WithTimeout(context.Background(), episodicSummaryTimeout)
 		defer cancel()
 
-		summary, err := callEpisodicSummarizer(ctx, conversation, sessionType)
+		summary, err := callEpisodicSummarizer(ctx, h.llmChat, conversation, sessionType)
 		if err != nil {
 			h.logger.Debug("episodic summary: llm call failed", slog.Any("error", err))
 			return
@@ -80,16 +77,16 @@ func (h *Handler) generateEpisodicSummary(cubeID, sessionID, conversation, now s
 		// Build node properties
 		id := uuid.New().String()
 		props := map[string]any{
-			"id":            id,
-			"memory":        summary,
-			"memory_type":   episodicMemoryType,
-			"user_name":     cubeID,
-			"session_id":    sessionID,
-			"status":        "activated",
-			"created_at":    now,
-			"updated_at":    now,
-			"confidence":    0.9,
-			"source":        "episodic_summarizer",
+			"id":          id,
+			"memory":      summary,
+			"memory_type": episodicMemoryType,
+			"user_name":   cubeID,
+			"session_id":  sessionID,
+			"status":      "activated",
+			"created_at":  now,
+			"updated_at":  now,
+			"confidence":  0.9,
+			"source":      "episodic_summarizer",
 		}
 		propsJSON, err := json.Marshal(props)
 		if err != nil {
@@ -231,7 +228,8 @@ func (h *Handler) linkHandlerPair(ctx context.Context, p entityLinkPair, cubeID,
 
 // callEpisodicSummarizer sends a single chat completion request to generate the session summary.
 // sessionType customizes the summary prompt focus (decision/learning/debug/planning/general).
-func callEpisodicSummarizer(ctx context.Context, conversation, sessionType string) (string, error) {
+// client must be non-nil; it is used to call the LLM via the shared llm.Client (CLIProxyAPI).
+func callEpisodicSummarizer(ctx context.Context, client *llm.Client, conversation, sessionType string) (string, error) {
 	// Truncate to avoid prompt overflows (last episodicConvMaxChars covers ~4000 tokens)
 	if len(conversation) > episodicConvMaxChars {
 		conversation = "..." + conversation[len(conversation)-episodicConvMaxChars:]
@@ -242,56 +240,17 @@ func callEpisodicSummarizer(ctx context.Context, conversation, sessionType strin
 		systemContent += "\n\n" + focus
 	}
 
-	payload := map[string]any{
-		"model":       llmDefaultModel,
-		"temperature": 0.2,
-		"max_tokens":  300,
-		"messages": []map[string]string{
-			{
-				"role":    "system",
-				"content": systemContent,
-			},
-			{
-				"role":    "user",
-				"content": "Conversation:\n" + conversation + "\n\nWrite a 3-5 sentence episodic summary capturing what was discussed and decided:",
-			},
-		},
+	messages := []map[string]string{
+		{"role": "system", "content": systemContent},
+		{"role": "user", "content": "Conversation:\n" + conversation + "\n\nWrite a 3-5 sentence episodic summary capturing what was discussed and decided:"},
 	}
-	body, _ := json.Marshal(payload)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, llmProxyURL+"/v1/chat/completions", bytes.NewReader(body))
+	summary, err := client.Chat(ctx, messages, episodicMaxTokens)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("episodic summarizer: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if llmProxyAPIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+llmProxyAPIKey)
+	if summary == "" {
+		return "", errors.New("episodic summarizer: empty response")
 	}
-
-	resp, err := llmClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, episodicRespBodyLimit))
-	if err != nil {
-		return "", err
-	}
-
-	var chatResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(respBody, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return "", errors.New("episodic summarizer: bad response")
-	}
-
-	// Validate we got a reference to the llm package (suppress unused import)
-	_ = llm.MinConfidence
-
-	return strings.TrimSpace(chatResp.Choices[0].Message.Content), nil
+	return strings.TrimSpace(summary), nil
 }

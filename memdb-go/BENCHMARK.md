@@ -134,12 +134,70 @@ Python returns 0 results at ~7ms for the same queries (fast-mode goal parser dro
 6. **Connection pool saturation**: At 50 req/s, DB queries queue behind 20-connection pool limit. Users endpoint degrades from 186ms to 9.7s. Cache-aside resolves this for read-heavy workloads.
 7. **VoyageAI is the bottleneck**: Uncached search spends ~200ms of 350ms on the embedding API call. At 20 rps tail latency grows to 1.25s p99 from API contention.
 
+## Migration Roadmap
+
+### Current Status (2026-03-04): Phase 4 — 32/36 routes native (89%)
+
+| Phase | Date | Milestone | Routes |
+|-------|------|-----------|--------|
+| 1 | 2026-02-08 | Go gateway + proxy layer | 0 native |
+| 2 | 2026-02-09 | Native get_all, users, delete, config, instances | 15 native |
+| 3 | 2026-02-10 | Native search (fast mode) | 15 native |
+| **4** | **2026-03-04** | **Full native search (fast + fine + internet), native add, chat, scheduler** | **32 native** |
+
+### Routes Still Proxied to Python (4)
+
+| Route | Handler | Reason |
+|-------|---------|--------|
+| `POST /product/chat/stream/playground` | `ProxyToProduct` | Playground-specific SSE, low priority |
+| `POST /product/suggestions` | `ProxyToProduct` | Suggestion generation (Python ML pipeline) |
+| `GET /product/suggestions/{user_id}` | `ProxyToProduct` | Suggestion retrieval |
+| `POST /product/llm/complete` | `NativeLLMComplete` | Direct CLIProxyAPI pass-through via `llm.Client.Passthrough` |
+
+### Search Migration: Go vs Upstream MemOS (MemTensor/MemOS)
+
+**Fully migrated (Go-native, no Python dependency):**
+
+| Feature | Upstream Python | Go Implementation |
+|---------|----------------|-------------------|
+| Fast search | `_fast_search()` → GoalParser → DB | Direct embed → parallel DB (vector + fulltext + Qdrant pref + graph recall + BFS) → merge → rerank → dedup |
+| Fine search (RECREATE) | `_fine_search(RECREATE)` → fast + LLM filter + recall | `SearchFine()` → fast + LLMFilter + LLMRecallHint + rebuild |
+| Internet search | `GoalParser` decides → SearXNG → embed → merge | Explicit `internet_search` flag → SearXNG → embed → merge at score 0.5 |
+| LLM reranker | Per-request via `llm_rerank` field | Per-request via `llm_rerank` field |
+| Iterative expansion | Per-request via `num_stages` field | Per-request via `num_stages` field |
+| User profile boost | Memobase-style profiler → Redis cache | `scheduler.Profiler` → Redis 1hr cache |
+
+**Not migrated (upstream-only, not needed):**
+
+| Feature | Upstream Python | Status |
+|---------|----------------|--------|
+| FineStrategy REWRITE | LLM rewrites query before search | Not needed — iterative expansion covers this |
+| FineStrategy DEEP_SEARCH | Multi-pass deep retrieval | Not needed — LLM reranker + recall achieves same goal |
+| FineStrategy AGENTIC_SEARCH | Agent-driven search loop | Future: could add as separate mode |
+| GoalParser (LLM decides search type) | LLM classifies intent → routes search | Replaced by explicit mode field — simpler, no LLM cost per search |
+
+**Key improvement over upstream:**
+- No circular dependency (Go→Python→Go loop eliminated)
+- Parallel errgroup for all DB backends (vs sequential in Python)
+- No GoalParser overhead (~200ms LLM call saved on every search)
+- Graceful degradation: all modules return safe defaults on error
+
+### Phase 5 Candidates (future)
+
+| Task | Priority | Effort |
+|------|----------|--------|
+| Native suggestions generation | Low | Medium — needs ML pipeline |
+| Playground chat stream | Low | Low — SSE proxy works fine |
+| Agentic search mode | Medium | High — new search paradigm |
+| Embedder migration to ONNX-only | Medium | Low — remove VoyageAI dependency |
+
 ## Notes
 
-- **15 of 33 routes native** (45%) as of Phase 3 — search, get_all, delete, users, instances, config
-- **18 routes proxied**: add, chat/*, feedback, suggestions, scheduler (need LLM/embedding pipeline)
-- Native search pipeline: VoyageAI embed → parallel errgroup{PolarDB vector, PolarDB fulltext, Qdrant pref×2} → merge → dedup → format
+- **32 of 36 routes native** (89%) as of Phase 4
+- **3 routes proxied to Python**: playground chat, suggestions ×2
+- **1 route proxied to CLIProxyAPI**: LLM complete (direct pass-through, not Python)
+- Native search pipeline: embed → parallel errgroup{PolarDB vector, PolarDB fulltext, Qdrant pref×2, graph recall, BFS, SearXNG} → merge → LLM filter (fine) → recall (fine) → rerank → dedup → format
 - PolarDB query latency for DISTINCT scan: ~186ms (cold), scales poorly under connection contention
 - Rate limiting uses per-IP token bucket via `golang.org/x/time/rate`
 - Service secret bypasses both auth and rate limiting for internal calls
-- Search cache key: `memdb:db:search:{user_id}:{sha256(query)[:8]}:{top_k}:{dedup}` with 30s TTL
+- Search cache key: `memdb:db:search:{user_id}:{sha256(query)[:8]}:{top_k}:{dedup}:{mode}` with 30s TTL

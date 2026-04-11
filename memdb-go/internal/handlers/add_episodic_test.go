@@ -3,9 +3,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 func TestCallEpisodicSummarizer_Success(t *testing.T) {
@@ -24,17 +27,8 @@ func TestCallEpisodicSummarizer_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	// Temporarily override globals targeting the mock server
-	origURL := llmProxyURL
-	origModel := llmDefaultModel
-	llmProxyURL = ts.URL
-	llmDefaultModel = "test-model"
-	defer func() {
-		llmProxyURL = origURL
-		llmDefaultModel = origModel
-	}()
-
-	summary, err := callEpisodicSummarizer(context.Background(), "user: I like coffee\nassistant: got it", "general")
+	client := llm.NewClient(ts.URL, "", "test-model", nil, slog.Default())
+	summary, err := callEpisodicSummarizer(context.Background(), client, "user: I like coffee\nassistant: got it", "general")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,11 +44,8 @@ func TestCallEpisodicSummarizer_ErrorFallback(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	origURL := llmProxyURL
-	llmProxyURL = ts.URL
-	defer func() { llmProxyURL = origURL }()
-
-	summary, err := callEpisodicSummarizer(context.Background(), "user: I like coffee", "general")
+	client := llm.NewClient(ts.URL, "", "test-model", nil, slog.Default())
+	summary, err := callEpisodicSummarizer(context.Background(), client, "user: I like coffee", "general")
 	if err == nil {
 		t.Errorf("expected error from 500 response, got none")
 	}

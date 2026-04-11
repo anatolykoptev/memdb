@@ -1,117 +1,49 @@
 package handlers
 
 import (
-	"bufio"
-	"bytes"
-	"context"
 	"encoding/json"
-	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 )
-
-var llmProxyURL = "http://cliproxyapi:8317"
-var llmProxyAPIKey string
-var llmDefaultModel = "gemini-2.5-flash"
 
 const (
 	sseInitBufSize = 64 * 1024  // 64 KB initial SSE scanner buffer
 	sseMaxBufSize  = 512 * 1024 // 512 KB max SSE scanner buffer
 )
 
-// SetLLMProxy configures the upstream LLM proxy URL, API key, and default model.
-func SetLLMProxy(url, apiKey, defaultModel string) {
-	if url != "" {
-		llmProxyURL = url
-	}
-	llmProxyAPIKey = apiKey
-	if defaultModel != "" {
-		llmDefaultModel = defaultModel
-	}
-}
-
-// llmClient is a shared HTTP client for non-streaming LLM proxy requests.
-var llmClient = &http.Client{Timeout: 120 * time.Second}
-
-// llmSSEClient has no Timeout — SSE streams are terminated by ctx cancellation.
-var llmSSEClient = &http.Client{}
-
-// ProxyLLMComplete forwards OpenAI-compatible chat completions to CLIProxyAPI.
-// This is a lightweight LLM proxy without memory retrieval (unlike /product/chat/complete
-// which adds 60-80s of memory search overhead).
+// NativeLLMComplete pass-through-routes OpenAI-compatible chat completions to
+// CLIProxyAPI. It talks directly to CLIProxyAPI — not to the Python backend —
+// making it a lightweight path without memory retrieval overhead (unlike
+// /product/chat/complete which adds 60-80 s of memory search).
 //
 // Request: {messages: [{role, content}], model?, max_tokens?, temperature?}
 // Response: OpenAI-compatible chat completions response (pass-through)
-func (h *Handler) ProxyLLMComplete(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) NativeLLMComplete(w http.ResponseWriter, r *http.Request) {
+	if h.llmChat == nil {
+		h.writeJSON(w, http.StatusServiceUnavailable,
+			map[string]any{"code": 503, "message": "llm not configured", "data": nil})
+		return
+	}
+
 	body, ok := h.readBody(w, r)
 	if !ok {
 		return
 	}
 
-	body = injectDefaultModel(body)
+	body = injectDefaultModel(body, h.llmChat.Model())
 	isStream := detectStreamMode(r, body)
 
-	targetURL := llmProxyURL + "/v1/chat/completions"
-	proxyReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL,
-		bytes.NewReader(body))
-	if err != nil {
-		h.logger.Error("llm proxy: create request failed", slog.Any("error", err))
-		h.writeJSON(w, http.StatusInternalServerError,
-			map[string]any{"code": 500, "message": "internal error", "data": nil})
-		return
-	}
-
-	proxyReq.Header.Set("Content-Type", "application/json")
-	if llmProxyAPIKey != "" {
-		proxyReq.Header.Set("Authorization", "Bearer "+llmProxyAPIKey)
-	}
-
-	client := llmClient
-	if isStream {
-		client = llmSSEClient
-	}
-
-	resp, err := client.Do(proxyReq)
-	if err != nil {
-		h.logger.Error("llm proxy: request failed",
-			slog.String("target", targetURL),
-			slog.Any("error", err))
-		h.writeJSON(w, http.StatusBadGateway,
-			map[string]any{"code": 502, "message": "llm service unavailable", "data": nil})
-		return
-	}
-	defer resp.Body.Close()
-
-	for key, values := range resp.Header {
-		for _, v := range values {
-			w.Header().Add(key, v)
-		}
-	}
-
-	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
-		w.Header().Set("X-Accel-Buffering", "no")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
-		w.WriteHeader(resp.StatusCode)
-		h.streamSSELines(r.Context(), w, resp.Body)
-		return
-	}
-
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	h.llmChat.Passthrough(r.Context(), body, isStream, w, h.logger)
 }
 
-// injectDefaultModel sets the model field to the default if absent or empty.
-func injectDefaultModel(body []byte) []byte {
+// injectDefaultModel sets the model field to defaultModel if absent or empty.
+func injectDefaultModel(body []byte, defaultModel string) []byte {
 	var req map[string]any
 	if json.Unmarshal(body, &req) != nil {
 		return body
 	}
 	if _, hasModel := req["model"]; !hasModel || req["model"] == "" {
-		req["model"] = llmDefaultModel
+		req["model"] = defaultModel
 		if patched, err := json.Marshal(req); err == nil {
 			return patched
 		}
@@ -133,34 +65,4 @@ func detectStreamMode(r *http.Request, body []byte) bool {
 		}
 	}
 	return false
-}
-
-// streamSSELines proxies an SSE body to the client using line-oriented scanning.
-// Guarantees SSE field boundaries are never split across reads.
-func (h *Handler) streamSSELines(ctx context.Context, w http.ResponseWriter, body io.Reader) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		return
-	}
-
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, sseInitBufSize), sseMaxBufSize)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		if !scanner.Scan() {
-			if err := scanner.Err(); err != nil {
-				h.logger.Debug("llm sse: scanner error", slog.Any("error", err))
-			}
-			return
-		}
-
-		fmt.Fprintf(w, "%s\n", scanner.Text())
-		flusher.Flush()
-	}
 }
