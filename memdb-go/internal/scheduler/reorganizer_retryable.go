@@ -39,7 +39,7 @@ func (r *Reorganizer) RunWithError(ctx context.Context, cubeID string) error {
 
 // ProcessRawMemoryWithError processes raw WM nodes and returns a critical error
 // if the DB fetch fails (individual node LLM errors remain non-fatal).
-func (r *Reorganizer) ProcessRawMemoryWithError(ctx context.Context, cubeID string, wmIDs []string) error {
+func (r *Reorganizer) ProcessRawMemoryWithError(ctx context.Context, userID, cubeID string, wmIDs []string) error {
 	if len(wmIDs) == 0 {
 		return nil
 	}
@@ -49,13 +49,13 @@ func (r *Reorganizer) ProcessRawMemoryWithError(ctx context.Context, cubeID stri
 
 	// Delegate directly to ProcessRawMemory which handles all paths (fine + legacy).
 	// The fine path fetches full properties internally; no need to pre-check here.
-	r.ProcessRawMemory(ctx, cubeID, wmIDs)
+	r.ProcessRawMemory(ctx, userID, cubeID, wmIDs)
 	return nil
 }
 
 // RefreshWorkingMemoryWithError embeds the query and refreshes the VSET.
 // Returns an error if the embedder call fails (retryable).
-func (r *Reorganizer) RefreshWorkingMemoryWithError(ctx context.Context, cubeID, queryText string) error {
+func (r *Reorganizer) RefreshWorkingMemoryWithError(ctx context.Context, userID, cubeID, queryText string) error {
 	if r.embedder == nil {
 		return nil
 	}
@@ -68,13 +68,13 @@ func (r *Reorganizer) RefreshWorkingMemoryWithError(ctx context.Context, cubeID,
 		return fmt.Errorf("mem_update: EmbedQuery: %w", err)
 	}
 	// Full refresh via original method (VSET ops non-fatal).
-	r.RefreshWorkingMemory(ctx, cubeID, queryText)
+	r.RefreshWorkingMemory(ctx, userID, cubeID, queryText)
 	return nil
 }
 
 // ExtractAndStorePreferencesWithError extracts preferences and returns a critical
 // error if the LLM call fails (retryable).
-func (r *Reorganizer) ExtractAndStorePreferencesWithError(ctx context.Context, cubeID, conversation string) error {
+func (r *Reorganizer) ExtractAndStorePreferencesWithError(ctx context.Context, userID, cubeID, conversation string) error {
 	if conversation == "" {
 		return nil
 	}
@@ -86,7 +86,7 @@ func (r *Reorganizer) ExtractAndStorePreferencesWithError(ctx context.Context, c
 		return nil
 	}
 	// Delegate storage to original (non-fatal) implementation.
-	r.ExtractAndStorePreferences(ctx, cubeID, conversation)
+	r.ExtractAndStorePreferences(ctx, userID, cubeID, conversation)
 	return nil
 }
 

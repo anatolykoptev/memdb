@@ -76,7 +76,7 @@ func (w *Worker) handle(ctx context.Context, msg ScheduleMessage) {
 		if w.reorg != nil && msg.Content != "" {
 			log.Debug("scheduler: query — refreshing working memory (pre-emptive)")
 			// query is best-effort: errors are logged but not retried (low priority).
-			w.reorg.RefreshWorkingMemory(ctx, msg.CubeID, msg.Content)
+			w.reorg.RefreshWorkingMemory(ctx, msg.UserID, msg.CubeID, msg.Content)
 		} else {
 			log.Debug("scheduler: query — acking (reorg not configured)")
 		}
@@ -135,7 +135,7 @@ func (w *Worker) handleMemRead(ctx context.Context, msg ScheduleMessage, log *sl
 		return nil
 	}
 	log.Info("scheduler: mem_read — processing raw WM nodes", slog.Int("wm_ids", len(ids)))
-	return w.reorg.ProcessRawMemoryWithError(ctx, msg.CubeID, ids)
+	return w.reorg.ProcessRawMemoryWithError(ctx, msg.UserID, msg.CubeID, ids)
 }
 
 // handleMemUpdate processes a mem_update message: refreshes the WorkingMemory hot cache.
@@ -145,7 +145,7 @@ func (w *Worker) handleMemUpdate(ctx context.Context, msg ScheduleMessage, log *
 		return nil
 	}
 	log.Debug("scheduler: mem_update — refreshing working memory")
-	return w.reorg.RefreshWorkingMemoryWithError(ctx, msg.CubeID, msg.Content)
+	return w.reorg.RefreshWorkingMemoryWithError(ctx, msg.UserID, msg.CubeID, msg.Content)
 }
 
 // handlePrefAdd processes a pref_add message: extracts and stores user preferences.
@@ -160,7 +160,7 @@ func (w *Worker) handlePrefAdd(ctx context.Context, msg ScheduleMessage, log *sl
 		return nil
 	}
 	log.Info("scheduler: pref_add — extracting preferences")
-	return w.reorg.ExtractAndStorePreferencesWithError(ctx, msg.CubeID, conv)
+	return w.reorg.ExtractAndStorePreferencesWithError(ctx, msg.UserID, msg.CubeID, conv)
 }
 
 // handleMemFeedback processes a mem_feedback message: applies LLM-driven keep/update/remove.

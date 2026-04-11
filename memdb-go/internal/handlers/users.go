@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"os"
-	"runtime"
 	"time"
 )
 
@@ -13,45 +11,47 @@ import (
 const usersCacheTTL = 120 * time.Second
 
 // NativeListUsers handles GET /product/users natively via PostgreSQL.
+// Phase 2: returns distinct person identities (user_id slot) shaped as upstream MemOS MOS.list_users().
 func (h *Handler) NativeListUsers(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code": 503, "message": "postgres unavailable",
+		})
 		return
 	}
 
-	ctx := r.Context()
-	cacheKey := cachePrefix + "users:list"
-
-	// Check cache
-	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(cached) //nolint:errcheck
-		return
-	}
-
-	users, err := h.postgres.ListUsers(ctx)
+	identities, err := h.postgres.ListDistinctUserIDs(r.Context())
 	if err != nil {
-		h.logger.Debug("native list_users failed, falling back to proxy",
-			slog.Any("error", err),
-		)
-		h.ProxyToProduct(w, r)
+		h.logger.Error("list_users query failed", slog.Any("error", err))
+		h.writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"code": 500, "message": "query failed",
+		})
 		return
 	}
-	if users == nil {
-		users = []string{}
+
+	type userRow struct {
+		UserID    string    `json:"user_id"`
+		UserName  string    `json:"user_name"`
+		Role      string    `json:"role"`
+		IsActive  bool      `json:"is_active"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	users := make([]userRow, 0, len(identities))
+	for _, u := range identities {
+		users = append(users, userRow{
+			UserID:    u.UserID,
+			UserName:  u.UserID, // single-user deployment — no separate display name
+			Role:      "user",
+			IsActive:  true,
+			CreatedAt: u.FirstSeen,
+		})
 	}
 
-	resp := map[string]any{
+	h.writeJSON(w, http.StatusOK, map[string]any{
 		"code":    200,
 		"message": "ok",
-		"data":    users,
-	}
-	if encoded, err := json.Marshal(resp); err == nil {
-		h.cacheSet(ctx, cacheKey, encoded, usersCacheTTL)
-	}
-
-	h.writeJSON(w, http.StatusOK, resp)
+		"data":    map[string]any{"users": users},
+	})
 }
 
 // NativeGetUser handles GET /product/users/{user_id} natively via PostgreSQL.
@@ -64,9 +64,7 @@ func (h *Handler) NativeGetUser(w http.ResponseWriter, r *http.Request) {
 	userID := r.PathValue("user_id")
 	if userID == "" {
 		h.writeJSON(w, http.StatusBadRequest, map[string]any{
-			"code":    400,
-			"message": "user_id is required",
-			"data":    nil,
+			"code": 400, "message": "user_id is required", "data": nil,
 		})
 		return
 	}
@@ -74,19 +72,58 @@ func (h *Handler) NativeGetUser(w http.ResponseWriter, r *http.Request) {
 	exists, err := h.postgres.ExistUser(r.Context(), userID)
 	if err != nil {
 		h.logger.Debug("native get_user failed, falling back to proxy",
-			slog.String("user_id", userID),
-			slog.Any("error", err),
-		)
+			slog.String("user_id", userID), slog.Any("error", err))
 		h.ProxyToProduct(w, r)
 		return
+	}
+
+	h.writeJSON(w, http.StatusOK, map[string]any{
+		"code": 200, "message": "ok",
+		"data": map[string]any{"user_id": userID, "exists": exists},
+	})
+}
+
+// NativeGetUserInfo handles POST /product/get_user_info.
+// Phase 2: returns user metadata plus accessible_cubes (full cube objects via ListCubes).
+func (h *Handler) NativeGetUserInfo(w http.ResponseWriter, r *http.Request) {
+	if h.postgres == nil || h.cubeStore == nil {
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code": 503, "message": "cube store unavailable",
+		})
+		return
+	}
+
+	var req struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == "" {
+		h.writeValidationError(w, []string{"user_id is required"})
+		return
+	}
+
+	cubes, err := h.cubeStore.ListCubes(r.Context(), &req.UserID)
+	if err != nil {
+		h.logger.Error("get_user_info: list cubes failed", slog.Any("error", err))
+		h.writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"code": 500, "message": "failed",
+		})
+		return
+	}
+
+	accessible := make([]map[string]any, 0, len(cubes))
+	for _, c := range cubes {
+		accessible = append(accessible, cubeToMap(c))
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
 		"code":    200,
 		"message": "ok",
 		"data": map[string]any{
-			"user_id": userID,
-			"exists":  exists,
+			"user_id":          req.UserID,
+			"user_name":        req.UserID, // single-user: same as user_id
+			"role":             "user",
+			"is_active":        true,
+			"accessible_cubes": accessible,
 		},
 	})
 }
@@ -120,309 +157,7 @@ func (h *Handler) NativeRegisterUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
-		"code":    200,
-		"message": "ok",
-		"data": map[string]any{
-			"user_id":    userID,
-			"registered": true,
-		},
+		"code": 200, "message": "ok",
+		"data": map[string]any{"user_id": userID, "registered": true},
 	})
-}
-
-// NativeInstancesStatus handles GET /product/instances/status.
-// Returns hardcoded status since Go gateway is always running.
-func (h *Handler) NativeInstancesStatus(w http.ResponseWriter, r *http.Request) {
-	hostname, _ := os.Hostname()
-	h.writeJSON(w, http.StatusOK, map[string]any{
-		"code":    200,
-		"message": "ok",
-		"data": map[string]any{
-			"status":     "running",
-			"hostname":   hostname,
-			"go_version": runtime.Version(),
-			"timestamp":  time.Now().UTC().Format(time.RFC3339),
-		},
-	})
-}
-
-// NativeInstancesCount handles GET /product/instances/count natively via PostgreSQL.
-func (h *Handler) NativeInstancesCount(w http.ResponseWriter, r *http.Request) {
-	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
-		return
-	}
-
-	ctx := r.Context()
-	cacheKey := cachePrefix + "users:count"
-
-	// Check cache
-	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(cached) //nolint:errcheck
-		return
-	}
-
-	count, err := h.postgres.CountDistinctUsers(ctx)
-	if err != nil {
-		h.logger.Debug("native instances_count failed, falling back to proxy",
-			slog.Any("error", err),
-		)
-		h.ProxyToProduct(w, r)
-		return
-	}
-
-	resp := map[string]any{
-		"code":    200,
-		"message": "ok",
-		"data": map[string]any{
-			"count": count,
-		},
-	}
-	if encoded, err := json.Marshal(resp); err == nil {
-		h.cacheSet(ctx, cacheKey, encoded, usersCacheTTL)
-	}
-
-	h.writeJSON(w, http.StatusOK, resp)
-}
-
-// NativeConfigure handles POST /product/configure.
-// Stub: configuration is managed by environment variables in Go gateway.
-func (h *Handler) NativeConfigure(w http.ResponseWriter, r *http.Request) {
-	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
-		return
-	}
-
-	h.writeJSON(w, http.StatusOK, map[string]any{
-		"code":    200,
-		"message": "configuration is managed via environment variables",
-		"data":    nil,
-	})
-}
-
-// NativeGetConfig handles GET /product/configure/{user_id}.
-// Stub: returns empty config since Go gateway uses env vars.
-func (h *Handler) NativeGetConfig(w http.ResponseWriter, r *http.Request) {
-	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
-		return
-	}
-
-	userID := r.PathValue("user_id")
-	h.writeJSON(w, http.StatusOK, map[string]any{
-		"code":    200,
-		"message": "ok",
-		"data": map[string]any{
-			"user_id": userID,
-			"config":  map[string]any{},
-		},
-	})
-}
-
-// NativeGetUserConfig handles GET /product/users/{user_id}/config.
-func (h *Handler) NativeGetUserConfig(w http.ResponseWriter, r *http.Request) {
-	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
-		return
-	}
-
-	userID := r.PathValue("user_id")
-	config, err := h.postgres.GetUserConfig(r.Context(), userID)
-	if err != nil {
-		h.logger.Debug("native get_user_config failed", slog.Any("error", err))
-		h.ProxyToProduct(w, r)
-		return
-	}
-	if config == nil {
-		config = map[string]any{}
-	}
-
-	h.writeJSON(w, http.StatusOK, map[string]any{
-		"code":    200,
-		"message": "ok",
-		"data": map[string]any{
-			"user_id": userID,
-			"config":  config,
-		},
-	})
-}
-
-// NativeUpdateUserConfig handles PUT /product/users/{user_id}/config.
-func (h *Handler) NativeUpdateUserConfig(w http.ResponseWriter, r *http.Request) {
-	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
-		return
-	}
-
-	userID := r.PathValue("user_id")
-
-	body, ok := h.readBody(w, r)
-	if !ok {
-		return
-	}
-
-	var cfg map[string]any
-	if err := json.Unmarshal(body, &cfg); err != nil {
-		h.writeValidationError(w, []string{"invalid JSON body: " + err.Error()})
-		return
-	}
-
-	if err := h.postgres.UpdateUserConfig(r.Context(), userID, cfg); err != nil {
-		h.logger.Debug("native update_user_config failed", slog.Any("error", err))
-		h.proxyWithBody(w, r, body)
-		return
-	}
-
-	// Invalidate the fast cache
-	h.cacheDelete(r.Context(), cachePrefix+"config:"+userID)
-
-	h.writeJSON(w, http.StatusOK, map[string]any{
-		"code":    200,
-		"message": "ok",
-		"data": map[string]any{
-			"user_id": userID,
-			"config":  cfg,
-		},
-	})
-}
-
-// NativeExistMemCube handles POST /product/exist_mem_cube_id natively via PostgreSQL.
-func (h *Handler) NativeExistMemCube(w http.ResponseWriter, r *http.Request) {
-	if h.postgres == nil {
-		h.ValidatedExistMemCube(w, r)
-		return
-	}
-
-	body, ok := h.readBody(w, r)
-	if !ok {
-		return
-	}
-
-	var req existMemCubeRequest
-	if !h.decodeJSON(w, body, &req) {
-		return
-	}
-
-	if req.MemCubeID == nil || *req.MemCubeID == "" {
-		h.writeValidationError(w, []string{"mem_cube_id is required"})
-		return
-	}
-
-	exists, err := h.postgres.ExistUser(r.Context(), *req.MemCubeID)
-	if err != nil {
-		h.logger.Debug("native exist_mem_cube_id failed, falling back to proxy",
-			slog.Any("error", err),
-		)
-		h.proxyWithBody(w, r, body)
-		return
-	}
-
-	h.writeJSON(w, http.StatusOK, map[string]any{
-		"code":    200,
-		"message": "ok",
-		"data":    exists,
-	})
-}
-
-// getUserNamesByMemoryIDsRequest validates POST /product/get_user_names_by_memory_ids.
-type getUserNamesByMemoryIDsRequest struct {
-	MemoryIDs *[]string `json:"memory_ids"`
-}
-
-// NativeGetUserNamesByMemoryIDs handles POST /product/get_user_names_by_memory_ids natively.
-func (h *Handler) NativeGetUserNamesByMemoryIDs(w http.ResponseWriter, r *http.Request) {
-	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
-		return
-	}
-
-	body, ok := h.readBody(w, r)
-	if !ok {
-		return
-	}
-
-	var req getUserNamesByMemoryIDsRequest
-	if !h.decodeJSON(w, body, &req) {
-		return
-	}
-
-	if req.MemoryIDs == nil || len(*req.MemoryIDs) == 0 {
-		h.writeValidationError(w, []string{"memory_ids is required and must be non-empty"})
-		return
-	}
-
-	result, err := h.postgres.GetUserNamesByMemoryIDs(r.Context(), *req.MemoryIDs)
-	if err != nil {
-		h.logger.Debug("native get_user_names_by_memory_ids failed, falling back to proxy",
-			slog.Any("error", err),
-		)
-		h.proxyWithBody(w, r, body)
-		return
-	}
-
-	h.writeJSON(w, http.StatusOK, map[string]any{
-		"code":    200,
-		"message": "ok",
-		"data":    result,
-	})
-}
-
-// NativeListCubesByTag handles GET /product/cubes?tag=<tag> natively.
-// Returns distinct cube IDs (user_name in node properties) that have at
-// least one activated memory carrying the given tag in properties->'tags'.
-// Used by go-wowa experience memory to hydrate its knownCubes set on start.
-//
-// Cache: time-bounded via usersCacheTTL (120s), not write-invalidated on
-// tag-writing inserts. That is acceptable because the only caller hydrates
-// once at process startup; a 120s window for a newly-registered cube to
-// become visible is tolerable.
-func (h *Handler) NativeListCubesByTag(w http.ResponseWriter, r *http.Request) {
-	tag := r.URL.Query().Get("tag")
-	if tag == "" {
-		h.writeJSON(w, http.StatusBadRequest, map[string]any{
-			"code":    400,
-			"message": "tag query parameter is required",
-			"data":    nil,
-		})
-		return
-	}
-
-	if h.postgres == nil {
-		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-			"code":    503,
-			"message": "postgres unavailable",
-			"data":    nil,
-		})
-		return
-	}
-
-	ctx := r.Context()
-	cacheKey := cachePrefix + "cubes:tag:" + tag
-	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(cached) //nolint:errcheck
-		return
-	}
-
-	cubes, err := h.postgres.ListCubesByTag(ctx, tag)
-	if err != nil {
-		h.logger.Error("list cubes by tag failed", slog.Any("error", err))
-		h.writeJSON(w, http.StatusInternalServerError, map[string]any{
-			"code":    500,
-			"message": "list cubes failed: " + err.Error(),
-			"data":    nil,
-		})
-		return
-	}
-	if cubes == nil {
-		cubes = []string{}
-	}
-
-	resp := map[string]any{"code": 200, "message": "ok", "data": cubes}
-	if encoded, err := json.Marshal(resp); err == nil {
-		h.cacheSet(ctx, cacheKey, encoded, usersCacheTTL)
-	}
-	h.writeJSON(w, http.StatusOK, resp)
 }

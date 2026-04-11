@@ -102,7 +102,7 @@ func TestBuildSkillProperties_AllFields(t *testing.T) {
 		Others:      map[string]string{"notes.md": "# Notes"},
 	}
 
-	props := buildSkillProperties("id-1", "cube-a", "2026-03-03T00:00:00", skill)
+	props := buildSkillProperties("id-1", "cube-a", "user-a", "2026-03-03T00:00:00", skill)
 
 	if props["id"] != "id-1" {
 		t.Errorf("expected id='id-1', got %v", props["id"])
@@ -144,7 +144,7 @@ func TestBuildSkillProperties_NilScriptsAndOthers(t *testing.T) {
 		Others:      nil,
 	}
 
-	props := buildSkillProperties("id-2", "cube-b", "2026-03-03T00:00:00", skill)
+	props := buildSkillProperties("id-2", "cube-b", "user-b", "2026-03-03T00:00:00", skill)
 
 	if _, ok := props["scripts"]; ok {
 		t.Error("expected scripts to be absent for nil")
@@ -163,7 +163,7 @@ func TestBuildSkillProperties_SerializesToValidJSON(t *testing.T) {
 		Tags:        []string{"tag1"},
 	}
 
-	props := buildSkillProperties("id-3", "cube-c", "2026-03-03T00:00:00", skill)
+	props := buildSkillProperties("id-3", "cube-c", "user-c", "2026-03-03T00:00:00", skill)
 	data, err := json.Marshal(props)
 	if err != nil {
 		t.Fatalf("failed to marshal skill properties: %v", err)
@@ -203,13 +203,13 @@ func TestStrFromMap(t *testing.T) {
 func TestGenerateSkillMemory_NilDependencies(t *testing.T) {
 	h := &Handler{}
 	// Should not panic with nil dependencies
-	h.generateSkillMemory("cube", "user: hello\nassistant: hi", 15)
+	h.generateSkillMemory("cube", "user-1", "user: hello\nassistant: hi", 15)
 }
 
 func TestGenerateSkillMemory_TooFewMessages(t *testing.T) {
 	// messageCount < 10 should return early
 	h := &Handler{}
-	h.generateSkillMemory("cube", "user: hello", 5)
+	h.generateSkillMemory("cube", "user-1", "user: hello", 5)
 	// No panic = success (no LLM/DB configured to call)
 }
 
@@ -217,5 +217,5 @@ func TestGenerateSkillMemory_HighCodeRatio(t *testing.T) {
 	h := &Handler{}
 	code := "```go\npackage main\nfunc main() {}\n```"
 	// 100% code → should skip
-	h.generateSkillMemory("cube", code, 15)
+	h.generateSkillMemory("cube", "user-1", code, 15)
 }

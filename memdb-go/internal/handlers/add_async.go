@@ -65,7 +65,7 @@ func (h *Handler) nativeAsyncAddForCube(ctx context.Context, req *fullAddRequest
 		}
 
 		wmJSON, err := marshalProps(buildMemoryProperties(
-			wmID, mem.Text, "WorkingMemory", cubeID, stringOrEmpty(req.AgentID),
+			wmID, mem.Text, "WorkingMemory", cubeID, userID, stringOrEmpty(req.AgentID),
 			sessionID, now, memInfo, req.CustomTags, mem.Sources, "",
 		))
 		if err != nil {
@@ -126,6 +126,7 @@ func (h *Handler) submitStreamTask(ctx context.Context, userID, cubeID, label st
 			"label":     label,
 			"content":   string(contentJSON),
 			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+			// user_name is the cube partition key (upstream MemOS convention; populated from cube_id)
 			"user_name": cubeID,
 			"task_id":   taskID,
 		},
@@ -159,6 +160,7 @@ func (h *Handler) submitPrefAdd(ctx context.Context, req *fullAddRequest, cubeID
 			"label":     scheduler.LabelPrefAdd,
 			"content":   string(messagesJSON),
 			"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+			// user_name is the cube partition key (upstream MemOS convention; populated from cube_id)
 			"user_name": cubeID,
 			"task_id":   taskID,
 		},

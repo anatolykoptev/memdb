@@ -265,11 +265,13 @@ func buildReprocessLTMNode(f llm.ExtractedFact, embVec, cubeID, now string) *db.
 
 	props := map[string]any{
 		"id": ltID, "memory": f.Memory, "memory_type": memType,
+		// user_name is the cube partition key (upstream MemOS convention; populated from cube_id)
+		// user_id falls back to cubeID — admin reprocess has no original person identity.
 		"user_name": cubeID, "user_id": cubeID,
 		"status": "activated", "created_at": createdAt, "updated_at": now,
-		"tags":             append([]string{"mode:reprocess"}, f.Tags...),
-		"background":       "", "delete_time": "", "delete_record_id": "",
-		"confidence":       f.Confidence, "type": "fact", "info": factInfo,
+		"tags":       append([]string{"mode:reprocess"}, f.Tags...),
+		"background": "", "delete_time": "", "delete_record_id": "",
+		"confidence": f.Confidence, "type": "fact", "info": factInfo,
 		"graph_id":         uuid.New().String(),
 		"importance_score": 1.0, "retrieval_count": 0,
 	}

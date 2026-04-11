@@ -32,21 +32,22 @@ type BufferConfig struct {
 type Handler struct {
 	python        *rpc.PythonClient
 	logger        *slog.Logger
-	postgres      *db.Postgres             // nil = not initialized, fall back to proxy
-	qdrant        *db.Qdrant               // nil = not initialized
-	redis         *db.Redis                // nil = not initialized
-	wmCache       *db.WorkingMemoryCache   // nil = VSET disabled, use postgres for candidates
-	embedder      embedder.Embedder        // nil = native search disabled
-	embedRegistry *embedder.Registry       // nil = single-model mode (uses embedder field)
-	searchService *search.SearchService    // nil = search falls back to proxy
-	llmExtractor  *llm.LLMExtractor        // nil = mode=fine falls back to proxy
-	llmChat       *llm.Client              // nil = chat falls back to proxy
-	profiler      *scheduler.Profiler      // nil = profile summaries disabled
+	postgres      *db.Postgres                 // nil = not initialized, fall back to proxy
+	qdrant        *db.Qdrant                   // nil = not initialized
+	redis         *db.Redis                    // nil = not initialized
+	wmCache       *db.WorkingMemoryCache       // nil = VSET disabled, use postgres for candidates
+	embedder      embedder.Embedder            // nil = native search disabled
+	embedRegistry *embedder.Registry           // nil = single-model mode (uses embedder field)
+	searchService *search.SearchService        // nil = search falls back to proxy
+	llmExtractor  *llm.LLMExtractor            // nil = mode=fine falls back to proxy
+	llmChat       *llm.Client                  // nil = chat falls back to proxy
+	profiler      *scheduler.Profiler          // nil = profile summaries disabled
 	tracker       *scheduler.TaskStatusTracker // nil = fall back to stream-based status
-	bufferCfg     BufferConfig                // buffer zone config (zero value = disabled)
-	addSem        *semaphore.Weighted         // nil = no limit on concurrent adds
-	addQueueMax   int64                       // max waiters before 503
-	addWaiters    atomic.Int64                // current goroutines waiting for semaphore
+	bufferCfg     BufferConfig                 // buffer zone config (zero value = disabled)
+	addSem        *semaphore.Weighted          // nil = no limit on concurrent adds
+	addQueueMax   int64                        // max waiters before 503
+	addWaiters    atomic.Int64                 // current goroutines waiting for semaphore
+	cubeStore     cubeStoreClient              // nil = cube endpoints return 503
 }
 
 // NewHandler creates a new Handler with the given dependencies.
@@ -63,6 +64,9 @@ func (h *Handler) SetDBClients(pg *db.Postgres, qd *db.Qdrant, rd *db.Redis) {
 	h.postgres = pg
 	h.qdrant = qd
 	h.redis = rd
+	if pg != nil {
+		h.cubeStore = pg
+	}
 }
 
 // SetEmbedder sets the embedding client for native search.

@@ -17,7 +17,8 @@ type memoryNodeProps struct {
 	ID         string
 	Memory     string
 	MemoryType string // "LongTermMemory" | "UserMemory" | "WorkingMemory"
-	UserName   string // also used as user_id
+	UserName   string // cube partition key (upstream MemOS convention; holds cube_id)
+	UserID     string // person identity — Phase 2 split from cube_id
 	AgentID    string // agent scope
 	SessionID  string
 	Mode       string // "fast" | "fine" — becomes tag "mode:<mode>"
@@ -35,23 +36,24 @@ func buildNodeProps(p memoryNodeProps) map[string]any {
 	tags = append(tags, p.CustomTags...)
 
 	return map[string]any{
-		"id":               p.ID,
-		"memory":           p.Memory,
-		"memory_type":      p.MemoryType,
-		"status":           "activated",
-		"user_name":        p.UserName,
-		"user_id":          p.UserName,
-		"agent_id":         p.AgentID,
-		"session_id":       p.SessionID,
-		"created_at":       p.CreatedAt,
-		"updated_at":       p.Now,
-		"delete_time":      "",
-		"delete_record_id": "",
-		"tags":             tags,
-		"key":              "",
-		"usage":            []string{},
-		"sources":          serializeSources(p.Sources),
-		"background":       p.Background,
+		"id":          p.ID,
+		"memory":      p.Memory,
+		"memory_type": p.MemoryType,
+		"status":      "activated",
+		// user_name is the cube partition key (upstream MemOS convention; populated from cube_id)
+		"user_name":         p.UserName,
+		"user_id":           p.UserID,
+		"agent_id":          p.AgentID,
+		"session_id":        p.SessionID,
+		"created_at":        p.CreatedAt,
+		"updated_at":        p.Now,
+		"delete_time":       "",
+		"delete_record_id":  "",
+		"tags":              tags,
+		"key":               "",
+		"usage":             []string{},
+		"sources":           serializeSources(p.Sources),
+		"background":        p.Background,
 		"confidence":        0.99,
 		"type":              "fact",
 		"info":              p.Info,
@@ -63,8 +65,9 @@ func buildNodeProps(p memoryNodeProps) map[string]any {
 }
 
 // buildMemoryProperties is a convenience wrapper for fast-mode (created_at == updated_at).
+// userName is the cube partition key; userID is the person identity (Phase 2 split).
 func buildMemoryProperties(
-	id, memory, memoryType, userName, agentID, sessionID, timestamp string,
+	id, memory, memoryType, userName, userID, agentID, sessionID, timestamp string,
 	info map[string]any, customTags []string,
 	sources []map[string]any, background string,
 ) map[string]any {
@@ -73,6 +76,7 @@ func buildMemoryProperties(
 		Memory:     memory,
 		MemoryType: memoryType,
 		UserName:   userName,
+		UserID:     userID,
 		AgentID:    agentID,
 		SessionID:  sessionID,
 		Mode:       modeFast,
@@ -87,8 +91,9 @@ func buildMemoryProperties(
 
 // buildMemoryPropertiesAt is a convenience wrapper for fine-mode with a separate
 // createdAt (from LLM-provided valid_at) and now (actual insert time).
+// userName is the cube partition key; userID is the person identity (Phase 2 split).
 func buildMemoryPropertiesAt(
-	id, memory, memoryType, userName, agentID, sessionID, now, createdAt string,
+	id, memory, memoryType, userName, userID, agentID, sessionID, now, createdAt string,
 	info map[string]any, customTags []string,
 	sources []map[string]any, background string,
 ) map[string]any {
@@ -97,6 +102,7 @@ func buildMemoryPropertiesAt(
 		Memory:     memory,
 		MemoryType: memoryType,
 		UserName:   userName,
+		UserID:     userID,
 		AgentID:    agentID,
 		SessionID:  sessionID,
 		Mode:       modeFine,

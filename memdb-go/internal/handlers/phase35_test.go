@@ -102,7 +102,7 @@ func TestBuildAddNodes_ContentHashInInfo(t *testing.T) {
 		ContentHash: hash,
 	}
 	embVec := "[0.1,0.2,0.3]"
-	nodes, item := buildAddNodes(fact, embVec, nil, "cube1", "", "sess1", "2026-01-01T00:00:00",
+	nodes, item := buildAddNodes(fact, embVec, nil, "cube1", "user1", "", "sess1", "2026-01-01T00:00:00",
 		map[string]any{}, nil, nil)
 
 	if len(nodes) != 2 {
@@ -130,7 +130,7 @@ func TestBuildAddNodes_ContentHashInInfo(t *testing.T) {
 
 func TestBuildAddNodes_EmptyEmbVecReturnsNil(t *testing.T) {
 	fact := llm.ExtractedFact{Memory: "test", Type: "LongTermMemory", Action: llm.MemAdd}
-	nodes, item := buildAddNodes(fact, "", nil, "cube1", "", "sess1", "2026-01-01T00:00:00",
+	nodes, item := buildAddNodes(fact, "", nil, "cube1", "user1", "", "sess1", "2026-01-01T00:00:00",
 		map[string]any{}, nil, nil)
 	if nodes != nil || item != nil {
 		t.Fatal("expected nil nodes and nil item when embVec is empty")
@@ -150,7 +150,7 @@ func TestBuildMemoryProperties_InfoNotMutated(t *testing.T) {
 	}
 	memInfo["content_hash"] = "abc123"
 
-	buildMemoryProperties("id1", "text", "LongTermMemory", "user", "", "sess",
+	buildMemoryProperties("id1", "text", "LongTermMemory", "user", "user", "", "sess",
 		"2026-01-01T00:00:00", memInfo, nil, nil, "")
 
 	if sharedInfo["key"] != original {

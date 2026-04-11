@@ -21,7 +21,7 @@ import (
 // This replaces Python's pref_mem service — no Qdrant dependency required.
 //
 // Non-fatal: errors are logged; the method always returns normally.
-func (r *Reorganizer) ExtractAndStorePreferences(ctx context.Context, cubeID, conversation string) {
+func (r *Reorganizer) ExtractAndStorePreferences(ctx context.Context, userID, cubeID, conversation string) {
 	if conversation == "" {
 		return
 	}
@@ -63,8 +63,8 @@ func (r *Reorganizer) ExtractAndStorePreferences(ctx context.Context, cubeID, co
 			"id":               id,
 			"memory":           text,
 			"memory_type":      "UserMemory",
-			"user_name":        cubeID,
-			"user_id":          cubeID,
+			"user_name":        cubeID, // partition key (upstream convention)
+			"user_id":          userID, // person identity — Phase 2 split
 			"status":           "activated",
 			"created_at":       now,
 			"updated_at":       now,

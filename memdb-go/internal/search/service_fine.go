@@ -63,7 +63,7 @@ func (s *SearchService) recallSearch(ctx context.Context, hint string, p SearchP
 	// which writes populate from cube_id. CubeID comes from readable_cube_ids,
 	// falling back to user_id when no cube is specified. See handlers/search.go
 	// buildSearchParams for the naming note.
-	results, err := s.postgres.VectorSearch(ctx, vecs[0], p.CubeID, TextScopes, p.AgentID, p.TopK)
+	results, err := s.postgres.VectorSearch(ctx, vecs[0], p.CubeID, p.UserName, TextScopes, p.AgentID, p.TopK)
 	if err != nil {
 		return nil
 	}

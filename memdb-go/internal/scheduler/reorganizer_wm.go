@@ -19,14 +19,14 @@ func (r *Reorganizer) generateUUID() string {
 	return uuid.New().String()
 }
 
-func (r *Reorganizer) buildWMProps(id, text, cubeID, now, background string) []byte {
+func (r *Reorganizer) buildWMProps(id, text, userID, cubeID, now, background string) []byte {
 	props := map[string]any{
 		"id":                id,
 		"memory":            text,
 		"memory_type":       "WorkingMemory",
 		"status":            "activated",
-		"user_name":         cubeID,
-		"user_id":           cubeID,
+		"user_name":         cubeID, // partition key (upstream convention)
+		"user_id":           userID, // person identity — Phase 2 split
 		"session_id":        "",
 		"created_at":        now,
 		"updated_at":        now,
@@ -60,7 +60,7 @@ func (r *Reorganizer) buildWMProps(id, text, cubeID, now, background string) []b
 //
 // Non-fatal: embedding or DB errors are logged and the method returns without
 // error so the worker always XACKs the message.
-func (r *Reorganizer) RefreshWorkingMemory(ctx context.Context, cubeID, queryText string) {
+func (r *Reorganizer) RefreshWorkingMemory(ctx context.Context, userID, cubeID, queryText string) {
 	log := r.logger.With(
 		slog.String("cube_id", cubeID),
 		slog.String("query_preview", truncate(queryText, wmQueryLogPreviewLen)),
@@ -111,7 +111,10 @@ func (r *Reorganizer) RefreshWorkingMemory(ctx context.Context, cubeID, queryTex
 	nowUnix := time.Now().UTC().Unix()
 
 	var allNodes []db.MemoryInsertNode
-	var vsetInserts []struct{ id, text string; emb []float32 }
+	var vsetInserts []struct {
+		id, text string
+		emb      []float32
+	}
 
 	for _, res := range results {
 		emb := res.Embedding
@@ -120,13 +123,16 @@ func (r *Reorganizer) RefreshWorkingMemory(ctx context.Context, cubeID, queryTex
 		}
 
 		wmID := r.generateUUID()
-		propsJSON := r.buildWMProps(wmID, res.Text, cubeID, nowStr, "[working_binding:"+res.ID+"]")
+		propsJSON := r.buildWMProps(wmID, res.Text, userID, cubeID, nowStr, "[working_binding:"+res.ID+"]")
 		embStr := db.FormatVector(emb)
 
 		allNodes = append(allNodes, db.MemoryInsertNode{
 			ID: wmID, PropertiesJSON: propsJSON, EmbeddingVec: embStr,
 		})
-		vsetInserts = append(vsetInserts, struct{ id, text string; emb []float32 }{
+		vsetInserts = append(vsetInserts, struct {
+			id, text string
+			emb      []float32
+		}{
 			id: wmID, text: res.Text, emb: emb,
 		})
 	}
@@ -147,7 +153,10 @@ func (r *Reorganizer) RefreshWorkingMemory(ctx context.Context, cubeID, queryTex
 }
 
 // addNodesToVSet writes vset entries and returns the count of successfully added entries.
-func (r *Reorganizer) addNodesToVSet(ctx context.Context, cubeID string, vsetInserts []struct{ id, text string; emb []float32 }, nowUnix int64, log *slog.Logger) int {
+func (r *Reorganizer) addNodesToVSet(ctx context.Context, cubeID string, vsetInserts []struct {
+	id, text string
+	emb      []float32
+}, nowUnix int64, log *slog.Logger) int {
 	added := 0
 	for _, vi := range vsetInserts {
 		if err := r.wmCache.VAdd(ctx, cubeID, vi.id, vi.text, vi.emb, nowUnix); err != nil {

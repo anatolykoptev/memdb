@@ -49,6 +49,20 @@ type mockPostgres struct {
 	findEntitiesCubeID             string
 	getMemByEntityCubeID           string
 
+	// personID recorded per method
+	vectorSearchPersonID             string
+	vectorSearchMultiCubePersonID    string
+	vectorSearchWithCutoffPersonID   string
+	fulltextSearchPersonID           string
+	fulltextSearchWithCutoffPersonID string
+	workingMemoryPersonID            string
+	graphRecallByKeyPersonID         string
+	graphRecallByTagsPersonID        string
+	graphRecallByEdgePersonID        string
+	graphBFSPersonID                 string
+	findEntitiesPersonID             string
+	getMemByEntityPersonID           string
+
 	// flags — which methods were called
 	vectorSearchCalled          bool
 	vectorSearchMultiCubeCalled bool
@@ -56,67 +70,79 @@ type mockPostgres struct {
 	graphRecallByKeyCalled      bool
 }
 
-func (m *mockPostgres) VectorSearch(_ context.Context, _ []float32, cubeID string, _ []string, _ string, _ int) ([]db.VectorSearchResult, error) {
+func (m *mockPostgres) VectorSearch(_ context.Context, _ []float32, cubeID, personID string, _ []string, _ string, _ int) ([]db.VectorSearchResult, error) {
 	m.vectorSearchCalled = true
 	m.vectorSearchCubeID = cubeID
+	m.vectorSearchPersonID = personID
 	return nil, nil
 }
 
-func (m *mockPostgres) VectorSearchMultiCube(_ context.Context, _ []float32, cubeIDs []string, _ []string, _ string, _ int) ([]db.VectorSearchResult, error) {
+func (m *mockPostgres) VectorSearchMultiCube(_ context.Context, _ []float32, cubeIDs []string, personID string, _ []string, _ string, _ int) ([]db.VectorSearchResult, error) {
 	m.vectorSearchMultiCubeCalled = true
 	m.vectorSearchMultiCubeCubes = cubeIDs
+	m.vectorSearchMultiCubePersonID = personID
 	return nil, nil
 }
 
-func (m *mockPostgres) VectorSearchWithCutoff(_ context.Context, _ []float32, cubeID string, _ []string, _ int, _ string, _ string) ([]db.VectorSearchResult, error) {
+func (m *mockPostgres) VectorSearchWithCutoff(_ context.Context, _ []float32, cubeID, personID string, _ []string, _ int, _ string, _ string) ([]db.VectorSearchResult, error) {
 	m.vectorSearchWithCutoffCubeID = cubeID
+	m.vectorSearchWithCutoffPersonID = personID
 	return nil, nil
 }
 
-func (m *mockPostgres) FulltextSearch(_ context.Context, _ string, cubeID string, _ []string, _ string, _ int) ([]db.VectorSearchResult, error) {
+func (m *mockPostgres) FulltextSearch(_ context.Context, _ string, cubeID, personID string, _ []string, _ string, _ int) ([]db.VectorSearchResult, error) {
 	m.fulltextSearchCubeID = cubeID
+	m.fulltextSearchPersonID = personID
 	return nil, nil
 }
 
-func (m *mockPostgres) FulltextSearchWithCutoff(_ context.Context, _ string, cubeID string, _ []string, _ int, _ string, _ string) ([]db.VectorSearchResult, error) {
+func (m *mockPostgres) FulltextSearchWithCutoff(_ context.Context, _ string, cubeID, personID string, _ []string, _ int, _ string, _ string) ([]db.VectorSearchResult, error) {
 	m.fulltextSearchWithCutoffCubeID = cubeID
+	m.fulltextSearchWithCutoffPersonID = personID
 	return nil, nil
 }
 
-func (m *mockPostgres) GetWorkingMemory(_ context.Context, cubeID string, _ int, _ string) ([]db.VectorSearchResult, error) {
+func (m *mockPostgres) GetWorkingMemory(_ context.Context, cubeID, personID string, _ int, _ string) ([]db.VectorSearchResult, error) {
 	m.workingMemoryCalled = true
 	m.workingMemoryCubeID = cubeID
+	m.workingMemoryPersonID = personID
 	return nil, nil
 }
 
-func (m *mockPostgres) GraphRecallByKey(_ context.Context, cubeID string, _ []string, _ []string, _ string, _ int) ([]db.GraphRecallResult, error) {
+func (m *mockPostgres) GraphRecallByKey(_ context.Context, cubeID, personID string, _ []string, _ []string, _ string, _ int) ([]db.GraphRecallResult, error) {
 	m.graphRecallByKeyCalled = true
 	m.graphRecallByKeyCubeID = cubeID
+	m.graphRecallByKeyPersonID = personID
 	return nil, nil
 }
 
-func (m *mockPostgres) GraphRecallByTags(_ context.Context, cubeID string, _ []string, _ []string, _ string, _ int) ([]db.GraphRecallResult, error) {
+func (m *mockPostgres) GraphRecallByTags(_ context.Context, cubeID, personID string, _ []string, _ []string, _ string, _ int) ([]db.GraphRecallResult, error) {
 	m.graphRecallByTagsCubeID = cubeID
+	m.graphRecallByTagsPersonID = personID
 	return nil, nil
 }
 
-func (m *mockPostgres) GraphRecallByEdge(_ context.Context, _ []string, _ string, cubeID string, _ int) ([]db.GraphRecallResult, error) {
+func (m *mockPostgres) GraphRecallByEdge(_ context.Context, _ []string, _ string, cubeID, personID string, _ int) ([]db.GraphRecallResult, error) {
 	m.graphRecallByEdgeCubeID = cubeID
+	m.graphRecallByEdgePersonID = personID
 	return nil, nil
 }
 
-func (m *mockPostgres) GraphBFSTraversal(_ context.Context, _ []string, cubeID string, _ []string, _, _ int, _ string) ([]db.GraphRecallResult, error) {
+func (m *mockPostgres) GraphBFSTraversal(_ context.Context, _ []string, cubeID, personID string, _ []string, _, _ int, _ string) ([]db.GraphRecallResult, error) {
 	m.graphBFSCubeID = cubeID
+	m.graphBFSPersonID = personID
 	return nil, nil
 }
 
-func (m *mockPostgres) FindEntitiesByNormalizedID(_ context.Context, _ []string, cubeID string) ([]string, error) {
+func (m *mockPostgres) FindEntitiesByNormalizedID(_ context.Context, _ []string, cubeID, personID string) ([]string, error) {
 	m.findEntitiesCubeID = cubeID
+	m.findEntitiesPersonID = personID
 	return nil, nil
 }
 
-func (m *mockPostgres) GetMemoriesByEntityIDs(_ context.Context, _ []string, cubeID string, _ int) ([]db.GraphRecallResult, error) {
+func (m *mockPostgres) GetMemoriesByEntityIDs(_ context.Context, _ []string, cubeID, personID string, _ int) ([]db.GraphRecallResult, error) {
 	m.getMemByEntityCubeID = cubeID
+	m.getMemByEntityPersonID = personID
 	return nil, nil
 }
 

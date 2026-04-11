@@ -18,10 +18,11 @@ func TestVectorSearchMultiCube_SQLShape(t *testing.T) {
 		{"uses ANY for user_name", "properties->>'user_name' = ANY($2::text[])"},
 		{"filters activated status", "properties->>'status' = 'activated'"},
 		{"uses halfvec index", "embedding::halfvec(1024) <=> $1::halfvec(1024)"},
-		{"filters by memory_type array", "properties->>'memory_type' = ANY($3)"},
-		{"optional agent_id filter", "$5::text = ''"},
+		{"filters by user_id", "properties->>'user_id'   = $3"},
+		{"filters by memory_type array", "properties->>'memory_type' = ANY($4)"},
+		{"optional agent_id filter", "$6::text = ''"},
 		{"requires non-null embedding", "embedding IS NOT NULL"},
-		{"limit param", "LIMIT $4"},
+		{"limit param", "LIMIT $5"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

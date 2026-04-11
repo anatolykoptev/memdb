@@ -115,53 +115,8 @@ func RegisterNativeGoProxyTools(server *mcp.Server, memdbGoURL string, serviceSe
 }
 
 // RegisterPythonProxyTools registers MCP tools that proxy to the Python legacy backend.
-// Covers cube management and scheduler control — not yet ported to Go.
+// Covers scheduler control — cube tools (create/list/delete/get_user_cubes) are now native Go via RegisterCubeTools.
 func RegisterPythonProxyTools(server *mcp.Server, pythonURL string, serviceSecret string, logger *slog.Logger) {
-	// create_cube
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "create_cube",
-		Description: "Create a new memory cube for a user to store different types of memories. (proxied to Python backend)",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, input CreateCubeProxyInput) (*mcp.CallToolResult, TextResult, error) {
-		result, err := proxyCall(ctx, pythonURL, "/product/configure", serviceSecret, "create_cube", input, logger)
-		return nil, result, err
-	})
-
-	// register_cube
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "register_cube",
-		Description: "Register an existing memory cube from file path or create new one. (proxied to Python backend)",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, input RegisterCubeProxyInput) (*mcp.CallToolResult, TextResult, error) {
-		result, err := proxyCall(ctx, pythonURL, "/product/configure", serviceSecret, "register_cube", input, logger)
-		return nil, result, err
-	})
-
-	// unregister_cube
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "unregister_cube",
-		Description: "Unregister a memory cube from the active session (data remains on disk). (proxied to Python backend)",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, input UnregisterCubeProxyInput) (*mcp.CallToolResult, TextResult, error) {
-		result, err := proxyCall(ctx, pythonURL, "/product/configure", serviceSecret, "unregister_cube", input, logger)
-		return nil, result, err
-	})
-
-	// share_cube
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "share_cube",
-		Description: "Grant access to a memory cube to another user for reading and searching. (proxied to Python backend)",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, input ShareCubeProxyInput) (*mcp.CallToolResult, TextResult, error) {
-		result, err := proxyCall(ctx, pythonURL, "/product/configure", serviceSecret, "share_cube", input, logger)
-		return nil, result, err
-	})
-
-	// dump_cube
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "dump_cube",
-		Description: "Export a memory cube to a directory for backup or migration purposes. (proxied to Python backend)",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, input DumpCubeProxyInput) (*mcp.CallToolResult, TextResult, error) {
-		result, err := proxyCall(ctx, pythonURL, "/product/configure", serviceSecret, "dump_cube", input, logger)
-		return nil, result, err
-	})
-
 	// control_memory_scheduler
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "control_memory_scheduler",

@@ -48,7 +48,7 @@ type enhancementFact struct {
 // When llmExtractor is available, runs the full fine-level pipeline (ExtractAndDedup,
 // content-hash dedup, entity linking, episodic summary, profiler refresh).
 // Falls back to the legacy llmEnhance path when llmExtractor is nil.
-func (r *Reorganizer) ProcessRawMemory(ctx context.Context, cubeID string, wmIDs []string) {
+func (r *Reorganizer) ProcessRawMemory(ctx context.Context, userID, cubeID string, wmIDs []string) {
 	if len(wmIDs) == 0 {
 		return
 	}
@@ -62,12 +62,12 @@ func (r *Reorganizer) ProcessRawMemory(ctx context.Context, cubeID string, wmIDs
 
 	// Guard: use fine-level pipeline only if llmExtractor is available.
 	if r.llmExtractor != nil {
-		r.processRawMemoryFine(ctx, cubeID, wmIDs, log)
+		r.processRawMemoryFine(ctx, userID, cubeID, wmIDs, log)
 		return
 	}
 
 	// Legacy path: simple llmEnhance per node.
-	r.processRawMemoryLegacy(ctx, cubeID, wmIDs, log)
+	r.processRawMemoryLegacy(ctx, userID, cubeID, wmIDs, log)
 }
 
 // wmInfo holds the extracted fields from WorkingMemory node properties.
@@ -82,7 +82,7 @@ type wmInfo struct {
 type actionCounts struct{ inserted, updated, deleted int }
 
 // processRawMemoryFine runs the full fine-level pipeline for async mem_read.
-func (r *Reorganizer) processRawMemoryFine(ctx context.Context, cubeID string, wmIDs []string, log *slog.Logger) {
+func (r *Reorganizer) processRawMemoryFine(ctx context.Context, userID, cubeID string, wmIDs []string, log *slog.Logger) {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000000")
 
 	fullNodes, err := r.postgres.GetMemoriesByPropertyIDs(ctx, wmIDs)
@@ -115,13 +115,13 @@ func (r *Reorganizer) processRawMemoryFine(ctx context.Context, cubeID string, w
 	facts = r.filterAddsByContentHash(ctx, facts, cubeID, log)
 	embedded := r.embedFacts(ctx, facts, log)
 
-	allNodes, counts := r.applyMemoryActions(ctx, embedded, cubeID, info.agentID, info.sessionID, now, log)
+	allNodes, counts := r.applyMemoryActions(ctx, embedded, userID, cubeID, info.agentID, info.sessionID, now, log)
 	r.insertAndLinkLTMNodes(ctx, allNodes, info.processedWMIDs, now, log)
 	r.linkEntities(embedded, cubeID, now)
 	r.deleteWMNodes(ctx, cubeID, info.processedWMIDs, log)
 
 	if info.sessionID != "" {
-		r.generateEpisodicSummary(cubeID, info.sessionID, conversation, now)
+		r.generateEpisodicSummary(userID, cubeID, info.sessionID, conversation, now)
 	}
 	if r.profiler != nil {
 		r.profiler.TriggerRefresh(cubeID)
@@ -169,7 +169,7 @@ func extractWMInfo(fullNodes []map[string]any) wmInfo {
 func (r *Reorganizer) applyMemoryActions(
 	ctx context.Context,
 	embedded []embeddedMemReadFact,
-	cubeID, agentID, sessionID, now string,
+	userID, cubeID, agentID, sessionID, now string,
 	log *slog.Logger,
 ) ([]db.MemoryInsertNode, actionCounts) {
 	var allNodes []db.MemoryInsertNode
@@ -188,7 +188,7 @@ func (r *Reorganizer) applyMemoryActions(
 				counts.updated++
 			}
 		default: // llm.MemAdd
-			node, ltmID, ok := buildLTMNode(ef, cubeID, agentID, sessionID, now)
+			node, ltmID, ok := buildLTMNode(ef, userID, cubeID, agentID, sessionID, now)
 			if ok {
 				allNodes = append(allNodes, node)
 				ef.ltmID = ltmID
@@ -241,7 +241,7 @@ func (r *Reorganizer) applyMemUpdate(ctx context.Context, ef *embeddedMemReadFac
 
 // buildLTMNode constructs a MemoryInsertNode for a MemAdd fact.
 // Returns (node, ltmID, ok).
-func buildLTMNode(ef *embeddedMemReadFact, cubeID, agentID, sessionID, now string) (db.MemoryInsertNode, string, bool) {
+func buildLTMNode(ef *embeddedMemReadFact, userID, cubeID, agentID, sessionID, now string) (db.MemoryInsertNode, string, bool) {
 	f := ef.fact
 	if ef.embVec == "" {
 		return db.MemoryInsertNode{}, "", false
@@ -269,9 +269,9 @@ func buildLTMNode(ef *embeddedMemReadFact, cubeID, agentID, sessionID, now strin
 
 	props := map[string]any{
 		"id": ltID, "memory": f.Memory, "memory_type": memType,
-		"user_name": cubeID, "user_id": cubeID, "agent_id": agentID, "session_id": sessionID,
+		"user_name": cubeID, "user_id": userID, "agent_id": agentID, "session_id": sessionID,
 		"status": "activated", "created_at": createdAt, "updated_at": now,
-		"tags": append([]string{"mode:mem_read"}, f.Tags...),
+		"tags":       append([]string{"mode:mem_read"}, f.Tags...),
 		"background": "", "delete_time": "", "delete_record_id": "",
 		"confidence": f.Confidence, "type": "fact", "info": factInfo,
 		"graph_id": uuid.New().String(), "importance_score": 1.0, "retrieval_count": 0,
@@ -343,7 +343,7 @@ func (r *Reorganizer) appendVSetCandidates(ctx context.Context, cubeID string, e
 
 // appendPGCandidates adds Postgres pgvector candidates to the output slice.
 func (r *Reorganizer) appendPGCandidates(ctx context.Context, cubeID, agentID string, embedding []float32, limit int, out *[]llm.Candidate, seen map[string]struct{}, log *slog.Logger) {
-	results, err := r.postgres.VectorSearch(ctx, embedding, cubeID,
+	results, err := r.postgres.VectorSearch(ctx, embedding, cubeID, cubeID,
 		[]string{"LongTermMemory", "UserMemory"}, agentID, limit)
 	if err != nil {
 		log.Debug("mem_read: postgres vector search failed", slog.Any("error", err))
@@ -493,7 +493,7 @@ func memReadTextHash(text string) string {
 // --- Legacy path (fallback when llmExtractor is nil) ---
 
 // processRawMemoryLegacy is the old simple pipeline: llmEnhance → embed → insert.
-func (r *Reorganizer) processRawMemoryLegacy(ctx context.Context, cubeID string, wmIDs []string, log *slog.Logger) {
+func (r *Reorganizer) processRawMemoryLegacy(ctx context.Context, userID, cubeID string, wmIDs []string, log *slog.Logger) {
 	nodes, err := r.postgres.GetMemoryByPropertyIDs(ctx, wmIDs, cubeID)
 	if err != nil || len(nodes) == 0 {
 		log.Warn("mem_read: GetMemoryByPropertyIDs failed or returned empty", slog.Any("error", err))
@@ -504,7 +504,7 @@ func (r *Reorganizer) processRawMemoryLegacy(ctx context.Context, cubeID string,
 	var inserted, skipped int
 
 	for _, node := range nodes {
-		n, skip := r.processLegacyNode(ctx, cubeID, node, now, log)
+		n, skip := r.processLegacyNode(ctx, userID, cubeID, node, now, log)
 		if skip {
 			skipped++
 		} else {
@@ -521,7 +521,7 @@ func (r *Reorganizer) processRawMemoryLegacy(ctx context.Context, cubeID string,
 
 // processLegacyNode runs the enhance→embed→insert pipeline for a single WM node.
 // Returns (ltmInserted, skipped).
-func (r *Reorganizer) processLegacyNode(ctx context.Context, cubeID string, node db.MemNode, now string, log *slog.Logger) (int, bool) {
+func (r *Reorganizer) processLegacyNode(ctx context.Context, userID, cubeID string, node db.MemNode, now string, log *slog.Logger) (int, bool) {
 	rawText := node.Text
 	wmID := node.ID
 	if rawText == "" || wmID == "" {
@@ -549,7 +549,7 @@ func (r *Reorganizer) processLegacyNode(ctx context.Context, cubeID string, node
 		return 0, true
 	}
 
-	ltmNodes := buildLegacyLTMNodes(facts, embs, cubeID, wmID, now)
+	ltmNodes := buildLegacyLTMNodes(facts, embs, userID, cubeID, wmID, now)
 	if len(ltmNodes) == 0 {
 		r.deleteWMNode(ctx, cubeID, wmID, log)
 		return 0, false
@@ -571,7 +571,7 @@ func (r *Reorganizer) processLegacyNode(ctx context.Context, cubeID string, node
 }
 
 // buildLegacyLTMNodes constructs LTM insert nodes from enhanced facts and their embeddings.
-func buildLegacyLTMNodes(facts []enhancementFact, embs [][]float32, cubeID, wmID, now string) []db.MemoryInsertNode {
+func buildLegacyLTMNodes(facts []enhancementFact, embs [][]float32, userID, cubeID, wmID, now string) []db.MemoryInsertNode {
 	var ltmNodes []db.MemoryInsertNode
 	for i, f := range facts {
 		if i >= len(embs) || len(embs[i]) == 0 {
@@ -586,8 +586,8 @@ func buildLegacyLTMNodes(facts []enhancementFact, embs [][]float32, cubeID, wmID
 			"id":               ltID,
 			"memory":           f.Text,
 			"memory_type":      memType,
-			"user_name":        cubeID,
-			"user_id":          cubeID,
+			"user_name":        cubeID, // partition key (upstream convention)
+			"user_id":          userID, // person identity — Phase 2 split
 			"status":           "activated",
 			"created_at":       now,
 			"updated_at":       now,

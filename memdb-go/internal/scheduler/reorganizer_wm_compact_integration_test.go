@@ -107,8 +107,6 @@ func mockLLMServerError(t *testing.T) *httptest.Server {
 	}))
 }
 
-
-
 // asPostgres wraps pgStub as *db.Postgres via a thin adapter.
 // Since db.Postgres is a concrete struct we can't embed, we use a test-only
 // approach: inject the stub methods via the reorganizerCompact interface.
@@ -351,7 +349,7 @@ func TestCompactWM_LLMRequest_SystemPrompt(t *testing.T) {
 
 func TestCompactWM_EpisodicProps_NotWorkingMemory(t *testing.T) {
 	r := &Reorganizer{}
-	data := r.buildEpisodicProps("ep-1", "Session summary.", "cube-1", "2026-02-19T00:00:00.000000", 40)
+	data := r.buildEpisodicProps("ep-1", "Session summary.", "cube-1", "cube-1", "2026-02-19T00:00:00.000000", 40)
 
 	var props map[string]any
 	if err := json.Unmarshal(data, &props); err != nil {
