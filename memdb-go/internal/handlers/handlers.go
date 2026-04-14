@@ -43,12 +43,13 @@ type Handler struct {
 	llmChat       *llm.Client                  // nil = chat falls back to proxy
 	profiler      *scheduler.Profiler          // nil = profile summaries disabled
 	tracker       *scheduler.TaskStatusTracker // nil = fall back to stream-based status
-	reorg         reorgRunner                  // nil = reorganizer not configured
-	bufferCfg     BufferConfig                 // buffer zone config (zero value = disabled)
-	addSem        *semaphore.Weighted          // nil = no limit on concurrent adds
-	addQueueMax   int64                        // max waiters before 503
-	addWaiters    atomic.Int64                 // current goroutines waiting for semaphore
-	cubeStore     cubeStoreClient              // nil = cube endpoints return 503
+	reorg           reorgRunner                 // nil = reorganizer not configured
+	bufferCfg       BufferConfig                // buffer zone config (zero value = disabled)
+	addSem          *semaphore.Weighted          // nil = no limit on concurrent adds
+	addQueueMax     int64                        // max waiters before 503
+	addWaiters      atomic.Int64                 // current goroutines waiting for semaphore
+	cubeStore       cubeStoreClient              // nil = cube endpoints return 503
+	memUpdaterField memoryUpdater                // non-nil only in tests (overrides h.postgres)
 }
 
 // NewHandler creates a new Handler with the given dependencies.
