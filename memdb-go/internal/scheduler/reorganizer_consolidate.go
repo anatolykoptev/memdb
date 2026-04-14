@@ -35,6 +35,12 @@ const (
 	// 20 catches near-duplicates at threshold 0.85 with minimal overhead.
 	// Increase to 40 if recall regresses on large cubes.
 	dupHNSWTopK = 20
+
+	// autoMergeThreshold is the minimum cosine similarity at which a cluster
+	// is merged without calling the LLM. At ≥0.97 the texts are near-identical
+	// (same fact stated differently), so we keep the longest text and skip LLM.
+	// Set to 1.1 to disable auto-merge entirely.
+	autoMergeThreshold = 0.97
 )
 
 // findNearDuplicates routes to the HNSW or legacy query based on the feature flag.
@@ -151,8 +157,13 @@ func (r *Reorganizer) RunTargeted(ctx context.Context, cubeID string, ids []stri
 	)
 }
 
-// consolidateCluster calls the LLM to merge a cluster, then persists the result.
+// consolidateCluster merges a cluster either via fast auto-merge (score ≥ autoMergeThreshold)
+// or by calling the LLM for lower-similarity clusters.
 func (r *Reorganizer) consolidateCluster(ctx context.Context, cubeID string, cluster []memNode, now string) error {
+	if clusterMinScore(cluster) >= autoMergeThreshold {
+		return r.autoMergeCluster(ctx, cubeID, cluster, now)
+	}
+
 	result, err := r.llmConsolidate(ctx, cluster)
 	if err != nil {
 		return fmt.Errorf("llm consolidate: %w", err)

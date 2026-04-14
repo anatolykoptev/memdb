@@ -26,7 +26,7 @@ func (r *Reorganizer) llmConsolidate(ctx context.Context, cluster []memNode) (co
 	}
 	items := make([]inputItem, len(cluster))
 	for i, n := range cluster {
-		items[i] = inputItem(n)
+		items[i] = inputItem{ID: n.ID, Text: n.Text}
 	}
 	memoriesJSON, _ := json.Marshal(items)
 

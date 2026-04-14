@@ -11,20 +11,29 @@ import (
 
 // memNode is a minimal memory representation used during clustering.
 type memNode struct {
-	ID   string
-	Text string
+	ID       string
+	Text     string
+	MaxScore float64 // highest pairwise cosine similarity touching this node in the cluster
 }
 
 // buildClusters groups near-duplicate pairs into connected clusters using Union-Find.
 // Each cluster is a slice of memNodes that should be consolidated together.
+// memNode.MaxScore holds the highest pairwise similarity seen for that node.
 func buildClusters(pairs []db.DuplicatePair) [][]memNode {
 	idToText := make(map[string]string, len(pairs)*2)
+	idToMaxScore := make(map[string]float64, len(pairs)*2)
 	for _, p := range pairs {
 		if idToText[p.IDa] == "" {
 			idToText[p.IDa] = p.MemA
 		}
 		if idToText[p.IDb] == "" {
 			idToText[p.IDb] = p.MemB
+		}
+		if p.Score > idToMaxScore[p.IDa] {
+			idToMaxScore[p.IDa] = p.Score
+		}
+		if p.Score > idToMaxScore[p.IDb] {
+			idToMaxScore[p.IDb] = p.Score
 		}
 	}
 
@@ -55,7 +64,7 @@ func buildClusters(pairs []db.DuplicatePair) [][]memNode {
 	groups := make(map[string][]memNode)
 	for id, text := range idToText {
 		root := find(id)
-		groups[root] = append(groups[root], memNode{ID: id, Text: text})
+		groups[root] = append(groups[root], memNode{ID: id, Text: text, MaxScore: idToMaxScore[id]})
 	}
 
 	clusters := make([][]memNode, 0, len(groups))
@@ -65,6 +74,22 @@ func buildClusters(pairs []db.DuplicatePair) [][]memNode {
 		}
 	}
 	return clusters
+}
+
+// clusterMinScore returns the minimum MaxScore across all nodes in the cluster.
+// A cluster qualifies for auto-merge only when ALL pairs are very similar,
+// so we use the minimum (most conservative) score as the gate.
+func clusterMinScore(cluster []memNode) float64 {
+	if len(cluster) == 0 {
+		return 0
+	}
+	min := cluster[0].MaxScore
+	for _, n := range cluster[1:] {
+		if n.MaxScore < min {
+			min = n.MaxScore
+		}
+	}
+	return min
 }
 
 // splitLargeCluster slices a cluster into sub-clusters of at most maxSize nodes.
