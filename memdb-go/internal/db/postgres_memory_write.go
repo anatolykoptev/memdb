@@ -13,6 +13,11 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
 )
 
+// ErrMemoryNotFound is returned by UpdateMemoryByID when the target row does not exist.
+// This is a normal condition when the Reorganizer hard-deleted a contradicted memory
+// between the caller's search and the update call.
+var ErrMemoryNotFound = errors.New("memory not found")
+
 // DeleteByPropertyIDs deletes nodes matching the given property IDs and user name.
 func (p *Postgres) DeleteByPropertyIDs(ctx context.Context, propertyIDs []string, userName string) (int64, error) {
 	tag, err := p.pool.Exec(ctx, fmt.Sprintf(queries.DeleteByPropertyIDs, graphName), propertyIDs, userName)
@@ -46,7 +51,7 @@ func (p *Postgres) UpdateMemoryByID(ctx context.Context, memoryID, cubeID string
 	err := p.pool.QueryRow(ctx, fmt.Sprintf(queries.UpdateMemoryPropsAndEmbedding, graphName), memoryID, cubeID, propsJSON, embedding).Scan(&returnedID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("memory not found: id=%s cube=%s", memoryID, cubeID)
+			return fmt.Errorf("%w: id=%s cube=%s", ErrMemoryNotFound, memoryID, cubeID)
 		}
 		return fmt.Errorf("update memory: %w", err)
 	}

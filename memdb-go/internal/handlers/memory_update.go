@@ -6,11 +6,27 @@ package handlers
 // (go-wowa experience memory).
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
+
+// memoryUpdater is a narrow interface for updating a memory node.
+// Implemented by *db.Postgres in production and by stubMemoryUpdater in tests.
+type memoryUpdater interface {
+	UpdateMemoryByID(ctx context.Context, memoryID, cubeID string, propsJSON []byte, embedding string) error
+}
+
+// memUpdater returns the memoryUpdater to use: test override if set, otherwise h.postgres.
+func (h *Handler) memUpdater() memoryUpdater {
+	if h.memUpdaterField != nil {
+		return h.memUpdaterField
+	}
+	return h.postgres
+}
 
 // updateMemoryRequest is the POST /product/update_memory payload.
 type updateMemoryRequest struct {
@@ -111,7 +127,19 @@ func (h *Handler) NativeUpdateMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.postgres.UpdateMemoryByID(ctx, memoryID, cubeID, propsJSON, db.FormatVector(embedding)); err != nil {
+	updater := h.memUpdater()
+	if err := updater.UpdateMemoryByID(ctx, memoryID, cubeID, propsJSON, db.FormatVector(embedding)); err != nil {
+		if errors.Is(err, db.ErrMemoryNotFound) {
+			h.logger.Info("update_memory: target not found (likely consolidated)",
+				slog.String("memory_id", memoryID),
+				slog.String("cube_id", cubeID))
+			h.writeJSON(w, http.StatusNotFound, map[string]any{
+				"code":    404,
+				"message": err.Error(),
+				"data":    nil,
+			})
+			return
+		}
 		h.logger.Error("update memory failed",
 			slog.Any("error", err),
 			slog.String("memory_id", memoryID),
