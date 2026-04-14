@@ -20,6 +20,11 @@ const (
 	consolidateLogPreviewLen = 80  // chars of merged text to log as preview
 	consolidateLLMMaxTokens  = 512 // max_tokens for consolidation LLM call
 	consolidateErrTruncLen   = 200 // max chars of error LLM output to include in error message
+
+	// maxClusterSize caps how many memories are sent to the LLM in one
+	// consolidation call. Larger clusters are split into chunks of this size
+	// so the LLM does not time out or hallucinate UUIDs on long prompts.
+	maxClusterSize = 8
 )
 
 // Run performs one reorganization cycle for the given cube (user_name in DB terms).
@@ -46,16 +51,18 @@ func (r *Reorganizer) Run(ctx context.Context, cubeID string) {
 	merged, skipped := 0, 0
 
 	for _, cluster := range clusters {
-		if len(cluster) < 2 {
-			continue
-		}
-		if err := r.consolidateCluster(ctx, cubeID, cluster, now); err != nil {
-			log.Warn("reorganizer: cluster consolidation failed",
-				slog.Any("ids", clusterIDs(cluster)),
-				slog.Any("error", err))
-			skipped++
-		} else {
-			merged++
+		for _, sub := range splitLargeCluster(cluster, maxClusterSize) {
+			if len(sub) < 2 {
+				continue
+			}
+			if err := r.consolidateCluster(ctx, cubeID, sub, now); err != nil {
+				log.Warn("reorganizer: cluster consolidation failed",
+					slog.Any("ids", clusterIDs(sub)),
+					slog.Any("error", err))
+				skipped++
+			} else {
+				merged++
+			}
 		}
 	}
 
@@ -98,16 +105,18 @@ func (r *Reorganizer) RunTargeted(ctx context.Context, cubeID string, ids []stri
 	merged, skipped := 0, 0
 
 	for _, cluster := range clusters {
-		if len(cluster) < 2 {
-			continue
-		}
-		if err := r.consolidateCluster(ctx, cubeID, cluster, now); err != nil {
-			log.Warn("reorganizer: targeted cluster consolidation failed",
-				slog.Any("ids", clusterIDs(cluster)),
-				slog.Any("error", err))
-			skipped++
-		} else {
-			merged++
+		for _, sub := range splitLargeCluster(cluster, maxClusterSize) {
+			if len(sub) < 2 {
+				continue
+			}
+			if err := r.consolidateCluster(ctx, cubeID, sub, now); err != nil {
+				log.Warn("reorganizer: targeted cluster consolidation failed",
+					slog.Any("ids", clusterIDs(sub)),
+					slog.Any("error", err))
+				skipped++
+			} else {
+				merged++
+			}
 		}
 	}
 	log.Info("reorganizer: targeted cycle complete",
@@ -172,6 +181,24 @@ func buildClusters(pairs []db.DuplicatePair) [][]memNode {
 		}
 	}
 	return clusters
+}
+
+// splitLargeCluster slices a cluster into sub-clusters of at most maxSize nodes.
+// Called after Union-Find clustering to keep LLM prompt length bounded. Order is
+// preserved. Returns a single-element slice if len(cluster) <= maxSize.
+func splitLargeCluster(cluster []memNode, maxSize int) [][]memNode {
+	if maxSize <= 0 || len(cluster) <= maxSize {
+		return [][]memNode{cluster}
+	}
+	out := make([][]memNode, 0, (len(cluster)+maxSize-1)/maxSize)
+	for i := 0; i < len(cluster); i += maxSize {
+		end := i + maxSize
+		if end > len(cluster) {
+			end = len(cluster)
+		}
+		out = append(out, cluster[i:end])
+	}
+	return out
 }
 
 // consolidateCluster calls the LLM to merge a cluster, then persists the result.
@@ -287,10 +314,10 @@ func (r *Reorganizer) evictVSet(ctx context.Context, cubeID, id, logMsg string) 
 // ContradictedIDs contains memories directly contradicted by the winner — they are
 // hard-deleted (not soft-merged) so they never re-surface in search results.
 type consolidationResult struct {
-	KeepID         string   `json:"keep_id"`
-	RemoveIDs      []string `json:"remove_ids"`
+	KeepID          string   `json:"keep_id"`
+	RemoveIDs       []string `json:"remove_ids"`
 	ContradictedIDs []string `json:"contradicted_ids,omitempty"`
-	MergedText     string   `json:"merged_text"`
+	MergedText      string   `json:"merged_text"`
 }
 
 // llmConsolidate calls the LLM with the cluster members and returns a parsed result.
