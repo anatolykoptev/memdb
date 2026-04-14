@@ -90,7 +90,7 @@ func initReorganizer(
 		logger.Info("scheduler reorganizer disabled (postgres or LLM not configured)")
 		return nil
 	}
-	reorgLLMClient := llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel, cfg.LLMFallbackModels, logger)
+	reorgLLMClient := llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMReorgModel, cfg.LLMFallbackModels, logger)
 	reorg := scheduler.NewReorganizer(pg, emb, wmCache, reorgLLMClient, logger)
 	if extractor != nil {
 		reorg.SetLLMExtractor(extractor)
@@ -99,7 +99,7 @@ func initReorganizer(
 		reorg.SetProfiler(profiler)
 	}
 	logger.Info("scheduler reorganizer initialized",
-		slog.String("model", cfg.LLMDefaultModel),
+		slog.String("model", cfg.LLMReorgModel),
 		slog.Any("fallback_models", cfg.LLMFallbackModels),
 	)
 	return reorg
