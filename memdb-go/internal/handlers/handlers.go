@@ -43,6 +43,7 @@ type Handler struct {
 	llmChat       *llm.Client                  // nil = chat falls back to proxy
 	profiler      *scheduler.Profiler          // nil = profile summaries disabled
 	tracker       *scheduler.TaskStatusTracker // nil = fall back to stream-based status
+	reorg         reorgRunner                  // nil = reorganizer not configured
 	bufferCfg     BufferConfig                 // buffer zone config (zero value = disabled)
 	addSem        *semaphore.Weighted          // nil = no limit on concurrent adds
 	addQueueMax   int64                        // max waiters before 503
@@ -97,6 +98,9 @@ func (h *Handler) SetChatLLM(c *llm.Client) { h.llmChat = c }
 func (h *Handler) SetProfiler(p *scheduler.Profiler) {
 	h.profiler = p
 }
+
+// SetReorganizer sets the Memory Reorganizer for on-demand reorg via /product/admin/reorg.
+func (h *Handler) SetReorganizer(r reorgRunner) { h.reorg = r }
 
 // SetTaskTracker sets the Redis-backed task status tracker.
 // When set, /scheduler/wait and /scheduler/wait/stream use memos:task_meta:{user_id}

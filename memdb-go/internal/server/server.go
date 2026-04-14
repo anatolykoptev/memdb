@@ -76,6 +76,9 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	if rd != nil {
 		reorg := initReorganizer(ctx, cfg, pg, emb, wmCache, extractor, profiler, logger)
 		go scheduler.NewWorker(rd.Client(), reorg, logger).Run(ctx)
+		if reorg != nil {
+			h.SetReorganizer(reorg)
+		}
 		h.SetTaskTracker(scheduler.NewTaskStatusTracker(rd.Client()))
 		logger.Info("scheduler worker started")
 	}
