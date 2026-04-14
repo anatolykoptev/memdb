@@ -74,7 +74,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 
 	// Start scheduler Worker (after embedder is initialized).
 	if rd != nil {
-		reorg := initReorganizer(ctx, cfg, pg, emb, wmCache, extractor, profiler, logger)
+		reorg := initReorganizer(ctx, cfg, pg, rd, emb, wmCache, extractor, profiler, logger)
 		go scheduler.NewWorker(rd.Client(), reorg, logger).Run(ctx)
 		if reorg != nil {
 			h.SetReorganizer(reorg)

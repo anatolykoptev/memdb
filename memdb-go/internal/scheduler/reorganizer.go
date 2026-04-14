@@ -63,20 +63,27 @@ const (
 //  5. Soft-delete all remove_ids
 //  6. Evict remove_ids from Redis VSET hot cache
 type Reorganizer struct {
-	postgres     *db.Postgres
-	embedder     embedder.Embedder
-	wmCache      *db.WorkingMemoryCache // nil = VSET not configured
-	llmClient    *llm.Client            // shared LLM client with retry + fallback
-	logger       *slog.Logger
-	llmExtractor *llm.LLMExtractor // for ExtractAndDedup (fine-level mem_read)
-	profiler     *Profiler         // for TriggerRefresh after mem_read
+	postgres         *db.Postgres
+	embedder         embedder.Embedder
+	wmCache          *db.WorkingMemoryCache // nil = VSET not configured
+	llmClient        *llm.Client            // shared LLM client with retry + fallback
+	logger           *slog.Logger
+	llmExtractor     *llm.LLMExtractor  // for ExtractAndDedup (fine-level mem_read)
+	profiler         *Profiler          // for TriggerRefresh after mem_read
+	cacheInvalidator CacheInvalidator   // nil = cache invalidation disabled
 }
 
 // SetLLMExtractor injects the LLM extractor for fine-level mem_read processing.
 func (r *Reorganizer) SetLLMExtractor(e *llm.LLMExtractor) { r.llmExtractor = e }
 
-// SetProfiler injects the profiler for background user profile refresh.
+// SetProfiler injects the background user profile summarizer.
 func (r *Reorganizer) SetProfiler(p *Profiler) { r.profiler = p }
+
+// SetCacheInvalidator injects the Redis cache invalidator.
+// When set, Reorganizer will purge stale search-result cache entries after
+// hard-deleting or soft-deleting memory nodes, preventing clients from
+// receiving stale IDs in subsequent search responses.
+func (r *Reorganizer) SetCacheInvalidator(c CacheInvalidator) { r.cacheInvalidator = c }
 
 // NewReorganizer creates a Reorganizer. llmClient provides retry + model
 // fallback for all LLM calls (consolidation, feedback, prefs, enhance).
