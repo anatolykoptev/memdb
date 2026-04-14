@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
+	"github.com/jackc/pgx/v5"
 )
 
 // SearchLTMByVector returns top-k activated LTM/UserMemory nodes by cosine similarity.
@@ -31,8 +32,20 @@ func (p *Postgres) SearchLTMByVector(ctx context.Context, userName, embeddingVec
 }
 
 // FindNearDuplicates returns activated LTM/UserMemory pairs with cosine similarity >= threshold.
+// Wrapped in a read-only tx with SET LOCAL statement_timeout = '120s' to avoid the role-level
+// default (30s) being hit by the O(N²) self-join on the embedding column.
 func (p *Postgres) FindNearDuplicates(ctx context.Context, userName string, threshold float64, limit int) ([]DuplicatePair, error) {
-	rows, err := p.pool.Query(ctx, fmt.Sprintf(queries.FindNearDuplicates, graphName), userName, threshold, limit)
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, fmt.Errorf("find near duplicates begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // read-only tx, rollback error is irrelevant
+
+	if _, err = tx.Exec(ctx, "SET LOCAL statement_timeout = '120s'"); err != nil {
+		return nil, fmt.Errorf("find near duplicates set timeout: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, fmt.Sprintf(queries.FindNearDuplicates, graphName), userName, threshold, limit)
 	if err != nil {
 		return nil, fmt.Errorf("find near duplicates: %w", err)
 	}
@@ -49,11 +62,23 @@ func (p *Postgres) FindNearDuplicates(ctx context.Context, userName string, thre
 }
 
 // FindNearDuplicatesByIDs restricts near-duplicate scan to pairs where at least one node is in ids.
+// Wrapped in a read-only tx with SET LOCAL statement_timeout = '120s' (same reason as FindNearDuplicates).
 func (p *Postgres) FindNearDuplicatesByIDs(ctx context.Context, userName string, ids []string, threshold float64, limit int) ([]DuplicatePair, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows, err := p.pool.Query(ctx, fmt.Sprintf(queries.FindNearDuplicatesByIDs, graphName), userName, ids, threshold, limit)
+
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, fmt.Errorf("find near duplicates by ids begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // read-only tx, rollback error is irrelevant
+
+	if _, err = tx.Exec(ctx, "SET LOCAL statement_timeout = '120s'"); err != nil {
+		return nil, fmt.Errorf("find near duplicates by ids set timeout: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, fmt.Sprintf(queries.FindNearDuplicatesByIDs, graphName), userName, ids, threshold, limit)
 	if err != nil {
 		return nil, fmt.Errorf("find near duplicates by ids: %w", err)
 	}
