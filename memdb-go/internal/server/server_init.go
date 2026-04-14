@@ -80,6 +80,7 @@ func initReorganizer(
 	_ context.Context,
 	cfg *config.Config,
 	pg *db.Postgres,
+	rd *db.Redis,
 	emb embedder.Embedder,
 	wmCache *db.WorkingMemoryCache,
 	extractor *llm.LLMExtractor,
@@ -97,6 +98,9 @@ func initReorganizer(
 	}
 	if profiler != nil {
 		reorg.SetProfiler(profiler)
+	}
+	if rd != nil {
+		reorg.SetCacheInvalidator(scheduler.NewRedisCacheInvalidator(rd.Client(), logger))
 	}
 	logger.Info("scheduler reorganizer initialized",
 		slog.String("model", cfg.LLMReorgModel),

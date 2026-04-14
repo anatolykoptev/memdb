@@ -23,6 +23,7 @@ func (r *Reorganizer) removeMergedNode(ctx context.Context, cubeID, removeID, ke
 		}
 	}
 	r.evictVSet(ctx, cubeID, removeID, "reorganizer: vset evict failed (non-fatal)")
+	r.invalidateCaches(ctx, cubeID, removeID)
 }
 
 // removeContradictedNode hard-deletes a contradicted memory and invalidates its graph edges.
@@ -49,6 +50,20 @@ func (r *Reorganizer) removeContradictedNode(ctx context.Context, cubeID, contra
 			slog.String("contradicted_id", contradictedID), slog.String("by", keepID))
 	}
 	r.evictVSet(ctx, cubeID, contradictedID, "reorganizer: vset evict contradicted failed (non-fatal)")
+	r.invalidateCaches(ctx, cubeID, contradictedID)
+}
+
+// invalidateCaches purges the Redis search-result and per-memory caches for the given ID.
+// Prevents clients from receiving stale IDs in subsequent search responses after a
+// soft-delete (merged) or hard-delete (contradicted). Non-fatal: no-op if cacheInvalidator is nil.
+func (r *Reorganizer) invalidateCaches(ctx context.Context, cubeID, memoryID string) {
+	if r.cacheInvalidator == nil {
+		return
+	}
+	r.cacheInvalidator.Invalidate(ctx,
+		"memdb:db:search:*:"+cubeID+":*", // vector/fulltext search results for this cube
+		"memdb:db:memory:"+memoryID,       // per-ID direct get cache
+	)
 }
 
 // evictVSet removes an ID from the VSET hot cache (non-fatal).
