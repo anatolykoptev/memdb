@@ -3,9 +3,7 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -21,8 +19,8 @@ type Config struct {
 	PythonBackendURL string `json:"python_backend_url"`
 
 	// Authentication
-	AuthEnabled       bool   `json:"auth_enabled"`
-	MasterKeyHash     string `json:"master_key_hash"`      // SHA-256 hex digest
+	AuthEnabled           bool   `json:"auth_enabled"`
+	MasterKeyHash         string `json:"master_key_hash"`         // SHA-256 hex digest
 	InternalServiceSecret string `json:"internal_service_secret"` // service-to-service bypass
 
 	// Logging
@@ -45,32 +43,33 @@ type Config struct {
 
 	// Database clients (Phase 2)
 	PostgresURL string `json:"postgres_url"`
-	QdrantAddr  string `json:"qdrant_addr"` // host:port for gRPC
+	QdrantAddr  string `json:"qdrant_addr"`  // host:port for gRPC
 	DBRedisURL  string `json:"db_redis_url"` // separate from cache Redis DB
 
 	// Embedder
-	EmbedderType  string `json:"embedder_type"`   // "onnx", "voyage", or "ollama"
+	EmbedderType     string `json:"embedder_type"`       // "onnx", "voyage", or "ollama"
 	ONNXModelDir     string `json:"onnx_model_dir"`      // path to ONNX model files
 	ONNXModelDirCode string `json:"onnx_model_dir_code"` // path to code ONNX model (optional)
-	VoyageAPIKey  string `json:"voyage_api_key"`   // kept for rollback
-	EmbedderModel string `json:"embedder_model"`   // model name (voyage or ollama)
-	OllamaURL     string `json:"ollama_url"`       // Ollama server URL (e.g. http://ollama:11434)
-	OllamaDim     int    `json:"ollama_dim"`       // embedding dimension override (0 = use model default)
-	OllamaPrefix  string `json:"ollama_prefix"`    // client-side text prefix ("" = no prefix, raw text like ONNX)
-	OllamaQuery   string `json:"ollama_query"`     // client-side query prefix for EmbedQuery ("" = same as OllamaPrefix)
-	EmbedURL      string `json:"embed_url"`        // HTTP embed-server sidecar URL (for type="http")
-	EmbedURLCode  string `json:"embed_url_code"`   // separate sidecar URL for code model (optional)
+	VoyageAPIKey     string `json:"voyage_api_key"`      // kept for rollback
+	EmbedderModel    string `json:"embedder_model"`      // model name (voyage or ollama)
+	OllamaURL        string `json:"ollama_url"`          // Ollama server URL (e.g. http://ollama:11434)
+	OllamaDim        int    `json:"ollama_dim"`          // embedding dimension override (0 = use model default)
+	OllamaPrefix     string `json:"ollama_prefix"`       // client-side text prefix ("" = no prefix, raw text like ONNX)
+	OllamaQuery      string `json:"ollama_query"`        // client-side query prefix for EmbedQuery ("" = same as OllamaPrefix)
+	EmbedURL         string `json:"embed_url"`           // HTTP embed-server sidecar URL (for type="http")
+	EmbedURLCode     string `json:"embed_url_code"`      // separate sidecar URL for code model (optional)
 
 	// API settings
 	EnableChatAPI bool `json:"enable_chat_api"`
 
 	// LLM proxy (CLIProxyAPI — internal Gemini proxy)
-	LLMProxyURL      string `json:"llm_proxy_url"`
-	LLMProxyAPIKey   string `json:"llm_proxy_api_key"`
-	LLMDefaultModel    string   `json:"llm_default_model"`
-	LLMSearchModel     string   `json:"llm_search_model"`     // model for search LLM calls: rerank, iterative (default: gemini-2.0-flash)
-	LLMExtractModel    string   `json:"llm_extract_model"`    // model for fine-mode extraction (default: gemini-2.0-flash-lite)
-	LLMFallbackModels  []string `json:"llm_fallback_models"`  // fallback models tried on quota errors (comma-separated env)
+	LLMProxyURL       string   `json:"llm_proxy_url"`
+	LLMProxyAPIKey    string   `json:"llm_proxy_api_key"`
+	LLMDefaultModel   string   `json:"llm_default_model"`
+	LLMSearchModel    string   `json:"llm_search_model"`    // model for search LLM calls: rerank, iterative (default: gemini-2.0-flash)
+	LLMExtractModel   string   `json:"llm_extract_model"`   // model for fine-mode extraction (default: gemini-2.0-flash-lite)
+	LLMReorgModel     string   `json:"llm_reorg_model"`     // model for memory reorganizer consolidation (default: gemini-2.5-flash-lite)
+	LLMFallbackModels []string `json:"llm_fallback_models"` // fallback models tried on quota errors (comma-separated env)
 
 	// Buffer zone (batch add before LLM extraction)
 	BufferEnabled bool          `json:"buffer_enabled"`
@@ -113,8 +112,8 @@ func Load() *Config {
 
 		PythonBackendURL: envStr("MEMDB_PYTHON_URL", "http://localhost:8000"),
 
-		AuthEnabled:       envBool("AUTH_ENABLED", false),
-		MasterKeyHash:     envStr("MASTER_KEY_HASH", ""),
+		AuthEnabled:           envBool("AUTH_ENABLED", false),
+		MasterKeyHash:         envStr("MASTER_KEY_HASH", ""),
 		InternalServiceSecret: envStr("INTERNAL_SERVICE_SECRET", ""),
 
 		LogLevel:  envStr("MEMDB_LOG_LEVEL", "info"),
@@ -135,25 +134,26 @@ func Load() *Config {
 		QdrantAddr:  envStr("MEMDB_QDRANT_ADDR", ""),
 		DBRedisURL:  envStr("MEMDB_DB_REDIS_URL", ""),
 
-		EmbedderType:  envStr("MEMDB_EMBEDDER_TYPE", "onnx"),
+		EmbedderType:     envStr("MEMDB_EMBEDDER_TYPE", "onnx"),
 		ONNXModelDir:     envStr("MEMDB_ONNX_MODEL_DIR", "/models"),
 		ONNXModelDirCode: envStr("MEMDB_ONNX_MODEL_DIR_CODE", ""),
-		VoyageAPIKey:  envStr("VOYAGE_API_KEY", ""),
-		EmbedderModel: envStr("MEMDB_EMBEDDER_MODEL", "voyage-4-lite"),
-		OllamaURL:     envStr("MEMDB_OLLAMA_URL", "http://localhost:11434"),
-		OllamaDim:     envInt("MEMDB_OLLAMA_DIM", 0),
-		OllamaPrefix:  envStr("MEMDB_OLLAMA_PREFIX", ""),
-		OllamaQuery:   envStr("MEMDB_OLLAMA_QUERY_PREFIX", ""),
-		EmbedURL:      envStr("MEMDB_EMBED_URL", ""),
-		EmbedURLCode:  envStr("MEMDB_EMBED_URL_CODE", ""),
+		VoyageAPIKey:     envStr("VOYAGE_API_KEY", ""),
+		EmbedderModel:    envStr("MEMDB_EMBEDDER_MODEL", "voyage-4-lite"),
+		OllamaURL:        envStr("MEMDB_OLLAMA_URL", "http://localhost:11434"),
+		OllamaDim:        envInt("MEMDB_OLLAMA_DIM", 0),
+		OllamaPrefix:     envStr("MEMDB_OLLAMA_PREFIX", ""),
+		OllamaQuery:      envStr("MEMDB_OLLAMA_QUERY_PREFIX", ""),
+		EmbedURL:         envStr("MEMDB_EMBED_URL", ""),
+		EmbedURLCode:     envStr("MEMDB_EMBED_URL_CODE", ""),
 
 		EnableChatAPI: envBool("ENABLE_CHAT_API", false),
 
-		LLMProxyURL:     envStr("MEMDB_LLM_PROXY_URL", "http://cliproxyapi:8317"),
-		LLMProxyAPIKey:  envStr("CLI_PROXY_API_KEY", ""),
+		LLMProxyURL:       envStr("MEMDB_LLM_PROXY_URL", "http://cliproxyapi:8317"),
+		LLMProxyAPIKey:    envStr("CLI_PROXY_API_KEY", ""),
 		LLMDefaultModel:   envStr("MEMDB_LLM_MODEL", "gemini-2.5-flash"),
 		LLMSearchModel:    envStr("MEMDB_LLM_SEARCH_MODEL", "gemini-2.0-flash"),
 		LLMExtractModel:   envStr("MEMDB_LLM_EXTRACT_MODEL", "gemini-2.0-flash-lite"),
+		LLMReorgModel:     envStr("MEMDB_REORG_LLM_MODEL", "gemini-2.5-flash-lite"),
 		LLMFallbackModels: envCSV("MEMDB_LLM_FALLBACK_MODELS", nil),
 
 		BufferEnabled: envBool("MEMDB_BUFFER_ENABLED", false),
@@ -165,7 +165,7 @@ func Load() *Config {
 
 		SearXNGURL:     envStr("SEARXNG_URL", ""),
 		WebshareAPIKey: envStr("WEBSHARE_API_KEY", ""),
-		MemDBGoURL: envStr("MEMDB_GO_URL", ""),
+		MemDBGoURL:     envStr("MEMDB_GO_URL", ""),
 	}
 }
 
@@ -181,61 +181,4 @@ func (c *Config) String() string {
 // PortStr returns the port as a string.
 func (c *Config) PortStr() string {
 	return strconv.Itoa(c.Port)
-}
-
-// --- helpers ---
-
-func envStr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-func envInt(key string, fallback int) int {
-	if v := os.Getenv(key); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			return i
-		}
-	}
-	return fallback
-}
-
-func envFloat(key string, fallback float64) float64 {
-	if v := os.Getenv(key); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return f
-		}
-	}
-	return fallback
-}
-
-func envBool(key string, fallback bool) bool {
-	if v := os.Getenv(key); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			return b
-		}
-	}
-	return fallback
-}
-
-func envCSV(key string, def []string) []string {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	parts := strings.Split(v, ",")
-	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
-	}
-	return parts
-}
-
-func envDuration(key string, fallback time.Duration) time.Duration {
-	if v := os.Getenv(key); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			return d
-		}
-	}
-	return fallback
 }

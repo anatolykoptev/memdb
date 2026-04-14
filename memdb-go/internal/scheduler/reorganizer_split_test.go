@@ -27,6 +27,10 @@ func TestSplitLargeCluster(t *testing.T) {
 		{"20 nodes chunks of 8", 20, 8, 3, 4},
 		{"16 nodes chunks of 8", 16, 8, 2, 8},
 		{"maxSize zero passthrough", 5, 0, 1, 5},
+		// N=6 cases (production maxClusterSize)
+		{"exactly 6", 6, 6, 1, 6},
+		{"20 nodes chunks of 6", 20, 6, 4, 2},
+		{"12 nodes chunks of 6", 12, 6, 2, 6},
 	}
 
 	for _, tc := range tests {
