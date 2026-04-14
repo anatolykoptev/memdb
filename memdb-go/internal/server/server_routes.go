@@ -89,4 +89,5 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
 
 	// ─── Admin endpoints ────────────────────────────────────────────────
 	mux.HandleFunc("POST /product/admin/reprocess", h.AdminReprocess)
+	mux.HandleFunc("POST /product/admin/reorg", h.AdminReorg)
 }
