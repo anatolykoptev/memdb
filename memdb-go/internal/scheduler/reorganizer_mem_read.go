@@ -528,7 +528,16 @@ func (r *Reorganizer) processLegacyNode(ctx context.Context, userID, cubeID stri
 		return 0, true
 	}
 
-	facts, err := r.llmEnhance(ctx, rawText)
+	// Fast path: skip LLM for texts that are already clean structured sentences.
+	// A raw note with ≥8 words and no JSON/code markers is taken as-is.
+	var facts []enhancementFact
+	var err error
+	if isCleanText(rawText) {
+		log.Debug("mem_read: skip llmEnhance (clean text)", slog.String("wm_id", wmID))
+		facts = []enhancementFact{{Text: rawText}}
+	} else {
+		facts, err = r.llmEnhance(ctx, rawText)
+	}
 	if err != nil {
 		log.Warn("mem_read: llmEnhance failed", slog.String("wm_id", wmID), slog.Any("error", err))
 		return 0, true
@@ -604,6 +613,30 @@ func buildLegacyLTMNodes(facts []enhancementFact, embs [][]float32, userID, cube
 		})
 	}
 	return ltmNodes
+}
+
+// isCleanText reports whether rawText is a clean, structured sentence that can be
+// stored as-is without LLM enhancement (legacy path fast-skip).
+// Criteria: ≥8 words, does not start with JSON/code markers, no curly braces.
+func isCleanText(s string) bool {
+	if len(s) < 10 {
+		return false
+	}
+	// Reject obvious structured data / code
+	trimmed := strings.TrimSpace(s)
+	if len(trimmed) == 0 {
+		return false
+	}
+	first := trimmed[0]
+	if first == '{' || first == '[' || first == '`' {
+		return false
+	}
+	if strings.Contains(trimmed, "```") || strings.Contains(trimmed, "\n\n\n") {
+		return false
+	}
+	// Require minimum word count
+	words := strings.Fields(trimmed)
+	return len(words) >= 8
 }
 
 // llmEnhance calls the LLM to extract structured facts from a raw WM note (legacy path).

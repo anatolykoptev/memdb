@@ -19,7 +19,8 @@ import (
 
 const (
 	consolidateLogPreviewLen = 80  // chars of merged text to log as preview
-	consolidateLLMMaxTokens  = 512 // max_tokens for consolidation LLM call
+	consolidateLLMMaxTokens      = 512 // max_tokens for consolidation LLM call
+	consolidateLLMMaxTokensPair  = 192 // max_tokens for 2-node cluster (short JSON response)
 	consolidateErrTruncLen   = 200 // max chars of error LLM output to include in error message
 
 	// maxClusterSize caps how many memories are sent to the LLM in one

@@ -76,6 +76,10 @@ type ExtractedFact struct {
 	// Each relation links two entities from the Entities array via a predicate.
 	// Populated by LLM; used to build entity-to-entity edges in the knowledge graph.
 	Relations []EntityRelation `json:"relations,omitempty"`
+	// Hallucinated is set to true by the LLM when the fact is not explicitly supported
+	// by the user's messages (inferred or contradicted). Hallucinated facts are dropped
+	// before insert, eliminating the need for a separate filterHallucinatedFacts call.
+	Hallucinated bool `json:"hallucinated,omitempty"`
 	// ContentHash is the SHA-256 content hash set by the add pipeline before insert.
 	// Not populated by LLM — set by filterAddsByContentHash for dedup tracking.
 	ContentHash string `json:"-"`
@@ -167,6 +171,7 @@ For each fact, output a JSON object with these fields:
 - "confidence": float 0.0–1.0 — your certainty this is a real, useful fact
 - "target_id": (only for "update" or "delete") the id of the existing memory to change
 - "valid_at": ISO-8601 timestamp when this fact became true (resolve from conversation dates/times; omit if unknown)
+- "hallucinated": true if the fact is NOT explicitly stated by the user (inferred, assumed, or contradicted by the user's words). Omit or set false for facts the user clearly stated.
 - "tags": an array of 2-4 strings representing key entities, topics or concepts extracted from this fact (e.g. ["Python", "Programming"]). Never leave empty for add/update.
 - "entities": array of named entities in this fact (up to 5): [{"name": "...", "type": "PERSON|ORG|PLACE|CONCEPT|PRODUCT"}]. Omit if no clear named entities exist.
 - "relations": array of directed entity-to-entity relationships (up to 3): [{"subject": "...", "predicate": "WORKS_AT|LIVES_IN|KNOWS|PART_OF|CREATED_BY|OWNS|LOCATED_IN|MEMBER_OF", "object": "..."}]. Subject and object must be names from the entities array. Omit if no clear relationships between entities exist.

@@ -67,11 +67,39 @@ type filterVerdict struct {
 // filterHallucinatedFacts validates extracted facts against the conversation,
 // removing any that the user never explicitly stated. Facts are kept by default
 // if the LLM call fails or a specific verdict cannot be parsed.
+//
+// Fast path: if the extractor already flagged any facts with Hallucinated=true,
+// use those flags directly without a second LLM round-trip.
 func (h *Handler) filterHallucinatedFacts(ctx context.Context, conversation string, facts []llm.ExtractedFact) []llm.ExtractedFact {
-	if len(facts) == 0 || h.llmChat == nil {
+	// Skip LLM call for trivial sets: 0-2 facts rarely contain hallucinations
+	// worth a full round-trip, and the extractor's own confidence filter already
+	// handles the most common cases.
+	if len(facts) <= 2 || h.llmChat == nil {
 		return facts
 	}
 
+	// Fast path: extractor already populated Hallucinated field — use it directly.
+	anyFlagged := false
+	for _, f := range facts {
+		if f.Hallucinated {
+			anyFlagged = true
+			break
+		}
+	}
+	if anyFlagged {
+		var kept []llm.ExtractedFact
+		for _, f := range facts {
+			if !f.Hallucinated {
+				kept = append(kept, f)
+			} else {
+				h.logger.Debug("hallucination filter: removed fact (extractor flag)",
+					slog.String("memory", f.Memory))
+			}
+		}
+		return kept
+	}
+
+	// Slow path: extractor did not flag anything — run dedicated LLM filter.
 	// Build indexed memories map: {"0": "fact text", "1": "fact text", ...}
 	memories := make(map[string]string, len(facts))
 	for i, f := range facts {
