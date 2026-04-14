@@ -70,6 +70,7 @@ type Config struct {
 	LLMExtractModel   string   `json:"llm_extract_model"`   // model for fine-mode extraction (default: gemini-2.0-flash-lite)
 	LLMReorgModel     string   `json:"llm_reorg_model"`     // model for memory reorganizer consolidation (default: gemini-2.5-flash-lite)
 	LLMFallbackModels []string `json:"llm_fallback_models"` // fallback models tried on quota errors (comma-separated env)
+	ReorgUseHNSW      bool     `json:"reorg_use_hnsw"`      // use HNSW index for FindNearDuplicates (env: MEMDB_REORG_USE_HNSW, default false)
 
 	// Buffer zone (batch add before LLM extraction)
 	BufferEnabled bool          `json:"buffer_enabled"`
@@ -155,6 +156,7 @@ func Load() *Config {
 		LLMExtractModel:   envStr("MEMDB_LLM_EXTRACT_MODEL", "gemini-2.0-flash-lite"),
 		LLMReorgModel:     envStr("MEMDB_REORG_LLM_MODEL", "gemini-2.5-flash-lite"),
 		LLMFallbackModels: envCSV("MEMDB_LLM_FALLBACK_MODELS", nil),
+		ReorgUseHNSW:      envBool("MEMDB_REORG_USE_HNSW", false),
 
 		BufferEnabled: envBool("MEMDB_BUFFER_ENABLED", false),
 		BufferSize:    envInt("MEMDB_BUFFER_SIZE", defaultBufferSize),

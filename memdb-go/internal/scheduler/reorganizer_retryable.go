@@ -16,7 +16,7 @@ import (
 // LLM consolidation failures per-cluster are non-fatal (logged, not returned).
 // Only DB-level errors (FindNearDuplicates) are returned for retry.
 func (r *Reorganizer) RunWithError(ctx context.Context, cubeID string) error {
-	pairs, err := r.postgres.FindNearDuplicates(ctx, cubeID, dupThreshold, dupScanLimit)
+	pairs, err := r.findNearDuplicates(ctx, cubeID)
 	if err != nil {
 		return fmt.Errorf("reorganizer: FindNearDuplicates: %w", err)
 	}

@@ -84,3 +84,79 @@ func SearchLTMByVectorSQL() string { return SearchLTMByVector }
 
 // FindNearDuplicatesSQL returns the FindNearDuplicates query string for testing.
 func FindNearDuplicatesSQL() string { return FindNearDuplicates }
+
+// FindNearDuplicatesHNSW returns near-duplicate pairs using the HNSW index on the embedding column.
+// For each activated memory a, it pulls top-K nearest neighbours via an indexed LATERAL scan,
+// then filters by the cosine-similarity threshold. O(N·topK·log N) vs the O(N²) self-join
+// in FindNearDuplicates. Approximate — recall depends on hnsw.ef_search (caller must SET LOCAL).
+//
+// The a.id < b.id predicate deduplicates symmetric pairs.
+// %[1]s = graph schema name (e.g. memos_graph).
+//
+// Args: $1 = user_name (text), $2 = similarity threshold (float64), $3 = limit (int), $4 = per-node top-K (int)
+const FindNearDuplicatesHNSW = `
+SELECT
+    a.id                    AS id_a,
+    a.properties->>'memory' AS mem_a,
+    b.id                    AS id_b,
+    b.properties->>'memory' AS mem_b,
+    1 - (a.embedding <=> b.embedding) AS score
+FROM %[1]s."Memory" a
+CROSS JOIN LATERAL (
+    SELECT m.id, m.properties, m.embedding
+    FROM %[1]s."Memory" m
+    WHERE m.id > a.id
+      AND m.properties->>'user_name' = $1
+      AND m.properties->>'status' = 'activated'
+      AND m.properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+      AND m.embedding IS NOT NULL
+    ORDER BY m.embedding <=> a.embedding
+    LIMIT $4
+) b
+WHERE a.properties->>'user_name' = $1
+  AND a.properties->>'status' = 'activated'
+  AND a.properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+  AND a.embedding IS NOT NULL
+  AND 1 - (a.embedding <=> b.embedding) >= $2
+ORDER BY score DESC
+LIMIT $3`
+
+// FindNearDuplicatesHNSWByIDs is the HNSW variant of FindNearDuplicatesByIDs.
+// Restricted to pairs where at least one node is in $2 (text[] of memory IDs).
+//
+// Args: $1 = user_name (text), $2 = ids (text[]), $3 = similarity threshold (float64),
+//
+//	$4 = limit (int), $5 = per-node top-K (int)
+const FindNearDuplicatesHNSWByIDs = `
+SELECT
+    a.id                    AS id_a,
+    a.properties->>'memory' AS mem_a,
+    b.id                    AS id_b,
+    b.properties->>'memory' AS mem_b,
+    1 - (a.embedding <=> b.embedding) AS score
+FROM %[1]s."Memory" a
+CROSS JOIN LATERAL (
+    SELECT m.id, m.properties, m.embedding
+    FROM %[1]s."Memory" m
+    WHERE m.id > a.id
+      AND m.properties->>'user_name' = $1
+      AND m.properties->>'status' = 'activated'
+      AND m.properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+      AND m.embedding IS NOT NULL
+    ORDER BY m.embedding <=> a.embedding
+    LIMIT $5
+) b
+WHERE a.properties->>'user_name' = $1
+  AND a.properties->>'status' = 'activated'
+  AND a.properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+  AND a.embedding IS NOT NULL
+  AND (a.id = ANY($2) OR b.id = ANY($2))
+  AND 1 - (a.embedding <=> b.embedding) >= $3
+ORDER BY score DESC
+LIMIT $4`
+
+// FindNearDuplicatesHNSWSQL returns the HNSW query string for testing.
+func FindNearDuplicatesHNSWSQL() string { return FindNearDuplicatesHNSW }
+
+// FindNearDuplicatesHNSWByIDsSQL returns the HNSW ByIDs query string for testing.
+func FindNearDuplicatesHNSWByIDsSQL() string { return FindNearDuplicatesHNSWByIDs }
