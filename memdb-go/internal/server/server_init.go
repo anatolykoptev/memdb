@@ -102,6 +102,10 @@ func initReorganizer(
 	if rd != nil {
 		reorg.SetCacheInvalidator(scheduler.NewRedisCacheInvalidator(rd.Client(), logger))
 	}
+	if cfg.ReorgUseHNSW {
+		reorg.SetUseHNSW(true)
+		logger.Info("scheduler reorganizer: HNSW near-duplicate path enabled")
+	}
 	logger.Info("scheduler reorganizer initialized",
 		slog.String("model", cfg.LLMReorgModel),
 		slog.Any("fallback_models", cfg.LLMFallbackModels),

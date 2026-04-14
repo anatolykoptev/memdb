@@ -10,6 +10,46 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
+// reorgPostgres is the narrow Postgres surface used by the Reorganizer.
+// Using an interface (rather than *db.Postgres directly) makes the Reorganizer
+// testable with spy/stub implementations without a live database.
+type reorgPostgres interface {
+	// Near-duplicate detection (legacy O(N²) and HNSW-indexed variants)
+	FindNearDuplicates(ctx context.Context, userName string, threshold float64, limit int) ([]db.DuplicatePair, error)
+	FindNearDuplicatesByIDs(ctx context.Context, userName string, ids []string, threshold float64, limit int) ([]db.DuplicatePair, error)
+	FindNearDuplicatesHNSW(ctx context.Context, userName string, threshold float64, limit, topK int) ([]db.DuplicatePair, error)
+	FindNearDuplicatesHNSWByIDs(ctx context.Context, userName string, ids []string, threshold float64, limit, topK int) ([]db.DuplicatePair, error)
+
+	// Memory node lifecycle
+	InsertMemoryNodes(ctx context.Context, nodes []db.MemoryInsertNode) error
+	UpdateMemoryNodeFull(ctx context.Context, memoryID, newText, embeddingVec, updatedAt string) error
+	SoftDeleteMerged(ctx context.Context, memoryID, mergedIntoID, updatedAt string) error
+	DeleteByPropertyIDs(ctx context.Context, propertyIDs []string, userName string) (int64, error)
+
+	// Graph edges
+	CreateMemoryEdge(ctx context.Context, fromID, toID, relation, createdAt, validAt string) error
+	InvalidateEdgesByMemoryID(ctx context.Context, memoryID, invalidAt string) error
+	InvalidateEntityEdgesByMemoryID(ctx context.Context, memoryID, invalidAt string) error
+
+	// Entity graph
+	UpsertEntityNodeWithEmbedding(ctx context.Context, name, entityType, userName, now, embVec string) (string, error)
+	UpsertEntityEdge(ctx context.Context, fromEntityID, predicate, toEntityID, memoryID, userName, validAt, createdAt string) error
+
+	// Memory reads
+	GetMemoryByPropertyIDs(ctx context.Context, ids []string, userName string) ([]db.MemNode, error)
+	GetMemoriesByPropertyIDs(ctx context.Context, ids []string) ([]map[string]any, error)
+	FilterExistingContentHashes(ctx context.Context, hashes []string, userName string) (map[string]bool, error)
+	VectorSearch(ctx context.Context, vector []float32, cubeID, personID string, memoryTypes []string, agentID string, limit int) ([]db.VectorSearchResult, error)
+
+	// WorkingMemory
+	SearchLTMByVector(ctx context.Context, userName, embeddingVec string, minScore float64, limit int) ([]db.LTMSearchResult, error)
+	CountWorkingMemory(ctx context.Context, userName string) (int64, error)
+	GetWorkingMemoryOldestFirst(ctx context.Context, userName string, limit int) ([]db.MemNode, error)
+
+	// Importance lifecycle
+	DecayAndArchiveImportance(ctx context.Context, userName string, decayFactor, archiveThreshold float64, now string) (int64, error)
+}
+
 const (
 	// dupThreshold is the cosine similarity above which two memories are
 	// considered near-duplicates and sent for LLM consolidation.
@@ -63,14 +103,15 @@ const (
 //  5. Soft-delete all remove_ids
 //  6. Evict remove_ids from Redis VSET hot cache
 type Reorganizer struct {
-	postgres         *db.Postgres
+	postgres         reorgPostgres          // *db.Postgres in production, spy in tests
 	embedder         embedder.Embedder
 	wmCache          *db.WorkingMemoryCache // nil = VSET not configured
 	llmClient        *llm.Client            // shared LLM client with retry + fallback
 	logger           *slog.Logger
-	llmExtractor     *llm.LLMExtractor  // for ExtractAndDedup (fine-level mem_read)
-	profiler         *Profiler          // for TriggerRefresh after mem_read
-	cacheInvalidator CacheInvalidator   // nil = cache invalidation disabled
+	llmExtractor     *llm.LLMExtractor // for ExtractAndDedup (fine-level mem_read)
+	profiler         *Profiler         // for TriggerRefresh after mem_read
+	cacheInvalidator CacheInvalidator  // nil = cache invalidation disabled
+	useHNSW          bool              // route FindNearDuplicates through HNSW index
 }
 
 // SetLLMExtractor injects the LLM extractor for fine-level mem_read processing.
@@ -102,6 +143,10 @@ func NewReorganizer(
 		logger:    logger,
 	}
 }
+
+// SetUseHNSW enables the HNSW-indexed FindNearDuplicates path.
+// Default false (legacy O(N²) self-join). Set via cfg.ReorgUseHNSW.
+func (r *Reorganizer) SetUseHNSW(v bool) { r.useHNSW = v }
 
 // DecayAndArchive runs the two-phase importance lifecycle for a cube:
 //  1. Multiply importance_score * importanceDecayFactor for all LTM/UserMemory

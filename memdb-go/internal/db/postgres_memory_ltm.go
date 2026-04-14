@@ -94,6 +94,84 @@ func (p *Postgres) FindNearDuplicatesByIDs(ctx context.Context, userName string,
 	return pairs, rows.Err()
 }
 
+// FindNearDuplicatesHNSW is the HNSW-indexed variant of FindNearDuplicates.
+// Uses CROSS JOIN LATERAL with the existing idx_memory_embedding HNSW index.
+// topK is the per-memory candidate pool (recommended: 20). Approximate —
+// SET LOCAL hnsw.ef_search=100 is applied to raise recall above the index default.
+//
+// Same 120s statement_timeout wrapper as the legacy FindNearDuplicates.
+func (p *Postgres) FindNearDuplicatesHNSW(ctx context.Context, userName string, threshold float64, limit, topK int) ([]DuplicatePair, error) {
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, fmt.Errorf("find near duplicates hnsw begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // read-only tx, rollback error is irrelevant
+
+	if _, err = tx.Exec(ctx, "SET LOCAL statement_timeout = '120s'"); err != nil {
+		return nil, fmt.Errorf("find near duplicates hnsw set timeout: %w", err)
+	}
+	if _, err = tx.Exec(ctx, "SET LOCAL hnsw.ef_search = 100"); err != nil {
+		return nil, fmt.Errorf("find near duplicates hnsw set ef_search: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, fmt.Sprintf(queries.FindNearDuplicatesHNSW, graphName), userName, threshold, limit, topK)
+	if err != nil {
+		return nil, fmt.Errorf("find near duplicates hnsw: %w", err)
+	}
+	defer rows.Close()
+	var pairs []DuplicatePair
+	for rows.Next() {
+		var dp DuplicatePair
+		if err := rows.Scan(&dp.IDa, &dp.MemA, &dp.IDb, &dp.MemB, &dp.Score); err != nil {
+			return nil, fmt.Errorf("find near duplicates hnsw scan: %w", err)
+		}
+		pairs = append(pairs, dp)
+	}
+	return pairs, rows.Err()
+}
+
+// FindNearDuplicatesHNSWByIDs is the HNSW variant of FindNearDuplicatesByIDs.
+// Restricts the scan to pairs where at least one node is in ids.
+func (p *Postgres) FindNearDuplicatesHNSWByIDs(ctx context.Context, userName string, ids []string, threshold float64, limit, topK int) ([]DuplicatePair, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, fmt.Errorf("find near duplicates hnsw by ids begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // read-only tx, rollback error is irrelevant
+
+	if _, err = tx.Exec(ctx, "SET LOCAL statement_timeout = '120s'"); err != nil {
+		return nil, fmt.Errorf("find near duplicates hnsw by ids set timeout: %w", err)
+	}
+	if _, err = tx.Exec(ctx, "SET LOCAL hnsw.ef_search = 100"); err != nil {
+		return nil, fmt.Errorf("find near duplicates hnsw by ids set ef_search: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, fmt.Sprintf(queries.FindNearDuplicatesHNSWByIDs, graphName), userName, ids, threshold, limit, topK)
+	if err != nil {
+		return nil, fmt.Errorf("find near duplicates hnsw by ids: %w", err)
+	}
+	defer rows.Close()
+	var pairs []DuplicatePair
+	for rows.Next() {
+		var dp DuplicatePair
+		if err := rows.Scan(&dp.IDa, &dp.MemA, &dp.IDb, &dp.MemB, &dp.Score); err != nil {
+			return nil, fmt.Errorf("find near duplicates hnsw by ids scan: %w", err)
+		}
+		pairs = append(pairs, dp)
+	}
+	return pairs, rows.Err()
+}
+
+// FindNearDuplicatesHNSWSQL returns the HNSW SQL template for testing.
+func FindNearDuplicatesHNSWSQL() string { return queries.FindNearDuplicatesHNSW }
+
+// FindNearDuplicatesHNSWByIDsSQL returns the HNSW ByIDs SQL template for testing.
+func FindNearDuplicatesHNSWByIDsSQL() string { return queries.FindNearDuplicatesHNSWByIDs }
+
 // SoftDeleteMerged marks a memory as merged (activated → merged lifecycle transition).
 func (p *Postgres) SoftDeleteMerged(ctx context.Context, memoryID, mergedIntoID, updatedAt string) error {
 	_, err := p.pool.Exec(ctx, fmt.Sprintf(queries.SoftDeleteMerged, graphName), memoryID, mergedIntoID, updatedAt)

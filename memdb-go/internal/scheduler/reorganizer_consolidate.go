@@ -30,7 +30,28 @@ const (
 	// fuzzyIDMaxDistance is the maximum Levenshtein distance used when
 	// matching LLM-returned IDs that may contain single-character hallucinations.
 	fuzzyIDMaxDistance = 2
+
+	// dupHNSWTopK is the per-memory candidate pool for the HNSW path.
+	// 20 catches near-duplicates at threshold 0.85 with minimal overhead.
+	// Increase to 40 if recall regresses on large cubes.
+	dupHNSWTopK = 20
 )
+
+// findNearDuplicates routes to the HNSW or legacy query based on the feature flag.
+func (r *Reorganizer) findNearDuplicates(ctx context.Context, cubeID string) ([]db.DuplicatePair, error) {
+	if r.useHNSW {
+		return r.postgres.FindNearDuplicatesHNSW(ctx, cubeID, dupThreshold, dupScanLimit, dupHNSWTopK)
+	}
+	return r.postgres.FindNearDuplicates(ctx, cubeID, dupThreshold, dupScanLimit)
+}
+
+// findNearDuplicatesByIDs routes the targeted path the same way.
+func (r *Reorganizer) findNearDuplicatesByIDs(ctx context.Context, cubeID string, ids []string) ([]db.DuplicatePair, error) {
+	if r.useHNSW {
+		return r.postgres.FindNearDuplicatesHNSWByIDs(ctx, cubeID, ids, dupThreshold, dupScanLimit, dupHNSWTopK)
+	}
+	return r.postgres.FindNearDuplicatesByIDs(ctx, cubeID, ids, dupThreshold, dupScanLimit)
+}
 
 // Run performs one reorganization cycle for the given cube (user_name in DB terms).
 // It is safe to call concurrently for different cubes.
@@ -38,7 +59,7 @@ func (r *Reorganizer) Run(ctx context.Context, cubeID string) {
 	log := r.logger.With(slog.String("cube_id", cubeID))
 	log.Debug("reorganizer: starting cycle")
 
-	pairs, err := r.postgres.FindNearDuplicates(ctx, cubeID, dupThreshold, dupScanLimit)
+	pairs, err := r.findNearDuplicates(ctx, cubeID)
 	if err != nil {
 		log.Error("reorganizer: FindNearDuplicates failed", slog.Any("error", err))
 		return
@@ -94,7 +115,7 @@ func (r *Reorganizer) RunTargeted(ctx context.Context, cubeID string, ids []stri
 	)
 	log.Debug("reorganizer: targeted cycle starting")
 
-	pairs, err := r.postgres.FindNearDuplicatesByIDs(ctx, cubeID, ids, dupThreshold, dupScanLimit)
+	pairs, err := r.findNearDuplicatesByIDs(ctx, cubeID, ids)
 	if err != nil {
 		log.Error("reorganizer: FindNearDuplicatesByIDs failed", slog.Any("error", err))
 		return
