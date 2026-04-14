@@ -9,7 +9,7 @@ const (
 	profileInjectDecayAlpha = 0.01  // inject profile: slow decay (0.01/cycle)
 	profileDeepTopK         = 10    // deep profile: wider retrieval window
 	profileDeepRelativity   = 0.85  // deep profile: moderate relevance threshold
-	profileDeepNumStages    = 3     // deep profile: 3 iterative expansion stages
+	profileDeepNumStages    = 2     // deep profile: 2 iterative expansion stages (was 3; saves one LLM+vector round-trip)
 	profileDeepDecayAlpha   = 0.002 // deep profile: very slow decay (0.002/cycle)
 )
 

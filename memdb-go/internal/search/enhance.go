@@ -15,12 +15,15 @@ package search
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -38,9 +41,41 @@ If a memory needs no changes, return it as-is with its original text.`
 const (
 	enhanceMaxTokens    = 2048
 	enhanceRespLimit    = 32 * 1024 // 32 KB
-	enhanceMinMemories  = 3        // skip enhancement for trivial result sets
-	enhanceMaxMemories  = 15       // cap to avoid prompt overflow
+	enhanceMinMemories  = 3         // skip enhancement for trivial result sets
+	enhanceMaxMemories  = 15        // cap to avoid prompt overflow
+	enhanceCacheTTL     = 3 * time.Minute
 )
+
+// enhanceCache is an in-process TTL cache for EnhanceMemories results.
+// Key: sha256(query + sorted_memory_ids). Value: enhanced []map[string]any.
+type enhanceCacheStore struct {
+	mu      sync.Mutex
+	entries map[string]*enhanceCacheEntry
+}
+
+type enhanceCacheEntry struct {
+	expires  time.Time
+	result   []map[string]any
+}
+
+func (c *enhanceCacheStore) get(key string) ([]map[string]any, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[key]
+	if !ok || time.Now().After(e.expires) {
+		delete(c.entries, key)
+		return nil, false
+	}
+	return e.result, true
+}
+
+func (c *enhanceCacheStore) set(key string, result []map[string]any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[key] = &enhanceCacheEntry{expires: time.Now().Add(enhanceCacheTTL), result: result}
+}
+
+var globalEnhanceCache = &enhanceCacheStore{entries: make(map[string]*enhanceCacheEntry)}
 
 // EnhanceConfig configures the post-retrieval enhancement LLM call.
 type EnhanceConfig struct {
@@ -90,6 +125,17 @@ func EnhanceMemories(
 		return memories
 	}
 
+	// Cache lookup: key = sha256(query + sorted memory IDs).
+	ids := make([]string, len(inputs))
+	for i, inp := range inputs {
+		ids[i] = inp.ID
+	}
+	sort.Strings(ids)
+	cacheKey := fmt.Sprintf("%x", sha256.Sum256([]byte(query+"\x00"+strings.Join(ids, ","))))
+	if cached, ok := globalEnhanceCache.get(cacheKey); ok {
+		return cached
+	}
+
 	inputJSON, _ := json.Marshal(inputs)
 	userMsg := fmt.Sprintf("Query: %s\n\nMemories:\n%s\n\nJSON:", query, string(inputJSON))
 
@@ -98,7 +144,9 @@ func EnhanceMemories(
 		return memories
 	}
 
-	return applyEnhancements(memories, enhanced)
+	result := applyEnhancements(memories, enhanced)
+	globalEnhanceCache.set(cacheKey, result)
+	return result
 }
 
 // callEnhanceLLM makes the LLM call for memory enhancement.

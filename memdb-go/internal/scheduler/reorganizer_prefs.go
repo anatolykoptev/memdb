@@ -14,6 +14,14 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
+const (
+	// prefDedupThreshold is the cosine similarity above which a new preference
+	// is considered a near-duplicate of an existing one and skipped.
+	prefDedupThreshold = 0.93
+	// prefDedupTopK is how many existing prefs we retrieve per new pref for dedup check.
+	prefDedupTopK = 3
+)
+
 // ExtractAndStorePreferences implements the Go-native pref_add handler.
 //
 // Extracts user preferences from conversation text via LLM and stores them
@@ -48,6 +56,13 @@ func (r *Reorganizer) ExtractAndStorePreferences(ctx context.Context, userID, cu
 	embs, err := r.embedder.Embed(ctx, prefs)
 	if err != nil {
 		log.Warn("pref_add: embed failed", slog.Any("error", err))
+		return
+	}
+
+	// Step 2b: dedup — skip preferences that are near-duplicates of existing ones.
+	prefs, embs = r.dedupPreferences(ctx, cubeID, prefs, embs, log)
+	if len(prefs) == 0 {
+		log.Debug("pref_add: all preferences already exist (dedup)")
 		return
 	}
 
@@ -87,6 +102,42 @@ func (r *Reorganizer) ExtractAndStorePreferences(ctx context.Context, userID, cu
 		return
 	}
 	log.Info("pref_add: preferences stored", slog.Int("inserted", len(nodes)))
+}
+
+// dedupPreferences filters out preference texts whose embedding is within
+// prefDedupThreshold of an already-stored UserMemory in the cube.
+// Returns filtered (prefs, embs) slices with only genuinely new entries.
+func (r *Reorganizer) dedupPreferences(ctx context.Context, cubeID string, prefs []string, embs [][]float32, log *slog.Logger) ([]string, [][]float32) {
+	var kept []string
+	var keptEmbs [][]float32
+	for i, emb := range embs {
+		if len(emb) == 0 {
+			continue
+		}
+		results, err := r.postgres.VectorSearch(ctx, emb, cubeID, "", []string{"UserMemory"}, "", prefDedupTopK)
+		if err != nil {
+			// On error keep the pref (safe default)
+			kept = append(kept, prefs[i])
+			keptEmbs = append(keptEmbs, emb)
+			continue
+		}
+		isDup := false
+		for _, res := range results {
+			if res.Score >= prefDedupThreshold {
+				log.Debug("pref_add: skipping duplicate preference",
+					slog.String("text", prefs[i]),
+					slog.Float64("score", res.Score),
+				)
+				isDup = true
+				break
+			}
+		}
+		if !isDup {
+			kept = append(kept, prefs[i])
+			keptEmbs = append(keptEmbs, emb)
+		}
+	}
+	return kept, keptEmbs
 }
 
 // llmExtractPreferences calls the LLM to extract user preferences from a conversation.

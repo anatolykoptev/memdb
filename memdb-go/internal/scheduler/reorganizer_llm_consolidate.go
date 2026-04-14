@@ -35,10 +35,16 @@ func (r *Reorganizer) llmConsolidate(ctx context.Context, cluster []memNode) (co
 		{"role": "user", "content": fmt.Sprintf("Memory cluster to consolidate:\n%s", memoriesJSON)},
 	}
 
+	// 2-node clusters need only a short JSON response — cap tokens to reduce cost.
+	maxTok := consolidateLLMMaxTokens
+	if len(cluster) == 2 {
+		maxTok = consolidateLLMMaxTokensPair
+	}
+
 	callCtx, cancel := context.WithTimeout(ctx, reorganizerLLMTimeout)
 	defer cancel()
 
-	raw, err := r.callLLM(callCtx, msgs, consolidateLLMMaxTokens)
+	raw, err := r.callLLM(callCtx, msgs, maxTok)
 	if err != nil {
 		return consolidationResult{}, err
 	}

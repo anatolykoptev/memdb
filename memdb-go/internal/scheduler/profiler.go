@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
@@ -36,9 +37,10 @@ const (
 )
 
 const (
-	profileKeyPrefix = "profile:"
-	profileTTL       = time.Hour
-	profileMinLength = 50 // minimum chars of UserMemory content needed to generate
+	profileKeyPrefix    = "profile:"
+	profileTTL          = time.Hour
+	profileMinLength    = 50              // minimum chars of UserMemory content needed to generate
+	profileRefreshCooldown = 10 * time.Minute // min interval between LLM refreshes per cube
 )
 
 // Profiler generates and caches user profile summaries in Redis.
@@ -49,6 +51,9 @@ type Profiler struct {
 	llmProxyKey   string
 	llmModel      string
 	logger        *slog.Logger
+
+	mu          sync.Mutex
+	lastRefresh map[string]time.Time // per-cube last refresh time (cooldown)
 }
 
 // NewProfiler creates a Profiler. All dependencies must be non-nil.
@@ -65,7 +70,19 @@ func NewProfiler(pg *db.Postgres, rd *db.Redis, llmURL, llmKey, llmModel string,
 
 // TriggerRefresh kicks off a background profile refresh for cubeID.
 // Non-blocking: runs in goroutine, failures are logged and silently ignored.
+// Cooldown: at most one LLM call per cube per profileRefreshCooldown interval.
 func (p *Profiler) TriggerRefresh(cubeID string) {
+	p.mu.Lock()
+	if p.lastRefresh == nil {
+		p.lastRefresh = make(map[string]time.Time)
+	}
+	if since := time.Since(p.lastRefresh[cubeID]); since < profileRefreshCooldown {
+		p.mu.Unlock()
+		return // still within cooldown, skip
+	}
+	p.lastRefresh[cubeID] = time.Now()
+	p.mu.Unlock()
+
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), profileRefreshTimeout)
 		defer cancel()
