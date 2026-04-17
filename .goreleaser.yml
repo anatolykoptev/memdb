@@ -2,11 +2,6 @@ version: 2
 
 project_name: memdb
 
-before:
-  hooks:
-    - go mod tidy
-    - go mod download
-
 builds:
   - id: mcp-server
     main: ./cmd/mcp-server
@@ -61,7 +56,7 @@ changelog:
 
 release:
   github:
-    owner: MemDBai
-    name: MemDB
+    owner: anatolykoptev
+    name: memdb
   draft: false
   prerelease: auto
