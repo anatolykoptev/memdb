@@ -1,0 +1,914 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MemDB Go API",
+    "description": "MemDB Go server — memory management, search, entity graph, bi-temporal edges.\n\nAll endpoints accept/return JSON. Authentication via `Authorization: Bearer <key>` when `AUTH_ENABLED=true`.",
+    "version": "2.0.0",
+    "contact": {
+      "name": "MemDB"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local development"
+    }
+  ],
+  "tags": [
+    {
+      "name": "health",
+      "description": "Health and readiness checks"
+    },
+    {
+      "name": "memory",
+      "description": "Memory CRUD operations"
+    },
+    {
+      "name": "search",
+      "description": "Memory search pipeline"
+    },
+    {
+      "name": "users",
+      "description": "User management"
+    },
+    {
+      "name": "scheduler",
+      "description": "Background scheduler status"
+    },
+    {
+      "name": "embeddings",
+      "description": "OpenAI-compatible embeddings"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health check",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "example": {
+                  "code": 200,
+                  "status": "ok",
+                  "hostname": "memdb-1"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Readiness check",
+        "description": "Checks connectivity to Postgres, Qdrant, and Redis.",
+        "operationId": "ready",
+        "responses": {
+          "200": {
+            "description": "All dependencies reachable"
+          },
+          "503": {
+            "description": "One or more dependencies unavailable"
+          }
+        }
+      }
+    },
+    "/product/add": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Add memories",
+        "description": "Add one or more memories for a user. Supports `fast` (no LLM) and `fine` (LLM extraction + entity graph) modes.",
+        "operationId": "addMemory",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddRequest"
+              },
+              "example": {
+                "user_id": "alice",
+                "mem_cube_id": "alice",
+                "messages": [
+                  {
+                    "role": "user",
+                    "content": "I work at Yandex as a Go engineer."
+                  }
+                ],
+                "mode": "fine"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Memories added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/product/search": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Search memories",
+        "description": "Multi-stage search: vector + fulltext + graph BFS + entity graph + LLM rerank + dedup.",
+        "operationId": "searchMemories",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              },
+              "example": {
+                "user_id": "alice",
+                "mem_cube_id": "alice",
+                "query": "Where does Alice work?",
+                "top_k": 5
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Search results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/product/get_all": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Get all memories",
+        "description": "Returns paginated list of memories for a user/cube.",
+        "operationId": "getAllMemories",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetAllRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of memories",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetAllResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/product/get_memory": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Get memory by ID (POST)",
+        "operationId": "getMemoryPost",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "memory_id": {
+                    "type": "string"
+                  },
+                  "user_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "memory_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Memory node"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/product/get_memory/{memory_id}": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Get memory by ID (GET)",
+        "operationId": "getMemoryById",
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Memory node"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/product/get_memory_by_ids": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Get memories by IDs (batch)",
+        "operationId": "getMemoriesByIds",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "memory_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "user_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of memory nodes"
+          }
+        }
+      }
+    },
+    "/product/delete_memory": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Delete memories",
+        "description": "Hard-deletes memories by ID. Also invalidates associated graph edges (bi-temporal: sets invalid_at).",
+        "operationId": "deleteMemory",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "memory_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "user_id": {
+                    "type": "string"
+                  },
+                  "mem_cube_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted count"
+          }
+        }
+      }
+    },
+    "/product/users": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "List all users",
+        "operationId": "listUsers",
+        "responses": {
+          "200": {
+            "description": "List of user IDs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "users": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/product/users/register": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Register user",
+        "operationId": "registerUser",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "user_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "user_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User registered"
+          }
+        }
+      }
+    },
+    "/product/users/{user_id}": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Get user info",
+        "operationId": "getUser",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User info"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/product/users/{user_id}/config": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Get user config",
+        "operationId": "getUserConfig",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User config JSON"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Update user config",
+        "operationId": "updateUserConfig",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Config updated"
+          }
+        }
+      }
+    },
+    "/product/configure": {
+      "post": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Configure user (upsert config)",
+        "operationId": "configure",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Config saved"
+          }
+        }
+      }
+    },
+    "/product/configure/{user_id}": {
+      "get": {
+        "tags": [
+          "users"
+        ],
+        "summary": "Get user config (legacy path)",
+        "operationId": "getConfigLegacy",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User config"
+          }
+        }
+      }
+    },
+    "/product/scheduler/status": {
+      "get": {
+        "tags": [
+          "scheduler"
+        ],
+        "summary": "Scheduler status",
+        "operationId": "schedulerStatus",
+        "responses": {
+          "200": {
+            "description": "Consumer group status"
+          }
+        }
+      }
+    },
+    "/product/scheduler/allstatus": {
+      "get": {
+        "tags": [
+          "scheduler"
+        ],
+        "summary": "Scheduler all status (with DLQ)",
+        "operationId": "schedulerAllStatus",
+        "responses": {
+          "200": {
+            "description": "Extended scheduler status including DLQ"
+          }
+        }
+      }
+    },
+    "/product/scheduler/task_queue_status": {
+      "get": {
+        "tags": [
+          "scheduler"
+        ],
+        "summary": "Task queue stats",
+        "operationId": "schedulerTaskQueueStatus",
+        "responses": {
+          "200": {
+            "description": "Task queue statistics"
+          }
+        }
+      }
+    },
+    "/v1/embeddings": {
+      "post": {
+        "tags": [
+          "embeddings"
+        ],
+        "summary": "Generate embeddings (OpenAI-compatible)",
+        "description": "OpenAI-compatible embeddings endpoint. Accepts `input` as string or array. Backed by ONNX, VoyageAI, or Ollama depending on `MEMDB_EMBEDDER_TYPE`.",
+        "operationId": "createEmbeddings",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmbeddingsRequest"
+              },
+              "example": {
+                "model": "nomic-embed-text",
+                "input": [
+                  "Hello world",
+                  "Привет мир"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Embeddings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "example": 200
+          },
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "hostname": {
+            "type": "string"
+          }
+        }
+      },
+      "AddRequest": {
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "description": "User identifier (cube ID)"
+          },
+          "mem_cube_id": {
+            "type": "string",
+            "description": "Memory cube ID (defaults to user_id)"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "description": "Conversation messages to extract memories from"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "fast",
+              "fine"
+            ],
+            "default": "fast",
+            "description": "fast: no LLM, direct insert. fine: LLM extraction + entity graph + dedup."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Optional metadata attached to extracted memories"
+          }
+        }
+      },
+      "AddResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "memory": {
+                  "type": "string"
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "ADD",
+                    "UPDATE",
+                    "DELETE",
+                    "NONE"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "SearchRequest": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "query"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string"
+          },
+          "mem_cube_id": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string",
+            "description": "Natural language search query"
+          },
+          "top_k": {
+            "type": "integer",
+            "default": 10,
+            "description": "Max results to return"
+          },
+          "memory_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Filter by memory types (LongTermMemory, WorkingMemory, UserMemory, ...)"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "cutoff_date": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Only return memories created after this date"
+          }
+        }
+      },
+      "SearchResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryResult"
+            }
+          }
+        }
+      },
+      "GetAllRequest": {
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "properties": {
+          "user_id": {
+            "type": "string"
+          },
+          "mem_cube_id": {
+            "type": "string"
+          },
+          "memory_type": {
+            "type": "string"
+          },
+          "page": {
+            "type": "integer",
+            "default": 1
+          },
+          "page_size": {
+            "type": "integer",
+            "default": 50
+          }
+        }
+      },
+      "GetAllResponse": {
+        "type": "object",
+        "properties": {
+          "memories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryResult"
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        }
+      },
+      "MemoryResult": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "memory": {
+            "type": "string",
+            "description": "Memory text content"
+          },
+          "score": {
+            "type": "number",
+            "description": "Relevance score (0–2)"
+          },
+          "memory_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "metadata": {
+            "type": "object"
+          }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant",
+              "system"
+            ]
+          },
+          "content": {
+            "type": "string"
+          }
+        }
+      },
+      "EmbeddingsRequest": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "description": "Ignored (model is configured server-side)"
+          },
+          "input": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ],
+            "description": "Text(s) to embed"
+          }
+        }
+      },
+      "EmbeddingsResponse": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "example": "list"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "object": {
+                  "type": "string",
+                  "example": "embedding"
+                },
+                "index": {
+                  "type": "integer"
+                },
+                "embedding": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          "model": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Master API key. Required when AUTH_ENABLED=true."
+      }
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ]
+}

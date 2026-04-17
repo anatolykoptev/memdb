@@ -168,12 +168,15 @@ venv.bak/
 # ignore all office files
 *.pdf
 *.txt
+!memdb-go/vendor/**/modules.txt
+!memdb-go/vendor/modules.txt
 *.docx
 *.doc
 *.pptx
 *.xls
 *.xlsx
 *.json
+!memdb-go/internal/server/static/openapi.json
 *.pkl
 *.html
 
