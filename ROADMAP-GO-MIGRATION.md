@@ -363,6 +363,8 @@ Option C из research (extract `AddMemories`/`ChatComplete` service functions, 
 - [ ] 2 недели без Python-related ошибок в логах
 - [ ] Load test: 50 concurrent adds без degradation
 - [ ] Все safety-net proxy fallbacks заменены на HTTP errors
+  - Включая `NativeAdd` error fallback (`add.go:145-146`) — сейчас `nativeAddForCube` error → `proxyWithBody`. После shut-down Python станет 502 dead upstream. Конвертировать в 500.
+- [ ] Audit `mem_cube_id` field usage in `/product/feedback` clients (потерян после удаления `normalizeFeedback` в Фазе 4.5; grep vaelor / piter-sites перед Phase 5 cut-over)
 
 **После:** docker-compose: postgres, qdrant, redis, memdb-go, go-search, cliproxyapi (6 контейнеров).
 
