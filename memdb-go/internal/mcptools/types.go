@@ -129,11 +129,6 @@ type DumpCubeProxyInput struct {
 	CubeID  string `json:"cube_id,omitempty" jsonschema:"Cube ID to export"`
 }
 
-// ControlSchedulerProxyInput for the control_memory_scheduler proxy tool.
-type ControlSchedulerProxyInput struct {
-	Action string `json:"action" jsonschema:"Action to perform: start or stop"`
-}
-
 // SearchMemoriesProxyInput for proxying search_memories to memdb-go /product/search.
 type SearchMemoriesProxyInput struct {
 	Query      string   `json:"query"`

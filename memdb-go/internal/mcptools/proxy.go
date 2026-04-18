@@ -114,19 +114,6 @@ func RegisterNativeGoProxyTools(server *mcp.Server, memdbGoURL string, serviceSe
 	})
 }
 
-// RegisterPythonProxyTools registers MCP tools that proxy to the Python legacy backend.
-// Covers scheduler control — cube tools (create/list/delete/get_user_cubes) are now native Go via RegisterCubeTools.
-func RegisterPythonProxyTools(server *mcp.Server, pythonURL string, serviceSecret string, logger *slog.Logger) {
-	// control_memory_scheduler
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "control_memory_scheduler",
-		Description: "Control the memory scheduler service (start/stop background processing). (proxied to Python backend)",
-	}, func(ctx context.Context, req *mcp.CallToolRequest, input ControlSchedulerProxyInput) (*mcp.CallToolResult, TextResult, error) {
-		result, err := proxyCall(ctx, pythonURL, "/product/scheduler/wait", serviceSecret, "control_memory_scheduler", input, logger)
-		return nil, result, err
-	})
-}
-
 func truncate(s string, maxLen int) string {
 	if len(s) > maxLen {
 		return s[:maxLen] + "..."

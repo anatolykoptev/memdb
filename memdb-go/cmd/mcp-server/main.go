@@ -48,7 +48,6 @@ func main() {
 
 	logger.Info("starting memdb-mcp",
 		slog.String("port", port),
-		slog.String("python_backend", cfg.PythonBackendURL),
 		slog.String("memdb_go_url", cfg.MemDBGoURL),
 		slog.Bool("stdio", stdioMode),
 	)
@@ -91,15 +90,12 @@ func main() {
 	mcptools.RegisterUserTools(server, pg, logger)
 	mcptools.RegisterCubeTools(server, pg, logger)
 	mcptools.RegisterNativeGoProxyTools(server, memdbGoURL, cfg.InternalServiceSecret, logger)
-	mcptools.RegisterPythonProxyTools(server, cfg.PythonBackendURL, cfg.InternalServiceSecret, logger)
 
-	const mcpNativeToolCount = 10     // search + memory CRUD + users + cubes (create/list/delete/get_user_cubes)
-	const mcpGoProxyToolCount = 3     // add_memory, chat, clear_chat_history → memdb-go native backend
-	const mcpPythonProxyToolCount = 1 // control_memory_scheduler → Python legacy
+	const mcpNativeToolCount = 10 // search + memory CRUD + users + cubes (create/list/delete/get_user_cubes)
+	const mcpGoProxyToolCount = 3 // add_memory, chat, clear_chat_history → memdb-go native backend
 	logger.Info("MCP tools registered",
 		slog.Int("native", mcpNativeToolCount),
 		slog.Int("go_proxy", mcpGoProxyToolCount),
-		slog.Int("python_proxy", mcpPythonProxyToolCount),
 	)
 
 	if stdioMode {
