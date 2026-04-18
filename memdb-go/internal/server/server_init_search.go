@@ -90,6 +90,21 @@ func initSearchService(
 ) (*search.SearchService, *scheduler.Profiler) {
 	svc := search.NewSearchService(pg, qd, emb, logger)
 
+	if cfg.CrossEncoderURL != "" {
+		svc.CrossEncoder = search.CrossEncoderConfig{
+			URL:     cfg.CrossEncoderURL,
+			Model:   cfg.CrossEncoderModel,
+			Timeout: cfg.CrossEncoderTimeout,
+			MaxDocs: cfg.CrossEncoderMaxDocs,
+		}
+		logger.Info("cross-encoder reranker enabled",
+			slog.String("url", cfg.CrossEncoderURL),
+			slog.String("model", cfg.CrossEncoderModel),
+			slog.Duration("timeout", cfg.CrossEncoderTimeout),
+			slog.Int("max_docs", cfg.CrossEncoderMaxDocs),
+		)
+	}
+
 	if cfg.LLMProxyURL != "" {
 		svc.LLMReranker = search.LLMRerankConfig{
 			APIURL: cfg.LLMProxyURL, APIKey: cfg.LLMProxyAPIKey, Model: cfg.LLMSearchModel,

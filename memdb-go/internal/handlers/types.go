@@ -14,7 +14,7 @@ type searchRequest struct {
 	AgentID *string `json:"agent_id,omitempty"`
 	Profile *string `json:"profile,omitempty"`
 	TopK    *int    `json:"top_k,omitempty"`
-	Dedup  *string `json:"dedup,omitempty"`
+	Dedup   *string `json:"dedup,omitempty"`
 
 	Relativity   *float64 `json:"relativity,omitempty"`
 	PrefTopK     *int     `json:"pref_top_k,omitempty"`
@@ -95,7 +95,29 @@ type chatCompleteRequest struct {
 	UserID  *string `json:"user_id"`
 	AgentID *string `json:"agent_id,omitempty"`
 	Query   *string `json:"query"`
-	TopK   *int    `json:"top_k,omitempty"`
+	TopK    *int    `json:"top_k,omitempty"`
+}
+
+// feedbackAddRecord is a single ADD operation result in the feedback response.
+type feedbackAddRecord struct {
+	ID          string `json:"id"`
+	Text        string `json:"text"`
+	SourceDocID string `json:"source_doc_id,omitempty"`
+}
+
+// feedbackUpdateRecord is a single UPDATE operation result in the feedback response.
+type feedbackUpdateRecord struct {
+	ID      string `json:"id"`
+	OldText string `json:"old_text"`
+	NewText string `json:"new_text"`
+}
+
+// feedbackResponse mirrors Python mem_feedback response: {"record": {"add": [...], "update": [...]}}
+type feedbackResponse struct {
+	Record struct {
+		Add    []feedbackAddRecord    `json:"add"`
+		Update []feedbackUpdateRecord `json:"update"`
+	} `json:"record"`
 }
 
 // chatRequest validates POST /product/chat and POST /product/chat/stream.

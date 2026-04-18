@@ -79,9 +79,10 @@
 
 ```
 Текущий оценочный score MemDB: ~68-70
-  + VEC_COT search              → +5-7 points
-  + Prompt quality gaps (1.5)   → +3-5 points
-  + Sparse vector prefs         → +1-2 points
+  + Cross-encoder rerank (apr 2026)  → +3-5 points  ← NEW
+  + VEC_COT search                    → +5-7 points
+  + Prompt quality gaps (1.5)         → +3-5 points
+  + Sparse vector prefs               → +1-2 points
 ─────────────────────────────────────────
 Цель: > 75 (превзойти MemOS 73.31)
 ```
@@ -205,15 +206,40 @@
 
 ---
 
-## Фаза 3 — NLI Reranker (optional) ❌ НЕ НАЧАТО
+## Фаза 3 — Cross-Encoder Reranker ✅ Реализовано (апрель 2026)
 
-**Impact:** +1-2 points LoCoMo.
-**Источник:** MemOS (`extras/nli_model/`). Опциональный lightweight NLI model server.
+**Impact:** +3-5 points LoCoMo — перераспределяет большую часть работы с LLM rerank на специализированный cross-encoder, быстрее и дешевле.
+**Источник:** Концептуальный аналог MemOS NLI reranker (`extras/nli_model/`). Реализовано на базе BGE-reranker-v2-m3 через `embed-server` и Cohere-совместимый endpoint `/v1/rerank` — лучшая модель и эксплуатационные характеристики, чем у NLI.
 
-**Суть:** Natural Language Inference определяет entailment/contradiction между запросом и памятью — точнее cosine similarity.
+**Суть:** Cross-encoder оценивает entailment/relevance между запросом и памятью прямым совместным forward-pass — на голову точнее cosine similarity, на порядок дешевле LLM rerank (~100-400ms против ~3-4s).
 
-**Effort:** L (требует отдельный model server, ONNX NLI модель)
-**Статус:** Отложено. LLM rerank (`llm_rerank.go`) покрывает большую часть этой функциональности.
+**Реализация:**
+- `memdb-go/internal/search/cross_encoder_rerank.go` — HTTP клиент + reorder логика (best-effort: любая ошибка → input без изменений).
+- `memdb-go/internal/search/service.go` — step 6.05, между cosine rerank и LLM rerank. Применяется только к `text_mem` (skill/tool/pref дёшево сортируются cosine). Гейтится на `s.CrossEncoder.URL != ""`, отдельного `SearchParams` флага нет — env = kill-switch.
+- `memdb-go/internal/config/config.go` — env vars `CROSS_ENCODER_URL` / `_MODEL` / `_TIMEOUT_MS` / `_MAX_DOCS` (defaults: `http://embed-server:8082`, `bge-reranker-v2-m3`, 2000ms, 50 docs).
+- Защита: `MaxDocs` (default 50) ограничивает payload на embed-server. Тоже сохраняет items без `memory` ключа — они передаются через как есть.
+- Логирование: `slog.Warn` при ошибках (в отличие от silent-fallback LLMRerank; CE ошибки редки и требуют ops-visibility).
+- Метаданные: `metadata.relativity` перезаписывается CE score; выставляется `metadata.cross_encoder_reranked = true`.
+- Timing: `ce_rerank` появляется в pipeline timing log рядом с `llm_rerank` и `iterative`.
+
+**Верифицировано (smoke test на реальном embed-server):**
+```json
+Query: "what is a cat"
+  "a cat is a small domestic feline mammal" → 5.77
+  "cats purr when content" → -5.48
+  "pasta comes in many shapes" → -11.00
+```
+Spread ~17 пунктов — модель чисто разделяет релевантное и нерелевантное.
+
+**Тестовое покрытие:**
+- 7 unit-тестов в `cross_encoder_rerank_test.go`: reorder-by-score, empty input, пустой URL, HTTP 5xx, timeout, `MaxDocs` cap, items без text-ключа.
+- 3 integration-теста в `cross_encoder_step_test.go`: вызов через `postProcessResults` с реальным `httptest` сервером; skip при пустом URL; `ceRerankDur > 0` при активном CE.
+- 3 config-теста в `internal/config/config_test.go`: defaults, env overrides, empty-env fallback.
+
+**Почему лучше NLI из MemOS:**
+- BGE-reranker-v2-m3 — state-of-the-art cross-encoder (MTEB), покрывает entailment/relevance одним сигналом.
+- Переиспользует существующий `embed-server` — не требует нового model server.
+- Cohere-совместимый API (`/v1/rerank`) — легко заменяется на commercial rerank (Cohere, Jina) без изменений кода.
 
 ---
 
@@ -230,8 +256,8 @@
 | LLM rerank + caching | ✅ (5min TTL) | ✅ (no cache) | ✅ (no cache) |
 | Relativity threshold filtering | ✅ (0.5 default) | ❌ | ❌ |
 | BM25+Vector hybrid | ✅ | ❌ | ❌ |
+| **Cross-encoder rerank (dedicated model)** | ✅ (BGE-reranker-v2-m3 via embed-server) | ❌ | ✅ (optional NLI) |
 | **CoT query decomposition** | ❌ | ❌ | ✅ |
-| **NLI reranker** | ❌ | ❌ | ✅ (optional) |
 | `search_priority` dict | ❌ | ❌ | ✅ |
 | Latency | **15-30ms** | ~200ms | ~300ms |
 
