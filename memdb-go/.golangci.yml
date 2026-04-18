@@ -6,68 +6,17 @@ run:
 linters:
   default: standard
   enable:
-    # Complexity & size
-
-    # DRY
-
-    # Hardcode prevention
-    - usestdlibvars
-
-    # Security
-    - gosec
-
-    # Code quality
-    - noctx
     - bodyclose
+    - gosec
+    - noctx
     - perfsprint
-
+    - usestdlibvars
   settings:
-    funlen:
-      lines: 100
-      statements: 60
-    gocognit:
-      min-complexity: 20
-    cyclop:
-      max-complexity: 15
-    nestif:
-      min-complexity: 5
-    dupl:
-      threshold: 150
-    goconst:
-      min-len: 3
-      min-occurrences: 3
-    mnd:
-      checks:
-        - argument
-        - case
-        - condition
-        - return
-      ignored-numbers:
-        - "0"
-        - "1"
-        - "2"
-        - "10"
-        - "100"
-        - "1000"
-      ignored-functions:
-        - "^math\\."
-        - "^time\\."
-        - "^strings\\.Repeat$"
     gosec:
       excludes:
         - G104
         - G304
 
-  exclusions:
-    presets:
-      - std-error-handling
-    paths:
-      # Generated code — never lint
-      - gen/
-    rules:
-      - path: _test\.go
-        linters:
-          - gosec
-      # CGO stubs
-      - path: onnx_stub\.go
-        linters:
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
