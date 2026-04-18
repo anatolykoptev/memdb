@@ -1,0 +1,25 @@
+# False-positive fixtures (test fake keys, LoCoMo dataset JWTs, default dev passwords)
+15ab727cd01181f933e92109cebf88d7cea1e795:memdb-go/docker-compose.yml:generic-api-key:72
+15ab727cd01181f933e92109cebf88d7cea1e795:memdb-go/internal/server/middleware/auth_test.go:generic-api-key:111
+15ab727cd01181f933e92109cebf88d7cea1e795:memdb-go/internal/server/middleware/auth_test.go:generic-api-key:129
+15ab727cd01181f933e92109cebf88d7cea1e795:memdb-go/internal/server/middleware/auth_test.go:generic-api-key:134
+15ab727cd01181f933e92109cebf88d7cea1e795:memdb-go/internal/server/middleware/auth_test.go:generic-api-key:147
+1edd4c95bc8e51d34ea416effae2bf9d36e68f01:openwork-memos-integration/apps/desktop/__tests__/integration/main/secureStorage.integration.test.ts:generic-api-key:418
+1edd4c95bc8e51d34ea416effae2bf9d36e68f01:openwork-memos-integration/apps/desktop/__tests__/integration/main/secureStorage.integration.test.ts:generic-api-key:64
+1edd4c95bc8e51d34ea416effae2bf9d36e68f01:openwork-memos-integration/apps/desktop/__tests__/unit/main/ipc/handlers.unit.test.ts:generic-api-key:404
+1edd4c95bc8e51d34ea416effae2bf9d36e68f01:openwork-memos-integration/apps/desktop/e2e/specs/settings-providers.spec.ts:generic-api-key:103
+1edd4c95bc8e51d34ea416effae2bf9d36e68f01:openwork-memos-integration/apps/desktop/e2e/specs/settings.spec.ts:generic-api-key:361
+1edd4c95bc8e51d34ea416effae2bf9d36e68f01:openwork-memos-integration/apps/desktop/e2e/specs/settings.spec.ts:generic-api-key:449
+2a52e9bb560a5c0b9a69bfa651419773f46ee8e1:memdb-go/internal/server/middleware/auth_test.go:generic-api-key:147
+2e6f6e8809eaac0fed979592b524f3dbe248fc84:evaluation/data/locomo/locomo10.json:jwt:43896
+2e6f6e8809eaac0fed979592b524f3dbe248fc84:evaluation/data/locomo/locomo10.json:jwt:64751
+2e6f6e8809eaac0fed979592b524f3dbe248fc84:evaluation/data/locomo/locomo10.json:jwt:64846
+727dc18003bc5b07740ef50b44aad86a77eab6d7:docker/docker-compose.yml:generic-api-key:37
+9c22cf1c0aa285e73f822e8766df8c35981b6625:openwork-memos-integration/apps/desktop/__tests__/integration/main/secureStorage.integration.test.ts:generic-api-key:418
+9c22cf1c0aa285e73f822e8766df8c35981b6625:openwork-memos-integration/apps/desktop/__tests__/integration/main/secureStorage.integration.test.ts:generic-api-key:64
+9c22cf1c0aa285e73f822e8766df8c35981b6625:openwork-memos-integration/apps/desktop/__tests__/unit/main/ipc/handlers.unit.test.ts:generic-api-key:404
+9c22cf1c0aa285e73f822e8766df8c35981b6625:openwork-memos-integration/apps/desktop/e2e/specs/settings-providers.spec.ts:generic-api-key:103
+9c22cf1c0aa285e73f822e8766df8c35981b6625:openwork-memos-integration/apps/desktop/e2e/specs/settings.spec.ts:generic-api-key:361
+9c22cf1c0aa285e73f822e8766df8c35981b6625:openwork-memos-integration/apps/desktop/e2e/specs/settings.spec.ts:generic-api-key:449
+ec3d65785b9403e6332c0aaef45bde6314c19195:tests/mem_scheduler/test_config.py:generic-api-key:100
+ec3d65785b9403e6332c0aaef45bde6314c19195:tests/mem_scheduler/test_config.py:generic-api-key:124
