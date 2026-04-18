@@ -3,6 +3,7 @@ package middleware
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -13,9 +14,19 @@ import (
 )
 
 const (
-	tracerName          = "memdb-go"
-	errorStatusMinCode  = http.StatusBadRequest // 400: track as error for OTel metrics
+	tracerName         = "memdb-go"
+	errorStatusMinCode = http.StatusBadRequest // 400: track as error for OTel metrics
 )
+
+// routePath returns the matched Go 1.22 ServeMux pattern, or "unmatched".
+// Using the pattern instead of r.URL.Path caps label cardinality on routes
+// with variable segments (e.g. /product/get_memory/{memory_id}).
+func routePath(r *http.Request) string {
+	if r.Pattern != "" {
+		return r.Pattern
+	}
+	return "unmatched"
+}
 
 // OTelMetrics holds the metric instruments for request tracking.
 type OTelMetrics struct {
@@ -71,6 +82,8 @@ func OTel(logger *slog.Logger, enabled bool) func(http.Handler) http.Handler {
 
 		// Wrap with otelhttp for automatic HTTP span instrumentation
 		otelHandler := otelhttp.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+
 			// Add custom span attributes
 			span := trace.SpanFromContext(r.Context())
 			span.SetAttributes(
@@ -78,11 +91,13 @@ func OTel(logger *slog.Logger, enabled bool) func(http.Handler) http.Handler {
 				attribute.String("memdb.method", r.Method),
 			)
 
+			path := routePath(r)
+
 			// Record request metric
 			metrics.RequestCount.Add(r.Context(), 1,
 				metric.WithAttributes(
 					attribute.String("method", r.Method),
-					attribute.String("path", r.URL.Path),
+					attribute.String("path", path),
 				),
 			)
 
@@ -90,11 +105,19 @@ func OTel(logger *slog.Logger, enabled bool) func(http.Handler) http.Handler {
 			rec := &otelResponseWriter{ResponseWriter: w}
 			next.ServeHTTP(rec, r)
 
+			elapsed := float64(time.Since(start).Milliseconds())
+			metrics.RequestLatency.Record(r.Context(), elapsed,
+				metric.WithAttributes(
+					attribute.String("method", r.Method),
+					attribute.String("path", path),
+				),
+			)
+
 			if rec.statusCode >= errorStatusMinCode {
 				metrics.ErrorCount.Add(r.Context(), 1,
 					metric.WithAttributes(
 						attribute.String("method", r.Method),
-						attribute.String("path", r.URL.Path),
+						attribute.String("path", path),
 						attribute.Int("status", rec.statusCode),
 					),
 				)

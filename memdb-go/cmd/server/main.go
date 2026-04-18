@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,9 +21,9 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/server"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/sdk/metric"
+	promexporter "go.opentelemetry.io/otel/exporters/prometheus"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
@@ -136,22 +137,17 @@ func initOTel(cfg *config.Config) (func(context.Context) error, error) {
 	)
 	otel.SetTracerProvider(tp)
 
-	// Metric exporter
-	metricOpts := []otlpmetrichttp.Option{
-		otlpmetrichttp.WithInsecure(),
-	}
-	if cfg.OTelEndpoint != "" {
-		metricOpts = append(metricOpts, otlpmetrichttp.WithEndpoint(cfg.OTelEndpoint))
-	}
-	metricExporter, err := otlpmetrichttp.New(ctx, metricOpts...)
+	// Metric exporter — Prometheus pull-based. Instruments registered via the
+	// OTel Meter are scraped from GET /metrics (see server_routes.go).
+	promExporter, err := promexporter.New()
 	if err != nil {
 		_ = tp.Shutdown(ctx)
-		return nil, err
+		return nil, fmt.Errorf("prometheus exporter: %w", err)
 	}
 
-	mp := metric.NewMeterProvider(
-		metric.WithReader(metric.NewPeriodicReader(metricExporter)),
-		metric.WithResource(res),
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(promExporter),
+		sdkmetric.WithResource(res),
 	)
 	otel.SetMeterProvider(mp)
 
