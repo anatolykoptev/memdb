@@ -6,7 +6,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -50,7 +49,11 @@ func (h *Handler) NativeFeedback(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.processFeedback(ctx, req)
 	if err != nil {
 		h.logger.Error("feedback: processing failed", slog.Any("error", err))
-		http.Error(w, fmt.Sprintf("feedback failed: %v", err), http.StatusInternalServerError)
+		h.writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"code":    500,
+			"message": "feedback processing failed",
+			"data":    nil,
+		})
 		return
 	}
 
