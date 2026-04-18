@@ -12,7 +12,7 @@ const (
 )
 
 // NativeLLMComplete pass-through-routes OpenAI-compatible chat completions to
-// CLIProxyAPI. It talks directly to CLIProxyAPI — not to the Python backend —
+// the configured LLM provider. It talks directly to the LLM API — not to the Python backend —
 // making it a lightweight path without memory retrieval overhead (unlike
 // /product/chat/complete which adds 60-80 s of memory search).
 //

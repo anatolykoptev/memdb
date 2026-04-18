@@ -41,10 +41,10 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	searchSvc, profiler := initSearchService(cfg, pg, qd, emb, rd, h, logger)
 	h.SetSearchService(searchSvc)
 
-	// Initialize LLM extractor (chat client with CLIProxyAPI config is wired below).
+	// Initialize LLM extractor (chat client with LLM API config is wired below).
 	extractor := initLLMExtractor(cfg, h, logger)
 
-	// Initialize chat LLM client (reuses CLIProxyAPI config, same default model)
+	// Initialize chat LLM client (reuses LLM API config, same default model)
 	if cfg.LLMProxyURL != "" {
 		chatClient := llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel, cfg.LLMFallbackModels, logger)
 		h.SetChatLLM(chatClient)

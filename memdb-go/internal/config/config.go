@@ -62,7 +62,7 @@ type Config struct {
 	// API settings
 	EnableChatAPI bool `json:"enable_chat_api"`
 
-	// LLM proxy (CLIProxyAPI — internal Gemini proxy)
+	// LLM proxy (OpenAI-compatible API base URL)
 	LLMProxyURL       string   `json:"llm_proxy_url"`
 	LLMProxyAPIKey    string   `json:"llm_proxy_api_key"`
 	LLMDefaultModel   string   `json:"llm_default_model"`
@@ -149,7 +149,7 @@ func Load() *Config {
 
 		EnableChatAPI: envBool("ENABLE_CHAT_API", false),
 
-		LLMProxyURL:       envStr("MEMDB_LLM_PROXY_URL", "http://cliproxyapi:8317"),
+		LLMProxyURL:       envStr("MEMDB_LLM_PROXY_URL", "https://api.openai.com/v1"),
 		LLMProxyAPIKey:    envStr("CLI_PROXY_API_KEY", ""),
 		LLMDefaultModel:   envStr("MEMDB_LLM_MODEL", "gemini-2.5-flash"),
 		LLMSearchModel:    envStr("MEMDB_LLM_SEARCH_MODEL", "gemini-2.0-flash"),
