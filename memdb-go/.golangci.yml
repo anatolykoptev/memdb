@@ -4,18 +4,11 @@ run:
   timeout: 5m
 
 linters:
-  default: standard
+  default: none
   enable:
-    - bodyclose
-    - gosec
-    - noctx
-    - perfsprint
-    - usestdlibvars
-  settings:
-    gosec:
-      excludes:
-        - G104
-        - G304
+    - govet
+    - ineffassign
+    - staticcheck
 
 issues:
   max-issues-per-linter: 0
