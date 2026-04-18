@@ -19,6 +19,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // --- Constants ---
@@ -84,11 +87,20 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Metrics setup — mode determined before eligibility check so proxy gets correct label.
+	mode := addMode(&req)
+	modeAttr := metric.WithAttributes(attribute.String("mode", mode))
+	start := time.Now()
+
 	// Check native eligibility
 	if !h.canHandleNativeAdd(&req) {
 		h.logger.Debug("add: proxying to python",
 			slog.String("reason", h.proxyReason(&req)),
 		)
+		addMx().Requests.Add(r.Context(), 1, metric.WithAttributes(
+			attribute.String("mode", mode),
+			attribute.String("outcome", "proxy"),
+		))
 		h.proxyWithBody(w, r, body)
 		return
 	}
@@ -142,6 +154,11 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 				slog.String("cube_id", cubeID),
 				slog.Any("error", err),
 			)
+			addMx().Requests.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("mode", mode),
+				attribute.String("outcome", "error"),
+			))
+			addMx().Duration.Record(ctx, float64(time.Since(start).Milliseconds()), modeAttr)
 			// Fall back to proxy on error
 			h.proxyWithBody(w, r, body)
 			return
@@ -157,6 +174,13 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
+	addMx().Requests.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("mode", mode),
+		attribute.String("outcome", "success"),
+	))
+	addMx().Memories.Add(ctx, int64(len(allItems)), modeAttr)
+	addMx().Duration.Record(ctx, float64(time.Since(start).Milliseconds()), modeAttr)
+
 	h.writeJSON(w, http.StatusOK, map[string]any{
 		"code":    200,
 		"message": "Memory added successfully",
@@ -167,6 +191,28 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 		slog.String("user_id", userID),
 		slog.Int("memories_added", len(allItems)),
 	)
+}
+
+// addMode returns a stable mode label for metrics given the add request flags.
+// Priority: async > feedback > raw > fast > fine > buffer > default.
+func addMode(req *fullAddRequest) string {
+	if req.AsyncMode != nil && *req.AsyncMode == modeAsync {
+		return "async"
+	}
+	if req.IsFeedback != nil && *req.IsFeedback {
+		return "feedback"
+	}
+	if req.Mode != nil {
+		switch *req.Mode {
+		case modeRaw:
+			return "raw"
+		case modeFast:
+			return "fast"
+		case modeFine:
+			return "fine"
+		}
+	}
+	return "default"
 }
 
 // canHandleNativeAdd checks if the request can be handled natively in Go.

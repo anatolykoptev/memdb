@@ -6,6 +6,10 @@ package scheduler
 import (
 	"context"
 	"log/slog"
+	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // handle dispatches a message to the appropriate handler.
@@ -28,6 +32,10 @@ func (w *Worker) handle(ctx context.Context, msg ScheduleMessage) {
 		w.tracker.TaskSubmitted(ctx, msg)
 	}
 	w.tracker.TaskStarted(ctx, msg)
+
+	label := msg.Label
+	start := time.Now()
+	metricOutcome := "processed"
 
 	var handleErr error
 
@@ -99,6 +107,7 @@ func (w *Worker) handle(ctx context.Context, msg ScheduleMessage) {
 
 	// On error: schedule retry (exponential backoff) or DLQ if exhausted.
 	if handleErr != nil {
+		metricOutcome = "failed"
 		log.Warn("scheduler: handler error",
 			slog.Any("error", handleErr),
 			slog.Int("retry_count", msg.RetryCount),
@@ -109,10 +118,18 @@ func (w *Worker) handle(ctx context.Context, msg ScheduleMessage) {
 		// While retrying, the task stays "in_progress" until final outcome.
 		if msg.RetryCount >= msg.maxRetries() {
 			w.tracker.TaskFailed(ctx, msg, handleErr.Error())
+			schedMx().DLQ.Add(ctx, 1, metric.WithAttributes(attribute.String("label", label)))
 		}
 	} else {
 		w.tracker.TaskCompleted(ctx, msg)
 	}
+
+	schedMx().Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
+		metric.WithAttributes(attribute.String("label", label)))
+	schedMx().Messages.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("label", label),
+		attribute.String("outcome", metricOutcome),
+	))
 
 	// XACK only for original stream messages (RetryCount == 0 means from PEL).
 	// Retry messages come from the ZSet, not the stream PEL — no XACK needed.
