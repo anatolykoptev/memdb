@@ -144,19 +144,6 @@ func TestNormalizeChatComplete_MemCubeID(t *testing.T) {
 	}
 }
 
-func TestNormalizeFeedback_MemCubeID(t *testing.T) {
-	body := []byte(`{"user_id":"memos","mem_cube_id":"cube1"}`)
-	result := normalizeFeedback(body)
-
-	var m map[string]any
-	_ = json.Unmarshal(result, &m)
-
-	ids := m["writable_cube_ids"].([]any)
-	if len(ids) != 1 || ids[0] != "cube1" {
-		t.Errorf("expected writable_cube_ids=[cube1], got %v", ids)
-	}
-}
-
 func TestNormalize_InvalidJSON(t *testing.T) {
 	body := []byte(`not json`)
 	// All normalize functions should return original body on invalid JSON
@@ -168,8 +155,5 @@ func TestNormalize_InvalidJSON(t *testing.T) {
 	}
 	if string(normalizeChatComplete(body)) != string(body) {
 		t.Error("normalizeChatComplete should return original body on invalid JSON")
-	}
-	if string(normalizeFeedback(body)) != string(body) {
-		t.Error("normalizeFeedback should return original body on invalid JSON")
 	}
 }

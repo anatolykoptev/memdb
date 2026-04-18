@@ -61,20 +61,6 @@ func normalizeChatComplete(body []byte) []byte {
 	return body
 }
 
-// normalizeFeedback converts deprecated fields in /product/feedback requests.
-//   - mem_cube_id (string) → writable_cube_ids ([]string)
-func normalizeFeedback(body []byte) []byte {
-	var m map[string]any
-	if json.Unmarshal(body, &m) != nil {
-		return body
-	}
-
-	if migrateCubeID(m, "writable_cube_ids") {
-		return mustMarshal(m, body)
-	}
-	return body
-}
-
 // --- helpers ---
 
 // migrateCubeID moves mem_cube_id → target field (as []string). Returns true if changed.

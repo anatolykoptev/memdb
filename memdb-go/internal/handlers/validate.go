@@ -4,11 +4,13 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
@@ -34,18 +36,18 @@ func (h *Handler) ValidatedSearch(w http.ResponseWriter, r *http.Request) {
 	h.proxyWithBody(w, r, normalizeSearch(body))
 }
 
-// ValidatedFeedback validates and proxies POST /product/feedback.
+// ValidatedFeedback handles POST /product/feedback natively via the feedback
+// pipeline: builds a synthetic fullAddRequest with IsFeedback=true and
+// dispatches through nativeAddForCube. Replaces the Phase 4.5 Python proxy.
 func (h *Handler) ValidatedFeedback(w http.ResponseWriter, r *http.Request) {
 	body, ok := h.readBody(w, r)
 	if !ok {
 		return
 	}
-
 	var req feedbackRequest
 	if !h.decodeJSON(w, body, &req) {
 		return
 	}
-
 	var errs []string
 	if req.UserID == nil || *req.UserID == "" {
 		errs = append(errs, "user_id is required")
@@ -56,12 +58,52 @@ func (h *Handler) ValidatedFeedback(w http.ResponseWriter, r *http.Request) {
 	if req.History == nil {
 		errs = append(errs, "history is required")
 	}
-
 	if !h.checkErrors(w, errs) {
 		return
 	}
 
-	h.proxyWithBody(w, r, normalizeFeedback(body))
+	var history []chatMessage
+	if err := json.Unmarshal(*req.History, &history); err != nil {
+		h.checkErrors(w, []string{"history: " + err.Error()})
+		return
+	}
+	history = append(history, chatMessage{Role: "user", Content: *req.FeedbackContent})
+
+	isFeedback := true
+	addReq := &fullAddRequest{
+		UserID:     req.UserID,
+		Messages:   history,
+		IsFeedback: &isFeedback,
+	}
+
+	if !h.canHandleNativeAdd(addReq) {
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "feedback: backend not ready (" + h.proxyReason(addReq) + ")",
+			"data":    nil,
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+
+	items, err := h.nativeAddForCube(ctx, addReq, *req.UserID)
+	if err != nil {
+		h.logger.Error("feedback: native add failed", slog.Any("error", err))
+		h.writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"code":    500,
+			"message": "feedback processing failed",
+			"data":    nil,
+		})
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, map[string]any{
+		"code":    200,
+		"message": "feedback processed",
+		"data":    items,
+	})
 }
 
 // ValidatedDelete validates and proxies POST /product/delete_memory.
