@@ -155,9 +155,9 @@
 |----------|-----------------|---------------|-----------|
 | ~~`POST /product/feedback`~~ | `NativeFeedback` via `nativeAddForCube` | — | ✅ Фаза 4.5 |
 | `POST /product/llm/complete` | `ProxyLLMComplete` | `llms/base.py` | 🟡 thin proxy |
-| `POST /product/chat/stream/playground` | `ProxyToProduct` | `mem_chat/*` + `chat_handler.py` | 🔵 |
-| `POST /product/suggestions` | `ProxyToProduct` | `suggestion_handler.py` | 🔵 |
-| `GET /product/suggestions/{user_id}` | `ProxyToProduct` | `suggestion_handler.py` | 🔵 |
+| ~~`POST /product/chat/stream/playground`~~ | removed 2026-04-18 | — | ✅ Фаза 4.5 followup |
+| ~~`POST /product/suggestions`~~ | removed 2026-04-18 | — | ✅ Фаза 4.5 followup |
+| ~~`GET /product/suggestions/{user_id}`~~ | removed 2026-04-18 | — | ✅ Фаза 4.5 followup |
 
 #### Нативный Go с proxy fallback на отдельные кейсы
 
@@ -182,7 +182,7 @@
 | `chat` | `api/handlers/chat_handler.py` | 🟡 (REST chat уже Go-native) |
 | `create_cube`, `register_cube`, `unregister_cube` | `mem_cube/single_cube.py` (33.7K) | 🟡 |
 | `share_cube`, `dump_cube` | `mem_cube/single_cube.py` | 🔵 |
-| `control_memory_scheduler` | `mem_scheduler/general_scheduler.py` | 🔵 (Go scheduler уже работает параллельно) |
+| ~~`control_memory_scheduler`~~ | removed 2026-04-18 — Go scheduler автономен | ✅ Фаза 4.5 followup |
 
 Из 5 "proxy → Python" MCP-инструментов **2 уже не требуют Python** (`add_memory`, `chat` — есть нативные REST-эндпоинты). Фикс = переключить `mcptools/add.go` и `mcptools/chat.go` на internal Go handler вместо HTTP proxy в memdb-api.
 
@@ -357,14 +357,14 @@ Option C из research (extract `AddMemories`/`ChatComplete` service functions, 
 - [x] **MCP add_memory + chat → memdb-go** — Фаза 4.10a ✅ апрель 2026
 - [x] **`/product/llm/complete` → CLIProxyAPI напрямую** — Фаза 4.12 ✅ апрель 2026
 - [x] **MCP cube tools** (`create_cube`/`share_cube`/`dump_cube`/`register_cube`/`unregister_cube`) — Go-native (Фаза 2 `b328ee49`)
-- [ ] Playground chat + Suggestions — Go-native или удалить
+- [x] Playground chat + Suggestions — удалены 2026-04-18 (callers survey: 0 external users)
 - [ ] Memory extraction покрыта тестами (accuracy ≥ Python baseline)
 - [ ] `POST /product/add` latency p95 < 1s
 - [ ] 2 недели без Python-related ошибок в логах
 - [ ] Load test: 50 concurrent adds без degradation
 - [ ] Все safety-net proxy fallbacks заменены на HTTP errors
   - Включая `NativeAdd` error fallback (`add.go:145-146`) — сейчас `nativeAddForCube` error → `proxyWithBody`. После shut-down Python станет 502 dead upstream. Конвертировать в 500.
-- [ ] Audit `mem_cube_id` field usage in `/product/feedback` clients (потерян после удаления `normalizeFeedback` в Фазе 4.5; grep vaelor / piter-sites перед Phase 5 cut-over)
+- [x] Audit `mem_cube_id` field usage in `/product/feedback` clients — audited 2026-04-18, не используется Go-клиентами, только в Python legacy
 
 **После:** docker-compose: postgres, qdrant, redis, memdb-go, go-search, cliproxyapi (6 контейнеров).
 
