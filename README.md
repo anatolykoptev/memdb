@@ -6,11 +6,11 @@
   </h1>
 
   <p>
-    <a href="https://github.com/MemDBai/MemDB">
+    <a href="https://github.com/anatolykoptev/memdb">
       <img alt="Static Badge" src="https://img.shields.io/badge/Maintained_by-MemDB-blue">
     </a>
     <a href="https://pypi.org/project/memdb">
-      <img src="https://img.shields.io/pypi/v/memdb?label=pypi%20package" alt="PyPI Version">
+      <img src="https://img.shields.io/pypi/v/memdb?label=pypi-not-yet-released" alt="PyPI Version">
     </a>
     <a href="https://pypi.org/project/memdb">
       <img src="https://img.shields.io/pypi/pyversions/memdb.svg" alt="Supported Python versions">
@@ -19,9 +19,9 @@
       <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Supported Platforms">
     </a>
     <a href="https://arxiv.org/abs/2507.03724">
-      <img src="https://img.shields.io/badge/arXiv-2507.03724-b31b1b.svg" alt="ArXiv Paper">
+      <img src="https://img.shields.io/badge/arXiv-2507.03724-b31b1b.svg" alt="Based on MemOS Research">
     </a>
-    <a href="https://github.com/MemDBai/MemDB/discussions">
+    <a href="https://github.com/anatolykoptev/memdb/discussions">
       <img src="https://img.shields.io/badge/GitHub-Discussions-181717.svg?logo=github" alt="GitHub Discussions">
     </a>
     <a href="https://discord.gg/Txbx3gebZR">
@@ -128,7 +128,7 @@ MemDB is a hard fork of [MemOS](https://github.com/MemTensor/MemOS) (arxiv 2507.
 
 1. Get the repository.
     ```bash
-    git clone https://github.com/MemDBai/MemDB.git
+    git clone https://github.com/anatolykoptev/memdb.git
     cd MemDB
     pip install -r ./docker/requirements.txt
     ```
@@ -206,9 +206,9 @@ MemDB is a hard fork of [MemOS](https://github.com/MemTensor/MemOS) (arxiv 2507.
 
 Join our community to ask questions, share your projects, and connect with other developers.
 
-- **GitHub Issues**: Report bugs or request features in our <a href="https://github.com/MemDBai/MemDB/issues" target="_blank">GitHub Issues</a>.
-- **GitHub Pull Requests**: Contribute code improvements via <a href="https://github.com/MemDBai/MemDB/pulls" target="_blank">Pull Requests</a>.
-- **GitHub Discussions**: Participate in our <a href="https://github.com/MemDBai/MemDB/discussions" target="_blank">GitHub Discussions</a> to ask questions or share ideas.
+- **GitHub Issues**: Report bugs or request features in our <a href="https://github.com/anatolykoptev/memdb/issues" target="_blank">GitHub Issues</a>.
+- **GitHub Pull Requests**: Contribute code improvements via <a href="https://github.com/anatolykoptev/memdb/pulls" target="_blank">Pull Requests</a>.
+- **GitHub Discussions**: Participate in our <a href="https://github.com/anatolykoptev/memdb/discussions" target="_blank">GitHub Discussions</a> to ask questions or share ideas.
 - **Discord**: Join our <a href="https://discord.gg/Txbx3gebZR" target="_blank">Discord Server</a>.
 
 <br>
@@ -253,7 +253,7 @@ url = {https://global-sci.com/article/91443/memory3-language-modeling-with-expli
 
 ## Contributing
 
-We welcome contributions from the community! Please read our [contribution guidelines](https://github.com/MemDBai/MemDB/blob/main/CONTRIBUTING.md) to get started.
+We welcome contributions from the community! Please read our [contribution guidelines](https://github.com/anatolykoptev/memdb/blob/main/CONTRIBUTING.md) to get started.
 
 <br>
 
