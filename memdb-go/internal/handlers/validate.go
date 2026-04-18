@@ -1,5 +1,6 @@
 // Package handlers — request validation for typed endpoints.
-// Validates request bodies against OpenAPI-generated types before proxying to Python.
+// Validates request bodies against OpenAPI-generated types. Some validators
+// dispatch natively (see ValidatedFeedback); others still proxy to Python.
 package handlers
 
 import (
@@ -72,6 +73,7 @@ func (h *Handler) ValidatedFeedback(w http.ResponseWriter, r *http.Request) {
 	isFeedback := true
 	addReq := &fullAddRequest{
 		UserID:     req.UserID,
+		AgentID:    req.AgentID,
 		Messages:   history,
 		IsFeedback: &isFeedback,
 	}
