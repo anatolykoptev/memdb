@@ -10,13 +10,16 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const (
-	voyageEndpoint        = "https://api.voyageai.com/v1/embeddings"
-	defaultModel          = "voyage-4-lite"
-	defaultHTTPTimeout    = 10 * time.Second
-	voyageDimension       = 1024 // voyage-4-lite embedding dimension
+	voyageEndpoint     = "https://api.voyageai.com/v1/embeddings"
+	defaultModel       = "voyage-4-lite"
+	defaultHTTPTimeout = 10 * time.Second
+	voyageDimension    = 1024 // voyage-4-lite embedding dimension
 )
 
 // VoyageClient calls the VoyageAI embedding API.
@@ -69,6 +72,20 @@ func (v *VoyageClient) Embed(ctx context.Context, texts []string) ([][]float32, 
 		return nil, nil
 	}
 
+	start := time.Now()
+	mx := embedderMetrics()
+	mx.BatchSize.Record(ctx, float64(len(texts)),
+		metric.WithAttributes(attribute.String("backend", "voyage")))
+	outcome := "success"
+	defer func() {
+		mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
+			metric.WithAttributes(attribute.String("backend", "voyage")))
+		mx.Requests.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("backend", "voyage"),
+			attribute.String("outcome", outcome),
+		))
+	}()
+
 	reqBody := voyageRequest{
 		Model:     v.model,
 		Input:     texts,
@@ -76,6 +93,7 @@ func (v *VoyageClient) Embed(ctx context.Context, texts []string) ([][]float32, 
 	}
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
+		outcome = "error"
 		return nil, fmt.Errorf("voyage: marshal request: %w", err)
 	}
 
@@ -125,6 +143,9 @@ func (v *VoyageClient) Embed(ctx context.Context, texts []string) ([][]float32, 
 		)
 		return out, resp.StatusCode, nil
 	})
+	if err != nil {
+		outcome = "error"
+	}
 	return embeddings, err
 }
 

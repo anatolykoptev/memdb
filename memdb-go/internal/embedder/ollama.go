@@ -53,6 +53,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const (
@@ -68,15 +71,15 @@ const (
 // No CGO, no ONNX Runtime — pure HTTP client.
 // Compatible with Ollama ≥ 0.3.6 which introduced the batch /api/embed endpoint.
 type OllamaClient struct {
-	baseURL      string
-	model        string
-	dim          int
-	detectedDim  int    // auto-detected from first response; 0 = not yet seen
-	textPrefix   string // prepended client-side to every document text before sending
-	queryPrefix  string // prepended client-side to query text (EmbedQuery)
-	normalizeL2  bool   // apply L2 normalization client-side after receiving embeddings
-	httpClient   *http.Client
-	logger       *slog.Logger
+	baseURL     string
+	model       string
+	dim         int
+	detectedDim int    // auto-detected from first response; 0 = not yet seen
+	textPrefix  string // prepended client-side to every document text before sending
+	queryPrefix string // prepended client-side to query text (EmbedQuery)
+	normalizeL2 bool   // apply L2 normalization client-side after receiving embeddings
+	httpClient  *http.Client
+	logger      *slog.Logger
 }
 
 // OllamaOption is a functional option for OllamaClient.
@@ -150,8 +153,8 @@ func NewOllamaClient(baseURL, model string, logger *slog.Logger, opts ...OllamaO
 // ollamaEmbedRequest is the request body for POST /api/embed.
 // Ollama ≥ 0.3.6: input accepts a list of strings for batch embedding.
 type ollamaEmbedRequest struct {
-	Model  string   `json:"model"`
-	Input  []string `json:"input"`
+	Model string   `json:"model"`
+	Input []string `json:"input"`
 	// KeepAlive controls how long the model stays loaded (default "5m").
 	// Set to "0" to unload immediately after embedding.
 	KeepAlive string `json:"keep_alive,omitempty"`
@@ -235,6 +238,21 @@ func (c *OllamaClient) Embed(ctx context.Context, texts []string) ([][]float32, 
 	if len(texts) == 0 {
 		return nil, nil
 	}
+
+	start := time.Now()
+	mx := embedderMetrics()
+	mx.BatchSize.Record(ctx, float64(len(texts)),
+		metric.WithAttributes(attribute.String("backend", "ollama")))
+	outcome := "success"
+	defer func() {
+		mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
+			metric.WithAttributes(attribute.String("backend", "ollama")))
+		mx.Requests.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("backend", "ollama"),
+			attribute.String("outcome", outcome),
+		))
+	}()
+
 	input := texts
 	if c.textPrefix != "" {
 		input = make([]string, len(texts))
@@ -244,6 +262,7 @@ func (c *OllamaClient) Embed(ctx context.Context, texts []string) ([][]float32, 
 	}
 	embs, err := c.embedRaw(ctx, input)
 	if err != nil {
+		outcome = "error"
 		return nil, err
 	}
 	c.logger.Debug("ollama embed complete",
