@@ -5,13 +5,11 @@ package handlers
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
@@ -87,8 +85,31 @@ func (h *Handler) ValidatedFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
-	defer cancel()
+	// Ingestion queue backpressure (same as NativeAdd sync path).
+	if h.addSem != nil {
+		if !h.acquireAddSlot(r.Context()) {
+			h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"code":    503,
+				"message": "feedback queue full, try again later",
+			})
+			return
+		}
+		defer h.addSem.Release(1)
+	}
+
+	ctx := r.Context()
+
+	// Phase 2 hybrid: ensure cube row exists (same pattern as NativeAdd).
+	if h.cubeStore != nil {
+		if created, err := h.cubeStore.EnsureCubeExists(ctx, *req.UserID, *req.UserID); err != nil {
+			h.logger.Error("feedback: ensure cube failed",
+				slog.String("cube_id", *req.UserID),
+				slog.Any("error", err))
+		} else if created {
+			h.logger.Warn("feedback: cube auto-created without explicit create_cube",
+				slog.String("cube_id", *req.UserID))
+		}
+	}
 
 	items, err := h.nativeAddForCube(ctx, addReq, *req.UserID)
 	if err != nil {
@@ -101,11 +122,21 @@ func (h *Handler) ValidatedFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.cacheInvalidate(ctx,
+		cachePrefix+"get_all:"+*req.UserID+":*",
+		cachePrefix+"post_get_memory:"+*req.UserID+":*",
+	)
+
 	h.writeJSON(w, http.StatusOK, map[string]any{
 		"code":    200,
 		"message": "feedback processed",
 		"data":    items,
 	})
+
+	h.logger.Info("feedback complete",
+		slog.String("user_id", *req.UserID),
+		slog.Int("memories_touched", len(items)),
+	)
 }
 
 // ValidatedDelete validates and proxies POST /product/delete_memory.

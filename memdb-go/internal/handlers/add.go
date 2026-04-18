@@ -228,6 +228,7 @@ func (h *Handler) acquireAddSlot(ctx context.Context) bool {
 // nativeAddForCube dispatches to async, fast, fine, or buffer pipeline based on mode.
 // Default (no mode specified) uses buffer if enabled, otherwise fine/fast.
 func (h *Handler) nativeAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
+	// Feedback has its own pipeline; bypass mode dispatch.
 	if req.IsFeedback != nil && *req.IsFeedback {
 		return h.handleFeedback(ctx, cubeID, req)
 	}
