@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg?logo=apache)](https://opensource.org/license/apache-2-0/)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8.svg?logo=go)](https://go.dev/)
 [![arXiv](https://img.shields.io/badge/arXiv-2507.03724-b31b1b.svg)](https://arxiv.org/abs/2507.03724)
-[![Discord](https://img.shields.io/badge/Discord-join%20chat-7289DA.svg?logo=discord)](https://discord.gg/Txbx3gebZR)
+[![Discord](https://img.shields.io/badge/Discord-join%20chat-7289DA.svg?logo=discord)](https://discord.gg/8vhbTZgf)
 [![GitHub Discussions](https://img.shields.io/badge/GitHub-Discussions-181717.svg?logo=github)](https://github.com/anatolykoptev/memdb/discussions)
 
 MemDB is a self-hosted memory database for AI agents. It stores, retrieves, and manages long-term memory — structured as a graph, searchable by vector similarity — and exposes it through a REST API and an MCP server for Claude-style agents.
