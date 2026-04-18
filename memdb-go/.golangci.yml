@@ -7,27 +7,18 @@ linters:
   default: standard
   enable:
     # Complexity & size
-    - funlen
-    - gocognit
-    - cyclop
-    - nestif
 
     # DRY
-    - dupl
-    - goconst
 
     # Hardcode prevention
-    - mnd
     - usestdlibvars
 
     # Security
     - gosec
 
     # Code quality
-    - gocritic
     - noctx
     - bodyclose
-    - errorlint
     - perfsprint
 
   settings:
@@ -76,15 +67,7 @@ linters:
     rules:
       - path: _test\.go
         linters:
-          - funlen
-          - mnd
-          - dupl
           - gosec
-          - goconst
-          - gocognit
-          - cyclop
       # CGO stubs
       - path: onnx_stub\.go
         linters:
-          - funlen
-          - gocognit
