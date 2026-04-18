@@ -7,6 +7,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/gob"
 	"encoding/json"
@@ -176,7 +177,7 @@ func NewServer(impl *Implementation, options *ServerOptions) *Server {
 	}
 
 	if opts.GetSessionID == nil {
-		opts.GetSessionID = randText
+		opts.GetSessionID = rand.Text
 	}
 
 	if opts.Logger == nil { // ensure we have a logger
@@ -320,15 +321,18 @@ func toolForErr[In, Out any](t *Tool, h ToolHandlerFor[In, Out], cache *SchemaCa
 		var err error
 		input, err = applySchema(input, inputResolved)
 		if err != nil {
-			// TODO(#450): should this be considered a tool error? (and similar below)
-			return nil, fmt.Errorf("%w: validating \"arguments\": %v", jsonrpc2.ErrInvalidParams, err)
+			var errRes CallToolResult
+			errRes.SetError(fmt.Errorf("validating \"arguments\": %v", err))
+			return &errRes, nil
 		}
 
 		// Unmarshal and validate args.
 		var in In
 		if input != nil {
 			if err := internaljson.Unmarshal(input, &in); err != nil {
-				return nil, fmt.Errorf("%w: %v", jsonrpc2.ErrInvalidParams, err)
+				var errRes CallToolResult
+				errRes.SetError(err)
+				return &errRes, nil
 			}
 		}
 
@@ -627,6 +631,14 @@ func (s *Server) changeAndNotify(notification string, change func() bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if change() && s.shouldSendListChangedNotification(notification) {
+		if len(s.sessions) == 0 {
+			if t := s.pendingNotifications[notification]; t != nil {
+				t.Stop()
+				s.pendingNotifications[notification] = nil
+			}
+			return
+		}
+
 		// Reset the outstanding delayed call, if any.
 		if t := s.pendingNotifications[notification]; t == nil {
 			s.pendingNotifications[notification] = time.AfterFunc(notificationDelay, func() { s.notifySessions(notification) })
@@ -833,7 +845,7 @@ func (s *Server) lookupResourceHandler(uri string) (ResourceHandler, string, boo
 // and the current working directory is unavailable, fileResourceHandler panics.
 //
 // Lexical path traversal attacks, where the path has ".." elements that escape dir,
-// are always caught. Go 1.24 and above also protects against symlink-based attacks,
+// are always caught. The SDK also protects against symlink-based attacks,
 // where symlinks under dir lead out of the tree.
 func fileResourceHandler(dir string) ResourceHandler {
 	// Convert dir to an absolute path.
@@ -1163,6 +1175,10 @@ func (ss *ServerSession) ListRoots(ctx context.Context, params *ListRootsParams)
 }
 
 // CreateMessage sends a sampling request to the client.
+//
+// If the client returns multiple content blocks (e.g. parallel tool calls),
+// CreateMessage returns an error. Use [ServerSession.CreateMessageWithTools]
+// for tool-enabled sampling.
 func (ss *ServerSession) CreateMessage(ctx context.Context, params *CreateMessageParams) (*CreateMessageResult, error) {
 	if err := ss.checkInitialized(methodCreateMessage); err != nil {
 		return nil, err
@@ -1175,7 +1191,44 @@ func (ss *ServerSession) CreateMessage(ctx context.Context, params *CreateMessag
 		p2.Messages = []*SamplingMessage{} // avoid JSON "null"
 		params = &p2
 	}
-	return handleSend[*CreateMessageResult](ctx, methodCreateMessage, newServerRequest(ss, orZero[Params](params)))
+	res, err := handleSend[*CreateMessageWithToolsResult](ctx, methodCreateMessage, newServerRequest(ss, orZero[Params](params)))
+	if err != nil {
+		return nil, err
+	}
+	// Downconvert to singular content.
+	if len(res.Content) > 1 {
+		return nil, fmt.Errorf("CreateMessage result has %d content blocks; use CreateMessageWithTools for multiple content", len(res.Content))
+	}
+	var content Content
+	if len(res.Content) > 0 {
+		content = res.Content[0]
+	}
+	return &CreateMessageResult{
+		Meta:       res.Meta,
+		Content:    content,
+		Model:      res.Model,
+		Role:       res.Role,
+		StopReason: res.StopReason,
+	}, nil
+}
+
+// CreateMessageWithTools sends a sampling request with tools to the client,
+// returning a [CreateMessageWithToolsResult] that supports array content
+// (for parallel tool calls). Use this instead of [ServerSession.CreateMessage]
+// when the request includes tools.
+func (ss *ServerSession) CreateMessageWithTools(ctx context.Context, params *CreateMessageWithToolsParams) (*CreateMessageWithToolsResult, error) {
+	if err := ss.checkInitialized(methodCreateMessage); err != nil {
+		return nil, err
+	}
+	if params == nil {
+		params = &CreateMessageWithToolsParams{Messages: []*SamplingMessageV2{}}
+	}
+	if params.Messages == nil {
+		p2 := *params
+		p2.Messages = []*SamplingMessageV2{} // avoid JSON "null"
+		params = &p2
+	}
+	return handleSend[*CreateMessageWithToolsResult](ctx, methodCreateMessage, newServerRequest(ss, orZero[Params](params)))
 }
 
 // Elicit sends an elicitation request to the client asking for user input.
@@ -1219,6 +1272,10 @@ func (ss *ServerSession) Elicit(ctx context.Context, params *ElicitParams) (*Eli
 		return nil, err
 	}
 
+	if res.Action != "accept" {
+		return res, nil
+	}
+
 	if params.RequestedSchema == nil {
 		return res, nil
 	}
@@ -1239,7 +1296,7 @@ func (ss *ServerSession) Elicit(ctx context.Context, params *ElicitParams) (*Eli
 	}
 	err = resolved.ApplyDefaults(&res.Content)
 	if err != nil {
-		return nil, fmt.Errorf("failed to apply schema defalts to elicitation result: %v", err)
+		return nil, fmt.Errorf("failed to apply schema defaults to elicitation result: %v", err)
 	}
 
 	return res, nil

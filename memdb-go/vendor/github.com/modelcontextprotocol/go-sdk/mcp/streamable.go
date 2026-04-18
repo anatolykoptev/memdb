@@ -11,6 +11,7 @@ package mcp
 import (
 	"bytes"
 	"context"
+	crand "crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"maps"
 	"math"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"slices"
 	"strconv"
@@ -30,6 +32,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	internaljson "github.com/modelcontextprotocol/go-sdk/internal/json"
 	"github.com/modelcontextprotocol/go-sdk/internal/jsonrpc2"
+	"github.com/modelcontextprotocol/go-sdk/internal/mcpgodebug"
+	"github.com/modelcontextprotocol/go-sdk/internal/util"
 	"github.com/modelcontextprotocol/go-sdk/internal/xcontext"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 )
@@ -93,7 +97,7 @@ func (i *sessionInfo) startPOST() {
 	i.refs++
 }
 
-// endPOST sigals that a request for this session is ending, starting the
+// endPOST signals that a request for this session is ending, starting the
 // timeout if there are no other requests running.
 func (i *sessionInfo) endPOST() {
 	if i.timeout <= 0 {
@@ -161,6 +165,24 @@ type StreamableHTTPOptions struct {
 	//
 	// If SessionTimeout is the zero value, idle sessions are never closed.
 	SessionTimeout time.Duration
+
+	// DisableLocalhostProtection disables automatic DNS rebinding protection.
+	// By default, requests arriving via a localhost address (127.0.0.1, [::1])
+	// that have a non-localhost Host header are rejected with 403 Forbidden.
+	// This protects against DNS rebinding attacks regardless of whether the
+	// server is listening on localhost specifically or on 0.0.0.0.
+	//
+	// Only disable this if you understand the security implications.
+	// See: https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices#local-mcp-server-compromise
+	DisableLocalhostProtection bool
+
+	// CrossOriginProtection allows to customize cross-origin protection.
+	// The deny handler set in the CrossOriginProtection through SetDenyHandler
+	// is ignored.
+	// If nil, default (zero-value) cross-origin protection will be used.
+	// Use `disablecrossoriginprotection` MCPGODEBUG compatibility parameter
+	// to disable the default protection until v1.6.0.
+	CrossOriginProtection *http.CrossOriginProtection
 }
 
 // NewStreamableHTTPHandler returns a new [StreamableHTTPHandler].
@@ -177,8 +199,10 @@ func NewStreamableHTTPHandler(getServer func(*http.Request) *Server, opts *Strea
 		h.opts = *opts
 	}
 
-	if h.opts.Logger == nil { // ensure we have a logger
-		h.opts.Logger = ensureLogger(nil)
+	h.opts.Logger = ensureLogger(h.opts.Logger)
+
+	if h.opts.CrossOriginProtection == nil {
+		h.opts.CrossOriginProtection = &http.CrossOriginProtection{}
 	}
 
 	return h
@@ -207,22 +231,50 @@ func (h *StreamableHTTPHandler) closeAll() {
 	}
 }
 
+// disablelocalhostprotection is a compatibility parameter that allows to disable
+// DNS rebinding protection, which was added in the 1.4.0 version of the SDK.
+// See the documentation for the mcpgodebug package for instructions how to enable it.
+// The option will be removed in the 1.6.0 version of the SDK.
+var disablelocalhostprotection = mcpgodebug.Value("disablelocalhostprotection")
+
+// disablecrossoriginprotection is a compatibility parameter that allows to disable
+// the verification of the 'Origin' and 'Content-Type' headers, which was added in
+// the 1.4.1 version of the SDK. See the documentation for the mcpgodebug package
+// for instructions how to enable it.
+// The option will be removed in the 1.6.0 version of the SDK.
+var disablecrossoriginprotection = mcpgodebug.Value("disablecrossoriginprotection")
+
 func (h *StreamableHTTPHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	// Allow multiple 'Accept' headers.
-	// https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Accept#syntax
-	accept := strings.Split(strings.Join(req.Header.Values("Accept"), ","), ",")
-	var jsonOK, streamOK bool
-	for _, c := range accept {
-		switch strings.TrimSpace(c) {
-		case "application/json", "application/*":
-			jsonOK = true
-		case "text/event-stream", "text/*":
-			streamOK = true
-		case "*/*":
-			jsonOK = true
-			streamOK = true
+	// DNS rebinding protection: auto-enabled for localhost servers.
+	// See: https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices#local-mcp-server-compromise
+	if !h.opts.DisableLocalhostProtection && disablelocalhostprotection != "1" {
+		if localAddr, ok := req.Context().Value(http.LocalAddrContextKey).(net.Addr); ok && localAddr != nil {
+			if util.IsLoopback(localAddr.String()) && !util.IsLoopback(req.Host) {
+				http.Error(w, fmt.Sprintf("Forbidden: invalid Host header %q", req.Host), http.StatusForbidden)
+				return
+			}
 		}
 	}
+
+	if disablecrossoriginprotection != "1" {
+		// Verify the 'Origin' header to protect against CSRF attacks.
+		if err := h.opts.CrossOriginProtection.Check(req); err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		// Validate 'Content-Type' header.
+		if req.Method == http.MethodPost {
+			contentType := req.Header.Get("Content-Type")
+			if contentType != "application/json" {
+				http.Error(w, "Content-Type must be 'application/json'", http.StatusUnsupportedMediaType)
+				return
+			}
+		}
+	}
+
+	// Allow multiple 'Accept' headers.
+	// https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Accept#syntax
+	jsonOK, streamOK := streamableAccepts(req.Header.Values("Accept"))
 
 	if req.Method == http.MethodGet {
 		if !streamOK {
@@ -374,7 +426,7 @@ func (h *StreamableHTTPHandler) ServeHTTP(w http.ResponseWriter, req *http.Reque
 				// stateless servers.
 				body, err := io.ReadAll(req.Body)
 				if err != nil {
-					http.Error(w, "failed to read body", http.StatusInternalServerError)
+					http.Error(w, "failed to read body", http.StatusBadRequest)
 					return
 				}
 				req.Body.Close()
@@ -485,6 +537,26 @@ func (h *StreamableHTTPHandler) ServeHTTP(w http.ResponseWriter, req *http.Reque
 	}
 
 	sessInfo.transport.ServeHTTP(w, req)
+}
+
+func streamableAccepts(values []string) (jsonOK, streamOK bool) {
+	for _, value := range values {
+		for _, raw := range strings.Split(value, ",") {
+			token := strings.TrimSpace(raw)
+			// Ignore Accept parameters like ";charset=utf-8"; match the base media type.
+			base, _, _ := strings.Cut(token, ";")
+			switch strings.ToLower(strings.TrimSpace(base)) {
+			case "application/json", "application/*":
+				jsonOK = true
+			case "text/event-stream", "text/*":
+				streamOK = true
+			case "*/*":
+				jsonOK = true
+				streamOK = true
+			}
+		}
+	}
+	return jsonOK, streamOK
 }
 
 // A StreamableServerTransport implements the server side of the MCP streamable
@@ -981,9 +1053,9 @@ func (c *streamableServerConn) acquireStream(ctx context.Context, w http.Respons
 		// Issue #410: the standalone SSE stream is likely not to receive messages
 		// for a long time. Ensure that headers are flushed.
 		w.WriteHeader(http.StatusOK)
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
-		}
+		rc := http.NewResponseController(w)
+		// Ignore returned error as flushing is best-effort.
+		_ = rc.Flush()
 	}
 
 	for _, data := range toReplay {
@@ -1139,9 +1211,9 @@ func (c *streamableServerConn) servePOST(w http.ResponseWriter, req *http.Reques
 	//
 	// Create a logical stream to track its responses.
 	// Important: don't publish the incoming messages until the stream is
-	// registered, as the server may attempt to respond to imcoming messages as
+	// registered, as the server may attempt to respond to incoming messages as
 	// soon as they're published.
-	stream, err := c.newStream(req.Context(), calls, randText())
+	stream, err := c.newStream(req.Context(), calls, crand.Text())
 	if err != nil {
 		http.Error(w, fmt.Sprintf("storing stream: %v", err), http.StatusInternalServerError)
 		return
@@ -1425,6 +1497,9 @@ type StreamableClientTransport struct {
 	//   - You want to avoid maintaining a persistent connection
 	DisableStandaloneSSE bool
 
+	// OAuthHandler is an optional field that, if provided, will be used to authorize the requests.
+	OAuthHandler auth.OAuthHandler
+
 	// TODO(rfindley): propose exporting these.
 	// If strict is set, the transport is in 'strict mode', where any violation
 	// of the MCP spec causes a failure.
@@ -1449,8 +1524,12 @@ var (
 	// reconnectInitialDelay is the base delay for the first reconnect attempt.
 	//
 	// Mutable for testing.
-	reconnectInitialDelay = 1 * time.Second
+	reconnectInitialDelay atomic.Int64
 )
+
+func init() {
+	reconnectInitialDelay.Store(int64(1 * time.Second))
+}
 
 // Connect implements the [Transport] interface.
 //
@@ -1500,6 +1579,7 @@ func (t *StreamableClientTransport) Connect(ctx context.Context) (Connection, er
 		cancel:               cancel,
 		failed:               make(chan struct{}),
 		disableStandaloneSSE: t.DisableStandaloneSSE,
+		oauthHandler:         t.OAuthHandler,
 	}
 	return conn, nil
 }
@@ -1517,6 +1597,9 @@ type streamableClientConn struct {
 	// disableStandaloneSSE controls whether to disable the standalone SSE stream
 	// for receiving server-to-client notifications when no request is in flight.
 	disableStandaloneSSE bool // from [StreamableClientTransport.DisableStandaloneSSE]
+
+	// oauthHandler is the OAuth handler for the connection.
+	oauthHandler auth.OAuthHandler // from [StreamableClientTransport.OAuthHandler]
 
 	// Guard calls to Close, as it may be called multiple times.
 	closeOnce sync.Once
@@ -1539,17 +1622,6 @@ type streamableClientConn struct {
 	initializedResult *InitializeResult
 	sessionID         string
 }
-
-// errSessionMissing distinguishes if the session is known to not be present on
-// the server (see [streamableClientConn.fail]).
-//
-// TODO(rfindley): should we expose this error value (and its corresponding
-// API) to the user?
-//
-// The spec says that if the server returns 404, clients should reestablish
-// a session. For now, we delegate that to the user, but do they need a way to
-// differentiate a 'NotFound' error from other errors?
-var errSessionMissing = errors.New("session not found")
 
 var _ clientConnection = (*streamableClientConn)(nil)
 
@@ -1629,7 +1701,7 @@ func (c *streamableClientConn) connectStandaloneSSE() {
 // If err is non-nil, it is terminal, and subsequent (or pending) Reads will
 // fail.
 //
-// If err wraps errSessionMissing, the failure indicates that the session is no
+// If err wraps ErrSessionMissing, the failure indicates that the session is no
 // longer present on the server, and no final DELETE will be performed when
 // closing the connection.
 func (c *streamableClientConn) fail(err error) {
@@ -1698,20 +1770,46 @@ func (c *streamableClientConn) Write(ctx context.Context, msg jsonrpc.Message) e
 		return fmt.Errorf("%s: %v", requestSummary, err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(data))
+	doRequest := func() (*http.Request, *http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(data))
+		if err != nil {
+			return nil, nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		if err := c.setMCPHeaders(req); err != nil {
+			// Failure to set headers means that the request was not sent.
+			// Wrap with ErrRejected so the jsonrpc2 connection doesn't set writeErr
+			// and permanently break the connection.
+			return nil, nil, fmt.Errorf("%s: %w: %v", requestSummary, jsonrpc2.ErrRejected, err)
+		}
+		resp, err := c.client.Do(req)
+		if err != nil {
+			// Any error from client.Do means the request didn't reach the server.
+			// Wrap with ErrRejected so the jsonrpc2 connection doesn't set writeErr
+			// and permanently break the connection.
+			err = fmt.Errorf("%s: %w: %v", requestSummary, jsonrpc2.ErrRejected, err)
+		}
+		return req, resp, err
+	}
+
+	req, resp, err := doRequest()
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/event-stream")
-	c.setMCPHeaders(req)
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		// Any error from client.Do means the request didn't reach the server.
-		// Wrap with ErrRejected so the jsonrpc2 connection doesn't set writeErr
-		// and permanently break the connection.
-		return fmt.Errorf("%w: %s: %v", jsonrpc2.ErrRejected, requestSummary, err)
+	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && c.oauthHandler != nil {
+		if err := c.oauthHandler.Authorize(ctx, req, resp); err != nil {
+			// Wrap with ErrRejected so the jsonrpc2 connection doesn't set writeErr
+			// and permanently break the connection.
+			// Wrap the authorization error as well for client inspection.
+			return fmt.Errorf("%s: %w: %w", requestSummary, jsonrpc2.ErrRejected, err)
+		}
+		// Retry the request after successful authorization.
+		_, resp, err = doRequest()
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := c.checkResponse(requestSummary, resp); err != nil {
@@ -1779,23 +1877,32 @@ func (c *streamableClientConn) Write(ctx context.Context, msg jsonrpc.Message) e
 	return nil
 }
 
-// testAuth controls whether a fake Authorization header is added to outgoing requests.
-// TODO: replace with a better mechanism when client-side auth is in place.
-var testAuth atomic.Bool
-
-func (c *streamableClientConn) setMCPHeaders(req *http.Request) {
+func (c *streamableClientConn) setMCPHeaders(req *http.Request) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.oauthHandler != nil {
+		ts, err := c.oauthHandler.TokenSource(c.ctx)
+		if err != nil {
+			return err
+		}
+		if ts != nil {
+			token, err := ts.Token()
+			if err != nil {
+				return err
+			}
+			if token != nil {
+				req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+			}
+		}
+	}
 	if c.initializedResult != nil {
 		req.Header.Set(protocolVersionHeader, c.initializedResult.ProtocolVersion)
 	}
 	if c.sessionID != "" {
 		req.Header.Set(sessionIDHeader, c.sessionID)
 	}
-	if testAuth.Load() {
-		req.Header.Set("Authorization", "Bearer foo")
-	}
+	return nil
 }
 
 func (c *streamableClientConn) handleJSON(requestSummary string, resp *http.Response) {
@@ -1824,15 +1931,14 @@ func (c *streamableClientConn) handleJSON(requestSummary string, resp *http.Resp
 // stream is complete when we receive its response. Otherwise, this is the
 // standalone stream.
 func (c *streamableClientConn) handleSSE(ctx context.Context, requestSummary string, resp *http.Response, forCall *jsonrpc2.Request) {
+	// Track the last event ID to detect progress.
+	// The retry counter is only reset when progress is made (lastEventID advances).
+	// This prevents infinite retry loops when a server repeatedly terminates
+	// connections without making progress (#679).
+	var prevLastEventID string
+	retriesWithoutProgress := 0
+
 	for {
-		// Connection was successful. Continue the loop with the new response.
-		//
-		// TODO(#679): we should set a reasonable limit on the number of times
-		// we'll try getting a response for a given request, or enforce that we
-		// actually make progress.
-		//
-		// Eventually, if we don't get the response, we should stop trying and
-		// fail the request.
 		lastEventID, reconnectDelay, clientClosed := c.processStream(ctx, requestSummary, resp, forCall)
 
 		// If the connection was closed by the client, we're done.
@@ -1844,6 +1950,23 @@ func (c *streamableClientConn) handleSSE(ctx context.Context, requestSummary str
 		// but we may just miss messages.
 		if lastEventID == "" && forCall != nil {
 			return
+		}
+
+		// Check if we made progress (lastEventID advanced).
+		// Only reset the retry counter when actual progress is made.
+		if lastEventID != "" && lastEventID != prevLastEventID {
+			// Progress was made: reset the retry counter.
+			retriesWithoutProgress = 0
+			prevLastEventID = lastEventID
+		} else {
+			// No progress: increment the retry counter.
+			retriesWithoutProgress++
+			if retriesWithoutProgress > c.maxRetries {
+				if ctx.Err() == nil {
+					c.fail(fmt.Errorf("%s: exceeded %d retries without progress (session ID: %v)", requestSummary, c.maxRetries, c.sessionID))
+				}
+				return
+			}
 		}
 
 		// The stream was interrupted or ended by the server. Attempt to reconnect.
@@ -1880,9 +2003,9 @@ func (c *streamableClientConn) checkResponse(requestSummary string, resp *http.R
 	// which it MUST respond to requests containing that session ID with HTTP
 	// 404 Not Found."
 	if resp.StatusCode == http.StatusNotFound {
-		// Return an errSessionMissing to avoid sending a redundant DELETE when the
+		// Return an ErrSessionMissing to avoid sending a redundant DELETE when the
 		// session is already gone.
-		return fmt.Errorf("%s: failed to connect (session ID: %v): %w", requestSummary, c.sessionID, errSessionMissing)
+		return fmt.Errorf("%s: failed to connect (session ID: %v): %w", requestSummary, c.sessionID, ErrSessionMissing)
 	}
 	// Transient server errors (502, 503, 504, 429) should not break the connection.
 	// Wrap them with ErrRejected so the jsonrpc2 layer doesn't set writeErr.
@@ -1910,6 +2033,14 @@ func (c *streamableClientConn) processStream(ctx context.Context, requestSummary
 			if ctx.Err() != nil {
 				return "", 0, true // don't reconnect: client cancelled
 			}
+
+			// Malformed events are hard errors that indicate corrupted data or protocol
+			// violations. These should fail the connection permanently.
+			if errors.Is(err, errMalformedEvent) {
+				c.fail(fmt.Errorf("%s: %v", requestSummary, err))
+				return "", 0, true
+			}
+
 			break
 		}
 
@@ -1922,6 +2053,15 @@ func (c *streamableClientConn) processStream(ctx context.Context, requestSummary
 				reconnectDelay = time.Duration(n) * time.Millisecond
 			}
 		}
+
+		// According to SSE specification
+		// (https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation)
+		// events with an empty data buffer are allowed.
+		// In MCP these can be priming events (SEP-1699) that carry only a Last-Event-ID for stream resumption.
+		if len(evt.Data) == 0 {
+			continue
+		}
+
 		// According to SSE spec, events with no name default to "message"
 		if evt.Name != "" && evt.Name != "message" {
 			continue
@@ -2015,7 +2155,9 @@ func (c *streamableClientConn) connectSSE(ctx context.Context, lastEventID strin
 			if err != nil {
 				return nil, err
 			}
-			c.setMCPHeaders(req)
+			if err := c.setMCPHeaders(req); err != nil {
+				return nil, err
+			}
 			if lastEventID != "" {
 				req.Header.Set(lastEventIDHeader, lastEventID)
 			}
@@ -2039,15 +2181,16 @@ func (c *streamableClientConn) connectSSE(ctx context.Context, lastEventID strin
 // Close implements the [Connection] interface.
 func (c *streamableClientConn) Close() error {
 	c.closeOnce.Do(func() {
-		if errors.Is(c.failure(), errSessionMissing) {
+		if errors.Is(c.failure(), ErrSessionMissing) {
 			// If the session is missing, no need to delete it.
 		} else {
 			req, err := http.NewRequestWithContext(c.ctx, http.MethodDelete, c.url, nil)
 			if err != nil {
 				c.closeErr = err
 			} else {
-				c.setMCPHeaders(req)
-				if _, err := c.client.Do(req); err != nil {
+				if err := c.setMCPHeaders(req); err != nil {
+					c.closeErr = err
+				} else if _, err := c.client.Do(req); err != nil {
 					c.closeErr = err
 				}
 			}
@@ -2066,7 +2209,7 @@ func calculateReconnectDelay(attempt int) time.Duration {
 		return 0
 	}
 	// Calculate the exponential backoff using the grow factor.
-	backoffDuration := time.Duration(float64(reconnectInitialDelay) * math.Pow(reconnectGrowFactor, float64(attempt-1)))
+	backoffDuration := time.Duration(float64(reconnectInitialDelay.Load()) * math.Pow(reconnectGrowFactor, float64(attempt-1)))
 	// Cap the backoffDuration at maxDelay.
 	backoffDuration = min(backoffDuration, reconnectMaxDelay)
 
