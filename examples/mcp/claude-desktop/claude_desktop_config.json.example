@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "memdb": {
+      "command": "mcp-stdio-proxy",
+      "args": ["--url", "http://127.0.0.1:8001/mcp"],
+      "env": {
+        "SERVICE_SECRET": "your-service-secret-here"
+      }
+    }
+  }
+}
