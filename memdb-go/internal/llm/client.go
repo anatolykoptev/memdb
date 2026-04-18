@@ -21,6 +21,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const (
@@ -164,6 +167,11 @@ func (c *Client) Model() string { return c.model }
 //	    if quota error && more models: continue
 //	    return error
 func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxTokens int) (string, error) {
+	start := time.Now()
+	mx := llmMetrics()
+	// Use primary model as the label for the top-level duration (first model tried).
+	primaryModel := c.model
+
 	models := make([]string, 0, 1+len(c.fallbackModels))
 	models = append(models, c.model)
 	models = append(models, c.fallbackModels...)
@@ -172,9 +180,21 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 	for i, model := range models {
 		content, err, switchModel := c.chatModelLoop(ctx, model, models, i, messages, maxTokens)
 		if err != nil {
+			mx.Requests.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("model", primaryModel),
+				attribute.String("outcome", "error"),
+			))
+			mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
+				metric.WithAttributes(attribute.String("model", primaryModel)))
 			return "", err
 		}
 		if content != "" {
+			mx.Requests.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("model", primaryModel),
+				attribute.String("outcome", "success"),
+			))
+			mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
+				metric.WithAttributes(attribute.String("model", primaryModel)))
 			return content, nil
 		}
 		lastErr = switchModel
@@ -182,6 +202,12 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 			break
 		}
 	}
+	mx.Requests.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("model", primaryModel),
+		attribute.String("outcome", "error"),
+	))
+	mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
+		metric.WithAttributes(attribute.String("model", primaryModel)))
 	return "", lastErr
 }
 
@@ -241,6 +267,10 @@ func (c *Client) classifyAttemptError(ctx context.Context, apiErr *APIError, mod
 		c.logger.Warn("llm transient error, retrying",
 			slog.String("model", model), slog.Int("status", apiErr.StatusCode),
 			slog.Int("attempt", attempt+1), slog.Duration("delay", delay))
+		llmMetrics().Requests.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("model", model),
+			attribute.String("outcome", "retry"),
+		))
 		_ = sleepCtx(ctx, delay)
 		return retryContinue
 	}

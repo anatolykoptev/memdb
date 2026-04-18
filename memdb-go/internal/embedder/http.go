@@ -10,6 +10,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const httpEmbedTimeout = 30 * time.Second
@@ -56,45 +59,67 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		return nil, nil
 	}
 
+	start := time.Now()
+	mx := embedderMetrics()
+	mx.BatchSize.Record(ctx, float64(len(texts)),
+		metric.WithAttributes(attribute.String("backend", "http")))
+	outcome := "success"
+	defer func() {
+		mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
+			metric.WithAttributes(attribute.String("backend", "http")))
+		mx.Requests.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("backend", "http"),
+			attribute.String("outcome", outcome),
+		))
+	}()
+
 	body, err := json.Marshal(httpEmbedRequest{Input: texts, Model: h.model})
 	if err != nil {
+		outcome = "error"
 		return nil, fmt.Errorf("http embedder: marshal: %w", err)
 	}
 
 	url := h.baseURL + "/v1/embeddings"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
+		outcome = "error"
 		return nil, fmt.Errorf("http embedder: create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := h.client.Do(req)
 	if err != nil {
+		outcome = "error"
 		return nil, fmt.Errorf("http embedder: request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		outcome = "error"
 		return nil, fmt.Errorf("http embedder: read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		outcome = "error"
 		return nil, fmt.Errorf("http embedder: status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var parsed httpEmbedResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		outcome = "error"
 		return nil, fmt.Errorf("http embedder: unmarshal: %w", err)
 	}
 
 	if len(parsed.Data) != len(texts) {
+		outcome = "error"
 		return nil, fmt.Errorf("http embedder: expected %d embeddings, got %d", len(texts), len(parsed.Data))
 	}
 
 	out := make([][]float32, len(texts))
 	for _, d := range parsed.Data {
 		if d.Index < 0 || d.Index >= len(texts) {
+			outcome = "error"
 			return nil, fmt.Errorf("http embedder: invalid index %d", d.Index)
 		}
 		out[d.Index] = d.Embedding

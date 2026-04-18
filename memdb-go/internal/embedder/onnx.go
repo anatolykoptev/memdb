@@ -10,9 +10,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/daulet/tokenizers"
 	ort "github.com/yalue/onnxruntime_go"
+
+
+	"go.opentelemetry.io/otel/attribute"
+
+	"go.opentelemetry.io/otel/metric"
 )
 
 const onnxIntraOpThreads = 4 // intra-op parallelism: 4 threads within a single ONNX op
@@ -20,8 +26,8 @@ const onnxIntraOpThreads = 4 // intra-op parallelism: 4 threads within a single 
 // ONNXEmbedder runs a quantized ONNX embedding model.
 // It is safe for concurrent use; inference calls are serialized by a mutex.
 type ONNXEmbedder struct {
-	session   *ort.DynamicAdvancedSession
-	tokenizer *tokenizers.Tokenizer
+	session        *ort.DynamicAdvancedSession
+	tokenizer      *tokenizers.Tokenizer
 	dim            int
 	maxLen         int
 	padID          int64
@@ -111,9 +117,24 @@ func (e *ONNXEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		return nil, nil
 	}
 
+	start := time.Now()
+	mx := embedderMetrics()
+	mx.BatchSize.Record(ctx, float64(len(texts)),
+		metric.WithAttributes(attribute.String("backend", "onnx")))
+	outcome := "success"
+	defer func() {
+		mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
+			metric.WithAttributes(attribute.String("backend", "onnx")))
+		mx.Requests.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("backend", "onnx"),
+			attribute.String("outcome", outcome),
+		))
+	}()
+
 	// Check for cancellation before starting work.
 	select {
 	case <-ctx.Done():
+		outcome = "error"
 		return nil, ctx.Err()
 	default:
 	}
@@ -183,6 +204,7 @@ func (e *ONNXEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 	e.mu.Unlock()
 
 	if err != nil {
+		outcome = "error"
 		return nil, err
 	}
 
