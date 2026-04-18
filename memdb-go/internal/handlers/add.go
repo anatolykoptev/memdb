@@ -198,14 +198,14 @@ func (h *Handler) proxyReason(req *fullAddRequest) string {
 	if h.embedder == nil {
 		return "embedder nil"
 	}
+	if req.IsFeedback != nil && *req.IsFeedback && h.llmChat == nil {
+		return "feedback: llmChat not configured"
+	}
 	if h.llmExtractor == nil {
 		return "llm extractor not configured (fine mode unavailable)"
 	}
 	if req.AsyncMode != nil && *req.AsyncMode == modeAsync {
 		return modeAsync
-	}
-	if req.IsFeedback != nil && *req.IsFeedback && h.llmChat == nil {
-		return "feedback: llmChat not configured"
 	}
 	return "unknown"
 }
