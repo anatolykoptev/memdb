@@ -12,11 +12,11 @@ import (
 
 func TestNativeDeleteCube_SoftDefault(t *testing.T) {
 	store := &fakeCubeStore{cubes: map[string]db.Cube{
-		"target": {CubeID: "target", OwnerID: "krolik", IsActive: true},
+		"target": {CubeID: "target", OwnerID: "alice", IsActive: true},
 	}}
 	h := newCubeHandler(store)
 
-	payload, _ := json.Marshal(map[string]any{"cube_id": "target", "user_id": "krolik"})
+	payload, _ := json.Marshal(map[string]any{"cube_id": "target", "user_id": "alice"})
 	req := httptest.NewRequest(http.MethodPost, "/product/delete_cube", bytes.NewReader(payload))
 	w := httptest.NewRecorder()
 	h.NativeDeleteCube(w, req)
@@ -34,12 +34,12 @@ func TestNativeDeleteCube_SoftDefault(t *testing.T) {
 
 func TestNativeDeleteCube_Hard(t *testing.T) {
 	store := &fakeCubeStore{
-		cubes:        map[string]db.Cube{"target": {CubeID: "target", OwnerID: "krolik", IsActive: true}},
+		cubes:        map[string]db.Cube{"target": {CubeID: "target", OwnerID: "alice", IsActive: true}},
 		hardDeletedN: 42,
 	}
 	h := newCubeHandler(store)
 
-	payload, _ := json.Marshal(map[string]any{"cube_id": "target", "user_id": "krolik", "hard_delete": true})
+	payload, _ := json.Marshal(map[string]any{"cube_id": "target", "user_id": "alice", "hard_delete": true})
 	req := httptest.NewRequest(http.MethodPost, "/product/delete_cube", bytes.NewReader(payload))
 	w := httptest.NewRecorder()
 	h.NativeDeleteCube(w, req)
@@ -67,7 +67,7 @@ func TestNativeDeleteCube_OwnerMismatch(t *testing.T) {
 	}}
 	h := newCubeHandler(store)
 
-	payload, _ := json.Marshal(map[string]any{"cube_id": "target", "user_id": "krolik"})
+	payload, _ := json.Marshal(map[string]any{"cube_id": "target", "user_id": "alice"})
 	req := httptest.NewRequest(http.MethodPost, "/product/delete_cube", bytes.NewReader(payload))
 	w := httptest.NewRecorder()
 	h.NativeDeleteCube(w, req)

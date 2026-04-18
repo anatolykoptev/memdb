@@ -75,7 +75,7 @@ func TestInternetSearch_EmptyOnError(t *testing.T) {
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /home/krolik/src/MemDB/memdb-go && go test ./internal/search/ -run TestInternetSearch -v`
+Run: `cd ./memdb-go && go test ./internal/search/ -run TestInternetSearch -v`
 Expected: FAIL — types not defined
 
 **Step 3: Implement internet.go**
@@ -180,13 +180,13 @@ func (s *InternetSearcher) Search(ctx context.Context, query string) ([]Internet
 
 **Step 4: Run test**
 
-Run: `cd /home/krolik/src/MemDB/memdb-go && go test ./internal/search/ -run TestInternetSearch -v`
+Run: `cd ./memdb-go && go test ./internal/search/ -run TestInternetSearch -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /home/krolik/src/MemDB/memdb-go
+cd ./memdb-go
 git add internal/search/internet.go internal/search/internet_test.go
 git commit -m "feat(search): add SearXNG internet search client
 
@@ -326,13 +326,13 @@ func TestEmbedInternetResults_Empty(t *testing.T) {
 
 **Step 6: Run tests**
 
-Run: `cd /home/krolik/src/MemDB/memdb-go && go test ./internal/search/ -v`
+Run: `cd ./memdb-go && go test ./internal/search/ -v`
 Expected: PASS
 
 **Step 7: Commit**
 
 ```bash
-cd /home/krolik/src/MemDB/memdb-go
+cd ./memdb-go
 git add internal/search/service.go internal/search/config.go internal/search/internet_pipeline_test.go
 git commit -m "feat(search): wire internet search into parallel pipeline
 
@@ -416,7 +416,7 @@ func TestFineFilter_ReturnsAllOnLLMError(t *testing.T) {
 
 **Step 2: Run test, verify fail**
 
-Run: `cd /home/krolik/src/MemDB/memdb-go && go test ./internal/search/ -run TestFine -v`
+Run: `cd ./memdb-go && go test ./internal/search/ -run TestFine -v`
 
 **Step 3: Implement fine.go**
 
@@ -626,13 +626,13 @@ If nothing is missing, return {"query": ""}.`
 
 **Step 4: Run tests**
 
-Run: `cd /home/krolik/src/MemDB/memdb-go && go test ./internal/search/ -run TestFine -v`
+Run: `cd ./memdb-go && go test ./internal/search/ -run TestFine -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /home/krolik/src/MemDB/memdb-go
+cd ./memdb-go
 git add internal/search/fine.go internal/search/fine_test.go
 git commit -m "feat(search): add LLM fine-mode filter and recall hint
 
@@ -747,13 +747,13 @@ func mergeRecallIntoKept(kept, recall []map[string]any, limit int) []map[string]
 
 **Step 3: Run all search tests**
 
-Run: `cd /home/krolik/src/MemDB/memdb-go && go test ./internal/search/ -v`
+Run: `cd ./memdb-go && go test ./internal/search/ -v`
 Expected: PASS
 
 **Step 4: Commit**
 
 ```bash
-cd /home/krolik/src/MemDB/memdb-go
+cd ./memdb-go
 git add internal/search/service.go internal/search/config.go
 git commit -m "feat(search): wire fine mode into SearchService
 
@@ -903,13 +903,13 @@ Remove the `ValidatedSearch` method entirely — it only proxied to Python and i
 
 **Step 4: Run tests**
 
-Run: `cd /home/krolik/src/MemDB/memdb-go && go test ./internal/handlers/ -v`
+Run: `cd ./memdb-go && go test ./internal/handlers/ -v`
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-cd /home/krolik/src/MemDB/memdb-go
+cd ./memdb-go
 git add internal/handlers/search.go internal/handlers/validate.go internal/handlers/search_native_test.go
 git commit -m "feat(search): remove proxy fallback, fully native /product/search
 
@@ -972,7 +972,7 @@ Check: `docker compose logs memdb-go --tail 20` — should see "internet search 
 **Step 5: Commit**
 
 ```bash
-cd /home/krolik/src/MemDB/memdb-go
+cd ./memdb-go
 git add internal/config/config.go internal/server/server.go
 git commit -m "feat(search): wire SearXNG and fine config in server init"
 ```
@@ -1060,8 +1060,8 @@ docker compose ps memdb-api
 ## Task 8: Cleanup — Remove Python go_client Dependency for Search (Optional)
 
 **Files:**
-- Modify: `/home/krolik/src/MemDB/src/memdb/multi_mem_cube/single_cube.py`
-- Modify: `/home/krolik/src/MemDB/src/memdb/clients/go_search_client.py`
+- Modify: `./src/memdb/multi_mem_cube/single_cube.py`
+- Modify: `./src/memdb/clients/go_search_client.py`
 
 **Context:** Now that Go never proxies search to Python, the circular path is broken. Python's `_fast_search` calling Go is safe. However, to fully decouple, we can make Python's `_fast_search` use its own direct DB path instead of calling Go. This eliminates the dependency entirely and makes Python standalone for search (useful if Go is down).
 

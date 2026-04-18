@@ -2,7 +2,7 @@
 # Downloads multilingual-e5-large INT8 ONNX model and tokenizer
 set -euo pipefail
 
-MODEL_DIR="${1:-/home/krolik/models/multilingual-e5-large}"
+MODEL_DIR="${1:-./models/multilingual-e5-large}"
 mkdir -p "$MODEL_DIR"
 
 echo "Downloading tokenizer.json..."

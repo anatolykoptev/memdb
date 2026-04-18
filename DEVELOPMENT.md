@@ -2,13 +2,13 @@
 
 ## 🎯 Основной репозиторий для доработок
 
-**Используйте:** `/home/krolik/MemDB`
+**Используйте:** `$HOME/memdb`
 
 ## 📋 Workflow для изменений
 
 ### 1. Внести изменения локально
 ```bash
-cd /home/krolik/MemDB
+cd $HOME/memdb
 git checkout -b feature/my-feature
 # Делайте изменения в коде
 ```
@@ -33,10 +33,10 @@ GitHub Actions выполнит все проверки:
   - ✅ Ruff formatting (`ruff format --check`)
   - ✅ PyTest unit tests
 
-### 4. Обновить krolik-server
+### 4. Обновить memdb-deploy
 После пуша в GitHub:
 ```bash
-cd ~/krolik-server/services/memdb-core
+cd $HOME/memdb-deploy/services/memdb-core
 git pull origin main  # или нужную ветку
 cd ../..
 docker compose build --no-cache memdb-api memdb-mcp
@@ -59,7 +59,7 @@ docker compose restart memdb-api memdb-mcp
 pip install --user pre-commit
 
 # В директории MemDB
-cd /home/krolik/MemDB
+cd $HOME/memdb
 pre-commit install
 
 # Запустить вручную
@@ -69,7 +69,7 @@ pre-commit run --all-files
 ### Ручная проверка с Ruff
 ```bash
 # В контейнере или локально
-cd /home/krolik/MemDB
+cd $HOME/memdb
 
 # Проверка стиля
 ruff check .
@@ -87,7 +87,7 @@ ruff format .
 ## 📊 Проверка статуса CI
 
 ```bash
-cd /home/krolik/MemDB
+cd $HOME/memdb
 
 # Список последних запусков
 gh run list --limit 10
@@ -102,7 +102,7 @@ gh run view --log
 ## 🔄 Синхронизация с upstream MemDB
 
 ```bash
-cd /home/krolik/MemDB
+cd $HOME/memdb
 
 # Добавить upstream remote (если еще нет)
 git remote add upstream https://github.com/MemDBai/MemDB.git
@@ -125,7 +125,7 @@ git push origin main
 ## 📁 Структура репозиториев
 
 ```
-/home/krolik/
+$HOME/
 ├── MemDB/              ⭐ ОСНОВНОЙ - все доработки здесь
 │   ├── .github/workflows/ - CI/CD конфигурация
 │   ├── src/memdb/         - Исходный код с патчами
@@ -134,7 +134,7 @@ git push origin main
 ├── memdb-pr-work/         🔧 Для создания PR в upstream
 │   └── (ветки для PR: fix/*, feat/*)
 │
-└── krolik-server/
+└── memdb-deploy/
     ├── services/
     │   └── memdb-core/    📦 Git submodule → MemDB
     └── docker-compose.yml
@@ -157,12 +157,12 @@ git push origin main
 | Создать ветку | `git checkout -b feature/name` |
 | Запушить изменения | `git push origin feature/name` |
 | Проверить CI | `gh run list --branch feature/name` |
-| Обновить submodule | `cd ~/krolik-server/services/memdb-core && git pull` |
+| Обновить submodule | `cd $HOME/memdb-deploy/services/memdb-core && git pull` |
 | Пересобрать контейнеры | `docker compose build --no-cache memdb-api memdb-mcp` |
 | Перезапустить сервисы | `docker compose restart memdb-api memdb-mcp` |
 | Проверить код Ruff | `ruff check . && ruff format --check .` |
 
 ---
 
-**Все изменения делайте в `/home/krolik/MemDB`**
+**Все изменения делайте в `$HOME/memdb`**
 **CI/CD гарантирует качество перед попаданием в upstream!**

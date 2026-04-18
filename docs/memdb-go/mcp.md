@@ -314,7 +314,7 @@ LangMem регистрирует memory tools через `create_manage_memory_t
 
 Zep предоставляет **A2A protocol** поддержку для multi-agent систем — агенты могут делиться памятью без общего MCP-сервера.
 
-**Где Zep сильнее:** A2A multi-agent memory sharing с access control на уровне graph nodes. Наш `share_cube` proxy и vaelor MCP (`mcp5_vaelor_*`) — более грубый механизм на уровне кубов.
+**Где Zep сильнее:** A2A multi-agent memory sharing с access control на уровне graph nodes. Наш `share_cube` proxy и your-agent MCP (`mcp5_<agent>_*`) — более грубый механизм на уровне кубов.
 
 **Цель Go-миграции:** Расширить `share_cube` механизм — добавить fine-grained access control на уровне memory_type или тегов, не только всего куба целиком.
 

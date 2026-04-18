@@ -371,7 +371,7 @@ Option C из research (extract `AddMemories`/`ChatComplete` service functions, 
 
 ## Функциональное сравнение Go vs Python vs MemOS upstream (март 2026)
 
-> Верификация полноты миграции. Сравнение с `/home/krolik/src/MemDB/src/` (Python) и `MemTensor/MemOS` v2.0.7.
+> Верификация полноты миграции. Сравнение с `.//src/` (Python) и `MemTensor/MemOS` v2.0.7.
 > Обновлено после deep audit (март 2026): исходная оценка была слишком оптимистичной.
 
 ### Где Go реально лучше

@@ -96,7 +96,7 @@ Add to `knownONNXModels` map:
 **Step 2: Verify build**
 
 ```bash
-cd /home/krolik/src/MemDB/memdb-go && go build ./...
+cd ./memdb-go && go build ./...
 ```
 
 ### Task 4: Add zero-padding in Embed output
