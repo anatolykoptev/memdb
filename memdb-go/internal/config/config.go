@@ -89,6 +89,14 @@ type Config struct {
 
 	// MemDB Go API URL (used by MCP server to proxy search)
 	MemDBGoURL string `json:"memdb_go_url"`
+
+	// Cross-encoder reranker (embed-server /v1/rerank, BGE-reranker-v2-m3).
+	// Empty URL disables the step. No SearchParams flag: controlled entirely
+	// by env so every handler, MCP, and test gets consistent behavior.
+	CrossEncoderURL     string        `json:"cross_encoder_url"`
+	CrossEncoderModel   string        `json:"cross_encoder_model"`
+	CrossEncoderTimeout time.Duration `json:"cross_encoder_timeout"`
+	CrossEncoderMaxDocs int           `json:"cross_encoder_max_docs"`
 }
 
 const (
@@ -101,6 +109,12 @@ const (
 	defaultBufferTTL       = 30 * time.Second
 	defaultAddWorkers      = 4
 	defaultAddQueueSize    = 50
+
+	// Cross-encoder reranker defaults.
+	defaultCrossEncoderURL        = "http://embed-server:8082"
+	defaultCrossEncoderModel      = "bge-reranker-v2-m3"
+	defaultCrossEncoderTimeoutMS  = 2000
+	defaultCrossEncoderMaxDocs    = 50
 )
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -168,6 +182,11 @@ func Load() *Config {
 		SearXNGURL:     envStr("SEARXNG_URL", ""),
 		WebshareAPIKey: envStr("WEBSHARE_API_KEY", ""),
 		MemDBGoURL:     envStr("MEMDB_GO_URL", ""),
+
+		CrossEncoderURL:     envStr("CROSS_ENCODER_URL", defaultCrossEncoderURL),
+		CrossEncoderModel:   envStr("CROSS_ENCODER_MODEL", defaultCrossEncoderModel),
+		CrossEncoderTimeout: time.Duration(envInt("CROSS_ENCODER_TIMEOUT_MS", defaultCrossEncoderTimeoutMS)) * time.Millisecond,
+		CrossEncoderMaxDocs: envInt("CROSS_ENCODER_MAX_DOCS", defaultCrossEncoderMaxDocs),
 	}
 }
 
