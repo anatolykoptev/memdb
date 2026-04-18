@@ -1,71 +1,92 @@
-name: memdb-dev
+# MemDB — Go-stack self-hosting compose file
+#
+# Quick start:
+#   cp .env.example .env
+#   # edit .env: set MEMDB_LLM_API_KEY and change POSTGRES_PASSWORD
+#   docker compose -f docker/docker-compose.yml up -d
+#   curl http://localhost:8080/health
+#
+# Optional embed-server sidecar (local GPU/CPU embeddings):
+#   docker compose -f docker/docker-compose.yml --profile embed up -d
+
+name: memdb
 
 services:
-  memdb:
-    container_name: memdb-api
+
+  # ── Postgres 17 with pgvector + Apache AGE ──────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: memdb-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"   # bind to loopback only — do not expose to 0.0.0.0 in production
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-memdb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-memdb}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-memdb} -d ${POSTGRES_DB:-memdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - memdb_network
+
+  # ── memdb-go API ─────────────────────────────────────────────────────────────
+  memdb-go:
+    container_name: memdb-go
     build:
       context: ..
-      dockerfile: docker/Dockerfile
-    ports:
-      - "8000:8000"
-    env_file:
-      - ../.env
-    depends_on:
-      - neo4j
-      - qdrant
-    environment:
-      - PYTHONPATH=/app/src
-      - HF_ENDPOINT=https://hf-mirror.com
-      - QDRANT_HOST=qdrant-docker
-      - QDRANT_PORT=6333
-      - NEO4J_URI=bolt://neo4j-docker:7687
-      - MEMDB_GO_URL=http://memdb-go:8080
-    volumes:
-      - ../src:/app/src
-      - .:/app/docker
-    networks:
-      - memdb_network
-
-  neo4j:
-    image: neo4j:5.26.4
-    container_name: neo4j-docker
-    ports:
-      - "7474:7474"   # HTTP
-      - "7687:7687"   # Bolt
-    healthcheck:
-      test: wget http://localhost:7474 || exit 1
-      interval: 1s
-      timeout: 10s
-      retries: 20
-      start_period: 3s
-    environment:
-      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
-      NEO4J_AUTH: "neo4j/12345678"
-    volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
-    networks:
-      - memdb_network
-
-  qdrant:
-    image: qdrant/qdrant:v1.15.3
-    container_name: qdrant-docker
-    ports:
-      - "6333:6333"  # REST API
-      - "6334:6334"  # gRPC API
-    volumes:
-      - qdrant_data:/qdrant/storage
-    environment:
-      QDRANT__SERVICE__GRPC_PORT: 6334
-      QDRANT__SERVICE__HTTP_PORT: 6333
+      dockerfile: memdb-go/Dockerfile
     restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      MEMDB_GO_PORT: "8080"
+      MEMDB_POSTGRES_URL: ${MEMDB_POSTGRES_URL:-postgresql://${POSTGRES_USER:-memdb}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-memdb}}
+      MEMDB_LLM_PROXY_URL: ${MEMDB_LLM_PROXY_URL:-https://api.openai.com/v1}
+      CLI_PROXY_API_KEY: ${MEMDB_LLM_API_KEY:-}
+      MEMDB_LLM_MODEL: ${MEMDB_LLM_MODEL:-gpt-4o-mini}
+      MEMDB_EMBEDDER_TYPE: ${MEMDB_EMBEDDER_TYPE:-http}
+      MEMDB_EMBED_URL: ${MEMDB_EMBED_URL:-}
+      MEMDB_LOG_LEVEL: ${MEMDB_LOG_LEVEL:-info}
+      MEMDB_LOG_FORMAT: ${MEMDB_LOG_FORMAT:-json}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - memdb_network
+
+  # ── embed-server sidecar (optional, enable with: --profile embed) ─────────
+  # Provides local multilingual embeddings (multilingual-e5-large, jina-code-v2).
+  # If you prefer a hosted embedding API, skip this profile and set
+  # MEMDB_EMBEDDER_TYPE=voyage or MEMDB_EMBEDDER_TYPE=ollama in .env.
+  embed-server:
+    image: ghcr.io/anatolykoptev/embed-server:latest
+    container_name: memdb-embed-server
+    profiles:
+      - embed
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - embed_models:/models
     networks:
       - memdb_network
 
 volumes:
-  neo4j_data:
-  neo4j_logs:
-  qdrant_data:
+  pg_data:
+  embed_models:
 
 networks:
   memdb_network:
