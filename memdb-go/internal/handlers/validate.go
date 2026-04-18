@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // --- Validated handler methods ---
@@ -96,6 +98,10 @@ func (h *Handler) ValidatedFeedback(w http.ResponseWriter, r *http.Request) {
 		}
 		defer h.addSem.Release(1)
 	}
+
+	feedbackMx().Requests.Add(r.Context(), 1, metric.WithAttributes(
+		attribute.String("entry", "standalone_endpoint"),
+	))
 
 	ctx := r.Context()
 
