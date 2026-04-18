@@ -196,8 +196,8 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	prefFormatted := FormatPrefResults(psr.prefResults)
 
 	// Steps 6–11: Rerank, dedup, trim.
-	var llmRerankDur, iterativeDur time.Duration
-	textFormatted, skillFormatted, toolFormatted, prefFormatted, llmRerankDur, iterativeDur =
+	var llmRerankDur, iterativeDur, ceRerankDur time.Duration
+	textFormatted, skillFormatted, toolFormatted, prefFormatted, llmRerankDur, iterativeDur, ceRerankDur =
 		s.postProcessResults(ctx, queryVec, textEmbByID, skillEmbByID, toolEmbByID, textFormatted, skillFormatted, toolFormatted, prefFormatted, p)
 
 	// Step 12: WorkingMemory → ActMem
@@ -220,6 +220,7 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 		slog.Duration("parallel_db", parallelDur),
 		slog.Duration("bfs", bfsDur),
 		slog.Duration("contradicts", contradictsDur),
+		slog.Duration("ce_rerank", ceRerankDur),
 		slog.Duration("llm_rerank", llmRerankDur),
 		slog.Duration("iterative", iterativeDur),
 		slog.Duration("profile", profileDur),
@@ -661,20 +662,31 @@ func (s *SearchService) dedupResults(queryVec []float32, textEmbByID map[string]
 }
 
 // postProcessResults runs steps 6–11 of the search pipeline:
-// cosine rerank → LLM rerank (opt-in) → iterative expansion → temporal decay →
-// relativity threshold → pref quality filter → dedup → cross-source dedup → trim.
-// Returns the processed slices plus timing durations for llm_rerank and iterative steps.
+// cosine rerank → cross-encoder rerank → LLM rerank (opt-in) → iterative expansion →
+// temporal decay → relativity threshold → pref quality filter → dedup →
+// cross-source dedup → trim.
+// Returns the processed slices plus timing durations for ce_rerank, llm_rerank
+// and iterative steps.
 func (s *SearchService) postProcessResults(
 	ctx context.Context,
 	queryVec []float32,
 	textEmbByID, skillEmbByID, toolEmbByID map[string][]float32,
 	text, skill, tool, pref []map[string]any,
 	p SearchParams,
-) (retText, retSkill, retTool, retPref []map[string]any, llmRerankDur, iterativeDur time.Duration) {
+) (retText, retSkill, retTool, retPref []map[string]any, llmRerankDur, iterativeDur, ceRerankDur time.Duration) {
 	// Step 6: Cosine rerank
 	text = ReRankByCosine(queryVec, text, textEmbByID)
 	skill = ReRankByCosine(queryVec, skill, skillEmbByID)
 	tool = ReRankByCosine(queryVec, tool, toolEmbByID)
+
+	// Step 6.05: Cross-encoder rerank (best-effort, runs before LLM rerank).
+	// Only applied to text_mem — skill/tool/pref are too low-value to warrant
+	// the extra HTTP round-trip. Zero-value config.URL disables.
+	if s.CrossEncoder.URL != "" && len(text) > 1 {
+		t0 := time.Now()
+		text = CrossEncoderRerank(ctx, p.Query, text, "memory", s.CrossEncoder)
+		ceRerankDur = time.Since(t0)
+	}
 
 	// Step 6.1: LLM rerank of text_mem (adaptive strategy)
 	if decision := rerankStrategy(text); p.LLMRerank && s.LLMReranker.APIURL != "" && decision.ShouldRerank {
@@ -723,7 +735,7 @@ func (s *SearchService) postProcessResults(
 	StripEmbeddings(tool)
 	StripEmbeddings(pref)
 
-	return text, skill, tool, pref, llmRerankDur, iterativeDur
+	return text, skill, tool, pref, llmRerankDur, iterativeDur, ceRerankDur
 }
 
 // formatWorkingMem converts working memory items to formatted act_mem entries.

@@ -118,12 +118,10 @@ func CrossEncoderRerank(
 		return items
 	}
 
-	// Apply scores back onto the head items. Items that were skipped (no text
-	// field) retain the default score sentinel and will sort after reranked
-	// items.
+	// Apply scores back onto the head items. Items skipped (no text field)
+	// keep the sentinel score and sort to the bottom of the reranked block.
 	const unscored = -1e18
 	scores := make([]float64, len(head))
-	reranked := make([]bool, len(head))
 	for i := range scores {
 		scores[i] = unscored
 	}
@@ -133,24 +131,31 @@ func CrossEncoderRerank(
 		}
 		headIdx := docIdxToHeadIdx[r.Index]
 		scores[headIdx] = r.RelevanceScore
-		reranked[headIdx] = true
 		if meta, ok := head[headIdx]["metadata"].(map[string]any); ok {
 			meta["relativity"] = r.RelevanceScore
 			meta["cross_encoder_reranked"] = true
 		}
 	}
 
-	// Stable-sort head by score descending. Unscored items keep their relative
-	// order and sink to the bottom of the head slice.
-	sort.SliceStable(head, func(i, j int) bool {
-		return scores[i] > scores[j]
+	// Sort indices by score descending (stable). Reorder head via the index
+	// permutation so scores[i] always matches head[i] during comparison.
+	order := make([]int, len(head))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		return scores[order[i]] > scores[order[j]]
 	})
+	reordered := make([]map[string]any, len(head))
+	for newPos, origIdx := range order {
+		reordered[newPos] = head[origIdx]
+	}
 
 	if len(tail) == 0 {
-		return head
+		return reordered
 	}
 	// Preserve the tail (items beyond MaxDocs) after the reranked head.
-	return append(head, tail...)
+	return append(reordered, tail...)
 }
 
 // callCrossEncoder POSTs the rerank request to embed-server and returns the
