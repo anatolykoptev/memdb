@@ -8,17 +8,17 @@ import (
 func TestSearch_PassesPersonIDToVectorSearch(t *testing.T) {
 	mock := &mockPostgres{}
 	svc := &SearchService{postgres: mock, embedder: &mockEmbedder{}, logger: discardLogger()}
-	params := SearchParams{UserName: "krolik", CubeID: "dozor-facts", Query: "test", TopK: 5}
+	params := SearchParams{UserName: "alice", CubeID: "team-facts", Query: "test", TopK: 5}
 	_, _ = svc.Search(context.Background(), params)
 
 	if !mock.vectorSearchCalled {
 		t.Fatal("VectorSearch not called")
 	}
-	if mock.vectorSearchCubeID != "dozor-facts" {
-		t.Errorf("cubeID: got %q want dozor-facts", mock.vectorSearchCubeID)
+	if mock.vectorSearchCubeID != "team-facts" {
+		t.Errorf("cubeID: got %q want team-facts", mock.vectorSearchCubeID)
 	}
-	if mock.vectorSearchPersonID != "krolik" {
-		t.Errorf("personID: got %q want krolik", mock.vectorSearchPersonID)
+	if mock.vectorSearchPersonID != "alice" {
+		t.Errorf("personID: got %q want alice", mock.vectorSearchPersonID)
 	}
 }
 

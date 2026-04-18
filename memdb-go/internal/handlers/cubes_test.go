@@ -15,7 +15,7 @@ func TestNativeCreateCube_Insert(t *testing.T) {
 	h := newCubeHandler(store)
 
 	payload, _ := json.Marshal(map[string]any{
-		"cube_id": "my-cube", "cube_name": "My Cube", "owner_id": "krolik", "description": "Test cube",
+		"cube_id": "my-cube", "cube_name": "My Cube", "owner_id": "alice", "description": "Test cube",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/product/create_cube", bytes.NewReader(payload))
 	w := httptest.NewRecorder()
@@ -49,7 +49,7 @@ func TestNativeCreateCube_MissingCubeID(t *testing.T) {
 	store := &fakeCubeStore{}
 	h := newCubeHandler(store)
 
-	payload, _ := json.Marshal(map[string]any{"owner_id": "krolik"})
+	payload, _ := json.Marshal(map[string]any{"owner_id": "alice"})
 	req := httptest.NewRequest(http.MethodPost, "/product/create_cube", bytes.NewReader(payload))
 	w := httptest.NewRecorder()
 	h.NativeCreateCube(w, req)
@@ -110,12 +110,12 @@ func TestNativeListCubes_OwnerFilter(t *testing.T) {
 
 func TestNativeGetUserCubes(t *testing.T) {
 	store := &fakeCubeStore{cubes: map[string]db.Cube{
-		"a": {CubeID: "a", OwnerID: "krolik", IsActive: true},
+		"a": {CubeID: "a", OwnerID: "alice", IsActive: true},
 		"b": {CubeID: "b", OwnerID: "other", IsActive: true},
 	}}
 	h := newCubeHandler(store)
 
-	payload, _ := json.Marshal(map[string]any{"user_id": "krolik"})
+	payload, _ := json.Marshal(map[string]any{"user_id": "alice"})
 	req := httptest.NewRequest(http.MethodPost, "/product/get_user_cubes", bytes.NewReader(payload))
 	w := httptest.NewRecorder()
 	h.NativeGetUserCubes(w, req)

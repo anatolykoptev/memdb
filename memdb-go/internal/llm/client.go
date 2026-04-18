@@ -6,7 +6,7 @@
 // Model fallback: on quota errors (429 or body containing "quota"/"rate limit"),
 // the client tries each fallback model in order before giving up.
 //
-// Based on patterns from dozor (retry) and go-hully (model fallback).
+// Retry + model-fallback patterns.
 package llm
 
 import (
