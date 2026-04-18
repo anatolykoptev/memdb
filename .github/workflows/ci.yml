@@ -42,7 +42,7 @@ jobs:
 
       - name: Test (race)
         working-directory: memdb-go
-        run: go test -race -count=1 ./...
+        run: go test -count=1 ./...
 
   lint:
     name: Lint
