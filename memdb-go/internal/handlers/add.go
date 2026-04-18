@@ -178,9 +178,9 @@ func (h *Handler) canHandleNativeAdd(req *fullAddRequest) bool {
 	if req.AsyncMode != nil && *req.AsyncMode == modeAsync {
 		return h.redis != nil
 	}
-	// Don't handle feedback
+	// Feedback runs its own native pipeline (handleFeedback); requires llmChat.
 	if req.IsFeedback != nil && *req.IsFeedback {
-		return false
+		return h.llmChat != nil
 	}
 	// mode=fast and mode=raw are always native (no LLM needed)
 	if req.Mode != nil && (*req.Mode == modeFast || *req.Mode == modeRaw) {
@@ -204,8 +204,8 @@ func (h *Handler) proxyReason(req *fullAddRequest) string {
 	if req.AsyncMode != nil && *req.AsyncMode == modeAsync {
 		return modeAsync
 	}
-	if req.IsFeedback != nil && *req.IsFeedback {
-		return "feedback"
+	if req.IsFeedback != nil && *req.IsFeedback && h.llmChat == nil {
+		return "feedback: llmChat not configured"
 	}
 	return "unknown"
 }
@@ -228,6 +228,9 @@ func (h *Handler) acquireAddSlot(ctx context.Context) bool {
 // nativeAddForCube dispatches to async, fast, fine, or buffer pipeline based on mode.
 // Default (no mode specified) uses buffer if enabled, otherwise fine/fast.
 func (h *Handler) nativeAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
+	if req.IsFeedback != nil && *req.IsFeedback {
+		return h.handleFeedback(ctx, cubeID, req)
+	}
 	if req.AsyncMode != nil && *req.AsyncMode == modeAsync {
 		return h.nativeAsyncAddForCube(ctx, req, cubeID)
 	}

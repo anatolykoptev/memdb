@@ -340,7 +340,7 @@ func TestCanHandleNativeAdd(t *testing.T) {
 			expected: false,
 		},
 		{
-			name: "feedback",
+			name: "feedback without llmChat → proxy",
 			handler: &Handler{
 				postgres: &stubPostgres,
 				embedder: &stubEmbedder{},
