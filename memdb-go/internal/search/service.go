@@ -53,8 +53,11 @@ type SearchService struct {
 	embedder    embedder.Embedder
 	logger      *slog.Logger
 	LLMReranker LLMRerankConfig
-	Iterative   IterativeConfig
-	Enhance     EnhanceConfig
+	// CrossEncoder is the cross-encoder reranker config (step 6.05). Zero-value
+	// URL disables the step — this is the on/off knob, no SearchParams flag.
+	CrossEncoder CrossEncoderConfig
+	Iterative    IterativeConfig
+	Enhance      EnhanceConfig
 	// Internet performs web search via SearXNG. nil = disabled.
 	Internet *InternetSearcher
 	// Fine configures LLM fine-mode (filter + recall). Zero value = disabled.
