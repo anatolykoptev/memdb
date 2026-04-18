@@ -1,6 +1,6 @@
 module github.com/anatolykoptev/memdb/memdb-go
 
-go 1.26rc3
+go 1.26.0
 
 require (
 	connectrpc.com/connect v1.19.1
