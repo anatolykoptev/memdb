@@ -230,7 +230,7 @@ func (h *Handler) linkHandlerPair(ctx context.Context, p entityLinkPair, cubeID,
 
 // callEpisodicSummarizer sends a single chat completion request to generate the session summary.
 // sessionType customizes the summary prompt focus (decision/learning/debug/planning/general).
-// client must be non-nil; it is used to call the LLM via the shared llm.Client (CLIProxyAPI).
+// client must be non-nil; it is used to call the LLM via the shared llm.Client.
 func callEpisodicSummarizer(ctx context.Context, client *llm.Client, conversation, sessionType string) (string, error) {
 	// Truncate to avoid prompt overflows (last episodicConvMaxChars covers ~4000 tokens)
 	if len(conversation) > episodicConvMaxChars {

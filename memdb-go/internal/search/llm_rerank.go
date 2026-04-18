@@ -6,7 +6,7 @@ package search
 // to each candidate. This replaces the cosine-only ordering before final trimming.
 //
 // Architecture decisions:
-//   - Uses the same OpenAI-compatible CLIProxyAPI endpoint as the extractor.
+//   - Uses the same OpenAI-compatible LLM API endpoint as the extractor.
 //   - Applied ONLY to the final text_mem top-K (not skill/pref; too low value).
 //   - Results are cached per (query × node_ids_hash) with a 5-minute TTL.
 //     This means repeated searches with identical queries are essentially free.

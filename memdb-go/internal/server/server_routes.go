@@ -30,7 +30,7 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	mux.HandleFunc("POST /product/chat/stream", h.NativeChatStream)
 	mux.HandleFunc("POST /product/chat/stream/playground", h.ProxyToProduct)
 
-	// LLM passthrough — direct CLIProxyAPI (no memory retrieval)
+	// LLM passthrough — direct LLM API (no memory retrieval)
 	mux.HandleFunc("POST /product/llm/complete", h.NativeLLMComplete)
 
 	// Suggestions

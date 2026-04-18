@@ -18,7 +18,7 @@
 //   - LangMem SNR rule: "consolidate and compress redundant memories; avoid idle words"
 //     is baked into the extraction prompt.
 //
-// Uses an OpenAI-compatible API (CLIProxyAPI → Gemini) for chat completions.
+// Uses an OpenAI-compatible API for chat completions.
 package llm
 
 import (
@@ -134,7 +134,7 @@ type LLMExtractor struct {
 	client *Client
 }
 
-// NewLLMExtractor creates an extractor pointing to CLIProxyAPI.
+// NewLLMExtractor creates an extractor using the configured OpenAI-compatible LLM API.
 // model defaults to "gemini-2.0-flash-lite" if empty.
 func NewLLMExtractor(baseURL, apiKey, model string, fallbackModels []string, logger *slog.Logger) *LLMExtractor {
 	if model == "" {
