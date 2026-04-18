@@ -1,224 +1,207 @@
-<div align="center">
+# MemDB — Memory Database for AI Agents
 
-  <h1 align="center">
-    MemDB 2.0: Stardust
-    <img src="https://img.shields.io/badge/status-Preview-blue" alt="Preview Badge"/>
-  </h1>
+[![License](https://img.shields.io/badge/License-Apache_2.0-green.svg?logo=apache)](https://opensource.org/license/apache-2-0/)
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8.svg?logo=go)](https://go.dev/)
+[![arXiv](https://img.shields.io/badge/arXiv-2507.03724-b31b1b.svg)](https://arxiv.org/abs/2507.03724)
+[![Discord](https://img.shields.io/badge/Discord-join%20chat-7289DA.svg?logo=discord)](https://discord.gg/Txbx3gebZR)
+[![GitHub Discussions](https://img.shields.io/badge/GitHub-Discussions-181717.svg?logo=github)](https://github.com/anatolykoptev/memdb/discussions)
 
-  <p>
-    <a href="https://github.com/anatolykoptev/memdb">
-      <img alt="Static Badge" src="https://img.shields.io/badge/Maintained_by-MemDB-blue">
-    </a>
-    <a href="https://pypi.org/project/memdb">
-      <img src="https://img.shields.io/pypi/v/memdb?label=pypi-not-yet-released" alt="PyPI Version">
-    </a>
-    <a href="https://pypi.org/project/memdb">
-      <img src="https://img.shields.io/pypi/pyversions/memdb.svg" alt="Supported Python versions">
-    </a>
-    <a href="https://pypi.org/project/memdb">
-      <img src="https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Supported Platforms">
-    </a>
-    <a href="https://arxiv.org/abs/2507.03724">
-      <img src="https://img.shields.io/badge/arXiv-2507.03724-b31b1b.svg" alt="Based on MemOS Research">
-    </a>
-    <a href="https://github.com/anatolykoptev/memdb/discussions">
-      <img src="https://img.shields.io/badge/GitHub-Discussions-181717.svg?logo=github" alt="GitHub Discussions">
-    </a>
-    <a href="https://discord.gg/Txbx3gebZR">
-      <img src="https://img.shields.io/badge/Discord-join%20chat-7289DA.svg?logo=discord" alt="Discord">
-    </a>
-    <a href="https://opensource.org/license/apache-2-0/">
-      <img src="https://img.shields.io/badge/License-Apache_2.0-green.svg?logo=apache" alt="License">
-    </a>
-    <a href="https://github.com/IAAR-Shanghai/Awesome-AI-Memory">
-      <img alt="Awesome AI Memory" src="https://img.shields.io/badge/Resources-Awesome--AI--Memory-8A2BE2">
-    </a>
-  </p>
+MemDB is a self-hosted memory database for AI agents. It stores, retrieves, and manages long-term memory — structured as a graph, searchable by vector similarity — and exposes it through a REST API and an MCP server for Claude-style agents.
 
-<p align="center">
-  <strong>+43.70% Accuracy vs. OpenAI Memory</strong><br/>
-  <strong>Top-tier long-term memory + personalization</strong><br/>
-  <strong>Saves 35.24% memory tokens</strong><br/>
-  <sub>LoCoMo 75.80 | LongMemEval +40.43% | PrefEval-10 +2568% | PersonaMem +40.75%</sub>
-</p>
+It runs as a single `docker compose up`: Go API service + Postgres (pgvector + Apache AGE). No external graph database, no proprietary cloud, no Python runtime required in production.
 
-</div>
+> **MemDB is a hard fork of [MemOS](https://github.com/MemTensor/MemOS).**
+> Research and original architecture: © MemTensor. This fork (Apache 2.0) repackages and rebuilds MemOS for independent self-hosting — primarily as a Go service. Full credits and license notes in [Acknowledgments](#acknowledgments).
 
 ---
 
-<br>
+## Why MemDB
 
-## MemDB: Memory Database for AI Agents
+- **Go-primary**: the core service (`memdb-go`) is written in Go — single static binary, low memory footprint, straightforward deployment.
+- **Single compose stack**: Postgres 17 with pgvector + Apache AGE covers both vector similarity search and graph traversal. No Qdrant, no Neo4j, no Redis required by default.
+- **OpenAI-compatible LLM layer**: any provider that speaks `/v1/chat/completions` works — OpenAI, Ollama, LiteLLM, OpenRouter, or a custom proxy. See [docs/llm-providers.md](docs/llm-providers.md).
+- **MCP native**: ships `memdb-mcp` + `mcp-stdio-proxy` for zero-config Claude Desktop / Claude Code integration.
+- **Local embeddings**: ONNX-based embedder (`multilingual-e5-large`, 1024 dim) runs in-process or as an optional `embed-server` sidecar — no third-party embedding API required.
+- **Apache 2.0**: fully open, no usage-based licensing.
 
-**MemDB** is a Memory Database for LLMs and AI agents that unifies **store / retrieve / manage** for long-term memory, enabling **context-aware and personalized** interactions with **KB**, **multi-modal**, **tool memory**, and **enterprise-grade** optimizations built in.
+---
 
-MemDB is a hard fork of [MemOS](https://github.com/MemTensor/MemOS) (arxiv 2507.03724), repackaged and rebranded for independent development.
+## Quick Start
 
-### Key Features
+```bash
+git clone https://github.com/anatolykoptev/memdb
+cd memdb
+cp .env.example .env
+# edit .env: set MEMDB_LLM_API_KEY (OpenAI key or any OpenAI-compatible)
+docker compose -f docker/docker-compose.yml up -d
+curl http://localhost:8080/health
+```
 
-- **Unified Memory API**: A single API to add, retrieve, edit, and delete memory -- structured as a graph, inspectable and editable by design, not a black-box embedding store.
-- **Multi-Modal Memory**: Natively supports text, images, tool traces, and personas, retrieved and reasoned together in one memory system.
-- **Multi-Cube Knowledge Base Management**: Manage multiple knowledge bases as composable memory cubes, enabling isolation, controlled sharing, and dynamic composition across users, projects, and agents.
-- **Asynchronous Ingestion via MemScheduler**: Run memory operations asynchronously with millisecond-level latency for production stability under high concurrency.
-- **Memory Feedback & Correction**: Refine memory with natural-language feedback -- correcting, supplementing, or replacing existing memories over time.
+Optional: enable the local embed-server sidecar for ONNX embeddings (no external API):
 
+```bash
+docker compose -f docker/docker-compose.yml --profile embed up -d
+```
 
-### Changelog
+Then set `MEMDB_EMBEDDER_TYPE=http` and `MEMDB_EMBED_URL=http://embed-server:8080` in your `.env`.
 
-- **2025-12-24** -- **MemDB v2.0: Stardust Release**
-  Comprehensive KB (doc/URL parsing + cross-project sharing), memory feedback & precise deletion, multi-modal memory (images/charts), tool memory for agent planning, Redis Streams scheduling + DB optimizations, streaming/non-streaming chat, MCP upgrade, and lightweight quick/full deployment.
-  <details>
-    <summary><b>New Features</b></summary>
+---
 
-  **Knowledge Base & Memory**
-  - Added knowledge base support for long-term memory from documents and URLs
+## Core Concepts
 
-  **Feedback & Memory Management**
-  - Added natural language feedback and correction for memories
-  - Added memory deletion API by memory ID
-  - Added MCP support for memory deletion and feedback
+- **Memory** — a single item stored about a user: a fact, preference, episode, tool trace, or skill.
+- **Cube** — a namespace for memories. Each cube is isolated; cubes can be scoped per agent, project, or team.
+- **User** — an identity within a cube. Memories are stored and retrieved per user.
 
-  **Conversation & Retrieval**
-  - Added chat API with memory-aware retrieval
-  - Added memory filtering with custom tags (Cloud & Open Source)
+---
 
-  **Multimodal & Tool Memory**
-  - Added tool memory for tool usage history
-  - Added image memory support for conversations and documents
+## API Usage
 
-  </details>
+**Add a memory:**
 
-  <details>
-    <summary><b>Improvements</b></summary>
+```bash
+curl -s -X POST http://localhost:8080/product/add \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "alice",
+    "writable_cube_ids": ["my-cube"],
+    "messages": [
+      {"role": "user", "content": "I prefer concise answers."},
+      {"role": "assistant", "content": "Noted."}
+    ],
+    "async_mode": "sync"
+  }'
+```
 
-  **Data & Infrastructure**
-  - Upgraded database for better stability and performance
+**Search memories:**
 
-  **Scheduler**
-  - Rebuilt task scheduler with Redis Streams and queue isolation
-  - Added task priority, auto-recovery, and quota-based scheduling
+```bash
+curl -s -X POST http://localhost:8080/product/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "alice",
+    "readable_cube_ids": ["my-cube"],
+    "query": "communication preferences",
+    "top_k": 5,
+    "mode": "fast"
+  }'
+```
 
-  **Deployment & Engineering**
-  - Added lightweight deployment with quick and full modes
+Full API reference: [docs/openapi.json](docs/openapi.json). Go and Python quickstart examples: [examples/](examples/).
 
-  </details>
+---
 
-  <details>
-    <summary><b>Bug Fixes</b></summary>
+## Claude Desktop Integration (MCP)
 
-  **Memory Scheduling & Updates**
-  - Fixed legacy scheduling API to ensure correct memory isolation
-  - Fixed memory update logging to show new memories correctly
+MemDB ships a Go MCP server. Claude Desktop connects to it over stdio using `mcp-stdio-proxy`.
 
-  </details>
+1. Build the proxy binary once:
+   ```bash
+   cd memdb-go
+   CGO_ENABLED=0 go build -o ~/bin/mcp-stdio-proxy ./cmd/mcp-stdio-proxy
+   ```
 
-- **2025-08-07** -- **v1.0.0 (MemCube) Release**
-  First MemCube release with a word-game demo, LongMemEval evaluation, BochaAISearchRetriever integration, NebulaGraph support, improved search capabilities, and the official Playground launch.
+2. Copy the example config into Claude Desktop's `claude_desktop_config.json`:
+   ```
+   examples/mcp/claude-desktop/claude_desktop_config.json.example
+   ```
 
-- **2025-07-07** -- **v1.0: Stellar Preview Release**
-  A SOTA Memory system for LLMs is now open-sourced.
-- **2025-07-04** -- **Paper Release**
-  [MemOS: A Memory OS for AI System](https://arxiv.org/abs/2507.03724) is available on arXiv.
+3. Restart Claude Desktop. Ask Claude: _"Search my memories for programming preferences."_
 
-<br>
+See [examples/mcp/claude-desktop/README.md](examples/mcp/claude-desktop/README.md) for the full walkthrough and available MCP tools.
 
-## Quickstart Guide
+---
 
-### Self-Hosted (Local/Private)
+## Configuration
 
-1. Get the repository.
-    ```bash
-    git clone https://github.com/anatolykoptev/memdb.git
-    cd MemDB
-    pip install -r ./docker/requirements.txt
-    ```
-2. Configure `docker/.env.example` and copy to `MemDB/.env`
-3. Start the service.
+Key environment variables (full list in `.env.example`):
 
-- Launch via Docker
-  ```bash
-  cd docker
-  docker compose up
-  ```
+| Variable | Default | Description |
+|---|---|---|
+| `MEMDB_LLM_PROXY_URL` | `https://api.openai.com/v1` | OpenAI-compatible base URL |
+| `MEMDB_LLM_API_KEY` | — | API key for the LLM provider |
+| `MEMDB_LLM_MODEL` | `gpt-4o-mini` | Model name |
+| `MEMDB_EMBEDDER_TYPE` | `http` | `http` (embed-server), `ollama`, or `onnx` |
+| `MEMDB_EMBED_URL` | — | Base URL for embed-server (when type=http) |
+| `POSTGRES_PASSWORD` | — | Required; no default |
+| `MEMDB_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
-- Launch via the uvicorn command line interface (CLI)
-  Make sure that your graph DB and vector DB are running before executing:
-  ```bash
-  cd src
-  uvicorn memdb.api.server_api:app --host 0.0.0.0 --port 8001 --workers 1
-  ```
+See [docs/llm-providers.md](docs/llm-providers.md) for provider-specific configuration (Ollama, OpenRouter, Gemini, LiteLLM).
 
-### Basic Usage (Self-Hosted)
-  - Add User Message
-    ```python
-    import requests
-    import json
+---
 
-    data = {
-        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
-        "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca",
-        "messages": [
-            {
-                "role": "user",
-                "content": "I like strawberry"
-            }
-        ],
-        "async_mode": "sync"
-    }
-    headers = {
-        "Content-Type": "application/json"
-    }
-    url = "http://localhost:8000/product/add"
+## Architecture
 
-    res = requests.post(url=url, headers=headers, data=json.dumps(data))
-    print(f"result: {res.json()}")
-    ```
-  - Search User Memory
-    ```python
-    import requests
-    import json
+```
+Claude Desktop / Claude Code / your app
+        │  REST or MCP (stdio)
+        ▼
+   memdb-go :8080
+   ┌─────────────────────────────────────┐
+   │  handlers  │  search  │  scheduler  │
+   │  embedder  │  graph   │  MCP server │
+   └─────────────────────────────────────┘
+        │
+        ▼
+   Postgres 17
+   ├── pgvector  (1024-dim semantic search)
+   └── Apache AGE (graph traversal)
 
-    data = {
-        "query": "What do I like",
-        "user_id": "8736b16e-1d20-4163-980b-a5063c3facdc",
-        "mem_cube_id": "b32d0977-435d-4828-a86f-4f47f8b55bca"
-    }
-    headers = {
-        "Content-Type": "application/json"
-    }
-    url = "http://localhost:8000/product/search"
+   (optional)
+   embed-server :8081
+   └── ONNX multilingual-e5-large + jina-code-v2
+```
 
-    res = requests.post(url=url, headers=headers, data=json.dumps(data))
-    print(f"result: {res.json()}")
-    ```
+`memdb-go` is the primary service: REST handlers, MCP server, semantic search, async memory scheduler, and an internal ONNX embedder that can be swapped for an HTTP sidecar or Ollama. Postgres covers both vector and graph storage, eliminating the need for separate databases.
 
-<br>
+**Python layer:** `src/` contains the original Python pipeline from the upstream fork. It remains for legacy compatibility during transition. New features target the Go service. See [ROADMAP-GO-MIGRATION.md](ROADMAP-GO-MIGRATION.md) for migration status.
 
-## Resources
+---
 
-- **Awesome-AI-Memory**
- A curated repository dedicated to resources on memory and memory systems for large language models. It systematically collects relevant research papers, frameworks, tools, and practical insights.
-- **Get started**: [IAAR-Shanghai/Awesome-AI-Memory](https://github.com/IAAR-Shanghai/Awesome-AI-Memory)
+## Comparison
 
-<br>
+Feature comparison based on publicly available information. Performance numbers are not included — run your own benchmarks.
 
-## Community & Support
+| | MemDB | Mem0 | Zep | MemGPT |
+|---|---|---|---|---|
+| Self-hosted | Yes (Go + Postgres) | OSS server + paid cloud | Yes (Python) | Yes (Python) |
+| License | Apache 2.0 | Apache 2.0 | Apache 2.0 | Apache 2.0 |
+| Primary language | Go | Python | Python | Python |
+| Vector search | pgvector | — | pgvector | vector store |
+| Graph memory | Apache AGE | No | Neo4j | No |
+| MCP native | Yes | No | No | No |
+| Local embeddings | ONNX sidecar | No | No | No |
+| OpenAI-compatible LLM | Yes | Yes | Yes | Yes |
 
-Join our community to ask questions, share your projects, and connect with other developers.
+---
 
-- **GitHub Issues**: Report bugs or request features in our <a href="https://github.com/anatolykoptev/memdb/issues" target="_blank">GitHub Issues</a>.
-- **GitHub Pull Requests**: Contribute code improvements via <a href="https://github.com/anatolykoptev/memdb/pulls" target="_blank">Pull Requests</a>.
-- **GitHub Discussions**: Participate in our <a href="https://github.com/anatolykoptev/memdb/discussions" target="_blank">GitHub Discussions</a> to ask questions or share ideas.
-- **Discord**: Join our <a href="https://discord.gg/Txbx3gebZR" target="_blank">Discord Server</a>.
+## Roadmap
 
-<br>
+Near-term priorities:
 
-## Citation
+- Complete Python pipeline deprecation — Go-only memory ingestion path (see [ROADMAP-GO-MIGRATION.md](ROADMAP-GO-MIGRATION.md))
+- Image memory support — ONNX CLIP embeddings, image + text co-retrieval (see [ROADMAP-FEATURES.md](ROADMAP-FEATURES.md))
+- MemCube cross-sharing — access control between cubes
+- Enhanced search pipeline — reranking, hybrid search improvements (see [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md))
+- Benchmarks on this fork — re-run LoCoMo / LongMemEval against the Go service
 
-If you use MemDB in your research, we would appreciate citations to the original papers.
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Issues and pull requests are welcome on [GitHub](https://github.com/anatolykoptev/memdb).
+
+---
+
+## Acknowledgments
+
+MemDB is a hard fork of [MemOS](https://github.com/MemTensor/MemOS) by MemTensor.
+
+The original research paper — "MemOS: A Memory OS for AI System" ([arXiv:2507.03724](https://arxiv.org/abs/2507.03724)) — describes the architecture, Memory-Augmented Generation (MAG) concept, and cube-based memory design that this codebase is built on. The MemOS team's work is the foundation of this project.
+
+If you use MemDB in research, please cite the original MemOS papers:
 
 ```bibtex
-
 @article{li2025memos_long,
   title={MemOS: A Memory OS for AI System},
   author={Li, Zhiyu and Song, Shichao and Xi, Chenyang and Wang, Hanyu and Tang, Chen and Niu, Simin and Chen, Ding and Yang, Jiawei and Li, Chunyu and Yu, Qingchen and Zhao, Jihao and Wang, Yezhaohui and Liu, Peng and Lin, Zehao and Wang, Pengyuan and Huo, Jiahao and Chen, Tianyi and Chen, Kai and Li, Kehang and Tao, Zhen and Ren, Junpeng and Lai, Huayi and Wu, Hao and Tang, Bo and Wang, Zhenren and Fan, Zhaoxin and Zhang, Ningyu and Zhang, Linfeng and Yan, Junchi and Yang, Mingchuan and Xu, Tong and Xu, Wei and Chen, Huajun and Wang, Haofeng and Yang, Hongkang and Zhang, Wentao and Xu, Zhi-Qin John and Chen, Siheng and Xiong, Feiyu},
@@ -234,29 +217,10 @@ If you use MemDB in your research, we would appreciate citations to the original
   year={2025},
   url={https://arxiv.org/abs/2505.22101}
 }
-
-@article{yang2024memory3,
-author = {Yang, Hongkang and Zehao, Lin and Wenjin, Wang and Wu, Hao and Zhiyu, Li and Tang, Bo and Wenqiang, Wei and Wang, Jinbo and Zeyun, Tang and Song, Shichao and Xi, Chenyang and Yu, Yu and Kai, Chen and Xiong, Feiyu and Tang, Linpeng and Weinan, E},
-title = {Memory$^3$: Language Modeling with Explicit Memory},
-journal = {Journal of Machine Learning},
-year = {2024},
-volume = {3},
-number = {3},
-pages = {300--346},
-issn = {2790-2048},
-doi = {https://doi.org/10.4208/jml.240708},
-url = {https://global-sci.com/article/91443/memory3-language-modeling-with-explicit-memory}
-}
 ```
 
-<br>
-
-## Contributing
-
-We welcome contributions from the community! Please read our [contribution guidelines](https://github.com/anatolykoptev/memdb/blob/main/CONTRIBUTING.md) to get started.
-
-<br>
+---
 
 ## License
 
-MemDB is licensed under the [Apache 2.0 License](./LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
