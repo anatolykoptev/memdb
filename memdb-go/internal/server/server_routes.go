@@ -25,17 +25,12 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	mux.HandleFunc("POST /product/add", h.NativeAdd)
 	mux.HandleFunc("POST /product/search", h.NativeSearch)
 
-	// Chat — native with proxy fallback (playground stays proxied)
+	// Chat — native (playground removed 2026-04-18; see ROADMAP Phase 4.5 followup)
 	mux.HandleFunc("POST /product/chat/complete", h.NativeChatComplete)
 	mux.HandleFunc("POST /product/chat/stream", h.NativeChatStream)
-	mux.HandleFunc("POST /product/chat/stream/playground", h.ProxyToProduct)
 
 	// LLM passthrough — direct LLM API (no memory retrieval)
 	mux.HandleFunc("POST /product/llm/complete", h.NativeLLMComplete)
-
-	// Suggestions
-	mux.HandleFunc("POST /product/suggestions", h.ProxyToProduct)
-	mux.HandleFunc("GET /product/suggestions/{user_id}", h.ProxyToProduct)
 
 	// Scheduler — native Go (queries Redis Streams consumer group directly)
 	mux.HandleFunc("GET /product/scheduler/allstatus", h.NativeSchedulerAllStatus)
