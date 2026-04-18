@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/handlers"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // registerRoutes mounts all HTTP handlers on the provided ServeMux.
@@ -11,6 +12,10 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	// ─── Health endpoints (native Go, no proxy) ─────────────────────────
 	mux.HandleFunc("GET /health", h.Health)
 	mux.HandleFunc("GET /ready", h.ReadinessCheck)
+
+	// Prometheus scrape endpoint — OTel Prometheus exporter reads instruments
+	// from the default registry. Gated by whatever auth middleware wraps mux.
+	mux.Handle("GET /metrics", promhttp.Handler())
 
 	// ─── OpenAPI spec + Swagger UI ───────────────────────────────────────
 	registerOpenAPIRoutes(mux)
