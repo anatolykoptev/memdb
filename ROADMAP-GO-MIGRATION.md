@@ -153,7 +153,7 @@
 
 | Endpoint | Обработчик в Go | Бэкенд Python | Приоритет |
 |----------|-----------------|---------------|-----------|
-| `POST /product/feedback` | `ValidatedFeedback` → proxy | `mem_feedback/feedback.py` (47.8K) | 🔴 БЛОКЕР Ф5 |
+| ~~`POST /product/feedback`~~ | `NativeFeedback` via `nativeAddForCube` | — | ✅ Фаза 4.5 |
 | `POST /product/llm/complete` | `ProxyLLMComplete` | `llms/base.py` | 🟡 thin proxy |
 | `POST /product/chat/stream/playground` | `ProxyToProduct` | `mem_chat/*` + `chat_handler.py` | 🔵 |
 | `POST /product/suggestions` | `ProxyToProduct` | `suggestion_handler.py` | 🔵 |
@@ -245,12 +245,15 @@ Python `GeneralScheduler` регистрирует 8 handlers:
 
 **Цель:** Убрать оставшиеся proxy-to-Python fallback paths. Покрыть тестами.
 
-#### 4.5 Native Feedback Handler (приоритет: 🟡)
+#### 4.5 Native Feedback Handler ✅ апрель 2026
 
-| # | Задача | Effort |
-|---|--------|--------|
-| 4.5.1 | Go-native feedback processing (LLM analysis → memory update) | M |
-| 4.5.2 | Убрать `ValidatedFeedback` → proxy | S |
+| # | Задача | Статус | Commit |
+|---|--------|--------|--------|
+| 4.5.1 | Wire existing `handleFeedback` into `/product/add?is_feedback=true` | ✅ | `beebed13` + `e86ee921` |
+| 4.5.2 | Go-native standalone `POST /product/feedback` — remove Python proxy | ✅ | `68ec6a41` + `d2b0f46c` |
+| 4.5.3 | E2E integration test | ✅ | `b05e4ee9` |
+
+**Discovery (2026-04-18):** `internal/handlers/feedback.go` + `feedback_ops.go` (493 lines, keyword-replace + judgement + decide ops + apply) had been in the repo as dead code since 2026-03-09 — the Go-native pipeline was written but `canHandleNativeAdd` always returned `false` for `IsFeedback=true`. Phase 2 user/cube split (`b328ee49`) kept it compilable. Phase 4.5 reduced to wiring (3 edits in `add.go`) + endpoint rewrite (`ValidatedFeedback` → synthetic `fullAddRequest{IsFeedback:true}` → `nativeAddForCube`) + tests. `normalizeFeedback` removed (no remaining callers).
 
 #### ~~4.6 Search mode=fine в Go~~ ✅ (март 2026)
 
@@ -347,17 +350,13 @@ Option C из research (extract `AddMemories`/`ChatComplete` service functions, 
 - [x] Skill extraction при add — Go-native
 - [x] Tool trajectory при add — Go-native (`add_tool.go`, `tool_trajectory.go`)
 - [x] Python proxy удалён из `/product/add` — HTTP errors
-- [ ] **Feedback** — Go-native processing (Фаза 4.5) ← последний БЛОКЕР
+- [x] **Feedback** — Go-native processing (Фаза 4.5) ✅ апрель 2026 (`b05e4ee9`)
 - [x] **Search mode=fine + internet** — Go-native (Фаза 4.6) ✅ март 2026
 - [x] **Delete by file_ids / complex filter** — Go-native (Фаза 4.7) ✅ апрель 2026
 - [x] **Get memory with complex filter** — Go-native (Фаза 4.8) ✅ апрель 2026
 - [x] **MCP add_memory + chat → memdb-go** — Фаза 4.10a ✅ апрель 2026
 - [x] **`/product/llm/complete` → CLIProxyAPI напрямую** — Фаза 4.12 ✅ апрель 2026
-- [ ] **Delete by file_ids/filter** — Go-native (Фаза 4.7) ← БЛОКЕР
-- [ ] **Get memory with filter** — Go-native (Фаза 4.8) ← БЛОКЕР
-- [ ] **MCP `add_memory` + `chat`** — переключить на internal Go handler вместо HTTP→Python (Фаза 4.10) ← новый пункт
-- [ ] **MCP cube tools** (`create_cube`/`share_cube`/`dump_cube`/`register_cube`/`unregister_cube`) — Go-native или sunset (Фаза 4.11)
-- [ ] **`llm/complete` thin proxy** — убрать либо переписать на CLIProxyAPI напрямую (Фаза 4.12)
+- [x] **MCP cube tools** (`create_cube`/`share_cube`/`dump_cube`/`register_cube`/`unregister_cube`) — Go-native (Фаза 2 `b328ee49`)
 - [ ] Playground chat + Suggestions — Go-native или удалить
 - [ ] Memory extraction покрыта тестами (accuracy ≥ Python baseline)
 - [ ] `POST /product/add` latency p95 < 1s
