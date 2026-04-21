@@ -8,10 +8,30 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/anatolykoptev/go-kit/rerank"
 )
 
+// ceTestRequest mirrors the Cohere /v1/rerank wire request body — declared
+// locally because the former internal `crossEncoderRequest` type lived in
+// cross_encoder_rerank.go (deleted in the migration to go-kit/rerank).
+type ceTestRequest struct {
+	Model     string   `json:"model,omitempty"`
+	Query     string   `json:"query"`
+	Documents []string `json:"documents"`
+}
+
+type ceTestResult struct {
+	Index          int     `json:"index"`
+	RelevanceScore float64 `json:"relevance_score"`
+}
+
+type ceTestResponse struct {
+	Results []ceTestResult `json:"results"`
+}
+
 // TestPostProcessResults_CrossEncoderCalledWhenURLSet verifies that step 6.05
-// invokes embed-server /v1/rerank when CrossEncoder.URL is configured, and
+// invokes embed-server /v1/rerank when the rerank client is configured, and
 // that the returned order matches the CE scores.
 func TestPostProcessResults_CrossEncoderCalledWhenURLSet(t *testing.T) {
 	var calls int32
@@ -21,28 +41,28 @@ func TestPostProcessResults_CrossEncoderCalledWhenURLSet(t *testing.T) {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		// Decode to count documents
-		var req crossEncoderRequest
+		var req ceTestRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
 		// Flip order: assign highest score to the LAST doc so after reorder
 		// it sits at the head.
-		results := make([]crossEncoderResult, 0, len(req.Documents))
+		results := make([]ceTestResult, 0, len(req.Documents))
 		for i := 0; i < len(req.Documents); i++ {
-			results = append(results, crossEncoderResult{
+			results = append(results, ceTestResult{
 				Index:          i,
 				RelevanceScore: float64(i + 1), // doc 0 → 1, doc 1 → 2, doc 2 → 3
 			})
 		}
-		_ = json.NewEncoder(w).Encode(crossEncoderResponse{Results: results})
+		_ = json.NewEncoder(w).Encode(ceTestResponse{Results: results})
 	}))
 	defer ts.Close()
 
 	svc := &SearchService{
 		postgres: &mockPostgres{}, embedder: &mockEmbedder{}, logger: discardLogger(),
-		CrossEncoder: CrossEncoderConfig{
+		RerankClient: rerank.New(rerank.Config{
 			URL:     ts.URL,
 			Model:   "test-ce",
 			Timeout: 2 * time.Second,
-		},
+		}, nil),
 	}
 
 	queryVec := []float32{0.1, 0.2, 0.3}
@@ -85,7 +105,7 @@ func TestPostProcessResults_CrossEncoderCalledWhenURLSet(t *testing.T) {
 func TestPostProcessResults_CrossEncoderSkippedWhenURLEmpty(t *testing.T) {
 	svc := &SearchService{
 		postgres: &mockPostgres{}, embedder: &mockEmbedder{}, logger: discardLogger(),
-		// CrossEncoder zero value → disabled
+		// RerankClient nil → disabled via Available()
 	}
 
 	queryVec := []float32{1, 0, 0}
@@ -128,7 +148,7 @@ func TestPostProcessResults_ReturnsCrossEncoderDuration(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Small synthetic delay so dur > 0.
 		time.Sleep(5 * time.Millisecond)
-		_ = json.NewEncoder(w).Encode(crossEncoderResponse{Results: []crossEncoderResult{
+		_ = json.NewEncoder(w).Encode(ceTestResponse{Results: []ceTestResult{
 			{Index: 0, RelevanceScore: 1.0},
 			{Index: 1, RelevanceScore: 0.5},
 		}})
@@ -137,7 +157,11 @@ func TestPostProcessResults_ReturnsCrossEncoderDuration(t *testing.T) {
 
 	svc := &SearchService{
 		postgres: &mockPostgres{}, embedder: &mockEmbedder{}, logger: discardLogger(),
-		CrossEncoder: CrossEncoderConfig{URL: ts.URL, Model: "x", Timeout: 2 * time.Second},
+		RerankClient: rerank.New(rerank.Config{
+			URL:     ts.URL,
+			Model:   "x",
+			Timeout: 2 * time.Second,
+		}, nil),
 	}
 
 	queryVec := []float32{0.1, 0.2, 0.3}

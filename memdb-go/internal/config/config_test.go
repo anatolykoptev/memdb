@@ -47,7 +47,7 @@ func TestLoad_CrossEncoderDefaults(t *testing.T) {
 	if cfg.CrossEncoderURL != "http://embed-server:8082" {
 		t.Errorf("default URL mismatch: %q", cfg.CrossEncoderURL)
 	}
-	if cfg.CrossEncoderModel != "bge-reranker-v2-m3" {
+	if cfg.CrossEncoderModel != "gte-multi-rerank" {
 		t.Errorf("default model mismatch: %q", cfg.CrossEncoderModel)
 	}
 	if cfg.CrossEncoderTimeout != 2000*time.Millisecond {
