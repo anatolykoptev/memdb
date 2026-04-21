@@ -119,29 +119,32 @@ func initOTel(cfg *config.Config) (func(context.Context) error, error) {
 		return nil, err
 	}
 
-	// Trace exporter
-	traceOpts := []otlptracehttp.Option{
-		otlptracehttp.WithInsecure(),
-	}
+	// Trace exporter — only when OTEL_EXPORTER_OTLP_ENDPOINT is set.
+	// Skipping the batcher avoids periodic "connection refused" warnings when
+	// no collector is deployed (Prometheus metrics remain unaffected).
+	var tp *sdktrace.TracerProvider
 	if cfg.OTelEndpoint != "" {
-		traceOpts = append(traceOpts, otlptracehttp.WithEndpoint(cfg.OTelEndpoint))
+		traceExporter, err := otlptracehttp.New(ctx,
+			otlptracehttp.WithInsecure(),
+			otlptracehttp.WithEndpoint(cfg.OTelEndpoint),
+		)
+		if err != nil {
+			return nil, err
+		}
+		tp = sdktrace.NewTracerProvider(
+			sdktrace.WithBatcher(traceExporter),
+			sdktrace.WithResource(res),
+		)
+		otel.SetTracerProvider(tp)
 	}
-	traceExporter, err := otlptracehttp.New(ctx, traceOpts...)
-	if err != nil {
-		return nil, err
-	}
-
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(traceExporter),
-		sdktrace.WithResource(res),
-	)
-	otel.SetTracerProvider(tp)
 
 	// Metric exporter — Prometheus pull-based. Instruments registered via the
 	// OTel Meter are scraped from GET /metrics (see server_routes.go).
 	promExporter, err := promexporter.New()
 	if err != nil {
-		_ = tp.Shutdown(ctx)
+		if tp != nil {
+			_ = tp.Shutdown(ctx)
+		}
 		return nil, fmt.Errorf("prometheus exporter: %w", err)
 	}
 
@@ -152,8 +155,10 @@ func initOTel(cfg *config.Config) (func(context.Context) error, error) {
 	otel.SetMeterProvider(mp)
 
 	shutdown := func(ctx context.Context) error {
-		if err := tp.Shutdown(ctx); err != nil {
-			return err
+		if tp != nil {
+			if err := tp.Shutdown(ctx); err != nil {
+				return err
+			}
 		}
 		return mp.Shutdown(ctx)
 	}
