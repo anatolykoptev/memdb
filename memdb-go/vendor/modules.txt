@@ -26,6 +26,7 @@ github.com/anatolykoptev/go-engine/text
 # github.com/anatolykoptev/go-kit v0.24.0
 ## explicit; go 1.26
 github.com/anatolykoptev/go-kit/metrics
+github.com/anatolykoptev/go-kit/rerank
 github.com/anatolykoptev/go-kit/retry
 # github.com/anatolykoptev/go-stealth v1.3.1
 ## explicit; go 1.26
@@ -193,6 +194,7 @@ github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil
 github.com/prometheus/client_golang/internal/github.com/golang/gddo/httputil/header
 github.com/prometheus/client_golang/prometheus
 github.com/prometheus/client_golang/prometheus/internal
+github.com/prometheus/client_golang/prometheus/promauto
 github.com/prometheus/client_golang/prometheus/promhttp
 github.com/prometheus/client_golang/prometheus/promhttp/internal
 # github.com/prometheus/client_model v0.6.2

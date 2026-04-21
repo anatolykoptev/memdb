@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/anatolykoptev/go-kit/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
@@ -53,9 +54,10 @@ type SearchService struct {
 	embedder    embedder.Embedder
 	logger      *slog.Logger
 	LLMReranker LLMRerankConfig
-	// CrossEncoder is the cross-encoder reranker config (step 6.05). Zero-value
-	// URL disables the step — this is the on/off knob, no SearchParams flag.
-	CrossEncoder CrossEncoderConfig
+	// RerankClient is the cross-encoder rerank client (step 6.05). Nil-safe:
+	// a nil or disabled client returns Available()=false. Constructed in
+	// server_init_search.go via rerank.New(...).
+	RerankClient *rerank.Client
 	Iterative    IterativeConfig
 	Enhance      EnhanceConfig
 	// Internet performs web search via SearXNG. nil = disabled.
@@ -682,9 +684,9 @@ func (s *SearchService) postProcessResults(
 	// Step 6.05: Cross-encoder rerank (best-effort, runs before LLM rerank).
 	// Only applied to text_mem — skill/tool/pref are too low-value to warrant
 	// the extra HTTP round-trip. Zero-value config.URL disables.
-	if s.CrossEncoder.URL != "" && len(text) > 1 {
+	if s.RerankClient.Available() && len(text) > 1 {
 		t0 := time.Now()
-		text = CrossEncoderRerank(ctx, p.Query, text, "memory", s.CrossEncoder)
+		text = rerankMemoryItems(ctx, s.RerankClient, p.Query, text)
 		ceRerankDur = time.Since(t0)
 	}
 

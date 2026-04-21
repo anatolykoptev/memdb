@@ -6,6 +6,7 @@ package server
 import (
 	"log/slog"
 
+	"github.com/anatolykoptev/go-kit/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
@@ -90,16 +91,20 @@ func initSearchService(
 ) (*search.SearchService, *scheduler.Profiler) {
 	svc := search.NewSearchService(pg, qd, emb, logger)
 
-	if cfg.CrossEncoderURL != "" {
-		svc.CrossEncoder = search.CrossEncoderConfig{
-			URL:            cfg.CrossEncoderURL,
-			Model:          cfg.CrossEncoderModel,
-			APIKey:         cfg.CrossEncoderAPIKey,
-			Timeout:        cfg.CrossEncoderTimeout,
-			MaxDocs:        cfg.CrossEncoderMaxDocs,
-			MaxCharsPerDoc: cfg.CrossEncoderMaxCharsPerDoc,
-		}
-		logger.Info("cross-encoder reranker enabled",
+	// Cross-encoder rerank client (step 6.05). Zero URL disables the step.
+	// APIKey supports hosted providers (Cohere/Jina/Voyage/Mixedbread);
+	// leave empty for self-hosted TEI/embed-server. MaxCharsPerDoc caps
+	// per-doc length (rune-aware) to bound O(seq²) attention compute.
+	svc.RerankClient = rerank.New(rerank.Config{
+		URL:            cfg.CrossEncoderURL,
+		Model:          cfg.CrossEncoderModel,
+		APIKey:         cfg.CrossEncoderAPIKey,
+		Timeout:        cfg.CrossEncoderTimeout,
+		MaxDocs:        cfg.CrossEncoderMaxDocs,
+		MaxCharsPerDoc: cfg.CrossEncoderMaxCharsPerDoc,
+	}, logger)
+	if svc.RerankClient.Available() {
+		logger.Info("cross_encoder rerank enabled",
 			slog.String("url", cfg.CrossEncoderURL),
 			slog.String("model", cfg.CrossEncoderModel),
 			slog.Bool("auth", cfg.CrossEncoderAPIKey != ""),
