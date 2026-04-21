@@ -90,13 +90,15 @@ type Config struct {
 	// MemDB Go API URL (used by MCP server to proxy search)
 	MemDBGoURL string `json:"memdb_go_url"`
 
-	// Cross-encoder reranker (embed-server /v1/rerank, BGE-reranker-v2-m3).
+	// Cross-encoder reranker (embed-server /v1/rerank, gte-multi-rerank).
 	// Empty URL disables the step. No SearchParams flag: controlled entirely
 	// by env so every handler, MCP, and test gets consistent behavior.
-	CrossEncoderURL     string        `json:"cross_encoder_url"`
-	CrossEncoderModel   string        `json:"cross_encoder_model"`
-	CrossEncoderTimeout time.Duration `json:"cross_encoder_timeout"`
-	CrossEncoderMaxDocs int           `json:"cross_encoder_max_docs"`
+	CrossEncoderURL            string        `json:"cross_encoder_url"`
+	CrossEncoderModel          string        `json:"cross_encoder_model"`
+	CrossEncoderAPIKey         string        `json:"cross_encoder_api_key"`
+	CrossEncoderTimeout        time.Duration `json:"cross_encoder_timeout"`
+	CrossEncoderMaxDocs        int           `json:"cross_encoder_max_docs"`
+	CrossEncoderMaxCharsPerDoc int           `json:"cross_encoder_max_chars_per_doc"`
 }
 
 const (
@@ -111,10 +113,11 @@ const (
 	defaultAddQueueSize    = 50
 
 	// Cross-encoder reranker defaults.
-	defaultCrossEncoderURL        = "http://embed-server:8082"
-	defaultCrossEncoderModel      = "bge-reranker-v2-m3"
-	defaultCrossEncoderTimeoutMS  = 2000
-	defaultCrossEncoderMaxDocs    = 50
+	defaultCrossEncoderURL            = "http://embed-server:8082"
+	defaultCrossEncoderModel          = "gte-multi-rerank"
+	defaultCrossEncoderTimeoutMS      = 2000
+	defaultCrossEncoderMaxDocs        = 50
+	defaultCrossEncoderMaxCharsPerDoc = 0 // 0 = no truncation; recommend 200 for ARM CPU rerankers
 )
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -183,10 +186,12 @@ func Load() *Config {
 		WebshareAPIKey: envStr("WEBSHARE_API_KEY", ""),
 		MemDBGoURL:     envStr("MEMDB_GO_URL", ""),
 
-		CrossEncoderURL:     envStr("CROSS_ENCODER_URL", defaultCrossEncoderURL),
-		CrossEncoderModel:   envStr("CROSS_ENCODER_MODEL", defaultCrossEncoderModel),
-		CrossEncoderTimeout: time.Duration(envInt("CROSS_ENCODER_TIMEOUT_MS", defaultCrossEncoderTimeoutMS)) * time.Millisecond,
-		CrossEncoderMaxDocs: envInt("CROSS_ENCODER_MAX_DOCS", defaultCrossEncoderMaxDocs),
+		CrossEncoderURL:            envStr("CROSS_ENCODER_URL", defaultCrossEncoderURL),
+		CrossEncoderModel:          envStr("CROSS_ENCODER_MODEL", defaultCrossEncoderModel),
+		CrossEncoderAPIKey:         envStr("CROSS_ENCODER_API_KEY", ""),
+		CrossEncoderTimeout:        time.Duration(envInt("CROSS_ENCODER_TIMEOUT_MS", defaultCrossEncoderTimeoutMS)) * time.Millisecond,
+		CrossEncoderMaxDocs:        envInt("CROSS_ENCODER_MAX_DOCS", defaultCrossEncoderMaxDocs),
+		CrossEncoderMaxCharsPerDoc: envInt("CROSS_ENCODER_MAX_CHARS_PER_DOC", defaultCrossEncoderMaxCharsPerDoc),
 	}
 }
 
