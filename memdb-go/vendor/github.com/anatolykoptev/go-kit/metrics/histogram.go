@@ -30,6 +30,9 @@ type Reservoir struct {
 
 // Update adds a sample value.
 func (h *Reservoir) Update(v float64) {
+	if h == nil {
+		return
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -62,6 +65,9 @@ func (h *Reservoir) Update(v float64) {
 // Percentile returns the value at the given percentile (0.0-1.0).
 // Returns 0 if no samples have been recorded.
 func (h *Reservoir) Percentile(p float64) float64 {
+	if h == nil {
+		return 0
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -79,6 +85,9 @@ func (h *Reservoir) Percentile(p float64) float64 {
 
 // Count returns the total number of samples recorded.
 func (h *Reservoir) Count() int64 {
+	if h == nil {
+		return 0
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.count
@@ -124,13 +133,20 @@ type HistogramSnapshot struct {
 }
 
 // Histogram returns a named histogram (reservoir sampler), creating it on first access.
+// Returns a non-nil noop Reservoir when called on a nil Registry.
 func (r *Registry) Histogram(name string) *Reservoir {
+	if r == nil {
+		return &Reservoir{}
+	}
 	v, _ := r.histograms.LoadOrStore(name, &Reservoir{})
 	return v.(*Reservoir) //nolint:forcetypeassert // invariant: only *Reservoir stored
 }
 
 // HistogramSnapshot returns snapshots of all histograms.
 func (r *Registry) HistogramSnapshot() map[string]HistogramSnapshot {
+	if r == nil {
+		return nil
+	}
 	m := make(map[string]HistogramSnapshot)
 	r.histograms.Range(func(k, v any) bool {
 		m[k.(string)] = v.(*Reservoir).Snapshot()
