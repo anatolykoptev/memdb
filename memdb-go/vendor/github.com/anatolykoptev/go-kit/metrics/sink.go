@@ -74,5 +74,8 @@ func (JSONSink) WriteMetrics(w io.Writer, counters map[string]int64, gauges map[
 
 // WriteTo writes all metrics to w using the given Sink.
 func (r *Registry) WriteTo(w io.Writer, sink Sink) error {
+	if r == nil {
+		return nil
+	}
 	return sink.WriteMetrics(w, r.Snapshot(), r.GaugeSnapshot())
 }

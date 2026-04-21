@@ -23,7 +23,7 @@ github.com/anatolykoptev/go-engine/metrics
 github.com/anatolykoptev/go-engine/search
 github.com/anatolykoptev/go-engine/sources
 github.com/anatolykoptev/go-engine/text
-# github.com/anatolykoptev/go-kit v0.21.0
+# github.com/anatolykoptev/go-kit v0.24.0
 ## explicit; go 1.26
 github.com/anatolykoptev/go-kit/metrics
 github.com/anatolykoptev/go-kit/retry

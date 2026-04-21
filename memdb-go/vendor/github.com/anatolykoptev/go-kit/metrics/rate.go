@@ -36,34 +36,54 @@ func newRate() *Rate {
 
 // Update records n events.
 func (r *Rate) Update(n int64) {
+	if r == nil {
+		return
+	}
 	r.tickIfNeeded()
 	r.uncounted.Add(n)
 	r.total.Add(n)
 }
 
 // Total returns the total number of events ever recorded.
-func (r *Rate) Total() int64 { return r.total.Load() }
+func (r *Rate) Total() int64 {
+	if r == nil {
+		return 0
+	}
+	return r.total.Load()
+}
 
 // M1 returns the 1-minute EWMA rate in events/sec.
 func (r *Rate) M1() float64 {
+	if r == nil {
+		return 0
+	}
 	r.tickIfNeeded()
 	return math.Float64frombits(r.m1.Load())
 }
 
 // M5 returns the 5-minute EWMA rate in events/sec.
 func (r *Rate) M5() float64 {
+	if r == nil {
+		return 0
+	}
 	r.tickIfNeeded()
 	return math.Float64frombits(r.m5.Load())
 }
 
 // M15 returns the 15-minute EWMA rate in events/sec.
 func (r *Rate) M15() float64 {
+	if r == nil {
+		return 0
+	}
 	r.tickIfNeeded()
 	return math.Float64frombits(r.m15.Load())
 }
 
 // Snapshot returns a point-in-time snapshot of all rate values.
 func (r *Rate) Snapshot() RateSnapshot {
+	if r == nil {
+		return RateSnapshot{}
+	}
 	r.tickIfNeeded()
 	return RateSnapshot{
 		Total: r.total.Load(),
@@ -84,6 +104,10 @@ type RateSnapshot struct {
 func (r *Rate) tickIfNeeded() {
 	now := time.Now().UnixNano()
 	last := r.lastTick.Load()
+	if last == 0 {
+		// zero-value noop Rate (created from a nil Registry) — skip ticking
+		return
+	}
 	elapsed := now - last
 	if elapsed < tickNanos {
 		return
@@ -111,13 +135,20 @@ func (r *Rate) tick() {
 }
 
 // Rate returns a named rate tracker, creating it on first access.
+// Returns a non-nil noop Rate when called on a nil Registry.
 func (r *Registry) Rate(name string) *Rate {
+	if r == nil {
+		return &Rate{}
+	}
 	v, _ := r.rates.LoadOrStore(name, newRate())
 	return v.(*Rate) //nolint:forcetypeassert // invariant: only *Rate stored
 }
 
 // RateSnapshot returns snapshots of all rate trackers.
 func (r *Registry) RateSnapshot() map[string]RateSnapshot {
+	if r == nil {
+		return nil
+	}
 	m := make(map[string]RateSnapshot)
 	r.rates.Range(func(k, v any) bool {
 		m[k.(string)] = v.(*Rate).Snapshot()
