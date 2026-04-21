@@ -1,7 +1,21 @@
 package search
 
-// cross_encoder_rerank.go — best-effort cross-encoder reranker backed by
-// embed-server's /v1/rerank endpoint (BGE-reranker-v2-m3, Cohere-compatible).
+// cross_encoder_rerank.go — best-effort cross-encoder reranker client.
+//
+// Speaks the **Cohere /v1/rerank de-facto standard**. Compatible with:
+//   - Cohere hosted (https://api.cohere.com/v1/rerank, requires APIKey)
+//   - Jina AI (https://api.jina.ai/v1/rerank, requires APIKey)
+//   - Voyage AI (https://api.voyageai.com/v1/rerank, requires APIKey)
+//   - Mixedbread AI (https://api.mixedbread.ai/v1/rerank, requires APIKey)
+//   - HuggingFace text-embeddings-inference self-hosted
+//   - Our embed-server self-hosted
+//
+// Request shape:  {model, query, documents: []string, top_n?}
+// Response shape: {results: [{index, relevance_score}], ...}
+//
+// Auth: when APIKey is set, sends `Authorization: Bearer <key>` (works for
+// every Cohere-compatible hosted provider). Self-hosted endpoints typically
+// don't need it — leave APIKey empty.
 //
 // Runs BEFORE the LLM reranker in the search pipeline (step 6.05). Much cheaper
 // than LLM rerank (~100-400ms vs ~3-4s) with strong cross-encoder relevance
@@ -33,10 +47,18 @@ const defaultCrossEncoderMaxDocs = 50
 // CrossEncoderConfig holds the settings for cross-encoder reranking.
 // Zero-value URL disables the step silently.
 type CrossEncoderConfig struct {
-	URL     string        // embed-server base URL, e.g. "http://embed-server:8082"
-	Model   string        // cross-encoder model name, e.g. "bge-reranker-v2-m3"
+	URL     string        // base URL up to (excl.) /v1/rerank, e.g. "http://embed-server:8082" or "https://api.cohere.com"
+	Model   string        // model name passed in request body, e.g. "gte-multi-rerank" or "rerank-multilingual-v3.0"
+	APIKey  string        // when non-empty, sent as `Authorization: Bearer <key>`. Required for Cohere/Jina/Voyage hosted, optional for self-hosted.
 	Timeout time.Duration // per-request HTTP timeout (propagated via ctx)
 	MaxDocs int           // cap on documents sent to server (0 → default 50)
+	// MaxCharsPerDoc caps doc length sent to the reranker. Cross-encoder
+	// attention is O(seq²); avg memory rows are ~750 chars (≈300 tokens).
+	// Truncating to ~200 chars (~80 tokens) gives a 4-9× speedup with
+	// minimal quality loss — the leading content carries the bulk of the
+	// query-relevance signal. Rune-aware (UTF-8 safe for Cyrillic).
+	// 0 disables truncation.
+	MaxCharsPerDoc int
 }
 
 // crossEncoderRequest mirrors embed-server's /v1/rerank input (Cohere-shaped).
@@ -93,12 +115,17 @@ func CrossEncoderRerank(
 
 	// Collect docs and the original head indices that backed them.
 	// Items missing the text field are skipped — they pass through unchanged.
+	// MaxCharsPerDoc applied here (rune-aware) to bound the seq length the
+	// reranker has to process — see CrossEncoderConfig docstring.
 	docs := make([]string, 0, len(head))
 	docIdxToHeadIdx := make([]int, 0, len(head))
 	for i, item := range head {
 		text, _ := item[textField].(string)
 		if text == "" {
 			continue
+		}
+		if cfg.MaxCharsPerDoc > 0 {
+			text = truncateRunes(text, cfg.MaxCharsPerDoc)
 		}
 		docs = append(docs, text)
 		docIdxToHeadIdx = append(docIdxToHeadIdx, i)
@@ -189,6 +216,12 @@ func callCrossEncoder(
 		return nil, fmt.Errorf("new request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// Bearer auth for Cohere-compatible hosted providers (Cohere, Jina,
+	// Voyage, Mixedbread). Self-hosted reranker servers (TEI, embed-server)
+	// usually need no auth — leave APIKey empty in that case.
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -211,4 +244,21 @@ func callCrossEncoder(
 		return nil, fmt.Errorf("unmarshal: %w", err)
 	}
 	return &parsed, nil
+}
+
+// truncateRunes returns the first `maxRunes` runes of s. UTF-8 safe — won't
+// split a multi-byte Cyrillic codepoint mid-sequence (which a naive `s[:N]`
+// byte slice would). Returns s unchanged when it already fits.
+func truncateRunes(s string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return s
+	}
+	count := 0
+	for i := range s {
+		if count == maxRunes {
+			return s[:i]
+		}
+		count++
+	}
+	return s
 }

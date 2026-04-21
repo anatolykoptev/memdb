@@ -223,3 +223,32 @@ func TestCrossEncoderRerank_ItemsWithoutTextKey(t *testing.T) {
 		t.Errorf("expected 3 items returned, got %d", len(res))
 	}
 }
+
+// TestCrossEncoderRerank_BearerAuth verifies the Authorization header is set
+// when APIKey is provided (required for Cohere/Jina/Voyage hosted) and absent
+// when empty (self-hosted TEI/embed-server case).
+func TestCrossEncoderRerank_BearerAuth(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		apiKey    string
+		wantAuth  string
+	}{
+		{name: "with key", apiKey: "sk-test-cohere-123", wantAuth: "Bearer sk-test-cohere-123"},
+		{name: "without key", apiKey: "", wantAuth: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotAuth string
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotAuth = r.Header.Get("Authorization")
+				_, _ = w.Write([]byte(`{"model":"x","results":[{"index":0,"relevance_score":1.0}]}`))
+			}))
+			defer ts.Close()
+			cfg := CrossEncoderConfig{URL: ts.URL, Model: "x", APIKey: tc.apiKey, Timeout: time.Second}
+			items := []map[string]any{{"memory": "a"}}
+			_ = CrossEncoderRerank(context.Background(), "q", items, "memory", cfg)
+			if gotAuth != tc.wantAuth {
+				t.Errorf("Authorization header: got %q, want %q", gotAuth, tc.wantAuth)
+			}
+		})
+	}
+}

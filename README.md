@@ -125,6 +125,21 @@ Key environment variables (full list in `.env.example`):
 | `MEMDB_EMBED_URL` | — | Base URL for embed-server (when type=http) |
 | `POSTGRES_PASSWORD` | — | Required; no default |
 | `MEMDB_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `CROSS_ENCODER_URL` | — | Cohere-compatible reranker base URL (e.g. `https://api.cohere.com`, `https://api.jina.ai`, or your self-hosted TEI / embed-server). Empty disables rerank. |
+| `CROSS_ENCODER_MODEL` | `gte-multi-rerank` | Model name passed in request body. For Cohere: `rerank-multilingual-v3.0`. For Jina: `jina-reranker-v2-base-multilingual`. For self-hosted: whatever name your server registered. |
+| `CROSS_ENCODER_API_KEY` | — | Bearer token. Required for hosted providers (Cohere/Jina/Voyage/Mixedbread); leave empty for self-hosted TEI/embed-server. |
+| `CROSS_ENCODER_TIMEOUT_MS` | `2000` | Per-request HTTP timeout. Hosted ~500ms, self-hosted CPU ~3-8s. |
+| `CROSS_ENCODER_MAX_DOCS` | `50` | Cap candidates sent to reranker. Lower if rerank latency dominates. |
+| `CROSS_ENCODER_MAX_CHARS_PER_DOC` | `0` (off) | Pre-truncate each document to N runes before sending. Saves O(seq²) attention compute. Recommend `200` for self-hosted CPU rerankers. |
+
+### Reranker compatibility
+
+`memdb-go` speaks the **Cohere `/v1/rerank` de-facto standard**:
+- Request: `{model, query, documents: [string], top_n?}`
+- Response: `{results: [{index, relevance_score}], ...}` (extra fields like `id`/`meta` ignored)
+- Auth: `Authorization: Bearer <CROSS_ENCODER_API_KEY>` when key set
+
+Tested against: Cohere hosted, Jina AI, Voyage AI, Mixedbread, HuggingFace text-embeddings-inference (TEI), and our own [embed-server](#embed-server).
 
 See [docs/llm-providers.md](docs/llm-providers.md) for provider-specific configuration (Ollama, OpenRouter, Gemini, LiteLLM).
 

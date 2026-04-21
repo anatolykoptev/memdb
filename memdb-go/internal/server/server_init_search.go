@@ -92,16 +92,20 @@ func initSearchService(
 
 	if cfg.CrossEncoderURL != "" {
 		svc.CrossEncoder = search.CrossEncoderConfig{
-			URL:     cfg.CrossEncoderURL,
-			Model:   cfg.CrossEncoderModel,
-			Timeout: cfg.CrossEncoderTimeout,
-			MaxDocs: cfg.CrossEncoderMaxDocs,
+			URL:            cfg.CrossEncoderURL,
+			Model:          cfg.CrossEncoderModel,
+			APIKey:         cfg.CrossEncoderAPIKey,
+			Timeout:        cfg.CrossEncoderTimeout,
+			MaxDocs:        cfg.CrossEncoderMaxDocs,
+			MaxCharsPerDoc: cfg.CrossEncoderMaxCharsPerDoc,
 		}
 		logger.Info("cross-encoder reranker enabled",
 			slog.String("url", cfg.CrossEncoderURL),
 			slog.String("model", cfg.CrossEncoderModel),
+			slog.Bool("auth", cfg.CrossEncoderAPIKey != ""),
 			slog.Duration("timeout", cfg.CrossEncoderTimeout),
 			slog.Int("max_docs", cfg.CrossEncoderMaxDocs),
+			slog.Int("max_chars_per_doc", cfg.CrossEncoderMaxCharsPerDoc),
 		)
 	}
 
