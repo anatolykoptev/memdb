@@ -37,7 +37,7 @@ SELECT DISTINCT properties->>(('user_name'::text)) AS cube_id
 FROM %[1]s."Memory"
 WHERE properties->>(('status'::text)) = 'activated'
   AND properties->>(('user_name'::text)) IS NOT NULL
-  AND properties->('tags'::text) @> to_jsonb(ARRAY[$1]::text[])
+  AND (properties::text::jsonb)->'tags' @> to_jsonb(ARRAY[$1]::text[])
 ORDER BY cube_id`
 
 // ExistUser checks if a user has any activated memories.
