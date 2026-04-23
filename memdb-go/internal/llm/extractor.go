@@ -287,9 +287,8 @@ func stripFences(s string) string {
 // parseExtractedFacts parses, validates, and filters a JSON array of ExtractedFact.
 // Facts with confidence < MinConfidence or empty memory (non-delete) are dropped.
 func parseExtractedFacts(raw string) ([]ExtractedFact, error) {
-	raw = stripFences(raw)
 	var facts []ExtractedFact
-	if err := json.Unmarshal([]byte(raw), &facts); err != nil {
+	if err := json.Unmarshal(StripJSONFence([]byte(raw)), &facts); err != nil {
 		return nil, err
 	}
 	var valid []ExtractedFact
