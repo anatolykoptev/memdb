@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const (
@@ -327,8 +329,13 @@ func (h *Handler) checkAndFlushStale(ctx context.Context, client *redis.Client, 
 
 	items, err := h.flushBuffer(ctx, cubeID)
 	if err != nil {
+		reason := classifyFlushError(err)
+		bufferMx().FlushErrors.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("reason", reason),
+		))
 		h.logger.Error("buffer flusher: flush failed",
 			slog.String("cube_id", cubeID),
+			slog.String("reason", reason),
 			slog.Any("error", err),
 		)
 		return
