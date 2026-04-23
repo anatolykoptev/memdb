@@ -113,6 +113,13 @@ if err := pg.EnsureUserConfigsTable(ctx); err != nil {
 logger.Warn("user_configs table init failed", slog.Any("error", err))
 }
 
+// Versioned SQL migrations. Fail-fast: schema drift must crash startup
+// so dozor flags it — not silently log-and-continue like Ensure* tables.
+if err := pg.RunMigrations(ctx); err != nil {
+pool.Close()
+return nil, fmt.Errorf("run migrations: %w", err)
+}
+
 logger.Info("postgres connected", slog.Int("max_conns", int(cfg.MaxConns)))
 return pg, nil
 }
