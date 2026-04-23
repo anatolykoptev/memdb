@@ -5,9 +5,12 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
 )
@@ -47,7 +50,35 @@ func (p *Postgres) InsertMemoryNodes(ctx context.Context, nodes []MemoryInsertNo
 	if err := br.Close(); err != nil {
 		return fmt.Errorf("close batch: %w", err)
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit memory insert: %w", err)
+	}
+	for _, n := range nodes {
+		memType, cubeID := extractMemoryLabels(n.PropertiesJSON)
+		dbMx().MemoryAdded.Add(ctx, 1,
+			metric.WithAttributes(
+				attribute.String("type", memType),
+				attribute.String("cube_id", cubeID),
+			),
+		)
+	}
+	return nil
+}
+
+// nodeMetricProps holds only the fields needed for metric labels.
+type nodeMetricProps struct {
+	MemoryType string `json:"memory_type"`
+	UserName   string `json:"user_name"`
+}
+
+// extractMemoryLabels parses memory_type and user_name from PropertiesJSON for low-cardinality metric labels.
+// Returns empty strings on parse failure — metric is still emitted, just unlabelled.
+func extractMemoryLabels(propsJSON []byte) (memType, cubeID string) {
+	var p nodeMetricProps
+	if err := json.Unmarshal(propsJSON, &p); err != nil {
+		return "", ""
+	}
+	return p.MemoryType, p.UserName
 }
 
 // UpdateMemoryNodeFull updates memory text, embedding, and updated_at of an existing node.
