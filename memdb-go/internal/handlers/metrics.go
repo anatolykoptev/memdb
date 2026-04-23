@@ -10,6 +10,29 @@ import (
 )
 
 var (
+	bufferMetricsOnce sync.Once
+	bufferMetrics     *bufferMetricsInstruments
+)
+
+type bufferMetricsInstruments struct {
+	// FlushErrors counts buffer flush failures by reason.
+	// reason ∈ {lua, parse, db, other}. rate(...[5m]) > 10 alerts.
+	FlushErrors metric.Int64Counter
+}
+
+// bufferMx returns the singleton buffer instruments, lazy-initialised.
+func bufferMx() *bufferMetricsInstruments {
+	bufferMetricsOnce.Do(func() {
+		meter := otel.Meter("memdb-go/buffer")
+		flush, _ := meter.Int64Counter("memdb.buffer.flush_errors",
+			metric.WithDescription("Count of buffer flush failures by reason (lua/parse/db/other). Burst alerts via increase([5m])>10."),
+		)
+		bufferMetrics = &bufferMetricsInstruments{FlushErrors: flush}
+	})
+	return bufferMetrics
+}
+
+var (
 	metricsOnce     sync.Once
 	feedbackMetrics *feedbackMetricsInstruments
 )
