@@ -132,6 +132,13 @@ func NewStubPostgres() *Postgres {
 return &Postgres{}
 }
 
+// NewTestPostgres wraps an externally-constructed pgxpool.Pool and logger
+// for integration testing. Unlike NewPostgres, it skips retry/ping/init
+// side effects so tests can fully control startup.
+func NewTestPostgres(pool *pgxpool.Pool, logger *slog.Logger) *Postgres {
+return &Postgres{pool: pool, logger: logger}
+}
+
 // Pool returns the underlying pgx pool for direct query access.
 func (p *Postgres) Pool() *pgxpool.Pool {
 return p.pool
