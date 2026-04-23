@@ -44,6 +44,12 @@ const firstMigrationName = "0001_phase2_user_cube_split.sql"
 // Idempotent. Must be called exactly once per NewPostgres.
 // Returns error — caller must propagate (do not log-and-swallow).
 func (p *Postgres) RunMigrations(ctx context.Context) error {
+	// Force lazy init of db metrics so pre-registered counters (drift, memory_added)
+	// become visible to Prometheus on the first scrape, not only after the first
+	// real event. Without this, a clean startup with no drift + no writes scrapes
+	// empty, and dashboards can't tell "metric missing" from "value 0".
+	_ = dbMx()
+
 	conn, err := p.pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire migration connection: %w", err)
