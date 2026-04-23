@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/anatolykoptev/memdb/memdb-go/migrations"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // migrationLockKey — fixed int8 namespace for pg_advisory_lock.
@@ -41,16 +42,22 @@ const firstMigrationName = "0001_phase2_user_cube_split.sql"
 // Idempotent. Must be called exactly once per NewPostgres.
 // Returns error — caller must propagate (do not log-and-swallow).
 func (p *Postgres) RunMigrations(ctx context.Context) error {
-	if _, err := p.pool.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+	conn, err := p.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration connection: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
 		return fmt.Errorf("acquire migration advisory lock: %w", err)
 	}
 	defer func() {
-		if _, err := p.pool.Exec(ctx, `SELECT pg_advisory_unlock($1)`, migrationLockKey); err != nil {
+		if _, err := conn.Exec(ctx, `SELECT pg_advisory_unlock($1)`, migrationLockKey); err != nil {
 			p.logger.Warn("release migration advisory lock failed", slog.Any("error", err))
 		}
 	}()
 
-	if _, err := p.pool.Exec(ctx, `
+	if _, err := conn.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS memos_graph.schema_migrations (
 			name       TEXT        PRIMARY KEY,
 			checksum   TEXT        NOT NULL,
@@ -59,11 +66,11 @@ func (p *Postgres) RunMigrations(ctx context.Context) error {
 		return fmt.Errorf("create schema_migrations table: %w", err)
 	}
 
-	if err := p.baselineIfNeeded(ctx); err != nil {
+	if err := p.baselineIfNeeded(ctx, conn); err != nil {
 		return fmt.Errorf("baseline existing schema: %w", err)
 	}
 
-	applied, err := p.loadAppliedMigrations(ctx)
+	applied, err := p.loadAppliedMigrations(ctx, conn)
 	if err != nil {
 		return fmt.Errorf("load applied migrations: %w", err)
 	}
@@ -92,7 +99,7 @@ func (p *Postgres) RunMigrations(ctx context.Context) error {
 		}
 
 		p.logger.Info("applying migration", slog.String("name", name), slog.String("sha", sum[:12]))
-		if err := p.applyMigration(ctx, name, string(content), sum); err != nil {
+		if err := p.applyMigration(ctx, conn, name, string(content), sum); err != nil {
 			return fmt.Errorf("apply migration %s: %w", name, err)
 		}
 		p.logger.Info("migration applied", slog.String("name", name))
@@ -103,9 +110,9 @@ func (p *Postgres) RunMigrations(ctx context.Context) error {
 // baselineIfNeeded handles transition from Python-managed schema to Go runner.
 // If memos_graph.cubes already exists and schema_migrations is empty, marks
 // firstMigrationName applied without executing it. Safe no-op on fresh DB.
-func (p *Postgres) baselineIfNeeded(ctx context.Context) error {
+func (p *Postgres) baselineIfNeeded(ctx context.Context, conn *pgxpool.Conn) error {
 	var count int
-	if err := p.pool.QueryRow(ctx,
+	if err := conn.QueryRow(ctx,
 		`SELECT count(*) FROM memos_graph.schema_migrations`,
 	).Scan(&count); err != nil {
 		return fmt.Errorf("count schema_migrations: %w", err)
@@ -115,7 +122,7 @@ func (p *Postgres) baselineIfNeeded(ctx context.Context) error {
 	}
 
 	var cubesExists bool
-	if err := p.pool.QueryRow(ctx, `
+	if err := conn.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM pg_tables
 			WHERE schemaname = 'memos_graph' AND tablename = 'cubes'
@@ -130,7 +137,7 @@ func (p *Postgres) baselineIfNeeded(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read %s for baseline: %w", firstMigrationName, err)
 	}
-	if _, err := p.pool.Exec(ctx, `
+	if _, err := conn.Exec(ctx, `
 		INSERT INTO memos_graph.schema_migrations(name, checksum)
 		VALUES ($1, $2)
 		ON CONFLICT DO NOTHING`,
@@ -143,8 +150,8 @@ func (p *Postgres) baselineIfNeeded(ctx context.Context) error {
 	return nil
 }
 
-func (p *Postgres) loadAppliedMigrations(ctx context.Context) (map[string]string, error) {
-	rows, err := p.pool.Query(ctx,
+func (p *Postgres) loadAppliedMigrations(ctx context.Context, conn *pgxpool.Conn) (map[string]string, error) {
+	rows, err := conn.Query(ctx,
 		`SELECT name, checksum FROM memos_graph.schema_migrations ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -161,8 +168,8 @@ func (p *Postgres) loadAppliedMigrations(ctx context.Context) (map[string]string
 	return applied, rows.Err()
 }
 
-func (p *Postgres) applyMigration(ctx context.Context, name, content, sum string) error {
-	tx, err := p.pool.Begin(ctx)
+func (p *Postgres) applyMigration(ctx context.Context, conn *pgxpool.Conn, name, content, sum string) error {
+	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
