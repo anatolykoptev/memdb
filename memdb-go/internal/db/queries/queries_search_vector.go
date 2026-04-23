@@ -18,15 +18,15 @@ package queries
 //	$6 = agent_id (text, '' for any)
 const VectorSearch = `
 SELECT id::text,
-       (properties - 'sources')::text,
+       (properties::text::jsonb - 'sources')::text,
        1 - (embedding::halfvec(1024) <=> $1::halfvec(1024)) AS score,
        embedding::text
 FROM %[1]s."Memory"
-WHERE properties->>'status' = 'activated'
-  AND properties->>'user_name' = $2
-  AND properties->>'user_id'   = $3
-  AND properties->>'memory_type' = ANY($4)
-  AND ($6::text = '' OR properties->>'agent_id' = $6)
+WHERE properties->>(('status'::text)) = 'activated'
+  AND properties->>(('user_name'::text)) = $2
+  AND properties->>(('user_id'::text))   = $3
+  AND properties->>(('memory_type'::text)) = ANY($4)
+  AND ($6::text = '' OR properties->>(('agent_id'::text)) = $6)
   AND embedding IS NOT NULL
 ORDER BY embedding::halfvec(1024) <=> $1::halfvec(1024) ASC
 LIMIT $5`
@@ -44,15 +44,15 @@ LIMIT $5`
 //	$6 = agent_id (text, '' for any)
 const VectorSearchMultiCube = `
 SELECT id::text,
-       (properties - 'sources')::text,
+       (properties::text::jsonb - 'sources')::text,
        1 - (embedding::halfvec(1024) <=> $1::halfvec(1024)) AS score,
        embedding::text
 FROM %[1]s."Memory"
-WHERE properties->>'status' = 'activated'
-  AND properties->>'user_name' = ANY($2::text[])
-  AND properties->>'user_id'   = $3
-  AND properties->>'memory_type' = ANY($4)
-  AND ($6::text = '' OR properties->>'agent_id' = $6)
+WHERE properties->>(('status'::text)) = 'activated'
+  AND properties->>(('user_name'::text)) = ANY($2::text[])
+  AND properties->>(('user_id'::text))   = $3
+  AND properties->>(('memory_type'::text)) = ANY($4)
+  AND ($6::text = '' OR properties->>(('agent_id'::text)) = $6)
   AND embedding IS NOT NULL
 ORDER BY embedding::halfvec(1024) <=> $1::halfvec(1024) ASC
 LIMIT $5`
@@ -69,16 +69,16 @@ LIMIT $5`
 //	$7 = agent_id (text, '' for any)
 const VectorSearchWithCutoff = `
 SELECT id::text,
-       (properties - 'sources')::text,
+       (properties::text::jsonb - 'sources')::text,
        1 - (embedding::halfvec(1024) <=> $1::halfvec(1024)) AS score,
        embedding::text
 FROM %[1]s."Memory"
-WHERE properties->>'status' = 'activated'
-  AND properties->>'user_name' = $2
-  AND properties->>'user_id'   = $3
-  AND properties->>'memory_type' = ANY($4)
-  AND ($7::text = '' OR properties->>'agent_id' = $7)
+WHERE properties->>(('status'::text)) = 'activated'
+  AND properties->>(('user_name'::text)) = $2
+  AND properties->>(('user_id'::text))   = $3
+  AND properties->>(('memory_type'::text)) = ANY($4)
+  AND ($7::text = '' OR properties->>(('agent_id'::text)) = $7)
   AND embedding IS NOT NULL
-  AND (properties->>'created_at') >= $6
+  AND (properties->>(('created_at'::text))) >= $6
 ORDER BY embedding::halfvec(1024) <=> $1::halfvec(1024) ASC
 LIMIT $5`

@@ -20,14 +20,14 @@ LIMIT %[3]d`
 // patterns (role: [timestamp]: content). Used by the admin reprocess endpoint.
 // Args: $1 = user_name, $2 = memory_types (text[]), $3 = limit
 const FindRawMemories = `
-SELECT properties->>'id'     AS prop_id,
-       properties->>'memory' AS memory
+SELECT properties->>(('id'::text))     AS prop_id,
+       properties->>(('memory'::text)) AS memory
 FROM %[1]s."Memory"
-WHERE properties->>'user_name' = $1
-  AND properties->>'memory_type' = ANY($2)
-  AND properties->>'status' = 'activated'
-  AND position('assistant: [20' IN properties->>'memory') > 0
-ORDER BY (properties->>'created_at') ASC NULLS LAST
+WHERE properties->>(('user_name'::text)) = $1
+  AND properties->>(('memory_type'::text)) = ANY($2)
+  AND properties->>(('status'::text)) = 'activated'
+  AND position('assistant: [20' IN properties->>(('memory'::text))) > 0
+ORDER BY (properties->>(('created_at'::text))) ASC NULLS LAST
 LIMIT $3`
 
 // CountRawMemories returns the total count of raw conversation-window memories.
@@ -35,7 +35,7 @@ LIMIT $3`
 const CountRawMemories = `
 SELECT COUNT(*)
 FROM %[1]s."Memory"
-WHERE properties->>'user_name' = $1
-  AND properties->>'memory_type' = ANY($2)
-  AND properties->>'status' = 'activated'
-  AND position('assistant: [20' IN properties->>'memory') > 0`
+WHERE properties->>(('user_name'::text)) = $1
+  AND properties->>(('memory_type'::text)) = ANY($2)
+  AND properties->>(('status'::text)) = 'activated'
+  AND position('assistant: [20' IN properties->>(('memory'::text))) > 0`

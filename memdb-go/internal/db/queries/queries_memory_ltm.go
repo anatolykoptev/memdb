@@ -13,13 +13,13 @@ package queries
 const SearchLTMByVector = `
 SELECT
     id                    AS memory_id,
-    properties->>'memory' AS memory_text,
+    properties->>(('memory'::text)) AS memory_text,
     1 - (embedding::halfvec(1024) <=> $2::halfvec(1024)) AS score,
     embedding::text       AS embedding_text
 FROM %[1]s."Memory"
-WHERE properties->>'user_name' = $1
-  AND properties->>'status' = 'activated'
-  AND properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+WHERE properties->>(('user_name'::text)) = $1
+  AND properties->>(('status'::text)) = 'activated'
+  AND properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
   AND embedding IS NOT NULL
   AND 1 - (embedding::halfvec(1024) <=> $2::halfvec(1024)) >= $3
 ORDER BY embedding::halfvec(1024) <=> $2::halfvec(1024) ASC
@@ -33,18 +33,18 @@ LIMIT $4`
 const FindNearDuplicates = `
 SELECT
     a.id                    AS id_a,
-    a.properties->>'memory' AS mem_a,
+    a.properties->>(('memory'::text)) AS mem_a,
     b.id                    AS id_b,
-    b.properties->>'memory' AS mem_b,
+    b.properties->>(('memory'::text)) AS mem_b,
     1 - (a.embedding <=> b.embedding) AS score
 FROM %[1]s."Memory" a
 JOIN %[1]s."Memory" b ON a.id < b.id
-WHERE a.properties->>'user_name' = $1
-  AND b.properties->>'user_name' = $1
-  AND a.properties->>'status' = 'activated'
-  AND b.properties->>'status' = 'activated'
-  AND a.properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
-  AND b.properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+WHERE a.properties->>(('user_name'::text)) = $1
+  AND b.properties->>(('user_name'::text)) = $1
+  AND a.properties->>(('status'::text)) = 'activated'
+  AND b.properties->>(('status'::text)) = 'activated'
+  AND a.properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+  AND b.properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
   AND a.embedding IS NOT NULL
   AND b.embedding IS NOT NULL
   AND 1 - (a.embedding <=> b.embedding) >= $2
@@ -60,18 +60,18 @@ LIMIT $3`
 const FindNearDuplicatesByIDs = `
 SELECT
     a.id                    AS id_a,
-    a.properties->>'memory' AS mem_a,
+    a.properties->>(('memory'::text)) AS mem_a,
     b.id                    AS id_b,
-    b.properties->>'memory' AS mem_b,
+    b.properties->>(('memory'::text)) AS mem_b,
     1 - (a.embedding <=> b.embedding) AS score
 FROM %[1]s."Memory" a
 JOIN %[1]s."Memory" b ON a.id < b.id
-WHERE a.properties->>'user_name' = $1
-  AND b.properties->>'user_name' = $1
-  AND a.properties->>'status' = 'activated'
-  AND b.properties->>'status' = 'activated'
-  AND a.properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
-  AND b.properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+WHERE a.properties->>(('user_name'::text)) = $1
+  AND b.properties->>(('user_name'::text)) = $1
+  AND a.properties->>(('status'::text)) = 'activated'
+  AND b.properties->>(('status'::text)) = 'activated'
+  AND a.properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+  AND b.properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
   AND (a.id = ANY($2) OR b.id = ANY($2))
   AND a.embedding IS NOT NULL
   AND b.embedding IS NOT NULL
@@ -97,25 +97,25 @@ func FindNearDuplicatesSQL() string { return FindNearDuplicates }
 const FindNearDuplicatesHNSW = `
 SELECT
     a.id                    AS id_a,
-    a.properties->>'memory' AS mem_a,
+    a.properties->>(('memory'::text)) AS mem_a,
     b.id                    AS id_b,
-    b.properties->>'memory' AS mem_b,
+    b.properties->>(('memory'::text)) AS mem_b,
     1 - (a.embedding <=> b.embedding) AS score
 FROM %[1]s."Memory" a
 CROSS JOIN LATERAL (
     SELECT m.id, m.properties, m.embedding
     FROM %[1]s."Memory" m
     WHERE m.id > a.id
-      AND m.properties->>'user_name' = $1
-      AND m.properties->>'status' = 'activated'
-      AND m.properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+      AND m.properties->>(('user_name'::text)) = $1
+      AND m.properties->>(('status'::text)) = 'activated'
+      AND m.properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
       AND m.embedding IS NOT NULL
     ORDER BY m.embedding <=> a.embedding
     LIMIT $4
 ) b
-WHERE a.properties->>'user_name' = $1
-  AND a.properties->>'status' = 'activated'
-  AND a.properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+WHERE a.properties->>(('user_name'::text)) = $1
+  AND a.properties->>(('status'::text)) = 'activated'
+  AND a.properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
   AND a.embedding IS NOT NULL
   AND 1 - (a.embedding <=> b.embedding) >= $2
 ORDER BY score DESC
@@ -130,25 +130,25 @@ LIMIT $3`
 const FindNearDuplicatesHNSWByIDs = `
 SELECT
     a.id                    AS id_a,
-    a.properties->>'memory' AS mem_a,
+    a.properties->>(('memory'::text)) AS mem_a,
     b.id                    AS id_b,
-    b.properties->>'memory' AS mem_b,
+    b.properties->>(('memory'::text)) AS mem_b,
     1 - (a.embedding <=> b.embedding) AS score
 FROM %[1]s."Memory" a
 CROSS JOIN LATERAL (
     SELECT m.id, m.properties, m.embedding
     FROM %[1]s."Memory" m
     WHERE m.id > a.id
-      AND m.properties->>'user_name' = $1
-      AND m.properties->>'status' = 'activated'
-      AND m.properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+      AND m.properties->>(('user_name'::text)) = $1
+      AND m.properties->>(('status'::text)) = 'activated'
+      AND m.properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
       AND m.embedding IS NOT NULL
     ORDER BY m.embedding <=> a.embedding
     LIMIT $5
 ) b
-WHERE a.properties->>'user_name' = $1
-  AND a.properties->>'status' = 'activated'
-  AND a.properties->>'memory_type' IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+WHERE a.properties->>(('user_name'::text)) = $1
+  AND a.properties->>(('status'::text)) = 'activated'
+  AND a.properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
   AND a.embedding IS NOT NULL
   AND (a.id = ANY($2) OR b.id = ANY($2))
   AND 1 - (a.embedding <=> b.embedding) >= $3

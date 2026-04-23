@@ -16,15 +16,15 @@ package queries
 //	$6 = agent_id (text, '' for any)
 const FulltextSearch = `
 SELECT id::text,
-       (properties - 'sources')::text,
+       (properties::text::jsonb - 'sources')::text,
        ts_rank(properties_tsvector_zh, to_tsquery('simple', $1)) AS rank
 FROM %[1]s."Memory"
 WHERE properties_tsvector_zh @@ to_tsquery('simple', $1)
-  AND properties->>'status' = 'activated'
-  AND properties->>'user_name' = $2
-  AND properties->>'user_id'   = $3
-  AND properties->>'memory_type' = ANY($4)
-  AND ($6::text = '' OR properties->>'agent_id' = $6)
+  AND properties->>(('status'::text)) = 'activated'
+  AND properties->>(('user_name'::text)) = $2
+  AND properties->>(('user_id'::text))   = $3
+  AND properties->>(('memory_type'::text)) = ANY($4)
+  AND ($6::text = '' OR properties->>(('agent_id'::text)) = $6)
 ORDER BY rank DESC
 LIMIT $5`
 
@@ -40,15 +40,15 @@ LIMIT $5`
 //	$7 = agent_id (text, '' for any)
 const FulltextSearchWithCutoff = `
 SELECT id::text,
-       (properties - 'sources')::text,
+       (properties::text::jsonb - 'sources')::text,
        ts_rank(properties_tsvector_zh, to_tsquery('simple', $1)) AS rank
 FROM %[1]s."Memory"
 WHERE properties_tsvector_zh @@ to_tsquery('simple', $1)
-  AND properties->>'status' = 'activated'
-  AND properties->>'user_name' = $2
-  AND properties->>'user_id'   = $3
-  AND properties->>'memory_type' = ANY($4)
-  AND ($7::text = '' OR properties->>'agent_id' = $7)
-  AND (properties->>'created_at') >= $6
+  AND properties->>(('status'::text)) = 'activated'
+  AND properties->>(('user_name'::text)) = $2
+  AND properties->>(('user_id'::text))   = $3
+  AND properties->>(('memory_type'::text)) = ANY($4)
+  AND ($7::text = '' OR properties->>(('agent_id'::text)) = $7)
+  AND (properties->>(('created_at'::text))) >= $6
 ORDER BY rank DESC
 LIMIT $5`
