@@ -59,6 +59,21 @@ func (p *Postgres) RunMigrations(ctx context.Context) error {
 		}
 	}()
 
+	// Bootstrap extensions + AGE graph on fresh DBs.
+	// Migrations 0001/0002/0004 reference memos_graph."Memory" (an AGE vertex
+	// label), so the graph must exist before any SQL migration can run.
+	// On existing DBs all three calls are no-ops (IF NOT EXISTS / graph-check).
+	if err := p.bootstrapGraphIfNeeded(ctx, conn); err != nil {
+		return fmt.Errorf("bootstrap AGE graph: %w", err)
+	}
+
+	// AGE operators (agtype ->>, agtype = agtype, etc.) live in ag_catalog.
+	// Set search_path for this connection so migrations that use agtype
+	// operators work without qualifying every operator.
+	if _, err := conn.Exec(ctx, `SET search_path = ag_catalog, memos_graph, "$user", public`); err != nil {
+		return fmt.Errorf("set search_path for migrations: %w", err)
+	}
+
 	if _, err := conn.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS memos_graph.schema_migrations (
 			name       TEXT        PRIMARY KEY,
@@ -212,4 +227,46 @@ func listMigrationFiles() ([]string, error) {
 func sha256sum(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
+}
+
+// bootstrapGraphIfNeeded ensures the AGE graph and required extensions exist
+// before any SQL migration runs. Migrations 0001/0002/0004 reference
+// memos_graph."Memory" (an AGE vertex label table), which only exists after
+// create_graph. On an already-bootstrapped DB all steps are no-ops.
+func (p *Postgres) bootstrapGraphIfNeeded(ctx context.Context, conn *pgxpool.Conn) error {
+	// Extensions must be loaded before create_graph (AGE requirement).
+	for _, ext := range []string{"age", "vector", "pg_trgm"} {
+		if _, err := conn.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS `+ext); err != nil {
+			return fmt.Errorf("create extension %s: %w", ext, err)
+		}
+	}
+
+	// Create the AGE graph only if it does not already exist.
+	// create_graph also creates the memos_graph schema — do NOT pre-create it.
+	var graphExists bool
+	if err := conn.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM ag_catalog.ag_graph WHERE name = 'memos_graph')`,
+	).Scan(&graphExists); err != nil {
+		return fmt.Errorf("probe ag_graph: %w", err)
+	}
+	if !graphExists {
+		// AGE requires ag_catalog in the search_path for its operator classes.
+		if _, err := conn.Exec(ctx, `SET search_path = ag_catalog, "$user", public`); err != nil {
+			return fmt.Errorf("set search_path for create_graph: %w", err)
+		}
+		if _, err := conn.Exec(ctx, `SELECT * FROM ag_catalog.create_graph('memos_graph')`); err != nil {
+			return fmt.Errorf("create_graph memos_graph: %w", err)
+		}
+		// Create the Memory vertex label so migration 0001/0002/0004 can
+		// reference memos_graph."Memory" even on a fully empty database.
+		if _, err := conn.Exec(ctx, `SELECT * FROM ag_catalog.create_vlabel('memos_graph', 'Memory')`); err != nil {
+			return fmt.Errorf("create Memory vlabel: %w", err)
+		}
+		// Restore default search_path so subsequent queries are not affected.
+		if _, err := conn.Exec(ctx, `RESET search_path`); err != nil {
+			p.logger.Warn("reset search_path after graph bootstrap failed", slog.Any("error", err))
+		}
+		p.logger.Info("AGE graph bootstrapped", slog.String("graph", "memos_graph"))
+	}
+	return nil
 }

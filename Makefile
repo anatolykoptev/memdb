@@ -1,4 +1,4 @@
-.PHONY: test
+.PHONY: test test-migrations-fresh-db
 
 install:
 	poetry install --extras all --with dev --with test
@@ -25,3 +25,6 @@ serve:
 
 openapi:
 	poetry run memdb export_openapi --output docs/openapi.json
+
+test-migrations-fresh-db:
+	bash memdb-go/scripts/test-migrations-fresh-db.sh
