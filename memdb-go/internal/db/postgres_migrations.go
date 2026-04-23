@@ -27,6 +27,8 @@ import (
 
 	"github.com/anatolykoptev/memdb/memdb-go/migrations"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // migrationLockKey — fixed int8 namespace for pg_advisory_lock.
@@ -94,6 +96,8 @@ func (p *Postgres) RunMigrations(ctx context.Context) error {
 					slog.String("applied_sha", prev[:12]),
 					slog.String("current_sha", sum[:12]),
 					slog.String("action", "no re-apply; manual intervention required"))
+				dbMx().MigrationChecksumDrift.Add(ctx, 1,
+					metric.WithAttributes(attribute.String("name", name)))
 			}
 			continue
 		}
