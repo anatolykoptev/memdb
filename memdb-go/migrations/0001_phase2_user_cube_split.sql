@@ -11,6 +11,11 @@
 --
 -- Idempotency: all DDL uses IF NOT EXISTS; inserts use ON CONFLICT DO NOTHING;
 -- update only touches rows where user_id != 'krolik'. Safe to re-run.
+--
+-- Note on agtype casting: properties is of type agtype (AGE vertex column).
+-- Extracting text fields requires casting via ::text::jsonb->>'key' to avoid
+-- operator overload ambiguity between agtype->>(agtype,text) and
+-- agtype->>(agtype,agtype) when ag_catalog is in search_path.
 
 BEGIN;
 
@@ -32,25 +37,29 @@ CREATE INDEX IF NOT EXISTS idx_cubes_path       ON memos_graph.cubes (cube_path)
 CREATE INDEX IF NOT EXISTS idx_cubes_updated_at ON memos_graph.cubes (updated_at DESC)      WHERE is_active;
 
 -- Step 2: Backfill cubes rows from distinct user_name values in Memory
+-- Cast properties via ::text::jsonb so ->> resolves to the JSONB operator
+-- (avoids agtype cast ambiguity when ag_catalog is in search_path).
 INSERT INTO memos_graph.cubes (cube_id, cube_name, owner_id, created_at, updated_at, is_active)
 SELECT
-    properties->>'user_name' AS cube_id,
-    properties->>'user_name' AS cube_name,
-    'krolik'                 AS owner_id,
-    MIN(created_at)          AS created_at,
-    MAX(created_at)          AS updated_at,
-    TRUE                     AS is_active
+    (properties::text::jsonb)->>'user_name'                        AS cube_id,
+    (properties::text::jsonb)->>'user_name'                        AS cube_name,
+    'krolik'                                                        AS owner_id,
+    MIN(COALESCE(((properties::text::jsonb)->>'created_at')::timestamptz, NOW())) AS created_at,
+    MAX(COALESCE(((properties::text::jsonb)->>'created_at')::timestamptz, NOW())) AS updated_at,
+    TRUE                                                            AS is_active
 FROM memos_graph."Memory"
-WHERE properties->>'user_name' IS NOT NULL
-GROUP BY properties->>'user_name'
+WHERE (properties::text::jsonb)->>'user_name' IS NOT NULL
+GROUP BY (properties::text::jsonb)->>'user_name'
 ON CONFLICT (cube_id) DO NOTHING;
 
 -- Step 3: Fix user_id JSONB slot on all existing Memory rows
 -- Single-user deployment: every row's person becomes 'krolik'
+-- Use agtype concatenation operator with agtype literal.
 UPDATE memos_graph."Memory"
-SET properties = properties || '{"user_id":"krolik"}'::jsonb
-WHERE properties->>'user_name' IS NOT NULL
-  AND (properties->>'user_id' IS NULL OR properties->>'user_id' != 'krolik');
+SET properties = properties || agtype_build_map('user_id', 'krolik')
+WHERE (properties::text::jsonb)->>'user_name' IS NOT NULL
+  AND ((properties::text::jsonb)->>'user_id' IS NULL
+       OR (properties::text::jsonb)->>'user_id' != 'krolik');
 
 -- Step 4: Invariant checks
 DO $$
@@ -60,10 +69,10 @@ DECLARE
     cube_rows      INTEGER;
     distinct_cubes INTEGER;
 BEGIN
-    SELECT COUNT(*)                                                INTO mem_total      FROM memos_graph."Memory";
-    SELECT COUNT(*)                                                INTO mem_person     FROM memos_graph."Memory" WHERE properties->>'user_id' = 'krolik';
-    SELECT COUNT(*)                                                INTO cube_rows      FROM memos_graph.cubes;
-    SELECT COUNT(DISTINCT properties->>'user_name')                INTO distinct_cubes FROM memos_graph."Memory";
+    SELECT COUNT(*)                                                               INTO mem_total      FROM memos_graph."Memory";
+    SELECT COUNT(*)                                                               INTO mem_person     FROM memos_graph."Memory" WHERE (properties::text::jsonb)->>'user_id' = 'krolik';
+    SELECT COUNT(*)                                                               INTO cube_rows      FROM memos_graph.cubes;
+    SELECT COUNT(DISTINCT (properties::text::jsonb)->>'user_name')               INTO distinct_cubes FROM memos_graph."Memory";
 
     RAISE NOTICE 'migration: total memory rows        = %', mem_total;
     RAISE NOTICE 'migration: memory rows (krolik)     = %', mem_person;
@@ -75,7 +84,7 @@ BEGIN
             cube_rows, distinct_cubes;
     END IF;
 
-    IF mem_person != (SELECT COUNT(*) FROM memos_graph."Memory" WHERE properties->>'user_name' IS NOT NULL) THEN
+    IF mem_person != (SELECT COUNT(*) FROM memos_graph."Memory" WHERE (properties::text::jsonb)->>'user_name' IS NOT NULL) THEN
         RAISE EXCEPTION 'some Memory rows with user_name still missing user_id backfill';
     END IF;
 END $$;
