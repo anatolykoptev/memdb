@@ -200,6 +200,7 @@
 
 | Python модуль | Размер | Что делает | Go статус | Блокер Ф5? |
 |---|---|---|---|---|
+| `graph_dbs/polardb/schema.py` | 232 строки, 14 DDL | Schema bootstrap: накатывает таблицы/колонки/индексы/triggers при старте Python (в т.ч. `properties_tsvector_zh`, GIN index, trigger) | ❌ нет (нет versioned runner) | 🔴 ДА (Фаза 4.13) |
 | `mem_feedback/feedback.py` | 47.8K | LLM анализ feedback → add/update памяти | ❌ нет | 🔴 ДА (Фаза 4.5) |
 | `mem_cube/single_cube.py` | 33.7K | Cube CRUD (create/share/dump/register/unregister) | ❌ нет (MCP proxy) | 🟡 частично |
 | `mem_reader/read_multi_modal/` | 10 файлов, ~150K | Парсеры user/assistant/system/tool/image/file_content/multi_modal | ❌ нет | ❌ (feature gap, не блокер) |
@@ -309,6 +310,24 @@ Option C из research (extract `AddMemories`/`ChatComplete` service functions, 
 | 4.11.2 | Если нужны — портировать `mem_cube/single_cube.py` (33.7K) в `internal/handlers/cubes.go` | L |
 | 4.11.3 | Если нет — удалить MCP tools и endpoints | S |
 
+#### 4.13 Schema Migration Runner (Go takeover `schema.py`) 🔄 В РАБОТЕ
+
+**Цель:** Убрать зависимость от Python `schema.py` как от de-facto DB migration tool. Пока Python стартует — он молча накатывает DDL (`properties_tsvector_zh`, GIN index, trigger) через `polardb/schema.py`. После shutdown memdb-api (Фаза 5) schema drift становится silent: Go embed'ит SQL в `migrations/`, но без runner'а применяет их "один раз вручную".
+
+**План:** [`docs/superpowers/plans/2026-04-23-memdb-go-migration-runner.md`](../../docs/superpowers/plans/2026-04-23-memdb-go-migration-runner.md) (v2: +advisory lock, +transactional apply, +sha256 checksum drift detection, +baseline для 0001, +fail-fast вместо Warn).
+
+| # | Задача | Effort | Статус |
+|---|--------|--------|--------|
+| 4.13.1 | `migrations/embed.go` — `//go:embed *.sql` | XS | ⏳ |
+| 4.13.2 | `migrations/0002_tsvector_fulltext.sql` — idempotent port `schema.py:update_tsvector_zh` trigger+index | S | ⏳ |
+| 4.13.3 | `internal/db/postgres_migrations.go` — advisory lock + transactional apply + sha256 checksums + baseline для 0001 | M | ⏳ |
+| 4.13.4 | Wire `RunMigrations` в `NewPostgres` **fail-fast** (`return nil, err`, не `Warn`) | XS | ⏳ |
+| 4.13.5 | Port оставшихся 12 DDL из `schema.py` в пронумерованные файлы (entity_nodes.embedding HNSW, все indexes) | M | ⏳ |
+| 4.13.6 | Audit: gate Python `schema.py` после верификации Go runner'а (`MEMDB_PYTHON_SCHEMA_INIT=false`) | S | ⏳ |
+| 4.13.7 | E2E test: `docker compose down -v && up` — fresh DB, Go runner поднимает всё, Python off | M | ⏳ |
+
+**Блокер для Фазы 5:** без этого shutdown Python = silent schema drift при следующем upgrade.
+
 #### 4.12 Убрать `llm/complete` thin proxy ✅ апрель 2026
 
 | # | Задача | Статус | Commit |
@@ -326,14 +345,15 @@ Option C из research (extract `AddMemories`/`ChatComplete` service functions, 
 ✅ 4.8 (get filter)       ├─ Неделя 1 (апрель 2026) ✅
 ✅ 4.10a (MCP add+chat)  ─┤
 ✅ 4.12 (llm/complete)   ─┘
-  → 4.5 (feedback — L) ← последний БЛОКЕР Фазы 5
+✅ 4.5 (feedback — L) ← блокер Фазы 5
+  → 4.13 (schema runner — M) ← БЛОКЕР Фазы 5 (schema drift после shutdown Python)
     → 4.11 (cube tools: решение — S, порт или sunset — L или S)
       → 4.9 (tests, E2E parity)
         → 4.10b (optional service layer refactor, 🟢 оптимизация)
           → Фаза 5 (удаление memdb-api)
 ```
 
-**Оценка:** Неделя 1 ✅. Остаётся 4.5 (2-3 недели) + 4.11 (решение 30 мин, реализация зависит).
+**Оценка:** Неделя 1 ✅, 4.5 ✅. Остаётся 4.13 (1-2 дня) + 4.11 (решение 30 мин, реализация зависит).
 
 ---
 
@@ -365,6 +385,7 @@ Option C из research (extract `AddMemories`/`ChatComplete` service functions, 
 - [ ] Все safety-net proxy fallbacks заменены на HTTP errors
   - Включая `NativeAdd` error fallback (`add.go:145-146`) — сейчас `nativeAddForCube` error → `proxyWithBody`. После shut-down Python станет 502 dead upstream. Конвертировать в 500.
 - [x] Audit `mem_cube_id` field usage in `/product/feedback` clients — audited 2026-04-18, не используется Go-клиентами, только в Python legacy
+- [ ] **Schema Migration Runner** — Go takeover `polardb/schema.py` с versioning (Фаза 4.13). 🔴 БЛОКЕР Ф5: без runner'а shutdown Python = silent schema drift при upgrade.
 
 **После:** docker-compose: postgres, qdrant, redis, memdb-go, go-search, cliproxyapi (6 контейнеров).
 
