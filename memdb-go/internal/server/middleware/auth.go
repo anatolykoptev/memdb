@@ -59,7 +59,12 @@ func isAuthExempt(r *http.Request) bool {
 	if r.Method == http.MethodOptions {
 		return true
 	}
+	// /metrics is exempt: bound to 127.0.0.1 only in docker-compose,
+	// reached via internal `backend` network from Prometheus. No PII in
+	// OTel instruments. Keeping auth would require Prometheus to send a
+	// header it doesn't support natively.
 	return r.URL.Path == "/health" || r.URL.Path == "/ready" ||
+		r.URL.Path == "/metrics" ||
 		strings.HasPrefix(r.URL.Path, "/v1/")
 }
 
