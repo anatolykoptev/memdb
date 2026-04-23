@@ -15,11 +15,11 @@ func TestVectorSearchMultiCube_SQLShape(t *testing.T) {
 		name   string
 		needle string
 	}{
-		{"uses ANY for user_name", "properties->>'user_name' = ANY($2::text[])"},
-		{"filters activated status", "properties->>'status' = 'activated'"},
+		{"uses ANY for user_name", "properties->>(('user_name'::text)) = ANY($2::text[])"},
+		{"filters activated status", "properties->>(('status'::text)) = 'activated'"},
 		{"uses halfvec index", "embedding::halfvec(1024) <=> $1::halfvec(1024)"},
-		{"filters by user_id", "properties->>'user_id'   = $3"},
-		{"filters by memory_type array", "properties->>'memory_type' = ANY($4)"},
+		{"filters by user_id", "properties->>(('user_id'::text))   = $3"},
+		{"filters by memory_type array", "properties->>(('memory_type'::text)) = ANY($4)"},
 		{"optional agent_id filter", "$6::text = ''"},
 		{"requires non-null embedding", "embedding IS NOT NULL"},
 		{"limit param", "LIMIT $5"},
@@ -36,7 +36,7 @@ func TestVectorSearchMultiCube_SQLShape(t *testing.T) {
 // TestVectorSearchMultiCube_DiffersFromSingleCube verifies the multi-cube
 // query does NOT use the single-cube equality filter — it must use ANY.
 func TestVectorSearchMultiCube_DiffersFromSingleCube(t *testing.T) {
-	const singleCubeFilter = "properties->>'user_name' = $2\n"
+	const singleCubeFilter = "properties->>(('user_name'::text)) = $2\n"
 	if strings.Contains(queries.VectorSearchMultiCube, singleCubeFilter) {
 		t.Error("VectorSearchMultiCube should not use single-cube equality filter; want ANY")
 	}
