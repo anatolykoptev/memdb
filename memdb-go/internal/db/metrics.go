@@ -3,9 +3,11 @@
 package db
 
 import (
+	"context"
 	"sync"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -40,6 +42,21 @@ func dbMx() *dbMetricsInstruments {
 			MigrationChecksumDrift: drift,
 			MemoryAdded:            added,
 		}
+
+		// Pre-register both counters at value 0 so Prometheus scrapes them
+		// before any real event fires. Without this, dashboards and alert
+		// rules see "metric not found" until the first Inc — a gap in
+		// observability especially problematic for the drift counter
+		// (drift IS the signal; not-seeing-it must not look identical to
+		// "nothing scraped yet").
+		ctx := context.Background()
+		drift.Add(ctx, 0, metric.WithAttributes(attribute.String("name", "")))
+		added.Add(ctx, 0,
+			metric.WithAttributes(
+				attribute.String("type", ""),
+				attribute.String("cube_id", ""),
+			),
+		)
 	})
 	return dbMetrics
 }
