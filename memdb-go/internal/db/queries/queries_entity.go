@@ -56,13 +56,13 @@ WHERE user_name = $1
 // Args: $1 = user_name (text), $2 = user_id (text), $3 = entity_ids (text[]), $4 = limit (int)
 const GetMemoriesByEntityIDs = `
 SELECT m.id::text,
-       (m.properties - 'sources')::text
+       (m.properties::text::jsonb - 'sources')::text
 FROM %[1]s."Memory" m
 JOIN memory_edges e ON m.id::text = e.from_id
 WHERE e.to_id = ANY($3)
   AND e.relation = 'MENTIONS_ENTITY'
   AND e.invalid_at IS NULL
-  AND m.properties->>'user_name' = $1
-  AND m.properties->>'user_id'   = $2
-  AND m.properties->>'status' = 'activated'
+  AND m.properties->>(('user_name'::text)) = $1
+  AND m.properties->>(('user_id'::text))   = $2
+  AND m.properties->>(('status'::text)) = 'activated'
 LIMIT $4`

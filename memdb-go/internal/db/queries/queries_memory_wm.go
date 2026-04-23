@@ -8,9 +8,9 @@ package queries
 const CountWorkingMemory = `
 SELECT COUNT(*)
 FROM %[1]s."Memory"
-WHERE properties->>'user_name' = $1
-  AND properties->>'memory_type' = 'WorkingMemory'
-  AND properties->>'status' = 'activated'`
+WHERE properties->>(('user_name'::text)) = $1
+  AND properties->>(('memory_type'::text)) = 'WorkingMemory'
+  AND properties->>(('status'::text)) = 'activated'`
 
 // GetWorkingMemoryOldestFirst returns activated WorkingMemory nodes for a cube
 // ordered oldest-first (by updated_at ASC). Used by WM compaction to identify
@@ -19,12 +19,12 @@ WHERE properties->>'user_name' = $1
 const GetWorkingMemoryOldestFirst = `
 SELECT
     id                    AS memory_id,
-    properties->>'memory' AS memory_text
+    properties->>(('memory'::text)) AS memory_text
 FROM %[1]s."Memory"
-WHERE properties->>'user_name' = $1
-  AND properties->>'memory_type' = 'WorkingMemory'
-  AND properties->>'status' = 'activated'
-ORDER BY (properties->>'updated_at') ASC NULLS LAST
+WHERE properties->>(('user_name'::text)) = $1
+  AND properties->>(('memory_type'::text)) = 'WorkingMemory'
+  AND properties->>(('status'::text)) = 'activated'
+ORDER BY (properties->>(('updated_at'::text))) ASC NULLS LAST
 LIMIT $2`
 
 // GetRecentWorkingMemory returns the N most-recent activated WorkingMemory nodes
@@ -34,13 +34,13 @@ LIMIT $2`
 const GetRecentWorkingMemory = `
 SELECT
     id                    AS memory_id,
-    properties->>'memory' AS memory_text,
-    COALESCE(EXTRACT(EPOCH FROM (properties->>'updated_at')::timestamptz)::bigint, 0) AS ts,
+    properties->>(('memory'::text)) AS memory_text,
+    COALESCE(EXTRACT(EPOCH FROM (properties->>(('updated_at'::text)))::timestamptz)::bigint, 0) AS ts,
     embedding::text       AS embedding_text
 FROM %[1]s."Memory"
-WHERE properties->>'user_name' = $1
-  AND properties->>'memory_type' = 'WorkingMemory'
-  AND properties->>'status' = 'activated'
+WHERE properties->>(('user_name'::text)) = $1
+  AND properties->>(('memory_type'::text)) = 'WorkingMemory'
+  AND properties->>(('status'::text)) = 'activated'
   AND embedding IS NOT NULL
-ORDER BY (properties->>'updated_at') DESC NULLS LAST
+ORDER BY (properties->>(('updated_at'::text))) DESC NULLS LAST
 LIMIT $2`

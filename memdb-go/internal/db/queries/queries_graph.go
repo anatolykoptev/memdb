@@ -42,26 +42,26 @@ ON CONFLICT (from_id, to_id, relation) DO NOTHING`
 //	$4 = user_id (text), $5 = limit (int)
 const GraphRecallByEdge = `
 SELECT m.id::text,
-       (m.properties - 'sources')::text
+       (m.properties::text::jsonb - 'sources')::text
 FROM %[1]s."Memory" m
 JOIN memory_edges e ON m.id = e.to_id
 WHERE e.from_id = ANY($1)
   AND e.relation = $2
   AND e.invalid_at IS NULL
-  AND m.properties->>'user_name' = $3
-  AND m.properties->>'user_id'   = $4
-  AND m.properties->>'status' = 'activated'
+  AND m.properties->>(('user_name'::text)) = $3
+  AND m.properties->>(('user_id'::text))   = $4
+  AND m.properties->>(('status'::text)) = 'activated'
 LIMIT $5`
 
 // FilterExistingContentHashes returns content_hash values that already exist for a user.
 // Used to batch-deduplicate before insert without per-item DB round-trips.
 // Args: $1 = hashes (text[]), $2 = user_name (text)
 const FilterExistingContentHashes = `
-SELECT properties->'info'->>'content_hash' AS hash
+SELECT properties->('info'::text)->>(('content_hash'::text)) AS hash
 FROM %[1]s."Memory"
-WHERE properties->'info'->>'content_hash' = ANY($1)
-  AND properties->>'user_name' = $2
-  AND properties->>'status' = 'activated'`
+WHERE properties->('info'::text)->>(('content_hash'::text)) = ANY($1)
+  AND properties->>(('user_name'::text)) = $2
+  AND properties->>(('status'::text)) = 'activated'`
 
 // IncrRetrievalCount increments retrieval_count and boosts importance_score for a batch of nodes.
 // Called asynchronously after search to track memory usage frequency.
@@ -69,38 +69,41 @@ WHERE properties->'info'->>'content_hash' = ANY($1)
 // Args: $1 = ids (text[]), $2 = now (text, ISO timestamp)
 const IncrRetrievalCount = `
 UPDATE %[1]s."Memory"
-SET properties = properties
-    || jsonb_build_object(
-        'retrieval_count',   COALESCE((properties->>'retrieval_count')::int, 0) + 1,
-        'last_retrieved_at', $2::text,
-        'importance_score',  LEAST(2.0, COALESCE((properties->>'importance_score')::float, 1.0) + 0.1)
+SET properties = ag_catalog.agtype_in(
+        (properties::text::jsonb || jsonb_build_object(
+            'retrieval_count',   COALESCE((properties->>(('retrieval_count'::text)))::int, 0) + 1,
+            'last_retrieved_at', $2::text,
+            'importance_score',  LEAST(2.0, COALESCE((properties->>(('importance_score'::text)))::float, 1.0) + 0.1)
+        ))::text
     )
 WHERE id = ANY($1)
-  AND properties->>'status' = 'activated'`
+  AND properties->>(('status'::text)) = 'activated'`
 
 // DecayImportanceScores multiplies importance_score by 0.95 for all LTM/UserMemory nodes of a user.
 // Called periodically (e.g. every 6h) to cause infrequently-retrieved memories to fade.
 // Args: $1 = user_name (text)
 const DecayImportanceScores = `
 UPDATE %[1]s."Memory"
-SET properties = properties
-    || jsonb_build_object(
-        'importance_score', GREATEST(0.0,
-            COALESCE((properties->>'importance_score')::float, 1.0) * 0.95)
+SET properties = ag_catalog.agtype_in(
+        (properties::text::jsonb || jsonb_build_object(
+            'importance_score', GREATEST(0.0,
+                COALESCE((properties->>(('importance_score'::text)))::float, 1.0) * 0.95)
+        ))::text
     )
-WHERE properties->>'user_name' = $1
-  AND properties->>'status' = 'activated'
-  AND properties->>'memory_type' IN ('LongTermMemory', 'UserMemory')`
+WHERE properties->>(('user_name'::text)) = $1
+  AND properties->>(('status'::text)) = 'activated'
+  AND properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory')`
 
 // AutoArchiveLowImportance marks memories with importance_score below the threshold as archived.
 // Only affects nodes that explicitly have an importance_score set (field exists in properties).
 // Args: $1 = user_name (text), $2 = threshold (float), $3 = now (text, ISO timestamp)
 const AutoArchiveLowImportance = `
 UPDATE %[1]s."Memory"
-SET properties = properties
-    || jsonb_build_object('status', 'archived', 'updated_at', $3::text)
-WHERE properties->>'user_name' = $1
-  AND properties->>'status' = 'activated'
-  AND properties->>'memory_type' IN ('LongTermMemory', 'UserMemory')
-  AND (properties ? 'importance_score')
-  AND (properties->>'importance_score')::float < $2`
+SET properties = ag_catalog.agtype_in(
+        (properties::text::jsonb || jsonb_build_object('status', 'archived', 'updated_at', $3::text))::text
+    )
+WHERE properties->>(('user_name'::text)) = $1
+  AND properties->>(('status'::text)) = 'activated'
+  AND properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory')
+  AND (properties ? ('importance_score'::text))
+  AND (properties->>(('importance_score'::text)))::float < $2`
