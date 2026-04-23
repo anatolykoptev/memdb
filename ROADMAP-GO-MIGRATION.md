@@ -310,7 +310,7 @@ Option C из research (extract `AddMemories`/`ChatComplete` service functions, 
 | 4.11.2 | Если нужны — портировать `mem_cube/single_cube.py` (33.7K) в `internal/handlers/cubes.go` | L |
 | 4.11.3 | Если нет — удалить MCP tools и endpoints | S |
 
-#### 4.13 Schema Migration Runner (Go takeover `schema.py`) ✅ апрель 2026 (кроме 4.13.6/4.13.7b)
+#### 4.13 Schema Migration Runner (Go takeover `schema.py`) ✅ апрель 2026
 
 **Цель:** Убрать зависимость от Python `schema.py` как от de-facto DB migration tool. Пока Python стартует — он молча накатывает DDL (`properties_tsvector_zh`, GIN index, trigger) через `polardb/schema.py`. После shutdown memdb-api (Фаза 5) schema drift становится silent: Go embed'ит SQL в `migrations/`, но без runner'а применяет их "один раз вручную".
 
@@ -325,7 +325,7 @@ Option C из research (extract `AddMemories`/`ChatComplete` service functions, 
 | 4.13.5 | Port оставшихся DDL из `schema.py` — 0003 extensions+AGE graph, 0004 embedding+HNSW. Python ivfflat/JSONB/agtype-broken indexes осознанно пропущены (prod-accurate) | M | ✅ | PR #3 (`b49fc4c8` + `21d63c43`) |
 | 4.13.6 | Audit: Python `schema.py` call sites. Результат: **уже отключён** — все вызовы закомментированы в `graph_dbs/polardb/connection.py:87-101` (до начала 4.13). Env flag не нужен. schema.py получил DEAD CODE header | XS | ✅ | F4-chore |
 | 4.13.7a | Fix ordering: `RunMigrations` ДО `Ensure*Table` в `NewPostgres` (иначе fresh DB: Ensure* падает Warn из-за отсутствия `memos_graph`) | S | ✅ | PR #4 (`c083e7e5`) |
-| 4.13.7b | E2E test: ephemeral Postgres container + testcontainers-go — fresh DB, Go runner поднимает всё, Python off | M | 🟢 отложено |
+| 4.13.7b | E2E fresh-DB bootstrap test: `scripts/test-migrations-fresh-db.sh` + `cmd/migration-test` (docker + psql assertions, no new Go deps). Test обнаружил 3 реальных бага: missing `bootstrapGraphIfNeeded` pre-step, `ag_catalog` search_path для agtype ops, и 3 agtype-bugs в baseline 0001 — все fixed | M | ✅ | PR #8 (`950931c1`) |
 
 **Прод верификация (2026-04-23):**
 ```
@@ -337,7 +337,13 @@ schema_migrations: 4 rows applied
 Restart: no re-apply (clean idempotent skip). postgres connected OK.
 ```
 
-**Статус блокера Фазы 5:** core snap больше не silent — drift detection через sha256 checksum, fail-fast на ошибках. 4.13.6 (выключить Python `schema.py`) требует: set `MEMDB_PYTHON_SCHEMA_INIT=false` в memdb-api `.env`, подтвердить что `_create_graph` не вызывается, один прогон `docker compose restart memdb-api && restart memdb-go`. 4.13.7b даст полный fresh-DB confidence (testcontainers-go), но не блокирует Фазу 5 — prod идёт через rolling restart поверх уже baseline'нутой схемы.
+**Статус блокера Фазы 5:** ✅ СНЯТ. Drift detection через sha256 checksum (log + `memdb.migration.checksum_drift{name}` OTel counter — PR #7). Fail-fast на ошибках. Python `schema.py` — dead code (PR #9, все call sites уже были закомментированы в `connection.py`). Fresh-DB bootstrap доказан integration test'ом (PR #8) — 8 psql-assertions + idempotency check проходят на blank DB без Python.
+
+**Follow-up работа сделанная в процессе:**
+- **F1** — `fix(llm): strip markdown fence before json.Unmarshal` (PR #6, `8c65b7ff`) — runtime fix, устранил `buffer flusher: flush failed` spam (0 errors verified на проде)
+- **F2** — `feat(db): OTel counter for migration checksum drift` (PR #7, `cb2cbe6c`) — ops-visible drift signal
+- **F3** — fresh-DB bootstrap orchestrator (PR #8, `950931c1`) — закрывает 4.13.7b, нашёл + fix'нул 3 agtype бага
+- **F4** — `chore(schema): mark Python schema.py as DEAD CODE` (PR #9, `1a7df4f8`) — закрывает 4.13.6
 
 #### 4.12 Убрать `llm/complete` thin proxy ✅ апрель 2026
 
@@ -396,7 +402,7 @@ Restart: no re-apply (clean idempotent skip). postgres connected OK.
 - [ ] Все safety-net proxy fallbacks заменены на HTTP errors
   - Включая `NativeAdd` error fallback (`add.go:145-146`) — сейчас `nativeAddForCube` error → `proxyWithBody`. После shut-down Python станет 502 dead upstream. Конвертировать в 500.
 - [x] Audit `mem_cube_id` field usage in `/product/feedback` clients — audited 2026-04-18, не используется Go-клиентами, только в Python legacy
-- [ ] **Schema Migration Runner** — Go takeover `polardb/schema.py` с versioning (Фаза 4.13). 🔴 БЛОКЕР Ф5: без runner'а shutdown Python = silent schema drift при upgrade.
+- [x] **Schema Migration Runner** — Go takeover `polardb/schema.py` с versioning (Фаза 4.13). ✅ апрель 2026. 4 migrations applied на проде, drift detection + OTel counter + fresh-DB integration test + Python schema.py помечен DEAD CODE.
 
 **После:** docker-compose: postgres, qdrant, redis, memdb-go, go-search, cliproxyapi (6 контейнеров).
 
