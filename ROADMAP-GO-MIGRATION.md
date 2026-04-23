@@ -310,23 +310,34 @@ Option C из research (extract `AddMemories`/`ChatComplete` service functions, 
 | 4.11.2 | Если нужны — портировать `mem_cube/single_cube.py` (33.7K) в `internal/handlers/cubes.go` | L |
 | 4.11.3 | Если нет — удалить MCP tools и endpoints | S |
 
-#### 4.13 Schema Migration Runner (Go takeover `schema.py`) 🔄 В РАБОТЕ
+#### 4.13 Schema Migration Runner (Go takeover `schema.py`) ✅ апрель 2026 (кроме 4.13.6/4.13.7b)
 
 **Цель:** Убрать зависимость от Python `schema.py` как от de-facto DB migration tool. Пока Python стартует — он молча накатывает DDL (`properties_tsvector_zh`, GIN index, trigger) через `polardb/schema.py`. После shutdown memdb-api (Фаза 5) schema drift становится silent: Go embed'ит SQL в `migrations/`, но без runner'а применяет их "один раз вручную".
 
 **План:** [`docs/superpowers/plans/2026-04-23-memdb-go-migration-runner.md`](../../docs/superpowers/plans/2026-04-23-memdb-go-migration-runner.md) (v2: +advisory lock, +transactional apply, +sha256 checksum drift detection, +baseline для 0001, +fail-fast вместо Warn).
 
-| # | Задача | Effort | Статус |
-|---|--------|--------|--------|
-| 4.13.1 | `migrations/embed.go` — `//go:embed *.sql` | XS | ⏳ |
-| 4.13.2 | `migrations/0002_tsvector_fulltext.sql` — idempotent port `schema.py:update_tsvector_zh` trigger+index | S | ⏳ |
-| 4.13.3 | `internal/db/postgres_migrations.go` — advisory lock + transactional apply + sha256 checksums + baseline для 0001 | M | ⏳ |
-| 4.13.4 | Wire `RunMigrations` в `NewPostgres` **fail-fast** (`return nil, err`, не `Warn`) | XS | ⏳ |
-| 4.13.5 | Port оставшихся 12 DDL из `schema.py` в пронумерованные файлы (entity_nodes.embedding HNSW, все indexes) | M | ⏳ |
-| 4.13.6 | Audit: gate Python `schema.py` после верификации Go runner'а (`MEMDB_PYTHON_SCHEMA_INIT=false`) | S | ⏳ |
-| 4.13.7 | E2E test: `docker compose down -v && up` — fresh DB, Go runner поднимает всё, Python off | M | ⏳ |
+| # | Задача | Effort | Статус | Commit |
+|---|--------|--------|--------|--------|
+| 4.13.1 | `migrations/embed.go` — `//go:embed *.sql` | XS | ✅ | `87079682` |
+| 4.13.2 | `migrations/0002_tsvector_fulltext.sql` — idempotent port `schema.py:update_tsvector_zh` trigger+index | S | ✅ | `d9d7beac` |
+| 4.13.3 | `internal/db/postgres_migrations.go` — advisory lock (pinned `*pgxpool.Conn`) + transactional apply + sha256 checksums + baseline для 0001 | M | ✅ | `e60c68b4` + fix `bd7152ce` |
+| 4.13.4 | Wire `RunMigrations` в `NewPostgres` **fail-fast** (`return nil, err`, не `Warn`) | XS | ✅ | `ed7efb47` |
+| 4.13.5 | Port оставшихся DDL из `schema.py` — 0003 extensions+AGE graph, 0004 embedding+HNSW. Python ivfflat/JSONB/agtype-broken indexes осознанно пропущены (prod-accurate) | M | ✅ | PR #3 (`b49fc4c8` + `21d63c43`) |
+| 4.13.6 | Audit: gate Python `schema.py` после верификации Go runner'а (`MEMDB_PYTHON_SCHEMA_INIT=false`) | S | 🔄 | — |
+| 4.13.7a | Fix ordering: `RunMigrations` ДО `Ensure*Table` в `NewPostgres` (иначе fresh DB: Ensure* падает Warn из-за отсутствия `memos_graph`) | S | ✅ | PR #4 (`c083e7e5`) |
+| 4.13.7b | E2E test: ephemeral Postgres container + testcontainers-go — fresh DB, Go runner поднимает всё, Python off | M | 🟢 отложено |
 
-**Блокер для Фазы 5:** без этого shutdown Python = silent schema drift при следующем upgrade.
+**Прод верификация (2026-04-23):**
+```
+schema_migrations: 4 rows applied
+- 0001_phase2_user_cube_split.sql (baselined, sha 0e4b7acd8b5d)
+- 0002_tsvector_fulltext.sql (sha c82077ebdf5f)
+- 0003_extensions_and_graph.sql (sha 35642fdb509f)
+- 0004_memory_embedding.sql (sha 8b1f44b9d41c)
+Restart: no re-apply (clean idempotent skip). postgres connected OK.
+```
+
+**Статус блокера Фазы 5:** core snap больше не silent — drift detection через sha256 checksum, fail-fast на ошибках. 4.13.6 (выключить Python `schema.py`) требует: set `MEMDB_PYTHON_SCHEMA_INIT=false` в memdb-api `.env`, подтвердить что `_create_graph` не вызывается, один прогон `docker compose restart memdb-api && restart memdb-go`. 4.13.7b даст полный fresh-DB confidence (testcontainers-go), но не блокирует Фазу 5 — prod идёт через rolling restart поверх уже baseline'нутой схемы.
 
 #### 4.12 Убрать `llm/complete` thin proxy ✅ апрель 2026
 
