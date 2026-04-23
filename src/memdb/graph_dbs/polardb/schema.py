@@ -1,3 +1,20 @@
+"""
+DEAD CODE — SchemaMixin is no longer invoked.
+
+All call sites in graph_dbs/polardb/connection.py (lines 87-101) are
+commented out. Since memdb-go v0.1 (April 2026) the Go migration runner
+at memdb-go/internal/db/postgres_migrations.go is the sole source of
+truth for PostgreSQL schema: it embeds ordered .sql files under
+memdb-go/migrations/ and tracks applied files via
+memos_graph.schema_migrations with sha256 checksum drift detection.
+
+This file is retained as a historical reference for what the Python
+bootstrap did. Do NOT re-wire it — any DDL changes belong in a new
+memdb-go/migrations/000N_*.sql file (numbered after the latest).
+
+See ROADMAP-GO-MIGRATION.md Phase 4.13 for migration history.
+"""
+
 from memdb.log import get_logger
 from memdb.utils import timed
 
@@ -6,7 +23,10 @@ logger = get_logger(__name__)
 
 
 class SchemaMixin:
-    """Mixin for schema and extension management."""
+    """Mixin for schema and extension management.
+
+    DEPRECATED — see module-level docstring. Kept for historical reference.
+    """
 
     def _ensure_database_exists(self):
         """Create database if it doesn't exist."""
