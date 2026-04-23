@@ -323,7 +323,7 @@ Option C из research (extract `AddMemories`/`ChatComplete` service functions, 
 | 4.13.3 | `internal/db/postgres_migrations.go` — advisory lock (pinned `*pgxpool.Conn`) + transactional apply + sha256 checksums + baseline для 0001 | M | ✅ | `e60c68b4` + fix `bd7152ce` |
 | 4.13.4 | Wire `RunMigrations` в `NewPostgres` **fail-fast** (`return nil, err`, не `Warn`) | XS | ✅ | `ed7efb47` |
 | 4.13.5 | Port оставшихся DDL из `schema.py` — 0003 extensions+AGE graph, 0004 embedding+HNSW. Python ivfflat/JSONB/agtype-broken indexes осознанно пропущены (prod-accurate) | M | ✅ | PR #3 (`b49fc4c8` + `21d63c43`) |
-| 4.13.6 | Audit: gate Python `schema.py` после верификации Go runner'а (`MEMDB_PYTHON_SCHEMA_INIT=false`) | S | 🔄 | — |
+| 4.13.6 | Audit: Python `schema.py` call sites. Результат: **уже отключён** — все вызовы закомментированы в `graph_dbs/polardb/connection.py:87-101` (до начала 4.13). Env flag не нужен. schema.py получил DEAD CODE header | XS | ✅ | F4-chore |
 | 4.13.7a | Fix ordering: `RunMigrations` ДО `Ensure*Table` в `NewPostgres` (иначе fresh DB: Ensure* падает Warn из-за отсутствия `memos_graph`) | S | ✅ | PR #4 (`c083e7e5`) |
 | 4.13.7b | E2E test: ephemeral Postgres container + testcontainers-go — fresh DB, Go runner поднимает всё, Python off | M | 🟢 отложено |
 
