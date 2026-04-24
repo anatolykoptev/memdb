@@ -152,3 +152,63 @@ WHERE m.properties->>(('status'::text)) = 'activated'
   AND m.properties->>(('memory_type'::text)) = ANY($4)
 ORDER BY m.properties->>(('id'::text))
 LIMIT $6`
+
+// MultiHopEdgeExpansion performs a depth-limited BFS over the memory_edges
+// table starting from a set of seed memory property UUIDs. Returns each
+// reachable neighbor together with its minimum hop distance and the seed
+// it was first reached from. Used by the D2 multi-hop expansion step
+// (post-vector-search) to inject graph neighbors into the candidate pool
+// before CE rerank.
+//
+// Traversal is undirected: an edge (a -> b) is followed in both directions
+// to match the Cypher MATCH (m)-[*1..2]-(n) semantics. Only currently
+// valid edges (invalid_at IS NULL) are followed.
+//
+// All returned node IDs are property UUIDs (properties->>'id'), matching
+// memory_edges.from_id / to_id which also store property UUIDs. Seeds are
+// excluded from the output — only newly discovered neighbors surface.
+//
+// Args: $1 = seed_ids (text[]) — starting property UUIDs (vector top-K),
+//
+//	$2 = user_name (text),
+//	$3 = user_id (text),
+//	$4 = depth (int) — max hop distance (recommended: 2),
+//	$5 = limit (int) — max rows returned (caller enforces 2× cap),
+//	$6 = agent_id (text, '' for any)
+const MultiHopEdgeExpansion = `
+WITH RECURSIVE walk(node_id, seed_id, hop) AS (
+  -- Base case: seeds at hop 0 (used as frontier; excluded from final output)
+  SELECT unnest($1::text[]), unnest($1::text[]), 0
+
+  UNION
+
+  -- Recursive step: follow memory_edges in either direction up to depth hops.
+  -- invalid_at IS NULL filters out bi-temporally-expired edges.
+  SELECT CASE WHEN e.from_id = w.node_id THEN e.to_id ELSE e.from_id END,
+         w.seed_id,
+         w.hop + 1
+  FROM walk w
+  JOIN memory_edges e
+    ON (e.from_id = w.node_id OR e.to_id = w.node_id)
+   AND e.invalid_at IS NULL
+  WHERE w.hop < $4
+)
+SELECT m.properties->>(('id'::text)) AS memory_id,
+       (m.properties::text::jsonb - 'sources')::text AS properties,
+       min_hop.hop                                  AS hop,
+       min_hop.seed_id                              AS seed_id
+FROM (
+  -- Collapse multiple walk rows for the same node to the minimum hop
+  SELECT node_id, MIN(hop) AS hop, (ARRAY_AGG(seed_id ORDER BY hop ASC))[1] AS seed_id
+  FROM walk
+  WHERE hop > 0
+  GROUP BY node_id
+) AS min_hop
+JOIN %[1]s."Memory" m ON m.properties->>(('id'::text)) = min_hop.node_id
+WHERE m.properties->>(('status'::text)) = 'activated'
+  AND m.properties->>(('user_name'::text)) = $2
+  AND m.properties->>(('user_id'::text))   = $3
+  AND ($6::text = '' OR m.properties->>(('agent_id'::text)) = $6)
+  AND NOT (m.properties->>(('id'::text)) = ANY($1::text[]))  -- exclude seeds
+ORDER BY min_hop.hop ASC, m.properties->>(('id'::text))
+LIMIT $5`
