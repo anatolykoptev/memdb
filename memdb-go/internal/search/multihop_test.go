@@ -200,8 +200,8 @@ func TestExpandViaGraph_CappedAt2x(t *testing.T) {
 	if len(pg.gotSeedIDs) != 10 {
 		t.Fatalf("seed IDs: got %d want 10", len(pg.gotSeedIDs))
 	}
-	if pg.gotDepth != multihopMaxDepth {
-		t.Fatalf("depth: got %d want %d", pg.gotDepth, multihopMaxDepth)
+	if pg.gotDepth != defaultMultihopMaxDepth {
+		t.Fatalf("depth: got %d want %d", pg.gotDepth, defaultMultihopMaxDepth)
 	}
 	if pg.gotCubeID != "cube" || pg.gotPersonID != "user" {
 		t.Fatalf("scope args: cube=%q user=%q", pg.gotCubeID, pg.gotPersonID)

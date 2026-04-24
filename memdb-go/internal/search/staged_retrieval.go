@@ -47,13 +47,15 @@ import (
 const (
 	stagedTimeout             = 15 * time.Second
 	stagedMaxTokens           = 800
-	stagedShortlistSize       = 10
-	stagedMinInputSize        = 5  // below this, staged adds no value
-	stagedMaxInputSize        = 50 // cap — sending 100 candidates to LLM wastes tokens
+	stagedMinInputSize        = 5 // below this, staged adds no value
 	stagedRespBodyLimit int64 = 16 * 1024
 	stagedMemTruncStage2      = 200 // char cap per memory in stage-2 prompt
 	stagedMemTruncStage3      = 300 // char cap per memory in stage-3 prompt
 )
+
+// stagedShortlistSize / stagedMaxInputSize — moved to tuning.go as
+// env-readable accessors (MEMDB_D5_SHORTLIST_SIZE, MEMDB_D5_MAX_INPUT_SIZE).
+// Defaults preserved as defaultStagedShortlistSize=10, defaultStagedMaxInputSize=50.
 
 var stagedStage2SystemPrompt = `You are a precision retrieval judge. Given a user's query and N candidate memories, identify the TOP 10 that are most likely to contain the answer.
 
@@ -89,8 +91,9 @@ func RunStagedRetrieval(ctx context.Context, logger *slog.Logger, query string, 
 		return items
 	}
 	candidates := items
-	if len(candidates) > stagedMaxInputSize {
-		candidates = candidates[:stagedMaxInputSize]
+	maxIn := stagedMaxInputSize()
+	if len(candidates) > maxIn {
+		candidates = candidates[:maxIn]
 	}
 
 	// Stage 2: refinement
@@ -174,8 +177,9 @@ func stagedStage2Refine(ctx context.Context, query string, items []map[string]an
 		return nil, fmt.Errorf("stage2 parse: %w", err)
 	}
 	// Cap to shortlist size
-	if len(parsed.IDs) > stagedShortlistSize {
-		parsed.IDs = parsed.IDs[:stagedShortlistSize]
+	shortlistCap := stagedShortlistSize()
+	if len(parsed.IDs) > shortlistCap {
+		parsed.IDs = parsed.IDs[:shortlistCap]
 	}
 	return parsed.IDs, nil
 }
