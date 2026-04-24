@@ -9,10 +9,10 @@ package queries
 //
 // memory_edges is a plain PostgreSQL table (not AGE Cypher) that stores
 // directed relationships between memory nodes identified by their property UUID.
-// Created lazily via EnsureEdgesTable on first use.
+// Created by migration 0005_memory_edges.sql at startup.
 
 // CreateEdgesTable is the reference DDL for the memory_edges table.
-// Actual table creation is done via EnsureEdgesTable (which also runs ALTER TABLE migrations).
+// Actual table creation is done by migration 0005_memory_edges.sql.
 const CreateEdgesTable = `
 CREATE TABLE IF NOT EXISTS memory_edges (
     from_id    TEXT NOT NULL,

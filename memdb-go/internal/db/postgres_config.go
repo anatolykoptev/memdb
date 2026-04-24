@@ -1,7 +1,10 @@
 package db
 
 // postgres_config.go — user_configs table operations.
-// Covers: EnsureUserConfigsTable, GetUserConfig, UpdateUserConfig.
+// Covers: GetUserConfig, UpdateUserConfig.
+//
+// Table creation moved to migration 0008_user_configs.sql (applied by
+// RunMigrations at startup).
 
 import (
 	"context"
@@ -13,14 +16,6 @@ import (
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
 )
-
-// EnsureUserConfigsTable creates the user_configs table if it does not exist.
-func (p *Postgres) EnsureUserConfigsTable(ctx context.Context) error {
-	if _, err := p.pool.Exec(ctx, queries.CreateUserConfigsTable); err != nil {
-		return fmt.Errorf("ensure user_configs table: %w", err)
-	}
-	return nil
-}
 
 // GetUserConfig retrieves the user config JSONB, returning nil if not found.
 func (p *Postgres) GetUserConfig(ctx context.Context, userID string) (map[string]any, error) {

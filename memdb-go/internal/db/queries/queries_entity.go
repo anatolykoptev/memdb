@@ -11,8 +11,8 @@ package queries
 // finding all memories that mention a given person, org, or concept.
 
 // CreateEntityNodesTable is the reference DDL for the entity_nodes table.
-// Actual table creation is done via EnsureEntityNodesTable (which also runs ALTER TABLE migrations
-// to add the embedding halfvec(1024) column and HNSW index for existing tables).
+// Actual table creation is done by migration 0006_entity_nodes.sql (which
+// adds the embedding halfvec(1024) column and HNSW index).
 const CreateEntityNodesTable = `
 CREATE TABLE IF NOT EXISTS entity_nodes (
     id          TEXT NOT NULL,
