@@ -110,6 +110,37 @@ Multi-hop expansion on `memory_edges` via recursive PG CTE (not AGE Cypher — m
 
 D2 works; its measurement is gated on D3 (hierarchical reorganizer that populates graph edges) and on expanded harness categories.
 
+### 2026-04-24 — D3 hierarchical tree reorganizer (commit `c3014b50`, PR #40)
+
+Port of Python `tree_text_memory/organize/` — 4 modules → 4 Go files (+ supporting helpers):
+- `manager.py` → `scheduler/tree_manager.go` (195 LOC)
+- `reorganizer.py` → `scheduler/tree_reorganizer.go` + `tree_summariser.go` (251 LOC)
+- `relation_reason_detector.py` → `scheduler/relation_detector.go` (122 LOC)
+- `history_manager.py` → `memos_graph.tree_consolidation_log` table + `InsertTreeConsolidationEvent`
+
+Features:
+- Two-pass clustering (raw → episodic cos≥0.7 min 3; episodic → semantic theme≥0.6 min 2)
+- LLM RelationDetector emits `CAUSES`/`CONTRADICTS`/`SUPPORTS`/`RELATED` with confidence+rationale into `memory_edges`
+- Retrieval `hierarchyBoost`: 1.15 semantic / 1.08 episodic / 1.0 raw
+- Migration 0013 adds `hierarchy_level` + `parent_memory_id` fields
+- Gated `MEMDB_REORG_HIERARCHY=true`; admin trigger via `POST /product/admin/reorg {"cube_id":"..."}` available
+
+| Metric | D1-OFF | D1+D2+D3-ON | Delta |
+|---|---|---|---|
+| EM | 0.000 | 0.000 | +0.000 |
+| F1 | 0.010 | 0.010 | +0.000 |
+| semsim | 0.039 | 0.039 | +0.000 |
+| hit@20 | 0.700 | 0.700 | +0.000 |
+
+**Interpretation — honest zero delta, sample-bound.** Tree reorganizer correctly deployed + invoked via admin endpoint (accepted 202, background goroutine finished in 2ms). BUT the LoCoMo sample harness ingests 1 conversation × 3 sessions → **extractor condenses to 1 LongTermMemory + 1 WorkingMemory per speaker = 2 raw memories per cube**. D3 cluster threshold (min 3 members) not met → no episodic/semantic formed → no hierarchy boost → no delta.
+
+**What will show D3 impact**:
+1. Real production corpus with 10+ memories per cube (accumulated user history)
+2. Expanded harness sample (3+ conversations per speaker) — future work
+3. A/B: disable extractor condensation to get 1 memory per message (would create 18-23 raw per session = clusterable)
+
+D3 shipped correctly; measurement is gated on sample size, not implementation.
+
 ### Phase D measurement plan
 
 Each D task re-runs the harness after deploy and adds a `### YYYY-MM-DD — D<N> <name>` row showing delta vs `baseline-v1.1.0-post-p1.json`. Expected impact ballpark per Phase D plan:
