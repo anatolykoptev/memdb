@@ -68,6 +68,13 @@ WHERE properties->('info'::text)->>(('content_hash'::text)) = ANY($1)
 // IncrRetrievalCount increments retrieval_count and boosts importance_score for a batch of nodes.
 // Called asynchronously after search to track memory usage frequency.
 // importance_score is capped at 2.0 (prevents unbounded growth for very popular memories).
+//
+// D1 additions (2026-04-24):
+//   - access_count — property-level counter used by the D1 importance
+//     multiplier in rerank (1 + log(1+n), capped at 5).
+//   - last_accessed_at — reflects actual usage recency, consumed by
+//     resolveRefTimestamp as the highest-priority decay reference.
+//
 // Args: $1 = ids (text[]) — property UUIDs (properties->>'id'), NOT AGE graphids,
 //
 //	$2 = now (text, ISO timestamp)
@@ -76,7 +83,9 @@ UPDATE %[1]s."Memory"
 SET properties = (
         (properties::text::jsonb || jsonb_build_object(
             'retrieval_count',   COALESCE((properties->>(('retrieval_count'::text)))::int, 0) + 1,
+            'access_count',      COALESCE((properties->>(('access_count'::text)))::int, 0) + 1,
             'last_retrieved_at', $2::text,
+            'last_accessed_at',  $2::text,
             'importance_score',  LEAST(2.0, COALESCE((properties->>(('importance_score'::text)))::float, 1.0) + 0.1)
         ))::text
     )::agtype
