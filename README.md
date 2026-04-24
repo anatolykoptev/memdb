@@ -192,13 +192,15 @@ Feature comparison based on publicly available information. Performance numbers 
 
 ## Roadmap
 
+**v2.0.0 (апрель 2026)** shipped the full Phase D LoCoMo intelligence stack (10 features — hierarchical tree reorganizer, multi-hop AGE retrieval, query rewriting, staged retrieval, CoT decomposition, post-retrieval enhancement, and more). LoCoMo hit@20 = **0.700** on the reproducible harness — above published Mem0 / MemOS numbers. Full details in [CHANGELOG.md](CHANGELOG.md#200--2026-04-24) and [evaluation/locomo/MILESTONES.md](evaluation/locomo/MILESTONES.md).
+
 Near-term priorities:
 
-- Complete Python pipeline deprecation — Go-only memory ingestion path (see [ROADMAP-GO-MIGRATION.md](ROADMAP-GO-MIGRATION.md))
-- Image memory support — ONNX CLIP embeddings, image + text co-retrieval (see [ROADMAP-FEATURES.md](ROADMAP-FEATURES.md))
-- MemCube cross-sharing — access control between cubes
-- Enhanced search pipeline — reranking, hybrid search improvements (see [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md))
-- Benchmarks on this fork — re-run LoCoMo / LongMemEval against the Go service
+- **Phase 5 Python deprecation** — ~4 real proxy call sites remain (`users_config` CRUD + 3 edge cases); ~11 safety-net fallbacks to convert to HTTP errors. See [ROADMAP-GO-MIGRATION.md](ROADMAP-GO-MIGRATION.md#что-нужно-до-полного-phase-5-shutdown-memdb-api).
+- **LoCoMo full-eval** — run harness in `LOCOMO_SKIP_CHAT=0` chat/complete mode on full 10-conv × 200-QA dataset for statistically-sound F1/EM measurement; expected +0.30-0.45 F1 from D10 synthetic dominating LLM context.
+- **VEC_COT search** — vector chain-of-thought retrieval, separate from Phase D prompt gaps (see [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md#фаза-1--vec_cot-search--не-начато)).
+- **Image memory support** — ONNX CLIP embeddings, image + text co-retrieval (see [ROADMAP-FEATURES.md](ROADMAP-FEATURES.md)).
+- **MemCube cross-sharing** — access control between cubes.
 
 ---
 

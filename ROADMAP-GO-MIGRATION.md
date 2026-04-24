@@ -239,19 +239,56 @@ Expected end-state (если все deltas складываются линейн
 | Chat pipeline (complete + stream) | ✅ |
 | Skill memory extraction | ✅ |
 
-### Что остаётся в Python (детальный аудит, апрель 2026)
+### Что остаётся в Python (честный статус на 2026-04-24, после v2.0.0)
 
-> Верифицировано: grep `ProxyToProduct|ProxyLLMComplete|ValidatedFeedback` по `memdb-go/internal/handlers/` + `server.go:274-334`.
+> **Ответ коротко**: **НЕТ, полностью не мигрировали.** `memdb-api` контейнер живой (uptime 30h healthy). В Go осталось **~16 active proxy call sites** — большинство safety-nets на случай недоступности Postgres/embedder, но несколько реально Python-dependent (users_config CRUD, complex filter get_memory, admin scheduler status). Трафик на проде идёт **99%+ нативно через Go**; Python срабатывает только в edge cases.
+>
+> Верифицировано 2026-04-24: `grep -rn "proxyWithBody\|ProxyToProduct" internal/handlers/` по свежему main; `docker ps memdb-api` → Up 30h healthy.
 
-#### Полностью проксируется (100% Python)
+#### Активные proxy sites (inventory 2026-04-24)
 
-| Endpoint | Обработчик в Go | Бэкенд Python | Приоритет |
-|----------|-----------------|---------------|-----------|
-| ~~`POST /product/feedback`~~ | `NativeFeedback` via `nativeAddForCube` | — | ✅ Фаза 4.5 |
-| `POST /product/llm/complete` | `ProxyLLMComplete` | `llms/base.py` | 🟡 thin proxy |
-| ~~`POST /product/chat/stream/playground`~~ | removed 2026-04-18 | — | ✅ Фаза 4.5 followup |
-| ~~`POST /product/suggestions`~~ | removed 2026-04-18 | — | ✅ Фаза 4.5 followup |
-| ~~`GET /product/suggestions/{user_id}`~~ | removed 2026-04-18 | — | ✅ Фаза 4.5 followup |
+| File | Handler | Когда proxies | Тип |
+|------|---------|---------------|-----|
+| `add.go:104,163` | `NativeAdd` | `canHandleNativeAdd=false` + fallback on error | 🟢 safety net |
+| `chat.go:42,50,95,103` | `NativeChatComplete/Stream` | `chatCanNative()=false` (нет searchService/llmChat) | 🟢 safety net |
+| `memory_get.go:126,322` | `NativeGetMemory/Post` | Postgres nil / complex filter | 🟡 edge case |
+| `memory_get_filter.go:74` | `NativePostGetMemory` | Complex filter path beyond Go parser | 🟡 edge case |
+| `memory_getall.go:77` | `NativeGetAll` | Postgres nil | 🟢 safety net |
+| `memory_delete_all.go:24,49` | `NativeDeleteAll` | Missing user_id / Postgres nil | 🟢 safety net |
+| `users.go:85,122` | `NativeGetUser/RegisterUser` | Postgres nil | 🟢 safety net |
+| `users_config.go:13,27,40,81` | `NativeGetConfig/UpdateUserConfig/ListCubesByTag` | Postgres nil / unimplemented CRUD | 🔴 real Python-dependent |
+| `scheduler.go:x3` | `NativeSchedulerStatus/AllStatus/TaskQueueStatus` | Redis unavailable | 🟢 safety net |
+| `scheduler_stream.go:x2` | `NativeSchedulerWait/Stream` | Scheduler nil | 🟢 safety net |
+| `validate.go:x7` | validation-fallback paths | Validation error or missing config | 🟢 safety net |
+
+**Классификация**:
+- 🟢 **Safety-net** (~11 sites): срабатывает только когда Postgres/Redis/embedder недоступны. В здоровом prod — никогда. После Phase 5 shutdown Python эти превратятся в HTTP 502/503.
+- 🟡 **Edge case** (3 sites): complex filter path, missing required fields. Можно портировать в отдельной PR или просто вернуть HTTP 422.
+- 🔴 **Реально Python-dependent** (~4 sites): `users_config.go` — CRUD user configs через Python. Всё остальное в proxy — fallback.
+
+Real ratio: **~1-2 routes реально проксируются в Python в здоровом prod trafic**. 99%+ нативно.
+
+#### Исторические 100%-Python endpoints (все закрыты)
+
+| Endpoint | Финальный обработчик | Закрыто в |
+|----------|----------------------|-----------|
+| ~~`POST /product/feedback`~~ | `NativeFeedback` via `nativeAddForCube` | ✅ Фаза 4.5 (апрель 2026) |
+| ~~`POST /product/llm/complete`~~ | `NativeLLMComplete` → CLIProxyAPI напрямую | ✅ Фаза 4.12 (апрель 2026) |
+| ~~`POST /product/chat/stream/playground`~~ | removed (0 external users) | ✅ 2026-04-18 |
+| ~~`POST /product/suggestions`~~ | removed | ✅ 2026-04-18 |
+| ~~`GET /product/suggestions/{user_id}`~~ | removed | ✅ 2026-04-18 |
+
+**Все исторические 100%-Python роуты закрыты или удалены.** Реальный activ-proxy список теперь короткий (таблица выше).
+
+#### Что нужно до полного Phase 5 (shutdown memdb-api)
+
+1. **Портировать `users_config` CRUD в Go** — 4 sites в `handlers/users_config.go`, единственная 🔴 категория. Несколько сотен строк Go-кода. Отдельная PR.
+2. **Safety-net → HTTP error** — переключить ~11 🟢 fallbacks с `proxyWithBody` на `writeJSON 503 "service degraded"`. Один PR.
+3. **Edge case sites (complex filter)** — либо дописать Go parser для редких filter форм, либо HTTP 422.
+4. **Load-test без memdb-api** — 50 concurrent ops, 0 errors за 2 недели — критерий Phase 5 checklist.
+5. **`docker compose stop memdb-api`** — финальный step. Контейнер, volume, dependency в compose.yml.
+
+**Оценка**: 1 sprint (~5 рабочих дней) на закрытие пунктов 1-3. Load test на неделе. Phase 5 shutdown на исходе второй недели.
 
 #### Нативный Go с proxy fallback на отдельные кейсы
 
