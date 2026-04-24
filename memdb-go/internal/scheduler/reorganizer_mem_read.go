@@ -654,7 +654,7 @@ func (r *Reorganizer) llmEnhance(ctx context.Context, rawText string) ([]enhance
 		return nil, err
 	}
 
-	raw = stripFences(raw)
+	raw = string(llm.StripJSONFence([]byte(raw)))
 	var result struct {
 		Memories []enhancementFact `json:"memories"`
 	}

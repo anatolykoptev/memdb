@@ -8,7 +8,6 @@ package scheduler
 
 import (
 	"context"
-	"strings"
 )
 
 // callLLM sends a chat completions request via the shared LLM client and
@@ -16,15 +15,6 @@ import (
 // The caller is responsible for parsing the domain-specific JSON from the result.
 func (r *Reorganizer) callLLM(ctx context.Context, msgs []map[string]string, maxTokens int) (string, error) {
 	return r.llmClient.Chat(ctx, msgs, maxTokens)
-}
-
-// stripFences removes optional ```json ... ``` markdown fences from LLM output.
-func stripFences(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	return strings.TrimSpace(s)
 }
 
 // truncate shortens s to maxLen runes for safe log output.
