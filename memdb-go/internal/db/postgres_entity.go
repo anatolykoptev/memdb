@@ -1,8 +1,11 @@
 package db
 
 // postgres_entity.go — entity_nodes table operations.
-// Covers: EnsureEntityNodesTable, NormalizeEntityID, UpsertEntityNode,
-// FindEntitiesByNormalizedID, GetMemoriesByEntityIDs.
+// Covers: NormalizeEntityID, UpsertEntityNode, FindEntitiesByNormalizedID,
+// GetMemoriesByEntityIDs.
+//
+// Table creation moved to migration 0006_entity_nodes.sql (applied by
+// RunMigrations at startup).
 
 import (
 	"context"
@@ -17,36 +20,6 @@ import (
 // to be considered the same real-world entity during identity resolution.
 // Above this threshold, the new name is merged into the existing entity node.
 const EntitySimilarityThreshold = 0.92
-
-// EnsureEntityNodesTable creates the entity_nodes table and indexes if they do not exist.
-// Also adds the embedding column to existing tables (idempotent via IF NOT EXISTS).
-// Called once during Postgres initialization. Non-fatal on error.
-func (p *Postgres) EnsureEntityNodesTable(ctx context.Context) error {
-	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS entity_nodes (
-			id          TEXT NOT NULL,
-			user_name   TEXT NOT NULL,
-			name        TEXT NOT NULL,
-			entity_type TEXT NOT NULL,
-			created_at  TEXT,
-			updated_at  TEXT,
-			embedding   halfvec(1024),
-			PRIMARY KEY (id, user_name)
-		)`,
-		`CREATE INDEX IF NOT EXISTS entity_nodes_user_idx ON entity_nodes(user_name)`,
-		`CREATE INDEX IF NOT EXISTS entity_nodes_name_idx ON entity_nodes(user_name, id)`,
-		// Migration: add embedding column to existing tables.
-		`ALTER TABLE entity_nodes ADD COLUMN IF NOT EXISTS embedding halfvec(1024)`,
-		// HNSW index for fast cosine similarity lookup during identity resolution.
-		`CREATE INDEX IF NOT EXISTS entity_nodes_emb_idx ON entity_nodes USING hnsw (embedding halfvec_cosine_ops)`,
-	}
-	for _, stmt := range stmts {
-		if _, err := p.pool.Exec(ctx, stmt); err != nil {
-			return fmt.Errorf("ensure entity_nodes table: %w", err)
-		}
-	}
-	return nil
-}
 
 // NormalizeEntityID returns a stable, lowercase identifier for an entity name.
 // Used as the primary key in entity_nodes to enable identity resolution.

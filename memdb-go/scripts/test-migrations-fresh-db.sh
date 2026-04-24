@@ -64,7 +64,7 @@ assert_sql() {
 }
 
 assert_sql "schema_migrations row count" \
-    "SELECT count(*) FROM memos_graph.schema_migrations" "4"
+    "SELECT count(*) FROM memos_graph.schema_migrations" "8"
 
 assert_sql "age extension installed" \
     "SELECT 1 FROM pg_extension WHERE extname='age'" "1"
@@ -90,8 +90,8 @@ assert_sql "tsvector trigger exists" \
 echo "==> Second run (idempotency check)"
 MEMDB_TEST_DSN="$DSN" go run ./cmd/migration-test
 
-assert_sql "schema_migrations still 4 after re-run" \
-    "SELECT count(*) FROM memos_graph.schema_migrations" "4"
+assert_sql "schema_migrations still 8 after re-run" \
+    "SELECT count(*) FROM memos_graph.schema_migrations" "8"
 
 echo ""
 echo "All fresh-DB bootstrap assertions passed."

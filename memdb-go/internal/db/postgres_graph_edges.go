@@ -1,9 +1,12 @@
 package db
 
-// postgres_graph_edges.go — memory_edges and entity_edges table management.
-// Covers: EdgeRelation constants, EnsureEdgesTable, CreateMemoryEdge,
-// EnsureEntityEdgesTable, UpsertEntityEdge, InvalidateEdgesByMemoryID,
-// InvalidateEntityEdgesByMemoryID, FilterExistingContentHashes.
+// postgres_graph_edges.go — memory_edges and entity_edges table operations.
+// Covers: EdgeRelation constants, CreateMemoryEdge, UpsertEntityEdge,
+// InvalidateEdgesByMemoryID, InvalidateEntityEdgesByMemoryID,
+// FilterExistingContentHashes.
+//
+// Table creation moved to migrations 0005_memory_edges.sql and
+// 0007_entity_edges.sql (applied by RunMigrations at startup).
 
 import (
 	"context"
@@ -38,32 +41,6 @@ CREATE TABLE IF NOT EXISTS entity_edges (
 CREATE INDEX IF NOT EXISTS entity_edges_from_idx ON entity_edges(from_entity_id, user_name);
 CREATE INDEX IF NOT EXISTS entity_edges_to_idx ON entity_edges(to_entity_id, user_name)`
 
-// EnsureEdgesTable creates the memory_edges table and index if they do not exist.
-// Also adds the valid_at column to existing tables (idempotent via IF NOT EXISTS).
-func (p *Postgres) EnsureEdgesTable(ctx context.Context) error {
-	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS memory_edges (
-			from_id    TEXT NOT NULL,
-			to_id      TEXT NOT NULL,
-			relation   TEXT NOT NULL,
-			created_at TEXT,
-			valid_at   TEXT,
-			invalid_at TEXT,
-			PRIMARY KEY (from_id, to_id, relation)
-		)`,
-		`CREATE INDEX IF NOT EXISTS memory_edges_to_idx ON memory_edges(to_id, relation)`,
-		`ALTER TABLE memory_edges ADD COLUMN IF NOT EXISTS valid_at TEXT`,
-		`ALTER TABLE memory_edges ADD COLUMN IF NOT EXISTS invalid_at TEXT`,
-		`CREATE INDEX IF NOT EXISTS memory_edges_active_idx ON memory_edges(to_id, relation) WHERE invalid_at IS NULL`,
-	}
-	for _, stmt := range stmts {
-		if _, err := p.pool.Exec(ctx, stmt); err != nil {
-			return fmt.Errorf("ensure edges table: %w", err)
-		}
-	}
-	return nil
-}
-
 // CreateMemoryEdge inserts a directed edge between two memory nodes (idempotent via ON CONFLICT).
 // validAt is the ISO-8601 timestamp when this fact became true. Pass empty string for NULL.
 func (p *Postgres) CreateMemoryEdge(ctx context.Context, fromID, toID, relation, createdAt, validAt string) error {
@@ -73,33 +50,6 @@ func (p *Postgres) CreateMemoryEdge(ctx context.Context, fromID, toID, relation,
 	_, err := p.pool.Exec(ctx, queries.InsertMemoryEdge, fromID, toID, relation, createdAt, validAt)
 	if err != nil {
 		return fmt.Errorf("create memory edge %s -[%s]-> %s: %w", fromID, relation, toID, err)
-	}
-	return nil
-}
-
-// EnsureEntityEdgesTable creates the entity_edges table and indexes if they do not exist.
-func (p *Postgres) EnsureEntityEdgesTable(ctx context.Context) error {
-	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS entity_edges (
-			from_entity_id TEXT NOT NULL,
-			predicate      TEXT NOT NULL,
-			to_entity_id   TEXT NOT NULL,
-			memory_id      TEXT NOT NULL,
-			user_name      TEXT NOT NULL,
-			valid_at       TEXT,
-			invalid_at     TEXT,
-			created_at     TEXT,
-			PRIMARY KEY (from_entity_id, predicate, to_entity_id, user_name)
-		)`,
-		`CREATE INDEX IF NOT EXISTS entity_edges_from_idx ON entity_edges(from_entity_id, user_name)`,
-		`CREATE INDEX IF NOT EXISTS entity_edges_to_idx ON entity_edges(to_entity_id, user_name)`,
-		`ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS invalid_at TEXT`,
-		`CREATE INDEX IF NOT EXISTS entity_edges_active_idx ON entity_edges(from_entity_id, user_name) WHERE invalid_at IS NULL`,
-	}
-	for _, stmt := range stmts {
-		if _, err := p.pool.Exec(ctx, stmt); err != nil {
-			return fmt.Errorf("ensure entity_edges table: %w", err)
-		}
 	}
 	return nil
 }
