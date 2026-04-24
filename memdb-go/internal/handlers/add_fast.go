@@ -11,6 +11,8 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
@@ -26,12 +28,20 @@ type fastAddContext struct {
 	customTags []string
 }
 
+// pendingFastMemory is a memory that survived hash-dedup and is queued for embedding.
+type pendingFastMemory struct {
+	mem  extractedMemory
+	hash string
+}
+
 // nativeFastAddForCube processes fast-mode add for a single cube/user.
 // Pipeline:
 //  1. Extract sliding-window memories from messages
-//  2. Per memory: content-hash dedup → embed → cosine dedup → build nodes
-//  3. Batch insert into Postgres
-//  4. Cleanup old WorkingMemory
+//  2. Hash dedup against existing rows (skip exact duplicates)
+//  3. Single batched embed call for all surviving memories (was: N sequential calls)
+//  4. Per memory: cosine dedup → build nodes
+//  5. Batch insert into Postgres
+//  6. Cleanup old WorkingMemory
 func (h *Handler) nativeFastAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
 	memories := extractFastMemories(req.Messages, windowSizeFor(req))
 	if len(memories) == 0 {
@@ -51,21 +61,19 @@ func (h *Handler) nativeFastAddForCube(ctx context.Context, req *fullAddRequest,
 	hashes := computeHashes(memories)
 	existingHashes := h.filterExistingHashes(ctx, hashes, cubeID)
 
-	var allNodes []db.MemoryInsertNode
-	var items []addResponseItem
-	var wmEmbeddings [][]float32
+	pending, texts := selectPendingFastMemories(memories, hashes, existingHashes, h.logger)
+	if len(pending) == 0 {
+		return nil, nil
+	}
 
-	for i, mem := range memories {
-		nodes, item, embedding, skip, err := h.processFastMemory(ctx, mem, hashes[i], existingHashes, fac)
-		if err != nil {
-			return nil, err
-		}
-		if skip {
-			continue
-		}
-		allNodes = append(allNodes, nodes...)
-		items = append(items, item)
-		wmEmbeddings = append(wmEmbeddings, embedding)
+	vecs, err := h.batchEmbedFastTexts(ctx, texts)
+	if err != nil {
+		return nil, err
+	}
+
+	allNodes, items, wmEmbeddings, err := h.buildFastBatch(ctx, pending, vecs, fac)
+	if err != nil {
+		return nil, err
 	}
 
 	if len(allNodes) == 0 {
@@ -79,35 +87,74 @@ func (h *Handler) nativeFastAddForCube(ctx context.Context, req *fullAddRequest,
 	return items, nil
 }
 
-// processFastMemory processes a single memory through hash dedup, embedding, and cosine dedup.
-// Returns (nodes, item, wmEmbedding, skip, err).
-func (h *Handler) processFastMemory(
-	ctx context.Context,
-	mem extractedMemory,
-	hash string,
+// selectPendingFastMemories filters out memories whose content_hash already exists in the DB.
+// Returns the surviving memories and a parallel slice of their texts (for batched embedding).
+func selectPendingFastMemories(
+	memories []extractedMemory,
+	hashes []string,
 	existingHashes map[string]bool,
+	logger debugLogger,
+) ([]pendingFastMemory, []string) {
+	pending := make([]pendingFastMemory, 0, len(memories))
+	texts := make([]string, 0, len(memories))
+	for i, mem := range memories {
+		if existingHashes[hashes[i]] {
+			if logger != nil {
+				logger.Debug("fast add: skipping exact duplicate by content_hash")
+			}
+			continue
+		}
+		pending = append(pending, pendingFastMemory{mem: mem, hash: hashes[i]})
+		texts = append(texts, mem.Text)
+	}
+	return pending, texts
+}
+
+// batchEmbedFastTexts performs a single Embed call for all pending memory texts.
+// Records the batch size to the memdb.add.embed_batch_size histogram.
+// Errors out (rather than silently dropping memories) if the result length mismatches input.
+func (h *Handler) batchEmbedFastTexts(ctx context.Context, texts []string) ([][]float32, error) {
+	addMx().EmbedBatchSize.Record(ctx, float64(len(texts)),
+		metric.WithAttributes(modeAttr(modeFast)))
+	vecs, err := h.embedder.Embed(ctx, texts)
+	if err != nil {
+		return nil, fmt.Errorf("batch embed: %w", err)
+	}
+	if len(vecs) != len(texts) {
+		return nil, fmt.Errorf("embed result length mismatch: got %d want %d", len(vecs), len(texts))
+	}
+	return vecs, nil
+}
+
+// buildFastBatch runs cosine-dedup against pre-computed embeddings and builds the
+// WM/LTM node pairs for memories that survive. Returns parallel slices: nodes (WM+LTM
+// pairs in [WM0,LTM0,WM1,LTM1,...] order), addResponseItems, and the WM embeddings
+// to push into the VSET hot cache.
+func (h *Handler) buildFastBatch(
+	ctx context.Context,
+	pending []pendingFastMemory,
+	vecs [][]float32,
 	fac fastAddContext,
-) ([]db.MemoryInsertNode, addResponseItem, []float32, bool, error) {
-	if existingHashes[hash] {
-		h.logger.Debug("fast add: skipping exact duplicate by content_hash")
-		return nil, addResponseItem{}, nil, true, nil
-	}
+) ([]db.MemoryInsertNode, []addResponseItem, [][]float32, error) {
+	allNodes := make([]db.MemoryInsertNode, 0, len(pending)*2)
+	items := make([]addResponseItem, 0, len(pending))
+	wmEmbeddings := make([][]float32, 0, len(pending))
 
-	memInfo := mergeInfo(fac.info, hash)
-	embedding, err := h.embedSingle(ctx, mem.Text)
-	if err != nil {
-		return nil, addResponseItem{}, nil, false, err
+	for j, p := range pending {
+		embedding := vecs[j]
+		if h.isDuplicate(ctx, embedding, fac.cubeID, fac.agentID) {
+			continue
+		}
+		memInfo := mergeInfo(fac.info, p.hash)
+		nodes, item, err := h.buildFastNodes(p.mem, embedding, fac, memInfo)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		allNodes = append(allNodes, nodes...)
+		items = append(items, item)
+		wmEmbeddings = append(wmEmbeddings, embedding)
 	}
-
-	if h.isDuplicate(ctx, embedding, fac.cubeID, fac.agentID) {
-		return nil, addResponseItem{}, nil, true, nil
-	}
-
-	nodes, item, err := h.buildFastNodes(mem, embedding, fac, memInfo)
-	if err != nil {
-		return nil, addResponseItem{}, nil, false, err
-	}
-	return nodes, item, embedding, false, nil
+	return allNodes, items, wmEmbeddings, nil
 }
 
 // buildFastNodes constructs the WM and LTM MemoryInsertNode pair for a memory.
@@ -142,4 +189,15 @@ func (h *Handler) buildFastNodes(
 	}
 	item := addResponseItem{Memory: mem.Text, MemoryID: ltID, MemoryType: mem.MemoryType, CubeID: fac.cubeID}
 	return nodes, item, nil
+}
+
+// debugLogger is the minimal slog surface used by selectPendingFastMemories so
+// the helper stays unit-testable without standing up a full *slog.Logger.
+type debugLogger interface {
+	Debug(msg string, args ...any)
+}
+
+// modeAttr returns the OTel attribute used to label add-pipeline metrics by mode.
+func modeAttr(mode string) attribute.KeyValue {
+	return attribute.String("mode", mode)
 }
