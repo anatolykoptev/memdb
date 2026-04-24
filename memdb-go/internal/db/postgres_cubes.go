@@ -122,7 +122,7 @@ UPDATE memos_graph.cubes SET is_active = FALSE, updated_at = NOW() WHERE cube_id
 	}
 
 	tag, err := tx.Exec(ctx, `
-DELETE FROM memos_graph."Memory" WHERE properties->>'user_name' = $1
+DELETE FROM memos_graph."Memory" WHERE properties->>(('user_name'::text)) = $1
 `, cubeID)
 	if err != nil {
 		return 0, fmt.Errorf("HardDeleteCube delete memories: %w", err)

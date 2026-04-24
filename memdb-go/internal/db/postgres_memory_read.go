@@ -126,7 +126,7 @@ func (p *Postgres) GetMemoriesByFilter(ctx context.Context, cubeIDs []string, fi
 	userConds := make([]string, 0, len(cubeIDs))
 	for _, id := range cubeIDs {
 		escaped := strings.ReplaceAll(id, "'", "''")
-		userConds = append(userConds, fmt.Sprintf("properties->>'user_name' = '%s'", escaped))
+		userConds = append(userConds, fmt.Sprintf("properties->>(('user_name'::text)) = '%s'", escaped))
 	}
 	parts := make([]string, 0, 2+len(filterConditions))
 	if len(userConds) == 1 {
@@ -134,7 +134,7 @@ func (p *Postgres) GetMemoriesByFilter(ctx context.Context, cubeIDs []string, fi
 	} else {
 		parts = append(parts, "("+strings.Join(userConds, " OR ")+")")
 	}
-	parts = append(parts, "properties->>'status' = 'activated'")
+	parts = append(parts, "properties->>(('status'::text)) = 'activated'")
 	parts = append(parts, filterConditions...)
 	q := fmt.Sprintf(queries.GetMemoriesByFilterSQL, graphName, strings.Join(parts, " AND "), limit)
 	rows, err := p.pool.Query(ctx, q)
