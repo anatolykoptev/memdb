@@ -54,3 +54,9 @@ Captured during the M7 sprint (2026-04-25). One-day-sprint discipline kept these
 9. **PR title commit-lint requires `^(?![A-Z]).+$` subject (lowercase first letter after colon).**
    - Witnessed: PRs #66, #67, #68 all initially failed the title check because subject started with "M7" (capital M). Fixed via `gh api -X PATCH` (gh pr edit was failing silently due to a GraphQL projects-classic deprecation warning).
    - Action: include explicit "lowercase first letter after colon" guidance in implementer prompts that ask for PR creation.
+
+10. **Extract `X-Service-Secret` / `X-Internal-Service` header constants + `CheckServiceSecret` helper to middleware package.**
+    - Currently 3rd-copy: `middleware/auth.go`, `middleware/ratelimit.go`, `server_routes.go (pprofHandler)`.
+    - Per project rule "3rd near-duplicate of logic → extract".
+    - Effort: 1h.
+    - Surfaced by code review of PR #72.
