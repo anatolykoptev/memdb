@@ -52,6 +52,19 @@ func (s *SearchService) postProcessResults(
 		llmRerankDur = time.Since(t0)
 	}
 
+	// Step 6.15: D5 staged retrieval (coarse→refine→justify).
+	// Env-gated by MEMDB_SEARCH_STAGED=true (default off). Runs AFTER
+	// existing LLM rerank so it consumes whatever order that step (if
+	// enabled) produced. Reuses LLMReranker credentials. Graceful
+	// degrade on any LLM error — `text` is returned unchanged.
+	if stagedRetrievalEnabled() {
+		text = RunStagedRetrieval(ctx, s.logger, p.Query, text, StagedRetrievalConfig{
+			APIURL: s.LLMReranker.APIURL,
+			APIKey: s.LLMReranker.APIKey,
+			Model:  s.LLMReranker.Model,
+		})
+	}
+
 	// Step 6.2: Iterative multi-stage retrieval expansion
 	t0 := time.Now()
 	text = s.runIterativeExpansion(ctx, queryVec, text, p)
