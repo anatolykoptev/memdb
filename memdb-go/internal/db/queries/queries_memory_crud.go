@@ -2,13 +2,18 @@ package queries
 
 // queries_memory_crud.go — SQL queries for memory node read/update/delete.
 // Covers: get-all, get-by-id(s), delete, update, user-names mapping.
+//
+// NOTE: the Memory vertex's id column is an AGE-managed graphid. The stable UUID
+// identity lives in properties->>(('id'::text)). All lookups match by the property
+// UUID, and SELECT-exposed memory_id / mem_id / node_id aliases return the property
+// UUID so downstream DELETE/UPDATE-by-UUID paths stay consistent.
 
 // --- Get All Memories ---
 
 // GetAllMemories returns paginated memories for a user filtered by memory_type.
 // Args: $1 = user_name, $2 = memory_type, $3 = limit, $4 = offset
 const GetAllMemories = `
-SELECT id          AS memory_id,
+SELECT properties->>(('id'::text)) AS memory_id,
        properties::text
 FROM %[1]s."Memory"
 WHERE properties->>(('user_name'::text)) = $1
@@ -21,7 +26,7 @@ LIMIT $3 OFFSET $4`
 // Used by NativePostGetMemory to fetch text_mem (LongTermMemory + UserMemory) in one query.
 // Args: $1 = user_name, $2 = memory_types (text[]), $3 = limit, $4 = offset
 const GetAllMemoriesByTypes = `
-SELECT id          AS memory_id,
+SELECT properties->>(('id'::text)) AS memory_id,
        properties::text
 FROM %[1]s."Memory"
 WHERE properties->>(('user_name'::text)) = $1
@@ -52,10 +57,10 @@ WHERE properties->>(('user_name'::text)) = $1
 // Used by mem_feedback and mem_read handlers to fetch memory texts for LLM analysis.
 // Args: $1 = property ids (text[]), $2 = user_name (text)
 const GetMemoryByPropertyIDs = `
-SELECT id                    AS mem_id,
-       properties->>(('memory'::text))  AS mem_text
+SELECT properties->>(('id'::text))          AS mem_id,
+       properties->>(('memory'::text))      AS mem_text
 FROM %[1]s."Memory"
-WHERE id = ANY($1)
+WHERE properties->>(('id'::text)) = ANY($1)
   AND properties->>(('user_name'::text)) = $2
   AND properties->>(('status'::text)) = 'activated'`
 
@@ -63,10 +68,10 @@ WHERE id = ANY($1)
 // Used by GET /product/get_memory/{memory_id} native handler.
 // Args: $1 = property id (text)
 const GetMemoryByPropertyID = `
-SELECT id                 AS memory_id,
-       properties::text    AS properties
+SELECT properties->>(('id'::text)) AS memory_id,
+       properties::text             AS properties
 FROM %[1]s."Memory"
-WHERE id = $1
+WHERE properties->>(('id'::text)) = $1
   AND properties->>(('status'::text)) = 'activated'
 LIMIT 1`
 
@@ -74,10 +79,10 @@ LIMIT 1`
 // No user_name filter — UUIDs are globally unique; used by read-only get_memory_by_ids handler.
 // Args: $1 = property ids (text[])
 const GetMemoriesByPropertyIDs = `
-SELECT id                      AS memory_id,
-       properties::text          AS properties
+SELECT properties->>(('id'::text)) AS memory_id,
+       properties::text             AS properties
 FROM %[1]s."Memory"
-WHERE id = ANY($1)
+WHERE properties->>(('id'::text)) = ANY($1)
   AND properties->>(('status'::text)) = 'activated'`
 
 // --- Delete ---
@@ -86,7 +91,7 @@ WHERE id = ANY($1)
 // Args: $1 = property ids (text[]), $2 = user_name (text)
 const DeleteByPropertyIDs = `
 DELETE FROM %[1]s."Memory"
-WHERE id = ANY($1)
+WHERE properties->>(('id'::text)) = ANY($1)
   AND properties->>(('user_name'::text)) = $2`
 
 // --- Update ---
@@ -96,7 +101,7 @@ WHERE id = ANY($1)
 const UpdateMemoryContent = `
 UPDATE %[1]s."Memory"
 SET properties = (jsonb_set(properties::text::jsonb, '{memory}', to_jsonb($2::text))::text)::agtype
-WHERE id = $1
+WHERE properties->>(('id'::text)) = $1
   AND properties->>(('status'::text)) = 'activated'`
 
 // SoftDeleteMerged marks a memory as merged into another, following MemOS lifecycle:
@@ -114,7 +119,7 @@ SET properties = (
             'updated_at',     $3::text
         ))::text
     )::agtype
-WHERE id = $1
+WHERE properties->>(('id'::text)) = $1
   AND properties->>(('status'::text)) = 'activated'`
 
 // DeleteAllByUser deletes all activated memories for a user.
@@ -129,25 +134,24 @@ WHERE properties->>(('user_name'::text)) = $1
 // GetUserNamesByPropertyIDs maps property IDs to user names.
 // Args: $1 = property ids (text[])
 const GetUserNamesByPropertyIDs = `
-SELECT id AS property_id,
+SELECT properties->>(('id'::text))        AS property_id,
        properties->>(('user_name'::text)) AS user_name
 FROM %[1]s."Memory"
-WHERE id = ANY($1)`
+WHERE properties->>(('id'::text)) = ANY($1)`
 
 // UpdateMemoryPropsAndEmbedding replaces the properties JSONB blob AND the
-// embedding vector for a single memory node, scoped to (id, user_name).
-// The table id column equals properties->>(('id'::text)) (UUID), so we filter by id
-// directly (same pattern as DeleteByPropertyIDs, GetMemoryByPropertyID).
+// embedding vector for a single memory node, scoped to (property UUID, user_name).
 // Used by NativeUpdateMemory to atomically rewrite a memory without the
 // delete-then-add race window.
 //
-// Args: $1 = memory_id (text, UUID = table id), $2 = user_name (cube id),
-//
-//	$3 = properties JSON (bytes), $4 = embedding vector literal (text)
+// Args: $1 = memory_id (text, UUID = properties->>(('id'::text))),
+//       $2 = user_name (cube id),
+//       $3 = properties JSON (bytes),
+//       $4 = embedding vector literal (text)
 const UpdateMemoryPropsAndEmbedding = `
 UPDATE %[1]s."Memory"
 SET properties = $3::text::agtype,
     embedding  = $4::halfvec(1024)
-WHERE id = $1
+WHERE properties->>(('id'::text)) = $1
   AND properties->>(('user_name'::text)) = $2
-RETURNING id`
+RETURNING properties->>(('id'::text))`
