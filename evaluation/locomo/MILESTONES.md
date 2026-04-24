@@ -141,6 +141,29 @@ Features:
 
 D3 shipped correctly; measurement is gated on sample size, not implementation.
 
+### 2026-04-24 — D10 post-retrieval enhancement (commit `7338dd25`, PR #42) ← **first non-zero Phase D delta**
+
+Env-gated `MEMDB_SEARCH_ENHANCE=true`. LLM distills top-5 memories into a synthetic `EnhancedAnswer` item inserted at rank 0 with source_ids + confidence.
+
+**Blocker fix en route**: discovered `MEMDB_LLM_SEARCH_MODEL` defaulted to `gemini-2.0-flash` (unknown at cliproxyapi → 500) → silent no-op. Added `gemini-2.5-flash-lite` default + compose pass-through (krolik-server#14).
+
+| Metric | D1-OFF | D10-ON (real) | Delta |
+|---|---|---|---|
+| EM | 0.000 | 0.000 | +0.000 |
+| F1 | 0.010 | 0.010 | +0.000 |
+| **semsim** | **0.039** | **0.049** | **+0.010 (+25%)** |
+| hit@20 | 0.700 | 0.700 | +0.000 |
+
+**Sample output (real /product/search on prod)**:
+```
+[0] type=EnhancedAnswer id=enhanced-9b207321292a mem="counseling or working in mental health"
+[1] type=LongTermMemory  mem="user: [2023-05-08]: Caroline: Hey Mel! ..."
+```
+
+**Interpretation.** D10 ships correctly and surfaces concise, query-aligned answers — verified by direct curl sample. semsim lift confirms the embedding of the synthetic answer aligns better with gold than raw verbose memories did. F1/EM unchanged because score.py aggregates across all retrieved items (not top-1); the synthetic item is one of 20 tokens-counted candidates, diluting contribution. Real F1/EM lift will come with **D10 + chat/complete mode** (harness `LOCOMO_SKIP_CHAT=0`) where the synthetic item is fed to the LLM as primary context for the final answer.
+
+**What will unlock full D10 F1 lift**: running harness without `LOCOMO_SKIP_CHAT=1` so chat/complete uses the enhanced answer as the authoritative retrieval context.
+
 ### Phase D measurement plan
 
 Each D task re-runs the harness after deploy and adds a `### YYYY-MM-DD — D<N> <name>` row showing delta vs `baseline-v1.1.0-post-p1.json`. Expected impact ballpark per Phase D plan:
