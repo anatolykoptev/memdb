@@ -72,6 +72,16 @@ func (s *SearchService) postProcessResults(
 	// Step 10: Cross-source dedup
 	skill, tool, pref = CrossSourceDedupByText(text, skill, tool, pref)
 
+	// Step 10.5: D10 post-retrieval answer enhancement (env-gated by
+	// MEMDB_SEARCH_ENHANCE=true; default off). Runs after dedup but
+	// before trim so we synthesise on the actual top candidates.
+	// Reuses LLMReranker proxy credentials.
+	text = applyAnswerEnhancement(ctx, s.logger, p.Query, text, AnswerEnhanceConfig{
+		APIURL: s.LLMReranker.APIURL,
+		APIKey: s.LLMReranker.APIKey,
+		Model:  s.LLMReranker.Model,
+	})
+
 	// Step 11: Trim each type to its budget
 	text = TrimSlice(text, p.TopK)
 	skill = TrimSlice(skill, p.SkillTopK)
