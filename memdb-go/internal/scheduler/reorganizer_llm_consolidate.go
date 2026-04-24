@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 // consolidationResult is the JSON structure returned by the LLM.
@@ -49,7 +51,7 @@ func (r *Reorganizer) llmConsolidate(ctx context.Context, cluster []memNode) (co
 		return consolidationResult{}, err
 	}
 
-	raw = stripFences(raw)
+	raw = string(llm.StripJSONFence([]byte(raw)))
 	var result consolidationResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		return consolidationResult{}, fmt.Errorf("parse llm json (%s): %w", truncate(raw, consolidateErrTruncLen), err)
