@@ -3,18 +3,10 @@ package scheduler
 // tree_manager.go — D3 hierarchical reorganizer entry point.
 //
 // Port of Python `tree_text_memory/organize/manager.py` + `reorganizer.py`.
-// Orchestrates raw → episodic → semantic promotion for a single cube:
-//
-//  1. Load raw memories.
-//  2. Cluster by cosine similarity (cos ≥ episodicCosineThreshold, size ≥ episodicMinClusterSize).
-//  3. Per cluster: LLM summarise → new EpisodicMemory node → CONSOLIDATED_INTO edges + SetHierarchyLevel.
-//  4. Load episodic memories.
-//  5. Cluster by cosine (size ≥ semanticMinClusterSize).
-//  6. Per cluster: LLM summarise → new SemanticMemory node → CONSOLIDATED_INTO edges + SetHierarchyLevel.
-//  7. Optional: relation detector on cross-cluster pairs.
-//
-// Keeps files ≤200 lines by delegating clustering and consolidation to
-// tree_reorganizer.go and LLM-call / edge-write helpers below.
+// Orchestrates raw → episodic → semantic promotion for a single cube, then
+// optionally detects A→B relations across the new parent nodes. Clustering
+// lives in tree_reorganizer.go; cluster persistence in tree_cluster_promote.go;
+// relation phase in tree_relation_phase.go.
 
 import (
 	"context"
@@ -35,21 +27,13 @@ func TreeHierarchyEnabled() bool {
 }
 
 const (
-	// hierarchyLevelRaw / Episodic / Semantic — property values for Memory.hierarchy_level.
+	// hierarchyLevel* — property values for Memory.hierarchy_level.
+	// Cluster size + cosine thresholds live in tuning.go (env-readable).
 	hierarchyLevelRaw      = "raw"
 	hierarchyLevelEpisodic = "episodic"
 	hierarchyLevelSemantic = "semantic"
 
-	// Cluster size + cosine thresholds — moved to tuning.go as env-readable
-	// accessors. Defaults match Python tree_text_memory/organize:
-	//   episodicMinClusterSize  = 3    (MEMDB_D3_MIN_CLUSTER_RAW)
-	//   semanticMinClusterSize  = 2    (MEMDB_D3_MIN_CLUSTER_EPISODIC)
-	//   episodicCosineThreshold = 0.70 (MEMDB_D3_COS_THRESHOLD_RAW)
-	//   semanticCosineThreshold = 0.60 (MEMDB_D3_COS_THRESHOLD_EPISODIC)
-
-	// Per-cube candidate caps. Bound memory + LLM cost per run. Deliberately
-	// modest — a busy conversational cube rarely exceeds 500 raw memories
-	// between 6h reorg cycles, and the episodic tier compacts further.
+	// Per-cube candidate caps — bound memory + LLM cost per run.
 	rawCandidateLimit      = 500
 	episodicCandidateLimit = 200
 
@@ -57,11 +41,9 @@ const (
 	tierSummaryMaxTokens = 400
 	tierSummaryTimeout   = 45 * time.Second
 
-	// memoryTypeEpisodic is the memory_type persisted for episodic nodes (reused
-	// from the existing WM-compaction path — keeps search filters unchanged).
+	// memoryType* — memory_type field persisted for each tier's parent node.
+	// memoryTypeEpisodic reuses the WM-compaction constant to keep filters unchanged.
 	memoryTypeEpisodic = episodicMemType // "EpisodicMemory"
-
-	// memoryTypeSemantic is the D3-new type for semantic theme nodes.
 	memoryTypeSemantic = "SemanticMemory"
 )
 
@@ -78,6 +60,8 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 		slog.String("component", "tree_reorg"),
 	)
 	log.Debug("tree reorg: starting cycle")
+
+	parents := make([]parentInfo, 0, 8)
 
 	// ---- tier 1: raw → episodic -----------------------------------------
 	rawMems, err := r.postgres.ListMemoriesByHierarchyLevel(ctx, cubeID, hierarchyLevelRaw, rawCandidateLimit)
@@ -111,7 +95,8 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 				))
 				continue
 			}
-			if err := r.promoteCluster(ctx, cubeID, cluster, hierarchyLevelEpisodic); err != nil {
+			info, err := r.promoteCluster(ctx, cubeID, cluster, hierarchyLevelEpisodic)
+			if err != nil {
 				schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
 					attribute.String("tier", "episodic"),
 					attribute.String("outcome", "error"),
@@ -121,6 +106,11 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 					slog.Any("error", err))
 				continue
 			}
+			if info.ID == "" {
+				// Empty-summary cluster — LLM returned nothing actionable.
+				continue
+			}
+			parents = append(parents, info)
 			schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("tier", "episodic"),
 				attribute.String("outcome", "created"),
@@ -167,7 +157,8 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 				))
 				continue
 			}
-			if err := r.promoteCluster(ctx, cubeID, cluster, hierarchyLevelSemantic); err != nil {
+			info, err := r.promoteCluster(ctx, cubeID, cluster, hierarchyLevelSemantic)
+			if err != nil {
 				schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
 					attribute.String("tier", "semantic"),
 					attribute.String("outcome", "error"),
@@ -177,6 +168,10 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 					slog.Any("error", err))
 				continue
 			}
+			if info.ID == "" {
+				continue
+			}
+			parents = append(parents, info)
 			schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("tier", "semantic"),
 				attribute.String("outcome", "created"),
@@ -190,59 +185,12 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 		))
 	}
 
+	// ---- tier 3: cross-parent relation detection (opt-in) --------------
+	r.runRelationPhase(ctx, cubeID, parents)
+
 	log.Info("tree reorg: cycle complete",
 		slog.Int("episodic_created", episodicCreated),
 		slog.Int("semantic_created", semanticCreated),
+		slog.Int("parents_collected", len(parents)),
 	)
-}
-
-// promoteCluster creates a parent memory node for the cluster, links each child
-// with a CONSOLIDATED_INTO edge, and promotes the children's hierarchy_level
-// via parent_memory_id. Called by RunTreeReorgForCube for both tiers.
-func (r *Reorganizer) promoteCluster(ctx context.Context, cubeID string, cluster []hierarchyNode, targetLevel string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	parentID, promptSHA, err := r.createTierParent(ctx, cubeID, cluster, targetLevel, now)
-	if err != nil {
-		return err
-	}
-	if parentID == "" {
-		return nil // empty LLM output — nothing to write (not a failure)
-	}
-
-	childIDs := make([]string, 0, len(cluster))
-	for _, n := range cluster {
-		if err := r.postgres.CreateMemoryEdge(ctx, n.ID, parentID, "CONSOLIDATED_INTO", now, ""); err != nil {
-			r.logger.Debug("tree reorg: edge write failed",
-				slog.String("from", n.ID), slog.String("to", parentID),
-				slog.Any("error", err))
-			continue
-		}
-		if err := r.postgres.SetHierarchyLevel(ctx, n.ID, childHierarchyLevelFor(targetLevel), parentID, now); err != nil {
-			r.logger.Debug("tree reorg: set child hierarchy failed",
-				slog.String("id", n.ID), slog.Any("error", err))
-		}
-		childIDs = append(childIDs, n.ID)
-	}
-
-	// Audit trail (best-effort — schema is nullable and recoverable without it).
-	eventID := newUUID()
-	if err := r.postgres.InsertTreeConsolidationEvent(ctx, eventID, cubeID, parentID, childIDs, targetLevel, r.llmClient.Model(), promptSHA, now); err != nil {
-		r.logger.Debug("tree reorg: audit log write failed", slog.Any("error", err))
-	}
-	return nil
-}
-
-// childHierarchyLevelFor returns the hierarchy_level that children of a
-// given-tier parent should carry. Semantic parent children stay 'episodic'
-// (they were already promoted in the first pass). Episodic parent children
-// become 'raw-consolidated' via the 'raw' level; parent_memory_id ties them.
-func childHierarchyLevelFor(parentLevel string) string {
-	// We keep children at their current tier but stamped with parent_memory_id.
-	// hierarchy_level for the child = the tier below parent.
-	switch parentLevel {
-	case hierarchyLevelSemantic:
-		return hierarchyLevelEpisodic
-	default:
-		return hierarchyLevelRaw
-	}
 }

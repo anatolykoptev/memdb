@@ -50,6 +50,8 @@ func LogTuningOverrides(logger *slog.Logger) {
 		_ = semanticMinClusterSize()
 		_ = episodicCosineThreshold()
 		_ = semanticCosineThreshold()
+		_ = maxRelationPairs()
+		_ = relationTopK()
 
 		envOverrideMu.Lock()
 		defer envOverrideMu.Unlock()
@@ -126,4 +128,23 @@ func episodicCosineThreshold() float64 {
 // Env: MEMDB_D3_COS_THRESHOLD_EPISODIC in [0, 1].
 func semanticCosineThreshold() float64 {
 	return parseEnvFloat("MEMDB_D3_COS_THRESHOLD_EPISODIC", 0, 1, defaultSemanticCosineThreshold)
+}
+
+// ---- D3 — relation detector (M5 follow-up #1) ----------------------------
+
+const (
+	defaultMaxRelationPairs = 10 // per-cycle budget for DetectRelationPair calls
+	defaultRelationTopK     = 3  // per-parent nearest-neighbour fan-out
+)
+
+// maxRelationPairs — per-cycle upper bound on DetectRelationPair attempts.
+// Env: MEMDB_D3_MAX_RELATION_PAIRS in [1, 1000].
+func maxRelationPairs() int {
+	return parseEnvInt("MEMDB_D3_MAX_RELATION_PAIRS", 1, 1000, defaultMaxRelationPairs)
+}
+
+// relationTopK — per-parent number of nearest-neighbour peers considered.
+// Env: MEMDB_D3_RELATION_TOPK in [1, 20].
+func relationTopK() int {
+	return parseEnvInt("MEMDB_D3_RELATION_TOPK", 1, 20, defaultRelationTopK)
 }
