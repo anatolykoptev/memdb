@@ -23,6 +23,15 @@ Predictions JSON layout:
   ]
 
 Deterministic: QAs sorted by (conv_id, question_idx).
+
+Category modes:
+  --sample (default)         : 10 category-1 QAs from conv-26 (backward compat)
+  --sample --categories=1,2,3,4,5 : 50 QAs from conv-26, 10 per category
+  --full                     : all QAs from all 10 convs
+
+Env:
+  LOCOMO_CATEGORIES  comma-separated list (e.g. "1,2,3,4,5"). Overridden
+                     by --categories.  Default: "1" (backward compat).
 """
 
 from __future__ import annotations
@@ -53,31 +62,141 @@ REPO_ROOT = EVAL_DIR.parent.parent
 FULL_DATA = REPO_ROOT / "evaluation" / "data" / "locomo" / "locomo10.json"
 SAMPLE_GOLD = EVAL_DIR / "sample_gold.json"
 
+# LoCoMo category constants
+ALL_CATEGORIES = {1, 2, 3, 4, 5}
+# How many QAs to sample per category when building a balanced sample
+CATEGORY_SAMPLE_SIZE = 10
+
+
+def parse_categories(raw: str | None) -> list[int]:
+    """Parse a comma-separated category string like '1,2,3,4,5' → [1, 2, 3, 4, 5].
+
+    Returns the parsed list or raises ValueError on bad input.
+    """
+    if not raw:
+        return [1]
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    cats: list[int] = []
+    for part in parts:
+        try:
+            c = int(part)
+        except ValueError:
+            raise ValueError(f"Invalid category {part!r} — must be an integer 1-5.") from None
+        if c not in ALL_CATEGORIES:
+            raise ValueError(f"Category {c} out of range — valid: 1-5.")
+        if c not in cats:
+            cats.append(c)
+    return sorted(cats)
+
 
 def load_gold(path: Path) -> list[dict]:
     with path.open() as f:
         return json.load(f)
 
 
-def load_gold_from_locomo10(path: Path) -> list[dict]:
+def load_gold_from_locomo10(path: Path, categories: list[int] | None = None) -> list[dict]:
+    """Load QAs from locomo10.json, optionally filtered to specific categories.
+
+    When categories is None or [1,2,3,4,5], all QAs with a valid answer are
+    returned.  When a subset is given (e.g. [1]), only QAs of those categories
+    are included.
+
+    Category 5 (adversarial) uses 'adversarial_answer' instead of 'answer'.
+    Both fields are normalised to 'answer' in the returned records.
+    """
     with path.open() as f:
         data = json.load(f)
+    cat_filter = set(categories) if categories else None
     out: list[dict] = []
     for conv in data:
         sample_id = conv.get("sample_id", "locomo_unknown")
-        qas = [qa for qa in conv.get("qa", []) if qa.get("answer") not in (None, "")]
-        qas.sort(key=lambda q: (q.get("category", 99), q.get("question", "")))
-        for q_idx, qa in enumerate(qas):
+        raw_qas = conv.get("qa", [])
+        qas_by_cat: dict[int, list[dict]] = {}
+        for qa in raw_qas:
+            cat = qa.get("category")
+            if cat_filter and cat not in cat_filter:
+                continue
+            # Normalise answer field: category 5 uses 'adversarial_answer'
+            answer = qa.get("answer") or qa.get("adversarial_answer") or ""
+            if answer == "":
+                continue
+            qas_by_cat.setdefault(cat, []).append(
+                {
+                    "question": qa["question"],
+                    "answer": answer,
+                    "evidence": qa.get("evidence", []),
+                    "category": cat,
+                }
+            )
+        # Sort within each category for determinism; preserve category order
+        q_idx = 0
+        for cat in sorted(qas_by_cat.keys()):
+            cat_qas = sorted(qas_by_cat[cat], key=lambda q: q["question"])
+            for qa in cat_qas:
+                out.append(
+                    {
+                        "conv_id": sample_id,
+                        "question_idx": q_idx,
+                        "question": qa["question"],
+                        "answer": qa["answer"],
+                        "evidence": qa["evidence"],
+                        "category": qa["category"],
+                    }
+                )
+                q_idx += 1
+    return out
+
+
+def build_sample_gold(
+    path: Path, categories: list[int], per_cat: int = CATEGORY_SAMPLE_SIZE
+) -> list[dict]:
+    """Build a balanced sample from locomo10.json: up to per_cat QAs per category.
+
+    Uses conv-26 (first conversation) as the fixed sample conversation so
+    the ingest step only needs to push a single conversation.
+
+    Deterministic: QAs within each category sorted alphabetically by question.
+    """
+    with path.open() as f:
+        data = json.load(f)
+    # Find conv-26 (first conversation in the dataset)
+    conv = data[0]
+    sample_id = conv.get("sample_id", "locomo_unknown")
+    raw_qas = conv.get("qa", [])
+
+    qas_by_cat: dict[int, list[dict]] = {}
+    for qa in raw_qas:
+        cat = qa.get("category")
+        if cat not in set(categories):
+            continue
+        answer = qa.get("answer") or qa.get("adversarial_answer") or ""
+        if answer == "":
+            continue
+        qas_by_cat.setdefault(cat, []).append(
+            {
+                "question": qa["question"],
+                "answer": answer,
+                "evidence": qa.get("evidence", []),
+                "category": cat,
+            }
+        )
+
+    out: list[dict] = []
+    q_idx = 0
+    for cat in sorted(qas_by_cat.keys()):
+        cat_qas = sorted(qas_by_cat[cat], key=lambda q: q["question"])[:per_cat]
+        for qa in cat_qas:
             out.append(
                 {
                     "conv_id": sample_id,
                     "question_idx": q_idx,
                     "question": qa["question"],
                     "answer": qa["answer"],
-                    "evidence": qa.get("evidence", []),
-                    "category": qa.get("category"),
+                    "evidence": qa["evidence"],
+                    "category": qa["category"],
                 }
             )
+            q_idx += 1
     return out
 
 
@@ -236,14 +355,45 @@ def main() -> int:
         default="a",
         help="Which speaker user ID to query as (stable across runs).",
     )
+    p.add_argument(
+        "--categories",
+        default=os.getenv("LOCOMO_CATEGORIES", ""),
+        help=(
+            "Comma-separated LoCoMo QA categories to include (default: '1', "
+            "backward-compat single-hop only). Use '1,2,3,4,5' for the full "
+            "5-category 50-QA sample. Env: LOCOMO_CATEGORIES."
+        ),
+    )
     args = p.parse_args()
 
+    try:
+        categories = parse_categories(args.categories)
+    except ValueError as exc:
+        print(f"ERROR: --categories: {exc}", file=sys.stderr)
+        return 2
+
+    multi_cat = len(categories) > 1
+    cat_label = ",".join(str(c) for c in categories)
+
     if args.sample:
-        gold = load_gold(SAMPLE_GOLD)
+        if multi_cat:
+            # Build balanced sample on-the-fly from locomo10.json
+            gold = build_sample_gold(FULL_DATA, categories)
+            print(
+                f"[query] 5-category mode: {len(gold)} QAs from conv-26 "
+                f"(categories {cat_label}, {CATEGORY_SAMPLE_SIZE} each)",
+                flush=True,
+            )
+        else:
+            # Default backward-compat path: use committed sample_gold.json
+            gold = load_gold(SAMPLE_GOLD)
+            print(f"[query] sample mode: {len(gold)} QAs (category-1 only)", flush=True)
     elif args.full:
-        gold = load_gold_from_locomo10(FULL_DATA)
+        gold = load_gold_from_locomo10(FULL_DATA, categories if multi_cat else None)
+        print(f"[query] full mode: {len(gold)} QAs (categories {cat_label})", flush=True)
     else:
         gold = load_gold(args.gold)
+        print(f"[query] custom gold: {len(gold)} QAs from {args.gold}", flush=True)
 
     gold.sort(key=lambda g: (g["conv_id"], g["question_idx"]))
 
@@ -305,6 +455,7 @@ def main() -> int:
                     "total": len(gold),
                     "errors": len(errors),
                     "skip_chat": args.skip_chat,
+                    "categories": categories,
                 },
             },
             f,
