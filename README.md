@@ -192,6 +192,8 @@ Feature comparison based on publicly available information. Performance numbers 
 
 ## Roadmap
 
+**v2.1.0 (2026-04-25)** — M7 Compound Lift Sprint. LoCoMo aggregate F1 0.053 → 0.238 (+349%, first MemOS-tier result). New: `answer_style` field on `/product/chat/complete` (`factual` mode is 2.1× faster at p95), `window_chars` per-request override on `/product/add`, pprof endpoint, embed batching (13× speedup at small windows). Full details in [CHANGELOG.md](CHANGELOG.md#210--2026-04-25).
+
 **v2.0.0 (апрель 2026)** shipped the full Phase D LoCoMo intelligence stack (10 features — hierarchical tree reorganizer, multi-hop AGE retrieval, query rewriting, staged retrieval, CoT decomposition, post-retrieval enhancement, and more). LoCoMo hit@20 = **0.700** on the reproducible harness — above published Mem0 / MemOS numbers. Full details in [CHANGELOG.md](CHANGELOG.md#200--2026-04-24) and [evaluation/locomo/MILESTONES.md](evaluation/locomo/MILESTONES.md).
 
 Near-term priorities:
