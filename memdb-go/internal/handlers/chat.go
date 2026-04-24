@@ -4,19 +4,48 @@ package handlers
 // Falls back to Python proxy when services are unavailable or on error.
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/rpc"
 )
 
 const (
-	chatMaxHistory  = 20   // last N history messages kept for LLM context
-	chatMaxTokens   = 8192 // max tokens for chat completion
+	chatMaxHistory = 20   // last N history messages kept for LLM context
+	chatMaxTokens  = 8192 // max tokens for chat completion
+
+	// answer_style enum values (see nativeChatRequest.AnswerStyle).
+	answerStyleFactual        = "factual"
+	answerStyleConversational = "conversational"
 )
+
+// promptTemplateLabel maps the (basePrompt, answerStyle) pair to the metric label
+// emitted by chat handlers. "custom" wins when basePrompt is non-empty (backward-compat).
+func promptTemplateLabel(basePrompt, answerStyle string) string {
+	if basePrompt != "" {
+		return "custom"
+	}
+	if answerStyle == answerStyleFactual {
+		return answerStyleFactual
+	}
+	return answerStyleConversational
+}
+
+// recordChatPromptUsed bumps memdb.chat.prompt_template_used_total{template=...}.
+// Called once per chat request right after buildSystemPrompt returns.
+func recordChatPromptUsed(ctx context.Context, basePrompt, answerStyle string) {
+	chatPromptMx().TemplateUsed.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("template", promptTemplateLabel(basePrompt, answerStyle))),
+	)
+}
 
 // chatCanNative returns true if all services needed for native chat are available.
 func (h *Handler) chatCanNative() bool {
@@ -51,7 +80,10 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prompt := buildSystemPrompt(*req.Query, memories, prefString, stringOrEmpty(req.SystemPrompt))
+	basePrompt := stringOrEmpty(req.SystemPrompt)
+	answerStyle := stringOrEmpty(req.AnswerStyle)
+	prompt := buildSystemPrompt(*req.Query, memories, prefString, basePrompt, answerStyle)
+	recordChatPromptUsed(ctx, basePrompt, answerStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
 
 	answer, err := h.llmChat.Chat(ctx, messages, chatMaxTokens)
@@ -104,7 +136,10 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prompt := buildSystemPrompt(*req.Query, memories, prefString, stringOrEmpty(req.SystemPrompt))
+	basePrompt := stringOrEmpty(req.SystemPrompt)
+	answerStyle := stringOrEmpty(req.AnswerStyle)
+	prompt := buildSystemPrompt(*req.Query, memories, prefString, basePrompt, answerStyle)
+	recordChatPromptUsed(ctx, basePrompt, answerStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
 
 	rpc.SSEHeaders(w)
@@ -178,6 +213,17 @@ func validateChatRequest(req *nativeChatRequest) []string {
 	}
 	if req.TopK != nil && *req.TopK < 1 {
 		errs = append(errs, "top_k must be >= 1")
+	}
+	if req.AnswerStyle != nil {
+		switch *req.AnswerStyle {
+		case "", answerStyleFactual, answerStyleConversational:
+			// allowed
+		default:
+			errs = append(errs, fmt.Sprintf(
+				"unknown answer_style '%s', valid: factual, conversational",
+				*req.AnswerStyle,
+			))
+		}
 	}
 	return errs
 }

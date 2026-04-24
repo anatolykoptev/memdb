@@ -65,3 +65,30 @@ func feedbackMx() *feedbackMetricsInstruments {
 	})
 	return feedbackMetrics
 }
+
+var (
+	chatPromptOnce    sync.Once
+	chatPromptMetrics *chatPromptMetricsInstruments
+)
+
+type chatPromptMetricsInstruments struct {
+	// TemplateUsed counts chat requests by which system-prompt template was selected.
+	// Label template ∈ {factual, conversational, custom}.
+	//   - "custom"         — non-empty system_prompt was provided (basePrompt wins).
+	//   - "factual"        — answer_style="factual" and basePrompt empty.
+	//   - "conversational" — default branch (includes empty answer_style).
+	TemplateUsed metric.Int64Counter
+}
+
+// chatPromptMx returns the singleton chat-prompt instruments, lazy-initialised.
+// Counter memdb.chat.prompt_template_used_total{template={factual|conversational|custom}}.
+func chatPromptMx() *chatPromptMetricsInstruments {
+	chatPromptOnce.Do(func() {
+		meter := otel.Meter("memdb-go/chat")
+		used, _ := meter.Int64Counter("memdb.chat.prompt_template_used_total",
+			metric.WithDescription("Count of chat requests per system-prompt template (factual/conversational/custom)."),
+		)
+		chatPromptMetrics = &chatPromptMetricsInstruments{TemplateUsed: used}
+	})
+	return chatPromptMetrics
+}
