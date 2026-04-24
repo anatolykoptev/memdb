@@ -178,6 +178,15 @@ func FindNearDuplicatesHNSWByIDsSQL() string { return FindNearDuplicatesHNSWByID
 // Memories without an explicit hierarchy_level default to 'raw' after migration
 // 0013's backfill, so the = $2 predicate matches them too.
 //
+// memory_type IN list intentionally includes WorkingMemory alongside
+// LongTermMemory/UserMemory/EpisodicMemory: on fresh ingest (/product/add),
+// a new raw memory lands as BOTH a WorkingMemory (in the hot VSET + Postgres)
+// AND a LongTermMemory (durable store). Both rows carry hierarchy_level='raw'
+// and the same text. Excluding WorkingMemory caused small cubes (2 raw rows,
+// 1 LTM + 1 WM per speaker) to fall below MEMDB_D3_MIN_CLUSTER_RAW=2 at the
+// fetch stage — the cluster never forms, no edges are written, and LoCoMo
+// category-2 multi-hop recall stays at floor. See docs/d3-gate-audit.md.
+//
 // Args: $1 = user_name (cube partition), $2 = hierarchy_level, $3 = limit
 const ListMemoriesByHierarchyLevel = `
 SELECT
@@ -188,7 +197,7 @@ SELECT
 FROM %[1]s."Memory"
 WHERE properties->>(('user_name'::text)) = $1
   AND properties->>(('status'::text)) = 'activated'
-  AND properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+  AND properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory', 'WorkingMemory')
   AND COALESCE(properties->>(('hierarchy_level'::text)), 'raw') = $2
   AND embedding IS NOT NULL
 ORDER BY properties->>(('created_at'::text)) DESC

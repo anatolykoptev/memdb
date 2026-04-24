@@ -9,14 +9,31 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
 )
+
+// defaultTreeHierarchyEnabled delegates to the scheduler package's env check.
+// Extracted so tests can stub the flag without touching os.Setenv.
+func defaultTreeHierarchyEnabled() bool { return scheduler.TreeHierarchyEnabled() }
 
 // reorgRunner is the minimal interface for the Memory Reorganizer, defined here
 // so tests can inject a mock without depending on the concrete scheduler type.
+//
+// RunTreeReorgForCube is the D3 tree reorganizer entry point (raw → episodic →
+// semantic promotion, emits CONSOLIDATED_INTO edges). It is a no-op unless
+// MEMDB_REORG_HIERARCHY=true, but AdminReorg calls it unconditionally so the
+// gate decision lives in one place (scheduler.TreeHierarchyEnabled) rather
+// than duplicated across callers.
 type reorgRunner interface {
 	Run(ctx context.Context, cubeID string)
 	RunTargeted(ctx context.Context, cubeID string, ids []string)
+	RunTreeReorgForCube(ctx context.Context, cubeID string)
 }
+
+// treeHierarchyEnabledFn is scheduler.TreeHierarchyEnabled; extracted as a var
+// so tests can swap it without touching process env.
+var treeHierarchyEnabledFn = defaultTreeHierarchyEnabled
 
 // reorgRequest is the JSON body for POST /product/admin/reorg.
 type reorgRequest struct {
@@ -83,9 +100,23 @@ func (h *Handler) AdminReorg(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.reorg.Run(ctx, cubeID)
 		}
+
+		// D3 tree reorganizer — raw → episodic → semantic promotion. Emits
+		// CONSOLIDATED_INTO edges that D2's recursive CTE traverses for
+		// multi-hop recall. Mirrors the sequencing in
+		// scheduler.runPeriodicReorg (Run → RunTreeReorgForCube). Targeted
+		// mode still invokes it so operators can force a cube-wide tree
+		// promotion from the admin endpoint when iterating on D3 tuning.
+		treeRan := false
+		if treeHierarchyEnabledFn() {
+			h.reorg.RunTreeReorgForCube(ctx, cubeID)
+			treeRan = true
+		}
+
 		h.logger.Info("admin reorg: background goroutine finished",
 			slog.String("cube_id", cubeID),
 			slog.String("mode", mode),
+			slog.Bool("tree_reorg_ran", treeRan),
 		)
 	}()
 
