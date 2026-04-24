@@ -361,6 +361,62 @@ Each D task re-runs the harness after deploy and adds a `### YYYY-MM-DD — D<N>
 - D5 (staged prompts): +0.08 EM
 - D10 (post-retrieval enhancement): +0.15 F1 (surface alignment)
 
+### 2026-04-24 — M6 prompt-engineering ablation (exp/locomo-qa-prompt)
+
+Bottleneck hunt after M5 follow-ups (PR #58/#59) landed. Baseline harness
+flagged aggregate F1 ≈ 0.053 with hit@20 ≈ 0.5 — retrieval is finding
+relevant memories, but LLM answer-gen produces multi-sentence conversational
+replies that tank F1 (which scores word-overlap with short gold phrases).
+
+**Root-cause found in `memdb-go/internal/handlers/chat_prompt_tpl.go`**: the
+default `cloudChatPromptEN` is a conversational-assistant template (700 words,
+"Four-Step Verdict", "NEVER mention retrieved memories") — wrong shape for a
+factual-extraction benchmark.
+
+Experimented by passing `system_prompt` via the `/product/chat/complete`
+payload (already supported by `buildSystemPrompt`; LoCoMo harness just wasn't
+using it).
+
+| Variant | cat-1 | cat-2 | cat-3 | cat-4 | cat-5 | **aggregate F1** |
+|---------|-------|-------|-------|-------|-------|------------------|
+| baseline (default chatbot) | 0.092 | 0.019 | 0.080 | 0.036 | 0.038 | **0.053** |
+| Fix 1 strict ("SHORTEST factual phrase") | 0.096 | 0.000 | **0.170** | 0.000 | **0.133** | **0.080** (+51%) |
+| Fix 1.1 softer ("match question length") | 0.107 | 0.000 | 0.083 | 0.016 | 0.000 | 0.041 (-23%) |
+
+Strict prompt wins by wide margin — LoCoMo gold answers are 1-5 words in
+≥3/5 categories; softer variant loses big on cat-3 and cat-5 because LLM
+re-starts adding explanations.
+
+**Side-finding (not prompt-driven):** hit@k collapsed to 0.000 on all
+categories across both variants. Direct `/product/search` probe with keyword
+query still returns text_mem entries correctly — retrieval works in principle,
+but question-form phrasing misses aggregated 4096-char sliding-window
+memories by cosine. Fast-mode ingest collapses 58 session messages into ~3
+coarse windows per cube (`add_windowing.go:windowChars=4096`); LoCoMo gold
+evidence (e.g. `D18:1`) references a single turn, so per-window cosine
+signal is diluted. This is a separate regression from prompt work.
+
+**Prompt engineering confirmed as #1 quality bottleneck.** Bottleneck
+ranking after this ablation:
+
+1. Prompt (default chatbot → factual QA): +51% F1 — verified
+2. Ingest granularity (fast sliding-window → raw per-message): unmeasured;
+   hypothesis — would lift hit@20 from ~0 to 0.3-0.5 and compound with prompt
+3. Cross-encoder rerank (go-kit/rerank plan from 2026-04-20): +0.03-0.05 F1
+4. Relation edges accumulation (M5 follow-ups): compounds cat-2 slowly over
+   weeks of natural multi-topic data
+
+### Next actions (queued for separate sessions)
+
+- **Port Fix 1 into memdb-go** as server-side `answer_style: "factual"` param
+  in `buildSystemPrompt` so all clients (Python harness, vaelor, go-nerv,
+  future Go/Rust clients) share the improvement. Branch `exp/locomo-qa-prompt`
+  stays for reference, not merged.
+- **Switch LoCoMo ingest to `mode: "raw"`** and remeasure — expect hit@20
+  to recover from 0 and prompt fix to compound across all categories.
+- **Reconsider 4096-char sliding window** as product-level design decision:
+  is it right for QA workloads at all, or should it be configurable per-mode?
+
 ## How to record a new milestone
 
 ```bash
