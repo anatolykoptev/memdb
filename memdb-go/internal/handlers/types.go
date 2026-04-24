@@ -52,11 +52,20 @@ type fullAddRequest struct {
 	AsyncMode *string       `json:"async_mode,omitempty"`
 	Mode      *string       `json:"mode,omitempty"`
 	Messages  []chatMessage `json:"messages,omitempty"`
-	// WindowChars overrides the sliding-window character budget used by
-	// extractFastMemories (mode=fast and the async path; other modes ignore it).
-	// Allowed range: [128, 16384]. Out-of-range or zero values fall back to the
-	// default windowChars (currently 4096) silently — this is a tuning hint,
-	// not a contract, so we do not 400 on garbage input. Nil/omitted = default.
+	// WindowChars sets the approximate character budget per sliding window for
+	// mode=fast/async ingest pipelines. Allowed range: [128, 16384]. Default
+	// (when nil or out-of-range): 4096.
+	//
+	// Latency trade-off: each window triggers a separate embed call. Smaller
+	// windows produce more memories at finer granularity (better retrieval recall
+	// for QA workloads) but linear latency growth. At window=512 with a 30-msg
+	// 1710-char conversation, p95 add latency rose from 1.2s to 20s (+1551%) on
+	// 2026-04-25 — see docs/perf/2026-04-25-m7-latency-report.md. After embed
+	// batching (M7 F2 follow-up) the cliff drops to ~1.5×. Recommended for
+	// latency-sensitive paths: WindowChars >= 1024 OR rely on the default.
+	//
+	// Ignored by mode=raw, mode=fine, default (buffer) mode, and the feedback
+	// path — those don't use sliding-window extraction.
 	WindowChars     *int           `json:"window_chars,omitempty"`
 	WritableCubeIDs []string       `json:"writable_cube_ids,omitempty"`
 	SessionID       *string        `json:"session_id,omitempty"`
