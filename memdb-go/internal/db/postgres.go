@@ -93,32 +93,15 @@ return nil, fmt.Errorf("postgres connect: %w", err)
 
 pg := &Postgres{pool: pool, logger: logger}
 
-// Versioned SQL migrations FIRST — they create memos_graph schema + AGE
-// graph + extensions that the Ensure* calls below depend on. Fail-fast:
-// schema drift must crash startup so dozor flags it.
+// Versioned SQL migrations — single source of truth for schema.
+// Covers extensions + AGE graph bootstrap (0003), memos_graph."Memory"
+// columns (0001/0002/0004), and the formerly-Ensure* tables
+// memory_edges (0005), entity_nodes (0006), entity_edges (0007),
+// user_configs (0008). Fail-fast: schema drift must crash startup
+// so dozor flags it.
 if err := pg.RunMigrations(ctx); err != nil {
 pool.Close()
 return nil, fmt.Errorf("run migrations: %w", err)
-}
-
-// Best-effort: create memory_edges table on startup (idempotent CREATE IF NOT EXISTS).
-if err := pg.EnsureEdgesTable(ctx); err != nil {
-logger.Warn("memory_edges table init failed (graph edges disabled)", slog.Any("error", err))
-}
-
-// Best-effort: create entity_nodes table (entity identity resolution + embedding HNSW index).
-if err := pg.EnsureEntityNodesTable(ctx); err != nil {
-logger.Warn("entity_nodes table init failed (entity graph disabled)", slog.Any("error", err))
-}
-
-// Best-effort: create entity_edges table on startup (idempotent CREATE IF NOT EXISTS).
-if err := pg.EnsureEntityEdgesTable(ctx); err != nil {
-logger.Warn("entity_edges table init failed (entity triplets disabled)", slog.Any("error", err))
-}
-
-// Best-effort: create user_configs table.
-if err := pg.EnsureUserConfigsTable(ctx); err != nil {
-logger.Warn("user_configs table init failed", slog.Any("error", err))
 }
 
 logger.Info("postgres connected", slog.Int("max_conns", int(cfg.MaxConns)))
