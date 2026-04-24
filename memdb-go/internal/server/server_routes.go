@@ -1,14 +1,25 @@
 package server
 
 import (
+	"crypto/subtle"
+	"fmt"
 	"net/http"
+	_ "net/http/pprof" // side-effect: registers /debug/pprof/* on http.DefaultServeMux
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/handlers"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // registerRoutes mounts all HTTP handlers on the provided ServeMux.
-func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
+// serviceSecret is the value of INTERNAL_SERVICE_SECRET; pprof endpoints
+// require it via X-Service-Secret header.
+func registerRoutes(mux *http.ServeMux, h *handlers.Handler, serviceSecret string) {
+	// ─── pprof endpoints behind internal-auth — leak prevention. See M7 follow-up F3. ──
+	// The net/http/pprof import (above) auto-registers handlers on http.DefaultServeMux.
+	// We proxy them here from our custom mux and enforce X-Service-Secret-only access:
+	// no bearer tokens, so user-facing API keys cannot access goroutine/heap dumps.
+	mux.Handle("/debug/pprof/", pprofHandler(serviceSecret))
+
 	// ─── Health endpoints (native Go, no proxy) ─────────────────────────
 	mux.HandleFunc("GET /health", h.Health)
 	mux.HandleFunc("GET /ready", h.ReadinessCheck)
@@ -90,4 +101,29 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler) {
 	// ─── Admin endpoints ────────────────────────────────────────────────
 	mux.HandleFunc("POST /product/admin/reprocess", h.AdminReprocess)
 	mux.HandleFunc("POST /product/admin/reorg", h.AdminReorg)
+}
+
+// pprofHandler returns an http.Handler that gates access to the pprof index
+// (http.DefaultServeMux, populated by the net/http/pprof side-effect import)
+// behind X-Service-Secret. Requests without a valid secret get 401.
+// Bearer token is intentionally not accepted: pprof exposes goroutine stacks,
+// heap snapshots, and source paths — internal tooling only.
+func pprofHandler(serviceSecret string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serviceSecret == "" {
+			http.Error(w, "pprof disabled: INTERNAL_SERVICE_SECRET not configured", http.StatusServiceUnavailable)
+			return
+		}
+		got := r.Header.Get("X-Service-Secret")
+		if got == "" {
+			got = r.Header.Get("X-Internal-Service")
+		}
+		if subtle.ConstantTimeCompare([]byte(got), []byte(serviceSecret)) != 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprint(w, `{"code":401,"message":"X-Service-Secret required","data":null}`)
+			return
+		}
+		http.DefaultServeMux.ServeHTTP(w, r)
+	})
 }

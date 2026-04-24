@@ -89,7 +89,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 
 	// Create router and apply middleware
 	mux := http.NewServeMux()
-	registerRoutes(mux, h)
+	registerRoutes(mux, h, cfg.InternalServiceSecret)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.PortStr(),
