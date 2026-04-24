@@ -25,6 +25,31 @@ func d1ImportanceEnabled() bool {
 	return os.Getenv("MEMDB_D1_IMPORTANCE") == "true"
 }
 
+// hierarchyBoostEnabled reports whether the D3 hierarchy-tier boost is active.
+// Gated by the same env that controls tree reorganization so enabling the
+// boost without reorg is a no-op (no episodic/semantic rows exist yet).
+// Read on every call — same rationale as d1ImportanceEnabled.
+func hierarchyBoostEnabled() bool {
+	return os.Getenv("MEMDB_REORG_HIERARCHY") == "true"
+}
+
+// hierarchyBoost returns a retrieval multiplier based on hierarchy_level.
+// Semantic and episodic memories represent compressed, LLM-curated insight
+// and outrank raw memories for identical cosine scores. Numbers chosen to
+// match the D3 plan (1.15 / 1.08 / 1.0) and to stay below the D1 importance
+// cap so the overall score remains bounded.
+func hierarchyBoost(meta map[string]any) float64 {
+	lvl, _ := meta["hierarchy_level"].(string)
+	switch lvl {
+	case "semantic":
+		return 1.15
+	case "episodic":
+		return 1.08
+	default:
+		return 1.0
+	}
+}
+
 // importanceMultiplier returns 1 + log(1 + access_count), capped at
 // d1ImportanceCap (5.0). access_count is read from metadata as float64
 // (FormatMemoryItem normalizes it). Missing / negative values clamp to 0,
@@ -163,9 +188,17 @@ func applyDecayToItem(item map[string]any, now time.Time, alpha float64) {
 	}
 
 	if d1ImportanceEnabled() {
-		// D1 combined formula: cosine * decay * importance, capped at 1.0.
+		// D1 combined formula: cosine * decay * importance * hierarchy, capped at 1.0.
+		// The hierarchy factor (D3) is 1.0 unless MEMDB_REORG_HIERARCHY=true AND
+		// the item carries an episodic/semantic hierarchy_level. Applied inside
+		// the D1 branch because D3 builds on D1's infrastructure — enabling D3
+		// without D1 would mean the boost never runs, which is fine.
 		imp := importanceMultiplier(meta)
-		combined := cosine * recency * imp
+		hier := 1.0
+		if hierarchyBoostEnabled() {
+			hier = hierarchyBoost(meta)
+		}
+		combined := cosine * recency * imp * hier
 		if combined > 1.0 {
 			combined = 1.0
 		}

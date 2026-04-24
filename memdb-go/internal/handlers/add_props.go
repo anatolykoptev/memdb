@@ -61,6 +61,11 @@ func buildNodeProps(p memoryNodeProps) map[string]any {
 		"importance_score":  1.0,
 		"retrieval_count":   0,
 		"last_retrieved_at": "",
+		// D3 hierarchy defaults — new memories start as 'raw' (direct extraction).
+		// TreeManager promotes clusters to 'episodic' and themes to 'semantic',
+		// populating parent_memory_id on children at promotion time.
+		"hierarchy_level":  "raw",
+		"parent_memory_id": nil,
 	}
 }
 

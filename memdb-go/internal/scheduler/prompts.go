@@ -125,6 +125,89 @@ Rules:
 6. Include temporal context if relevant (e.g. "In this session, the user...")
 7. If the notes contain no durable facts, return: {"summary": ""}`
 
+// episodicTierSystemPrompt guides the LLM to consolidate a cluster of raw
+// memories into one episodic summary (D3 tree reorganizer, raw → episodic).
+//
+// Episodic = short narrative spanning multiple raw memories about the same
+// topic/event window. Distinct from consolidationSystemPrompt (which picks one
+// winner + drops near-duplicates) — here we SYNTHESIZE across all inputs.
+const episodicTierSystemPrompt = `You are a long-term memory archivist for an AI assistant.
+
+You will receive a cluster of raw memory fragments belonging to the same user and topic window.
+Write ONE episodic summary capturing what happened across all of them.
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "summary": "<episodic memory statement>"
+}
+
+Rules:
+1. Write in third person: "The user..." not "I..." or "You..."
+2. Preserve ALL unique facts and timeline context from the inputs
+3. Resolve time references to absolute dates/periods where possible
+4. Keep to 2-4 sentences — dense with facts, not verbose
+5. If the cluster contains no durable facts, return {"summary": ""}`
+
+// semanticTierSystemPrompt guides the LLM to consolidate a cluster of episodic
+// memories into one semantic theme (D3 tree reorganizer, episodic → semantic).
+//
+// Semantic = theme-level abstraction across multiple episodic memories. Captures
+// long-horizon patterns ("the user is building towards a social-work career")
+// rather than session-level narrative.
+const semanticTierSystemPrompt = `You are a long-term memory abstractor for an AI assistant.
+
+You will receive a cluster of episodic summaries about the same user.
+Write ONE semantic theme that captures the long-horizon pattern across them.
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "summary": "<semantic theme statement>"
+}
+
+Rules:
+1. Write in third person: "The user..." not "I..." or "You..."
+2. Abstract away session-specific details — focus on durable themes, values, goals
+3. Preserve ALL distinct themes — if the cluster covers two patterns, name both
+4. One or two sentences — concise, theme-level, not narrative
+5. If no durable theme emerges, return {"summary": ""}`
+
+// relationDetectorSystemPrompt guides the LLM to classify the relationship
+// between two memory statements (D3 port of Python
+// relation_reason_detector.py / PAIRWISE_RELATION_PROMPT).
+//
+// Categories mirror the Python vocabulary, mapped to our edge constants:
+//   - CAUSES     → db.EdgeCauses
+//   - CONTRADICTS → db.EdgeContradicts (re-used from D1 write-path)
+//   - SUPPORTS   → db.EdgeSupports (D3-new, evidential)
+//   - RELATED    → db.EdgeRelated
+//   - NONE       → no edge emitted
+//
+// confidence is the LLM's self-reported certainty (0..1). rationale is a
+// short free-text justification stored on the edge for diagnostics.
+const relationDetectorSystemPrompt = `You are a memory relationship classifier for an AI assistant.
+
+You will receive two memory statements (A and B) about the same user.
+Decide the directed relationship A → B from this fixed vocabulary:
+
+- CAUSES       — A is a direct cause of B
+- CONTRADICTS  — A and B state incompatible facts about the same subject
+- SUPPORTS     — A provides evidence that makes B more likely / true
+- RELATED      — A and B are topically related but none of the above applies
+- NONE         — no meaningful relationship
+
+Return ONLY valid JSON — no markdown, no explanation:
+{
+  "relation": "<CAUSES|CONTRADICTS|SUPPORTS|RELATED|NONE>",
+  "confidence": <float 0..1>,
+  "rationale": "<one short sentence>"
+}
+
+Rules:
+1. Pick the SINGLE most specific category — CAUSES beats SUPPORTS beats RELATED.
+2. If uncertain between RELATED and NONE, prefer NONE (false positives are expensive).
+3. rationale must be <= 140 characters and cite the key fact from each memory.
+4. confidence <= 0.5 means "I'm not sure" — use NONE in that case.`
+
 // memEnhancementSystemPrompt guides the LLM to convert a raw working-memory
 // note (fast-mode transcript chunk) into one or more structured long-term facts.
 //

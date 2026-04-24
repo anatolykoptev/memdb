@@ -106,6 +106,13 @@ func (w *Worker) runPeriodicReorg(ctx context.Context) {
 
 		w.reorg.Run(ctx, cubeID)
 
+		// D3 tree reorganizer — raw → episodic → semantic promotion. Gated by
+		// MEMDB_REORG_HIERARCHY (default off). Non-fatal: errors inside
+		// RunTreeReorgForCube are logged and the loop continues.
+		if TreeHierarchyEnabled() {
+			w.reorg.RunTreeReorgForCube(ctx, cubeID)
+		}
+
 		// Decay importance_score for all LTM/UserMemory of this cube.
 		// Auto-archive memories that have faded below the threshold.
 		n, err := w.reorg.DecayAndArchive(ctx, cubeID)
