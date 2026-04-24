@@ -42,7 +42,7 @@ All search queries add: `WHERE expired_at IS NULL OR expired_at > $query_time`
 
 ## Source Code Reference
 
-File: `/home/krolik/src/compete-research/graphiti/graphiti_core/edges.py:271`
+File: `github.com/getzep/graphiti/blob/main/graphiti_core/edges.py`
 ```python
 expired_at: datetime | None = Field(
     default=None,
@@ -54,7 +54,7 @@ invalid_at: datetime | None = Field(
 )
 ```
 
-File: `/home/krolik/src/compete-research/graphiti/graphiti_core/utils/maintenance/edge_operations.py:543-572`
+File: `github.com/getzep/graphiti/blob/main/graphiti_core/utils/maintenance/edge_operations.py`
 ```python
 def resolve_edge_contradictions(resolved_edge, invalidation_candidates, now):
     invalidated_edges = []
@@ -67,7 +67,7 @@ def resolve_edge_contradictions(resolved_edge, invalidation_candidates, now):
     return invalidated_edges
 ```
 
-File: `/home/krolik/src/compete-research/graphiti/graphiti_core/helpers.py:122-133`
+File: `github.com/getzep/graphiti/blob/main/graphiti_core/helpers.py`
 ```python
 # semaphore_gather pattern (bonus: implement for MemDB LLM semaphore)
 async def semaphore_gather(*coroutines, max_coroutines=None):

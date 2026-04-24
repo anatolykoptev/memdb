@@ -5,6 +5,16 @@
 **Effort:** M (3-5 days)
 **Expected F1 lift:** +5-7 points on complex multi-hop LoCoMo questions (per ROADMAP-SEARCH.md Phase 1 estimate)
 
+> **Caveat on the +5-7 lift estimate**: This number is an internal pre-M8 planning
+> assumption (ROADMAP-SEARCH §Phase 1), NOT an independently measured delta from a
+> MemOS ablation. MemOS does not publish per-feature LoCoMo ablation results that
+> isolate VEC_COT's contribution to their 73.31 score. The Memobase finding (75.78
+> with NO vector search at all) suggests VEC_COT may not be the load-bearing
+> technique even in MemOS. We rank VEC_COT #1 because it directly addresses
+> MemDB's lowest-scoring category (cat-2 multi-hop F1=0.091, see MILESTONES.md
+> M7 Stage 2 section), not because of an empirical lift estimate. Re-evaluate
+> after first ablation in M8 Stream 4 implementation.
+
 ---
 
 ## What We Port and Why
@@ -38,7 +48,7 @@ Union → rerank. vs MemDB today which only probes with #4.
 
 ## Source Code Reference
 
-File: `/home/krolik/src/compete-research/memos/src/memos/memories/textual/tree_text_memory/retrieve/searcher.py`
+File: `github.com/MemTensor/MemOS/blob/main/src/memos/memories/textual/tree_text_memory/retrieve/searcher.py`
 
 ```python
 # Line 68: VEC_COT flag from search_strategy config

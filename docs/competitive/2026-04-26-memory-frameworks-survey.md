@@ -212,6 +212,13 @@
 
 ## Ranked Port-Targets
 
+### Why this ranking
+
+Port priorities map to M7 weak spots, not raw F1 numbers from competitors:
+- **#1 VEC_COT** addresses MemDB's lowest-scoring LoCoMo category — cat-2 multi-hop F1=0.091 (MILESTONES.md M7 Stage 2). Competitors confirm this matters: Zep* claims 66.04% multi-hop using graph traversal, Memobase only 46.88%. Whether VEC_COT specifically (vs alternative graph approaches) is the right port is an open question — see the caveat in port-target-vec-cot.md.
+- **#2 Profile context injection** addresses temporal/single-hop where Memobase 85.05% sets the public bar, vs MemDB temporal F1=0.201 in M7 Stage 2 (different metric, comparable shape).
+- **#3 expired_at soft-delete** is an indirect quality lift (cleaner retrieval) plus a major product win (point-in-time queries, undo, audit). Lift estimate is a planning assumption.
+
 | Rank | Source | Technique | Effort | Expected F1 Lift | Status |
 |------|--------|-----------|--------|------------------|--------|
 | 1 | MemOS | VEC_COT: embed each sub-question independently, union vectors for HNSW probe | M | +5-7 pts (complex multi-hop) | RECOMMEND M8 — S4 poised |

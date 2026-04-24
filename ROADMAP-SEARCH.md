@@ -132,11 +132,15 @@
 | Memobase v0.0.32 | 70.91 | 63.83 | 52.08 | 71.82 | 80.37 | Python | profile |
 | LangMem | 58.10 | 62.23 | 47.92 | 71.12 | 23.43 | Python | — |
 | OpenAI Memory | 52.75 | 63.79 | 42.92 | 62.29 | 21.71 | — | — |
-| **MemDB M7** | **~70** | — | — | — | — | **Go** | **HNSW+BM25+CE+Graph** |
 | **MemDB (цель)** | **> 76** | — | — | — | — | **Go** | **+VEC_COT+profile** |
 
-> *Zep* = updated numbers from Zep team, issue #101 in memobase repo. Original Zep = 65.99.
-> MemDB M7 = estimated from aggregate F1 0.238 hit@k 0.769 on 50-QA sample (not direct LLM Judge comparison; scale differs).
+> *Zep* = self-reported by Zep team in memobase repo issue #101, not independently re-benchmarked. Original Zep score was 65.99 (independently benchmarked by Memobase). Use with caution.
+
+**MemDB M7 — separate measurement (NOT LLM Judge, NOT directly comparable to the table above):**
+
+| System | Metric | Scope | Note |
+|--------|--------|-------|------|
+| MemDB M7 (single-conv F1 reference) | F1 0.238 / hit@k 0.769 on 199 QA conv-26 only | NOT directly comparable to LLM Judge — different metric, different scope |
 
 ### Путь к лидерству
 

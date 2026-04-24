@@ -40,7 +40,7 @@ Result: instead of `{"ADD": "User likes hiking"}` when "hiking" is already known
 
 ## Source Code Reference
 
-File: `/home/krolik/src/compete-research/memobase/src/server/api/memobase_server/controllers/modal/chat/extract.py`
+File: `github.com/memodb-io/memobase/blob/main/src/server/api/memobase_server/controllers/modal/chat/extract.py`
 
 ```python
 # Line 26-80: extract_topics with profile context injection
@@ -68,7 +68,7 @@ async def extract_topics(
     parsed_facts = parse_string_into_profiles(results)
 ```
 
-Taxonomy file: `/home/krolik/src/compete-research/memobase/src/server/api/memobase_server/prompts/user_profile_topics.py:9`
+Taxonomy file: `github.com/memodb-io/memobase/blob/main/src/server/api/memobase_server/prompts/user_profile_topics.py`
 ```python
 CANDIDATE_PROFILE_TOPICS = [
     UserProfileTopic("basic_info", sub_topics=["Name", "Age", "Gender", ...]),
