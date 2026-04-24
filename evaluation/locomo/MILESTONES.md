@@ -87,6 +87,29 @@ D1 shines on **accumulated longitudinal memories** where either (a) same items r
 
 Feature is correct, deployed, observable. Real measurement requires a multi-week prod cohort or a synthetic test that varies `valid_at` across ingested memories. Parking both as followups; not blocking D2.
 
+### 2026-04-24 — D2 multi-hop AGE graph (commit `ec27647d`, PR #36 + critical fix #37)
+
+Multi-hop expansion on `memory_edges` via recursive PG CTE (not AGE Cypher — memory_edges is plain table). Env-gated `MEMDB_SEARCH_MULTIHOP=true`. Enabled in prod via ops .env.
+
+**Critical companion fix (PR #37):** B1 migrations created `memory_edges` / `entity_edges` / `entity_nodes` / `user_configs` unqualified, which routed them to `ag_catalog` (first writable schema at the time). Go queries use `memos_graph.<name>` → silent 0-row results. Migration 0012 `ALTER TABLE ... SET SCHEMA memos_graph` preserves 114 live `memory_edges` + 62 `entity_nodes` + 7 `entity_edges`.
+
+| Metric | D1-OFF | D1+D2-ON | Delta |
+|---|---|---|---|
+| EM | 0.000 | 0.000 | +0.000 |
+| F1 | 0.010 | 0.010 | +0.000 |
+| semsim | 0.039 | 0.039 | +0.000 |
+| hit@20 | 0.700 | 0.700 | +0.000 |
+
+**Interpretation — honest zero delta, data-bound.** D2 is deployed, env-on, SQL verified on fixture graph. But:
+- For **conv-26__speaker_a** (the test subject) there are **zero `memory_edges` rows** after fresh ingest. Extractor creates edges asynchronously via scheduler workers which haven't run for this data yet — and even when they do, they create `MENTIONS_ENTITY` (Memory↔entity_nodes) not the Memory↔Memory relations D2 traverses.
+- Harness queries category 1 = single-hop; correct answer is already in top-20 from vector search alone — multi-hop expansion adds candidates that aren't relevant to the specific question.
+
+**What will show D2 impact**:
+1. Multi-hop questions (LoCoMo category 2) — answers requiring facts from 2+ sessions
+2. Sustained production use where scheduler reorganizer creates `RELATED` / `MERGED_INTO` edges from consolidation clusters (this is exactly D3's job)
+
+D2 works; its measurement is gated on D3 (hierarchical reorganizer that populates graph edges) and on expanded harness categories.
+
 ### Phase D measurement plan
 
 Each D task re-runs the harness after deploy and adds a `### YYYY-MM-DD — D<N> <name>` row showing delta vs `baseline-v1.1.0-post-p1.json`. Expected impact ballpark per Phase D plan:
