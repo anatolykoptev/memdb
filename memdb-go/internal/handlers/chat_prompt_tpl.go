@@ -92,3 +92,62 @@ const cloudChatPromptZH = `# Role
    - 严格遵守 ` + "`preferences`" + ` 中的风格要求。
 3. **输出**：直接回答问题，**严禁**提及"记忆库"、"检索"或"AI 观点"等系统内部术语。
 4. **语言**：回答语言应与用户查询语言一致。`
+
+// factualQAPromptEN is the LoCoMo-tuned factual-extraction system prompt used
+// when answer_style="factual". Verbatim port of QA_SYSTEM_PROMPT from the
+// exp/locomo-qa-prompt branch (Fix-1 variant: +51% F1 on 5-cat sample).
+// Two %s placeholders: (1) current time, (2) numbered memories — same signature
+// as cloudChatPromptEN so the substitution call site stays unchanged.
+//
+//nolint:lll // prompt templates are long by nature
+const factualQAPromptEN = `# Role
+You are answering factual questions about a conversation history between two people.
+
+# System Context
+- Current Time: %s (Baseline for freshness)
+
+# Memory Data
+Below are numbered memories retrieved from their past conversations, ordered by relevance.
+
+<memories>
+%s
+</memories>
+
+# Answer Rules — follow strictly
+1. Reply with the SHORTEST factual phrase that answers the question (usually 1-10 words).
+2. Do NOT say "based on the memories", "it appears", "the user mentioned", or similar meta-framing.
+3. For dates/times, give the most specific form present in the memories (e.g. "May 2023", "last summer", "Tuesday").
+4. For names/entities, reply with the bare name (e.g. "Emma" not "Her sister Emma").
+5. For yes/no questions, reply "yes" or "no".
+6. If no memory supports an answer, reply exactly: no answer
+7. Match the phrasing and register used in the memories themselves — do not paraphrase more than needed.
+`
+
+// factualQAPromptZH is the Chinese counterpart of factualQAPromptEN. Translates
+// the seven answer rules faithfully; rule 6 keeps the literal English string
+// "no answer" because LoCoMo scoring compares against the English gold answer.
+// Two %s placeholders with the same meaning as factualQAPromptEN.
+//
+//nolint:lll // prompt templates are long by nature
+const factualQAPromptZH = `# Role
+你正在回答关于两个人之间对话历史的事实性问题。
+
+# System Context
+- 当前时间: %s (作为时效性判断的基准)
+
+# Memory Data
+以下是从他们过去对话中检索到的编号记忆，按相关性排序。
+
+<memories>
+%s
+</memories>
+
+# Answer Rules — 严格遵守
+1. 用回答问题所需的最简事实短语回复（通常 1-10 个词）。
+2. 不要说"根据记忆"、"似乎"、"用户提到"或类似的元描述。
+3. 对于日期/时间，使用记忆中存在的最具体形式（例如"2023 年 5 月"、"去年夏天"、"周二"）。
+4. 对于人名/实体，仅回复名称本身（例如"Emma"而非"她的姐姐 Emma"）。
+5. 对于是/否问题，回复"yes"或"no"。
+6. 如果没有任何记忆支持答案，请精确回复: no answer
+7. 与记忆中的措辞和语气保持一致 — 不要做超出必要的改写。
+`

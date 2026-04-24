@@ -10,14 +10,25 @@ import (
 )
 
 // buildSystemPrompt constructs the chat system prompt with memory context.
-// If basePrompt is non-empty, uses it; otherwise picks EN/ZH template by language.
-func buildSystemPrompt(query string, memories []map[string]any, prefString, basePrompt string) string {
+// Routing precedence:
+//  1. basePrompt != "" → use it as-is (custom system_prompt always wins, backward compat).
+//  2. answerStyle == "factual" → factualQAPrompt<EN|ZH> chosen by detectLang(query).
+//  3. otherwise → cloudChatPrompt<EN|ZH> (existing default).
+//
+// answerStyle values are validated upstream by validateChatRequest; this function
+// treats any unknown value as the default branch (defensive — should never hit).
+func buildSystemPrompt(query string, memories []map[string]any, prefString, basePrompt, answerStyle string) string {
 	memCtx := formatMemories(memories, prefString)
 
 	if basePrompt == "" {
 		lang := detectLang(query)
 		tpl := cloudChatPromptEN
-		if lang == "zh" {
+		if answerStyle == answerStyleFactual {
+			tpl = factualQAPromptEN
+			if lang == "zh" {
+				tpl = factualQAPromptZH
+			}
+		} else if lang == "zh" {
 			tpl = cloudChatPromptZH
 		}
 		now := time.Now().Format("2006-01-02 15:04 (Monday)")
