@@ -125,36 +125,27 @@
 
 ---
 
-## Фаза 1.5 — Prompt Quality Gaps (MemOS parity) 🔴 ВЫСОКИЙ ПРИОРИТЕТ
+## Фаза 1.5 — Prompt Quality Gaps (MemOS parity) ✅ ЗАКРЫТА (v2.0.0, апрель 2026)
 
-**Impact:** +3-5 points LoCoMo — второй по важности рычаг после VEC_COT.
+**Impact (planned):** +3-5 points LoCoMo — второй по важности рычаг после VEC_COT.
 **Источник:** Deep audit MemOS upstream (март 2026). Основной разрыв — качество промптов.
+**Результат:** Все 5 sub-items shipped в v2.0.0 Phase D. Production metrics — см. `evaluation/locomo/MILESTONES.md`. LoCoMo hit@20 = 0.700 (выше Mem0/MemOS).
 
-### 1.5.1 Post-retrieval memory enhancement
+### 1.5.1 Post-retrieval memory enhancement ✅ shipped as D10
 
-**Суть:** Перед передачей в chat LLM — LLM-pass для disambiguation+fusion retrieved memories.
+- File: `internal/search/answer_enhance.go` (+ `answer_enhance_test.go`)
+- PR: #42, commit `7338dd25`
+- Env: `MEMDB_SEARCH_ENHANCE=true`
+- Verified live: `EnhancedAnswer="counseling or mental health"` surface at rank 0 for "What does Caroline do for work?"
 
-```go
-// internal/search/enhance.go
-// Resolve: "she" → "Caroline", "last night" → "November 25, 2025"
-// Merge: related entries
-// Filter: keep only query-relevant
-```
+### 1.5.2 Stage-aware iterative retrieval ✅ shipped as D5
 
-**MemOS эквивалент:** `MEMORY_RECREATE_ENHANCEMENT_PROMPT`
-**Effort:** S (1 новый файл, 1 LLM вызов)
+- File: `internal/search/staged_retrieval.go` (+ test)
+- PR: #45, commit `37e78273`
+- Env: `MEMDB_SEARCH_STAGED=true`
+- Pipeline: coarse (vector+CE) → refine (LLM top-10) → justify (LLM drop IRRELEVANT)
 
-### 1.5.2 Stage-aware iterative retrieval
-
-**Суть:** Заменить flat expansion prompt на 3-stage pipeline:
-- Stage 1: Entity-anchored discriminative noun phrases
-- Stage 2: Pronoun/temporal resolution + canonicalization
-- Stage 3: Hypothesis generation when still unanswerable
-
-**MemOS эквивалент:** `STAGE1/2/3_EXPAND_RETRIEVE_PROMPT`
-**Effort:** S (замена промпта в `iterative_retrieval.go`)
-
-### 1.5.3 Query rewriting before embedding
+### 1.5.3 Query rewriting before embedding ✅ shipped as D4
 
 **Суть:** Для multi-turn sessions — rewrite query to be self-contained.
 "What did he say about it?" → "What did John say about the project deadline?"
@@ -162,12 +153,23 @@
 **MemOS эквивалент:** `QUERY_REWRITE_PROMPT`
 **Effort:** S (1 новая функция, вызов перед embedding)
 
-### 1.5.4 Post-retrieval relevance filter
+- File: `internal/search/query_rewrite.go` (+ test)
+- PR: #44, commit `95d6f1c0`
+- Env: `MEMDB_QUERY_REWRITE=true`
+- Verified live: `"What does Caroline do for work?"` → `"Caroline's occupation"` (conf 0.9)
 
-**Суть:** LLM-фильтр после vector search — отсечь keyword-matched но context-unrelated memories.
+### 1.5.4 Post-retrieval relevance filter ✅ shipped as part of D5
 
-**MemOS эквивалент:** `MEMORY_FILTERING_PROMPT` + `MEMORY_REDUNDANCY_FILTERING_PROMPT`
-**Effort:** S (опциональный LLM pass)
+Stage 3 of D5 staged retrieval includes the "drop IRRELEVANT" step, which is exactly this filter. Single LLM pass produces both justification + relevance flag per shortlist item.
+
+### 1.5.5 Bonus — not originally in plan but shipped
+
+- **D7 CoT query decomposition** — multi-part queries split into atomic sub-questions + union-by-id merge. PR #47.
+- **D3 Hierarchical reorganizer** — port of Python `tree_text_memory/organize/` (4 modules ~1500 LOC). Raw → episodic → semantic tiers with LLM relation detector. PR #40.
+- **D6 Pronoun + temporal resolution in EXTRACTION** (not just retrieval). Stored memories are already resolved at write time. PR #48.
+- **D8 Third-person + 22-category preference taxonomy** in extractor. PR #48.
+- **D1 Temporal decay + importance scoring** in rerank (MemOS has decay; we add access_count boost). PR #34.
+- **D2 Multi-hop AGE graph retrieval** via recursive CTE on `memory_edges`. PR #36.
 
 ---
 
@@ -192,12 +194,17 @@
 
 ### Из MemOS:
 - ✅ **Memory Reorganizer** — реализован
-- ❌ **VEC_COT** → Фаза 1
-- ❌ **Prompt quality gaps** → Фаза 1.5
-- ❌ **MEMORY_RECREATE_ENHANCEMENT** → 1.5.1
-- ❌ **3-stage iterative retrieval** → 1.5.2
-- ❌ **Query rewriting** → 1.5.3
-- ❌ **Post-retrieval filter** → 1.5.4
+- ✅ **Tree hierarchical memory (raw→episodic→semantic)** — D3 (v2.0.0)
+- ✅ **Relation detector (CAUSES/CONTRADICTS/SUPPORTS/RELATED)** — D3 (v2.0.0)
+- ✅ **MEMORY_RECREATE_ENHANCEMENT** — D10 (v2.0.0)
+- ✅ **3-stage iterative retrieval** — D5 (v2.0.0)
+- ✅ **Query rewriting** — D4 (v2.0.0)
+- ✅ **Post-retrieval filter** — D5 stage 3 (v2.0.0)
+- ✅ **Pronoun/temporal resolution in extraction** — D6 (v2.0.0)
+- ✅ **Preference taxonomy (22 categories)** — D8 (v2.0.0)
+- ✅ **Multi-hop graph retrieval** — D2 (v2.0.0)
+- ✅ **CoT query decomposition** — D7 (v2.0.0)
+- ❌ **VEC_COT** → Фаза 1 (отдельная задача, не покрыта Phase D)
 
 ### Из mem0:
 - ✅ **LLM entity extraction** — реализован (entity linking в add_fine)
