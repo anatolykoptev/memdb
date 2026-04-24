@@ -46,6 +46,11 @@ func main() {
 	logger := slog.New(logHandler)
 	slog.SetDefault(logger)
 
+	// Apply GOMEMLIMIT from container cgroup limit if not set explicitly.
+	// Must run before any significant allocation so the GC pressure is active
+	// from the start of ingest.  See gomemlimit.go for detection logic.
+	applyGoMemLimit(logger)
+
 	logger.Info("starting memdb-go",
 		slog.String("config", cfg.String()),
 	)
