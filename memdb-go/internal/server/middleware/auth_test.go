@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -174,5 +175,113 @@ func TestAuth_InvalidServiceSecret(t *testing.T) {
 	// Should fall through to check Bearer token, which is missing → 401
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+// ── CheckServiceSecret unit tests ─────────────────────────────────────────────
+
+func TestCheckServiceSecret_NotPresented(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	presented, valid := CheckServiceSecret(req, "secret")
+	if presented {
+		t.Error("expected presented=false when no header is set")
+	}
+	if valid {
+		t.Error("expected valid=false when no header is set")
+	}
+}
+
+func TestCheckServiceSecret_EmptyExpected(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(HeaderServiceSecret, "anything")
+	presented, valid := CheckServiceSecret(req, "")
+	if presented {
+		t.Error("expected presented=false when expected is empty")
+	}
+	if valid {
+		t.Error("expected valid=false when expected is empty")
+	}
+}
+
+func TestCheckServiceSecret_Valid(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(HeaderServiceSecret, "my-secret")
+	presented, valid := CheckServiceSecret(req, "my-secret")
+	if !presented {
+		t.Error("expected presented=true")
+	}
+	if !valid {
+		t.Error("expected valid=true for correct secret")
+	}
+}
+
+func TestCheckServiceSecret_WrongValue(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(HeaderServiceSecret, "wrong")
+	presented, valid := CheckServiceSecret(req, "correct")
+	if !presented {
+		t.Error("expected presented=true (header was set)")
+	}
+	if valid {
+		t.Error("expected valid=false for wrong secret")
+	}
+}
+
+func TestCheckServiceSecret_LegacyHeader(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(HeaderInternalServiceLeg, "legacy-secret")
+	presented, valid := CheckServiceSecret(req, "legacy-secret")
+	if !presented {
+		t.Error("expected presented=true via legacy header")
+	}
+	if !valid {
+		t.Error("expected valid=true via legacy header")
+	}
+}
+
+func TestCheckServiceSecret_CanonicalWinsOverLegacy(t *testing.T) {
+	// When both headers are set, canonical header value is used.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(HeaderServiceSecret, "canonical")
+	req.Header.Set(HeaderInternalServiceLeg, "legacy")
+	presented, valid := CheckServiceSecret(req, "canonical")
+	if !presented || !valid {
+		t.Error("canonical header should win when both are set")
+	}
+}
+
+// ── WriteAuthError unit tests ──────────────────────────────────────────────────
+
+func TestWriteAuthError_StatusAndBody(t *testing.T) {
+	w := httptest.NewRecorder()
+	WriteAuthError(w, http.StatusUnauthorized, "missing token")
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected application/json content-type, got %q", ct)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"code":401`) {
+		t.Errorf("body missing code field: %s", body)
+	}
+	if !strings.Contains(body, `missing token`) {
+		t.Errorf("body missing message: %s", body)
+	}
+	if !strings.Contains(body, `"data":null`) {
+		t.Errorf("body missing data:null: %s", body)
+	}
+}
+
+func TestWriteAuthError_403(t *testing.T) {
+	w := httptest.NewRecorder()
+	WriteAuthError(w, http.StatusForbidden, "invalid API key")
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("expected 403, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"code":403`) {
+		t.Errorf("body missing code 403: %s", w.Body.String())
 	}
 }

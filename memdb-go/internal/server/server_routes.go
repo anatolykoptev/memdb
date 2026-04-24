@@ -1,12 +1,11 @@
 package server
 
 import (
-	"crypto/subtle"
-	"fmt"
 	"net/http"
 	_ "net/http/pprof" // side-effect: registers /debug/pprof/* on http.DefaultServeMux
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/handlers"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/server/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -120,14 +119,8 @@ func pprofHandler(serviceSecret string) http.Handler {
 			http.Error(w, "pprof disabled: INTERNAL_SERVICE_SECRET not configured", http.StatusServiceUnavailable)
 			return
 		}
-		got := r.Header.Get("X-Service-Secret")
-		if got == "" {
-			got = r.Header.Get("X-Internal-Service")
-		}
-		if subtle.ConstantTimeCompare([]byte(got), []byte(serviceSecret)) != 1 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			fmt.Fprint(w, `{"code":401,"message":"X-Service-Secret required","data":null}`)
+		if _, valid := middleware.CheckServiceSecret(r, serviceSecret); !valid {
+			middleware.WriteAuthError(w, http.StatusUnauthorized, "X-Service-Secret required")
 			return
 		}
 		http.DefaultServeMux.ServeHTTP(w, r)

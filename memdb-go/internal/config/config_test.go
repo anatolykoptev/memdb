@@ -93,3 +93,38 @@ func TestLoad_CrossEncoderEmptyURLDisables(t *testing.T) {
 		t.Errorf("empty env should fall back to default, got %q", cfg.CrossEncoderURL)
 	}
 }
+
+// ── MEMDB_DEFAULT_ANSWER_STYLE tests ──────────────────────────────────────────
+
+func TestLoad_DefaultAnswerStyle_Unset(t *testing.T) {
+	unsetEnv(t, "MEMDB_DEFAULT_ANSWER_STYLE")
+	cfg := Load()
+	if cfg.DefaultAnswerStyle != "" {
+		t.Errorf("unset env should produce empty default, got %q", cfg.DefaultAnswerStyle)
+	}
+}
+
+func TestLoad_DefaultAnswerStyle_Conversational(t *testing.T) {
+	setEnv(t, "MEMDB_DEFAULT_ANSWER_STYLE", "conversational")
+	cfg := Load()
+	if cfg.DefaultAnswerStyle != "conversational" {
+		t.Errorf("expected conversational, got %q", cfg.DefaultAnswerStyle)
+	}
+}
+
+func TestLoad_DefaultAnswerStyle_Factual(t *testing.T) {
+	setEnv(t, "MEMDB_DEFAULT_ANSWER_STYLE", "factual")
+	cfg := Load()
+	if cfg.DefaultAnswerStyle != "factual" {
+		t.Errorf("expected factual, got %q", cfg.DefaultAnswerStyle)
+	}
+}
+
+func TestLoad_DefaultAnswerStyle_BadValueFallback(t *testing.T) {
+	setEnv(t, "MEMDB_DEFAULT_ANSWER_STYLE", "loud")
+	cfg := Load()
+	// Bad value must fall back to conversational (no crash, warn + fallback).
+	if cfg.DefaultAnswerStyle != "conversational" {
+		t.Errorf("bad value should fall back to conversational, got %q", cfg.DefaultAnswerStyle)
+	}
+}

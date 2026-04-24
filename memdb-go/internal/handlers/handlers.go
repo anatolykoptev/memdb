@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
@@ -32,6 +33,7 @@ type BufferConfig struct {
 type Handler struct {
 	python        *rpc.PythonClient
 	logger        *slog.Logger
+	cfg           *config.Config               // nil = no config-driven defaults
 	postgres      *db.Postgres                 // nil = not initialized, fall back to proxy
 	qdrant        *db.Qdrant                   // nil = not initialized
 	redis         *db.Redis                    // nil = not initialized
@@ -59,6 +61,10 @@ func NewHandler(python *rpc.PythonClient, logger *slog.Logger) *Handler {
 		logger: logger,
 	}
 }
+
+// SetConfig stores the full application config so handlers can read
+// server-wide defaults (e.g. DefaultAnswerStyle) at request time.
+func (h *Handler) SetConfig(c *config.Config) { h.cfg = c }
 
 // SetDBClients sets optional database clients for native handlers.
 // When set, supported endpoints use direct DB access instead of proxying.
