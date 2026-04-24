@@ -1,0 +1,37 @@
+name: Conventional PR title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title matches conventional-commit format
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            chore
+            docs
+            test
+            refactor
+            perf
+            security
+            build
+            ci
+            sec
+            deps
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: |
+            The subject (the part after the colon) must not start with a capital letter.
+            Good: "fix(db): handle agtype nil"
+            Bad:  "fix(db): Handle agtype nil"
