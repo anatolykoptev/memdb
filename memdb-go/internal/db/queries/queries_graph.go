@@ -69,13 +69,13 @@ WHERE properties->('info'::text)->>(('content_hash'::text)) = ANY($1)
 // Args: $1 = ids (text[]), $2 = now (text, ISO timestamp)
 const IncrRetrievalCount = `
 UPDATE %[1]s."Memory"
-SET properties = ag_catalog.agtype_in(
+SET properties = (
         (properties::text::jsonb || jsonb_build_object(
             'retrieval_count',   COALESCE((properties->>(('retrieval_count'::text)))::int, 0) + 1,
             'last_retrieved_at', $2::text,
             'importance_score',  LEAST(2.0, COALESCE((properties->>(('importance_score'::text)))::float, 1.0) + 0.1)
         ))::text
-    )
+    )::agtype
 WHERE id = ANY($1)
   AND properties->>(('status'::text)) = 'activated'`
 
@@ -84,12 +84,12 @@ WHERE id = ANY($1)
 // Args: $1 = user_name (text)
 const DecayImportanceScores = `
 UPDATE %[1]s."Memory"
-SET properties = ag_catalog.agtype_in(
+SET properties = (
         (properties::text::jsonb || jsonb_build_object(
             'importance_score', GREATEST(0.0,
                 COALESCE((properties->>(('importance_score'::text)))::float, 1.0) * 0.95)
         ))::text
-    )
+    )::agtype
 WHERE properties->>(('user_name'::text)) = $1
   AND properties->>(('status'::text)) = 'activated'
   AND properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory')`
@@ -99,9 +99,9 @@ WHERE properties->>(('user_name'::text)) = $1
 // Args: $1 = user_name (text), $2 = threshold (float), $3 = now (text, ISO timestamp)
 const AutoArchiveLowImportance = `
 UPDATE %[1]s."Memory"
-SET properties = ag_catalog.agtype_in(
+SET properties = (
         (properties::text::jsonb || jsonb_build_object('status', 'archived', 'updated_at', $3::text))::text
-    )
+    )::agtype
 WHERE properties->>(('user_name'::text)) = $1
   AND properties->>(('status'::text)) = 'activated'
   AND properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory')
