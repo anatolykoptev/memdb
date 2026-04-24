@@ -16,7 +16,7 @@ import (
 type memoryNodeProps struct {
 	ID         string
 	Memory     string
-	MemoryType string // "LongTermMemory" | "UserMemory" | "WorkingMemory"
+	MemoryType string // "LongTermMemory" | "UserMemory" | "PreferenceMemory" | "WorkingMemory"
 	UserName   string // cube partition key (upstream MemOS convention; holds cube_id)
 	UserID     string // person identity — Phase 2 split from cube_id
 	AgentID    string // agent scope
@@ -28,6 +28,14 @@ type memoryNodeProps struct {
 	CustomTags []string
 	Sources    []map[string]any
 	Background string // "[working_binding:<wm_id>]" for LTM nodes; "" for WM nodes
+
+	// D6: verbatim original utterance, preserved alongside the resolved form in
+	// Memory. Empty string means no raw text was provided by the extractor
+	// (e.g. non-LLM callers like manual add).
+	RawText string
+	// D8: one of the 22-key MemOS preference taxonomy. Only set for PreferenceMemory
+	// entries; empty otherwise.
+	PreferenceCategory string
 }
 
 // buildNodeProps constructs the JSONB properties dict matching the Python format.
@@ -35,7 +43,7 @@ func buildNodeProps(p memoryNodeProps) map[string]any {
 	tags := []string{"mode:" + p.Mode}
 	tags = append(tags, p.CustomTags...)
 
-	return map[string]any{
+	props := map[string]any{
 		"id":          p.ID,
 		"memory":      p.Memory,
 		"memory_type": p.MemoryType,
@@ -67,6 +75,18 @@ func buildNodeProps(p memoryNodeProps) map[string]any {
 		"hierarchy_level":  "raw",
 		"parent_memory_id": nil,
 	}
+	// D6: include raw_text only when provided — keeps payload lean for callers
+	// that don't pass it (manual add, legacy paths).
+	if p.RawText != "" {
+		props["raw_text"] = p.RawText
+	}
+	// D8: preference_category populated only for PreferenceMemory entries.
+	// Null-by-default keeps JSON size small and makes property introspection
+	// explicit about which rows are categorised.
+	if p.PreferenceCategory != "" {
+		props["preference_category"] = p.PreferenceCategory
+	}
+	return props
 }
 
 // buildMemoryProperties is a convenience wrapper for fast-mode (created_at == updated_at).
