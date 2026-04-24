@@ -417,6 +417,48 @@ ranking after this ablation:
 - **Reconsider 4096-char sliding window** as product-level design decision:
   is it right for QA workloads at all, or should it be configurable per-mode?
 
+### 2026-04-25 — M7 Stream B: ingest mode=raw (baseline, no prompt fix)
+
+Switched `ingest.py` from `mode="fast"` (4096-char sliding-window extractor) to
+`mode="raw"` (per-message granularity). Added `INGEST_MODE` env-override constant
+and `cleanup_locomo_cubes.py` idempotent cleanup script.
+
+**Memory count before/after for conv-26:**
+
+| Speaker | fast mode (prior) | raw mode | Delta |
+|---------|-------------------|----------|-------|
+| speaker_a LTM | ~3 windows | **58 messages** | +55 |
+| speaker_b LTM | ~3 windows | **58 messages** | +55 |
+
+All 58 LTM vertices confirmed in AGE graph with pgvector embeddings (4100 bytes each).
+
+**Manual hit@20 probe (5 questions, speaker_a, top_k=20):**
+
+| Query | text_mem hits | pref_mem hits | Relevant content in results? |
+|-------|--------------|--------------|------------------------------|
+| "What LGBTQ+ events has Caroline participated in?" | 0 | 6 | ✅ yes (LGBTQ support group, school speech) |
+| "What career path has Caroline decided to pursue?" | 0 | 6 | ✅ yes (counseling / mental health) |
+| "What activities does Melanie partake in?" | 0 | 6 | ✅ yes (pottery, painting, charity race) |
+| "pride parade LGBTQ support group" | 0 | 6 | ✅ yes (support group entry at rank 0) |
+| "counseling mental health transgender" | 0 | 6 | ✅ yes (education / exploration entry) |
+
+**Interpretation.** `pref_mem` (PostgreSQL extracted preference summaries) returns
+relevant content for all 5 probes. `text_mem` (AGE graph cosine search over 58 raw
+LTM nodes) returns 0 — same pattern as M6 pre-regression where "hit@k collapsed to 0
+on all categories." 58 per-message memories ARE stored with embeddings; the AGE
+cosine search path for text_mem has a separate threshold/routing issue. Full harness
+score (Stream E) will quantify the hit@20 impact. pref_mem serving 6 relevant hits per
+question is qualitatively better than the ~3-window fast-mode collapse.
+
+**Ingest command used:**
+
+```bash
+export MEMDB_SERVICE_SECRET=$(docker exec memdb-go env | grep INTERNAL_SERVICE_SECRET | cut -d= -f2)
+python3 evaluation/locomo/scripts/cleanup_locomo_cubes.py --sample
+python3 evaluation/locomo/ingest.py --sample
+# → mode='raw', sessions=3, messages=58, errors=[], duration_sec=77.48
+```
+
 ## How to record a new milestone
 
 ```bash
