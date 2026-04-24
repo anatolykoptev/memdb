@@ -115,7 +115,7 @@ func ChunkTasks(ctx context.Context, client *Client, conversation string) ([]Tas
 		return nil, fmt.Errorf("chunk tasks: %w", err)
 	}
 
-	raw = stripFences(raw)
+	raw = string(StripJSONFence([]byte(raw)))
 
 	var chunks []TaskChunk
 	if err := json.Unmarshal([]byte(raw), &chunks); err != nil {
@@ -148,7 +148,7 @@ func ExtractSkill(ctx context.Context, client *Client, taskMessages string, exis
 		return nil, fmt.Errorf("extract skill: %w", err)
 	}
 
-	raw = stripFences(raw)
+	raw = string(StripJSONFence([]byte(raw)))
 
 	// LLM returns "null" when no skill is extractable
 	if raw == "null" || raw == "" {
