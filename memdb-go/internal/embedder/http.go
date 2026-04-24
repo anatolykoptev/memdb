@@ -80,29 +80,36 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 	}
 
 	url := h.baseURL + "/v1/embeddings"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+
+	// Retry transient failures: client timeout under load, 429/503/504 from
+	// embed-server back-pressure. Exponential backoff via shared withRetry
+	// helper (200ms → 400ms → 800ms, cap 5s, 3 attempts total). Non-retriable
+	// errors (4xx validation, unmarshal) fail fast.
+	respBody, err := withRetry(ctx, defaultRetry, func() ([]byte, int, error) {
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		if reqErr != nil {
+			return nil, 0, fmt.Errorf("http embedder: create request: %w", reqErr)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, doErr := h.client.Do(req)
+		if doErr != nil {
+			return nil, 0, fmt.Errorf("http embedder: request: %w", doErr)
+		}
+		defer resp.Body.Close()
+
+		rb, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, resp.StatusCode, fmt.Errorf("http embedder: read response: %w", readErr)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, resp.StatusCode, fmt.Errorf("http embedder: status %d: %s", resp.StatusCode, string(rb))
+		}
+		return rb, resp.StatusCode, nil
+	})
 	if err != nil {
 		outcome = "error"
-		return nil, fmt.Errorf("http embedder: create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := h.client.Do(req)
-	if err != nil {
-		outcome = "error"
-		return nil, fmt.Errorf("http embedder: request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		outcome = "error"
-		return nil, fmt.Errorf("http embedder: read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		outcome = "error"
-		return nil, fmt.Errorf("http embedder: status %d: %s", resp.StatusCode, string(respBody))
+		return nil, err
 	}
 
 	var parsed httpEmbedResponse
