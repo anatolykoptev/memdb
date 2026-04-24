@@ -58,9 +58,31 @@ Both are already committed (~4.7 MB total). No external download required.
 ### Minimal-viable sample
 
 For fast iteration / CI, `sample_conversations.json` + `sample_gold.json`
-contain a tiny hand-crafted 2-conversation / 20-QA subset derived from
-`locomo10.json` (deterministic via seed=0). Running `make eval-locomo`
-without args uses this sample — finishes in <60s once memdb-go is up.
+contain a 1-conversation / 10-QA subset derived from `locomo10.json`
+(conv-26, category-1 single-hop questions, deterministic by sort order).
+Running `make eval-locomo` without args uses this sample — finishes in <60s
+once memdb-go is up.
+
+### 5-category sample (M2 expanded harness)
+
+Setting `LOCOMO_CATEGORIES=1,2,3,4,5` (or passing `--categories=1,2,3,4,5`
+to `ingest.py` and `query.py`) enables the expanded 50-QA sample: **10 QAs
+per category from conv-26**.
+
+| Category | Type | Phase D features exercised |
+|----------|------|---------------------------|
+| 1 | Single-hop recall | D1 (basic retrieval fix), D3 (entity linking) |
+| 2 | Multi-hop reasoning | D2 (multi-hop reranker), D5 (cross-session links) |
+| 3 | Temporal reasoning | D6 (temporal resolution), D8 (session timestamps) |
+| 4 | Open-domain / summarisation | D7 (CoT decomposition), D4 (consolidation) |
+| 5 | Adversarial ("I don't know") | D10 (hallucination suppression) |
+
+Category 5 gold answers come from `adversarial_answer` in the dataset
+(the correct refusal answer).
+
+**Backward compatibility**: the default (`--categories=1` or no env var)
+still uses the committed `sample_gold.json` (10 category-1 QAs), so
+existing baseline comparisons remain valid. The 5-category mode is opt-in.
 
 Full run (all 10 convs) → `LOCOMO_FULL=1 make eval-locomo`. Expect
 5–30 min depending on add/search latency.
@@ -91,6 +113,16 @@ make eval-locomo
 This writes `evaluation/locomo/results/<commit-sha>.json` with per-QA
 scores and aggregate stats.
 
+### 5-category sample run
+
+```bash
+LOCOMO_CATEGORIES=1,2,3,4,5 make eval-locomo
+```
+
+This runs 50 QAs from conv-26 (10 per category 1-5) and produces a
+results JSON with both `aggregate` and `by_category` top-level keys.
+Enables per-category measurement of Phase D features (see table above).
+
 ### Full LoCoMo run
 
 ```bash
@@ -100,13 +132,19 @@ LOCOMO_FULL=1 MEMDB_URL=http://localhost:8080 make eval-locomo
 ### Manual steps (for debugging)
 
 ```bash
-# 1. Ingest
+# 1. Ingest (--categories flag is accepted but doesn't affect what's ingested)
 python3 evaluation/locomo/ingest.py --sample --memdb-url http://localhost:8080
 
-# 2. Query
+# 2. Query — default (10 category-1 QAs)
 python3 evaluation/locomo/query.py --sample \
     --memdb-url http://localhost:8080 \
     --out evaluation/locomo/results/predictions.json
+
+# 2. Query — 5-category expanded (50 QAs)
+python3 evaluation/locomo/query.py --sample \
+    --memdb-url http://localhost:8080 \
+    --categories=1,2,3,4,5 \
+    --out evaluation/locomo/results/predictions-5cat.json
 
 # 3. Score
 python3 evaluation/locomo/score.py \
