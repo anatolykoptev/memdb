@@ -8,6 +8,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
@@ -31,9 +32,29 @@ type reorgRunner interface {
 	RunTreeReorgForCube(ctx context.Context, cubeID string)
 }
 
-// treeHierarchyEnabledFn is scheduler.TreeHierarchyEnabled; extracted as a var
-// so tests can swap it without touching process env.
-var treeHierarchyEnabledFn = defaultTreeHierarchyEnabled
+// treeHierarchyEnabledFn is scheduler.TreeHierarchyEnabled; extracted behind
+// an atomic.Pointer so tests can swap it without touching process env and
+// without racing the background goroutine that reads it post-dispatch.
+var treeHierarchyEnabledFn = func() bool {
+	fn := treeHierarchyEnabledPtr.Load()
+	if fn == nil {
+		return defaultTreeHierarchyEnabled()
+	}
+	return (*fn)()
+}
+
+var treeHierarchyEnabledPtr atomic.Pointer[func() bool]
+
+// SetTreeHierarchyEnabledForTest is test-only: installs a flag stub and
+// returns a restore func. Safe to call from parallel tests because the
+// underlying pointer is atomic. Exporting is acceptable since the function
+// is called solely from tests in the same package plus gives a single
+// well-named seam for anything external.
+func SetTreeHierarchyEnabledForTest(fn func() bool) (restore func()) {
+	prev := treeHierarchyEnabledPtr.Load()
+	treeHierarchyEnabledPtr.Store(&fn)
+	return func() { treeHierarchyEnabledPtr.Store(prev) }
+}
 
 // reorgRequest is the JSON body for POST /product/admin/reorg.
 type reorgRequest struct {
