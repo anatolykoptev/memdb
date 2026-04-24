@@ -103,6 +103,16 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	// Step 4: Merge per type
 	textMerged, skillMerged, toolMerged := s.mergeSearchResults(psr, bfsResults, internetMerged, p)
 
+	// Step 4.25: D2 multi-hop graph expansion (env-gated by
+	// MEMDB_SEARCH_MULTIHOP=true; default off). Walks memory_edges up to
+	// 2 hops from current text_mem candidates, injecting neighbors with
+	// 0.8^hop score decay. Pool capped at 2× original size. Runs before
+	// CONTRADICTS so expanded neighbors also get the penalty if they are
+	// contradicted by a seed. No-op when disabled or on DB error.
+	t0 = time.Now()
+	textMerged = expandViaGraph(ctx, s.postgres, s.logger, textMerged, p.CubeID, p.UserName, p.AgentID)
+	multihopDur := time.Since(t0)
+
 	// Step 4.5: CONTRADICTS penalty
 	t0 = time.Now()
 	textMerged = s.applyContradictsPenalty(ctx, textMerged, p)
@@ -138,6 +148,7 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 		slog.Duration("embed", embedDur),
 		slog.Duration("parallel_db", parallelDur),
 		slog.Duration("bfs", bfsDur),
+		slog.Duration("multihop", multihopDur),
 		slog.Duration("contradicts", contradictsDur),
 		slog.Duration("ce_rerank", ceRerankDur),
 		slog.Duration("llm_rerank", llmRerankDur),
