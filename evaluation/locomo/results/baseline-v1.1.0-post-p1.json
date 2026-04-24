@@ -1,0 +1,162 @@
+{
+  "meta": {
+    "commit_sha": "74659311d60347a19c44a5baf713d8fed764449a",
+    "predictions_file": "/home/krolik/src/MemDB/evaluation/locomo/results/predictions-post-p1-write-fix-74659311.json",
+    "retrieval_only": true,
+    "semsim_mode": "bow",
+    "memdb_url": "http://localhost:8080",
+    "top_k": 20,
+    "speaker": "a",
+    "total": 10,
+    "errors": 0,
+    "skip_chat": true
+  },
+  "aggregate": {
+    "em": 0.0,
+    "f1": 0.009920833006731519,
+    "semsim": 0.03897012520312924,
+    "hit_at_k": 0.7,
+    "n": 10,
+    "by_category": {
+      "1": {
+        "em": 0.0,
+        "f1": 0.009920833006731519,
+        "semsim": 0.03897012520312924,
+        "hit_at_k": 0.7,
+        "n": 10
+      }
+    }
+  },
+  "per_qa": [
+    {
+      "conv_id": "conv-26",
+      "question_idx": 0,
+      "question": "What LGBTQ+ events has Caroline participated in?",
+      "category": 1,
+      "gold_answer": "Pride parade, school speech, support group",
+      "prediction": "user: [2023-05-08T13:56:00+00:00]: Caroline: Hey Mel! Good to see you! How have you been?\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Hey Caroline! Good to see you! I'm swamped with the kids & work. What's up with you? Anything new?\nuser: [2023-05-08T13:56:00+00:00]: Caroline: I went to a LGBTQ support group yesterday and it was so powerful.\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Wow, that's cool, Caroline! What happened that was so awesome? Did you hear any inspiring stories?\nuse",
+      "em": 0.0,
+      "f1": 0.012383900928792569,
+      "semsim": 0.07317917228850435,
+      "hit_at_k": 1.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 1,
+      "question": "What activities does Melanie partake in?",
+      "category": 1,
+      "gold_answer": "pottery, camping, painting, swimming",
+      "prediction": "user: [2023-05-08T13:56:00+00:00]: Caroline: Hey Mel! Good to see you! How have you been?\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Hey Caroline! Good to see you! I'm swamped with the kids & work. What's up with you? Anything new?\nuser: [2023-05-08T13:56:00+00:00]: Caroline: I went to a LGBTQ support group yesterday and it was so powerful.\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Wow, that's cool, Caroline! What happened that was so awesome? Did you hear any inspiring stories?\nuse",
+      "em": 0.0,
+      "f1": 0.012461059190031154,
+      "semsim": 0.05121475197315839,
+      "hit_at_k": 1.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 2,
+      "question": "What activities has Melanie done with her family?",
+      "category": 1,
+      "gold_answer": "Pottery, painting, camping, museum, swimming, hiking",
+      "prediction": "user: [2023-05-08T13:56:00+00:00]: Caroline: Hey Mel! Good to see you! How have you been?\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Hey Caroline! Good to see you! I'm swamped with the kids & work. What's up with you? Anything new?\nuser: [2023-05-08T13:56:00+00:00]: Caroline: I went to a LGBTQ support group yesterday and it was so powerful.\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Wow, that's cool, Caroline! What happened that was so awesome? Did you hear any inspiring stories?\nuse",
+      "em": 0.0,
+      "f1": 0.012383900928792569,
+      "semsim": 0.04181666987914534,
+      "hit_at_k": 1.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 3,
+      "question": "What career path has Caroline decided to persue?",
+      "category": 1,
+      "gold_answer": "counseling or mental health for Transgender people",
+      "prediction": "user: [2023-05-08T13:56:00+00:00]: Caroline: Hey Mel! Good to see you! How have you been?\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Hey Caroline! Good to see you! I'm swamped with the kids & work. What's up with you? Anything new?\nuser: [2023-05-08T13:56:00+00:00]: Caroline: I went to a LGBTQ support group yesterday and it was so powerful.\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Wow, that's cool, Caroline! What happened that was so awesome? Did you hear any inspiring stories?\nuse",
+      "em": 0.0,
+      "f1": 0.043209876543209874,
+      "semsim": 0.0871081053292489,
+      "hit_at_k": 1.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 4,
+      "question": "What did Caroline research?",
+      "category": 1,
+      "gold_answer": "Adoption agencies",
+      "prediction": "user: [2023-05-08T13:56:00+00:00]: Caroline: Hey Mel! Good to see you! How have you been?\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Hey Caroline! Good to see you! I'm swamped with the kids & work. What's up with you? Anything new?\nuser: [2023-05-08T13:56:00+00:00]: Caroline: I went to a LGBTQ support group yesterday and it was so powerful.\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Wow, that's cool, Caroline! What happened that was so awesome? Did you hear any inspiring stories?\nuse",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 5,
+      "question": "What events has Caroline participated in to help children?",
+      "category": 1,
+      "gold_answer": "Mentoring program, school speech",
+      "prediction": "user: [2023-05-08T13:56:00+00:00]: Caroline: Hey Mel! Good to see you! How have you been?\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Hey Caroline! Good to see you! I'm swamped with the kids & work. What's up with you? Anything new?\nuser: [2023-05-08T13:56:00+00:00]: Caroline: I went to a LGBTQ support group yesterday and it was so powerful.\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Wow, that's cool, Caroline! What happened that was so awesome? Did you hear any inspiring stories?\nuse",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 6,
+      "question": "What has Melanie painted?",
+      "category": 1,
+      "gold_answer": "Horse, sunset, sunrise",
+      "prediction": "user: [2023-05-08T13:56:00+00:00]: Caroline: Hey Mel! Good to see you! How have you been?\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Hey Caroline! Good to see you! I'm swamped with the kids & work. What's up with you? Anything new?\nuser: [2023-05-08T13:56:00+00:00]: Caroline: I went to a LGBTQ support group yesterday and it was so powerful.\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Wow, that's cool, Caroline! What happened that was so awesome? Did you hear any inspiring stories?\nuse",
+      "em": 0.0,
+      "f1": 0.00625,
+      "semsim": 0.014784425419091456,
+      "hit_at_k": 1.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 7,
+      "question": "What instruments does Melanie play?",
+      "category": 1,
+      "gold_answer": "clarinet and violin",
+      "prediction": "user: [2023-05-08T13:56:00+00:00]: Caroline: Hey Mel! Good to see you! How have you been?\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Hey Caroline! Good to see you! I'm swamped with the kids & work. What's up with you? Anything new?\nuser: [2023-05-08T13:56:00+00:00]: Caroline: I went to a LGBTQ support group yesterday and it was so powerful.\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Wow, that's cool, Caroline! What happened that was so awesome? Did you hear any inspiring stories?\nuse",
+      "em": 0.0,
+      "f1": 0.00625,
+      "semsim": 0.1034909779336402,
+      "hit_at_k": 1.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 8,
+      "question": "What is Caroline's identity?",
+      "category": 1,
+      "gold_answer": "Transgender woman",
+      "prediction": "user: [2023-05-08T13:56:00+00:00]: Caroline: Hey Mel! Good to see you! How have you been?\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Hey Caroline! Good to see you! I'm swamped with the kids & work. What's up with you? Anything new?\nuser: [2023-05-08T13:56:00+00:00]: Caroline: I went to a LGBTQ support group yesterday and it was so powerful.\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Wow, that's cool, Caroline! What happened that was so awesome? Did you hear any inspiring stories?\nuse",
+      "em": 0.0,
+      "f1": 0.006269592476489028,
+      "semsim": 0.018107149208503707,
+      "hit_at_k": 1.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 9,
+      "question": "What is Caroline's relationship status?",
+      "category": 1,
+      "gold_answer": "Single",
+      "prediction": "user: [2023-05-08T13:56:00+00:00]: Caroline: Hey Mel! Good to see you! How have you been?\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Hey Caroline! Good to see you! I'm swamped with the kids & work. What's up with you? Anything new?\nuser: [2023-05-08T13:56:00+00:00]: Caroline: I went to a LGBTQ support group yesterday and it was so powerful.\nassistant: [2023-05-08T13:56:00+00:00]: Melanie: Wow, that's cool, Caroline! What happened that was so awesome? Did you hear any inspiring stories?\nuse",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    }
+  ]
+}
