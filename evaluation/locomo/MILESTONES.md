@@ -49,6 +49,24 @@ Fixed three cascading blockers that together gated all retrieval:
 
 **Written as `results/baseline-v1.1.0-post-p1.json`** — from here on, the real baseline for measuring D1-D10 lift. The earlier all-zero `baseline-v1.1.0.json` is retained as a historical marker of the pre-fix state.
 
+### 2026-04-24 — post follow-ups F5/F7/E1/E2/E3 (commit `742b2b6a`)
+
+Closes pre-D follow-ups without changing retrieval behaviour:
+- **F5** — Search SELECTs project `properties->>'id'` (UUID) not graphid (PR #31). Closes the API-surface consistency gap P1 implementer deferred.
+- **F7** — Drop legacy `public.*` duplicate tables via migration 0010 (PR #30).
+- **E1** — memdb-go embedder wraps HTTP calls in `withRetry` — exp backoff on 30s timeout, 429, 503, 502, 504 (PR #32).
+- **E2** — embed-server queue-depth gauge + batch-wait histogram + 429 backpressure at 80% MAX_QUEUE_SIZE (ox-embed-server #14). Closed-loop: E1 retries E2's 429.
+- **E3** — Prometheus alert rules for EmbedQueueSaturation / EmbedRejections / EmbedHighLatency / EmbedBatchWaitHigh (krolik-server #9).
+
+| Metric | post-P1 | post-follow-ups | Delta |
+|---|---|---|---|
+| EM | 0.000 | 0.000 | +0.000 |
+| F1 | 0.010 | 0.010 | +0.000 |
+| semsim | 0.039 | 0.039 | +0.000 |
+| hit@20 | 0.700 | 0.700 | +0.000 |
+
+**Interpretation.** Zero delta confirms follow-ups are behaviour-preserving: observability additions + API consistency + resilience under load — not retrieval changes. A false regression appeared mid-session because stale conv-* Memory rows written between P1 and F5 contained graphid-format `working_binding` links that post-F5 queries no longer matched. Flushing and re-ingesting restored parity. Going forward, any re-ingest-after-query-change is a standard procedure — captured in the harness.
+
 ### Phase D measurement plan
 
 Each D task re-runs the harness after deploy and adds a `### YYYY-MM-DD — D<N> <name>` row showing delta vs `baseline-v1.1.0-post-p1.json`. Expected impact ballpark per Phase D plan:
