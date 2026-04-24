@@ -23,6 +23,7 @@ type postgresClient interface {
 	GraphRecallByTags(ctx context.Context, cubeID, personID string, memoryTypes []string, tags []string, agentID string, limit int) ([]db.GraphRecallResult, error)
 	GraphRecallByEdge(ctx context.Context, seedIDs []string, relation, cubeID, personID string, limit int) ([]db.GraphRecallResult, error)
 	GraphBFSTraversal(ctx context.Context, seedIDs []string, cubeID, personID string, memoryTypes []string, depth, limit int, agentID string) ([]db.GraphRecallResult, error)
+	MultiHopEdgeExpansion(ctx context.Context, seedIDs []string, cubeID, personID string, depth, limit int, agentID string) ([]db.GraphExpansion, error)
 	FindEntitiesByNormalizedID(ctx context.Context, normalizedIDs []string, cubeID, personID string) ([]string, error)
 	GetMemoriesByEntityIDs(ctx context.Context, entityIDs []string, cubeID, personID string, limit int) ([]db.GraphRecallResult, error)
 	IncrRetrievalCount(ctx context.Context, ids []string, now string) error

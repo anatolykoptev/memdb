@@ -134,6 +134,10 @@ func (m *mockPostgres) GraphBFSTraversal(_ context.Context, _ []string, cubeID, 
 	return nil, nil
 }
 
+func (m *mockPostgres) MultiHopEdgeExpansion(_ context.Context, _ []string, _, _ string, _, _ int, _ string) ([]db.GraphExpansion, error) {
+	return nil, nil
+}
+
 func (m *mockPostgres) FindEntitiesByNormalizedID(_ context.Context, _ []string, cubeID, personID string) ([]string, error) {
 	m.findEntitiesCubeID = cubeID
 	m.findEntitiesPersonID = personID
