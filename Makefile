@@ -1,4 +1,4 @@
-.PHONY: test test-migrations-fresh-db
+.PHONY: test test-migrations-fresh-db eval-locomo eval-locomo-full
 
 install:
 	poetry install --extras all --with dev --with test
@@ -28,3 +28,12 @@ openapi:
 
 test-migrations-fresh-db:
 	bash memdb-go/scripts/test-migrations-fresh-db.sh
+
+# LoCoMo evaluation harness — retrieval quality measurement for memdb-go.
+# Requires memdb-go stack to be running (MEMDB_URL, default localhost:8080).
+# See evaluation/locomo/README.md.
+eval-locomo:
+	bash evaluation/locomo/run.sh
+
+eval-locomo-full:
+	LOCOMO_FULL=1 bash evaluation/locomo/run.sh

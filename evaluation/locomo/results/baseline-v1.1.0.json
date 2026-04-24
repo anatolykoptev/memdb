@@ -1,0 +1,171 @@
+{
+  "meta": {
+    "commit_sha": "cdc5573e4b8a6a19d6856f1d89633b31bd5c1cb6",
+    "target_tag": "v1.1.0",
+    "predictions_file": "evaluation/locomo/results/predictions-baseline.json",
+    "retrieval_only": true,
+    "semsim_mode": "bow",
+    "memdb_url": "http://localhost:8080",
+    "top_k": 20,
+    "speaker": "a",
+    "total": 10,
+    "errors": 0,
+    "skip_chat": true,
+    "sample_scope": "1 conversation (conv-26), first 3 sessions, 58 messages, 10 category-1 QAs. Deterministic subset of evaluation/data/locomo/locomo10.json.",
+    "known_findings": [
+      "BLOCKER: retrieval returns 0 memories for all 10 QAs on current main. HTTP 200 responses mask storage failures.",
+      "memdb-go logs show 'ensure cube failed: column cube_id does not exist' and 'native add failed: function ag_catalog.agtype_in(text) does not exist'. AGE graph write path appears broken against the current postgres/AGE image.",
+      "Explicit single /product/add calls (see README smoketest) DO store explicit_preference memories correctly, but the full LoCoMo multi-turn flow fails.",
+      "This baseline INTENTIONALLY captures the broken state so Phase D fixes (D1-D8, D10) produce a measurable delta.",
+      "Full LoCoMo (10 convs, ~1990 QAs) requires LOCOMO_FULL=1 and hours of runtime — not captured in this initial baseline."
+    ]
+  },
+  "aggregate": {
+    "em": 0.0,
+    "f1": 0.0,
+    "semsim": 0.0,
+    "hit_at_k": 0.0,
+    "n": 10,
+    "by_category": {
+      "1": {
+        "em": 0.0,
+        "f1": 0.0,
+        "semsim": 0.0,
+        "hit_at_k": 0.0,
+        "n": 10
+      }
+    }
+  },
+  "per_qa": [
+    {
+      "conv_id": "conv-26",
+      "question_idx": 0,
+      "question": "What LGBTQ+ events has Caroline participated in?",
+      "category": 1,
+      "gold_answer": "Pride parade, school speech, support group",
+      "prediction": "",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 1,
+      "question": "What activities does Melanie partake in?",
+      "category": 1,
+      "gold_answer": "pottery, camping, painting, swimming",
+      "prediction": "",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 2,
+      "question": "What activities has Melanie done with her family?",
+      "category": 1,
+      "gold_answer": "Pottery, painting, camping, museum, swimming, hiking",
+      "prediction": "",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 3,
+      "question": "What career path has Caroline decided to persue?",
+      "category": 1,
+      "gold_answer": "counseling or mental health for Transgender people",
+      "prediction": "",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 4,
+      "question": "What did Caroline research?",
+      "category": 1,
+      "gold_answer": "Adoption agencies",
+      "prediction": "",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 5,
+      "question": "What events has Caroline participated in to help children?",
+      "category": 1,
+      "gold_answer": "Mentoring program, school speech",
+      "prediction": "",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 6,
+      "question": "What has Melanie painted?",
+      "category": 1,
+      "gold_answer": "Horse, sunset, sunrise",
+      "prediction": "",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 7,
+      "question": "What instruments does Melanie play?",
+      "category": 1,
+      "gold_answer": "clarinet and violin",
+      "prediction": "",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 8,
+      "question": "What is Caroline's identity?",
+      "category": 1,
+      "gold_answer": "Transgender woman",
+      "prediction": "",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    },
+    {
+      "conv_id": "conv-26",
+      "question_idx": 9,
+      "question": "What is Caroline's relationship status?",
+      "category": 1,
+      "gold_answer": "Single",
+      "prediction": "",
+      "em": 0.0,
+      "f1": 0.0,
+      "semsim": 0.0,
+      "hit_at_k": 0.0,
+      "error": null
+    }
+  ]
+}

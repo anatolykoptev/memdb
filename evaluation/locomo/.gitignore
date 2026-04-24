@@ -1,0 +1,11 @@
+# The top-level .gitignore excludes *.json globally (line ~178).
+# Re-admit the files this harness needs.
+
+# Checked-in fixtures
+!sample_conversations.json
+!sample_gold.json
+
+# Only commit baseline-*.json. Per-run scored results and
+# intermediate prediction files are transient and stay local.
+results/*.json
+!results/baseline-*.json
