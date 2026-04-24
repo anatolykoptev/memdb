@@ -95,7 +95,7 @@ WHERE id = ANY($1)
 // Args: $1 = memory_id (properties->>(('id'::text))), $2 = new content (text)
 const UpdateMemoryContent = `
 UPDATE %[1]s."Memory"
-SET properties = ag_catalog.agtype_in(jsonb_set(properties::text::jsonb, '{memory}', to_jsonb($2::text))::text)
+SET properties = (jsonb_set(properties::text::jsonb, '{memory}', to_jsonb($2::text))::text)::agtype
 WHERE id = $1
   AND properties->>(('status'::text)) = 'activated'`
 
@@ -107,13 +107,13 @@ WHERE id = $1
 // Args: $1 = memory_id (properties->>(('id'::text))), $2 = merged_into_id (text), $3 = updated_at (text)
 const SoftDeleteMerged = `
 UPDATE %[1]s."Memory"
-SET properties = ag_catalog.agtype_in(
+SET properties = (
         (properties::text::jsonb || jsonb_build_object(
             'status',         'merged',
             'merged_into_id', $2::text,
             'updated_at',     $3::text
         ))::text
-    )
+    )::agtype
 WHERE id = $1
   AND properties->>(('status'::text)) = 'activated'`
 
@@ -146,7 +146,7 @@ WHERE id = ANY($1)`
 //	$3 = properties JSON (bytes), $4 = embedding vector literal (text)
 const UpdateMemoryPropsAndEmbedding = `
 UPDATE %[1]s."Memory"
-SET properties = ag_catalog.agtype_in($3::text),
+SET properties = $3::text::agtype,
     embedding  = $4::halfvec(1024)
 WHERE id = $1
   AND properties->>(('user_name'::text)) = $2

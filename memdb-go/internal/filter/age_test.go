@@ -39,13 +39,13 @@ func TestAGE_ScalarStringEq(t *testing.T) {
 
 func TestAGE_ScalarNumericEq(t *testing.T) {
 	got := buildFromJSON(t, `{"confidence": 42}`)
-	want := []string{confProp + ` = ag_catalog.agtype_in('42')`}
+	want := []string{confProp + ` = '42'::agtype`}
 	eq(t, got, want)
 }
 
 func TestAGE_ScalarNumericGt(t *testing.T) {
 	got := buildFromJSON(t, `{"confidence": {"gt": 5}}`)
-	want := []string{confProp + ` > ag_catalog.agtype_in('5')`}
+	want := []string{confProp + ` > '5'::agtype`}
 	eq(t, got, want)
 }
 
