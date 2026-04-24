@@ -3,7 +3,10 @@
 // (see formatters_handler.py, single_cube.py, composite_cube.py).
 package search
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // metadataExtraFields is the number of standard fields added on top of the
 // original props when building the metadata map (ref_id, embedding, usage, id).
@@ -89,6 +92,11 @@ func FormatMemoryItem(props map[string]any, includeEmbedding bool) map[string]an
 	metadata["ref_id"] = refID
 	metadata["id"] = memoryID
 	metadata["memory"] = props["memory"]
+
+	// D1 normalization: expose access_count as float64 for the rerank
+	// importance multiplier. Backfilled to 0 by migration 0011, but older
+	// properties blobs may still lack it — default to 0 here defensively.
+	metadata["access_count"] = intAsFloat(props, "access_count", 0)
 
 	// Build the top-level item.
 	memory, _ := props["memory"].(string)
@@ -202,4 +210,33 @@ func extractMemoryType(item map[string]any) string {
 	}
 	mt, _ := meta["memory_type"].(string)
 	return mt
+}
+
+// intAsFloat extracts a numeric JSON field from props and returns it as
+// float64. Handles the shapes produced by jsonb → map[string]any:
+// float64 (numbers), int/int64 (direct Go), and string (agtype coercions).
+// Returns def when missing, nil, or unparseable.
+func intAsFloat(props map[string]any, key string, def float64) float64 {
+	v, ok := props[key]
+	if !ok || v == nil {
+		return def
+	}
+	switch x := v.(type) {
+	case float64:
+		return x
+	case int:
+		return float64(x)
+	case int64:
+		return float64(x)
+	case string:
+		if x == "" {
+			return def
+		}
+		if f, err := strconv.ParseFloat(x, 64); err == nil {
+			return f
+		}
+		return def
+	default:
+		return def
+	}
 }
