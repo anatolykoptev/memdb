@@ -417,6 +417,71 @@ ranking after this ablation:
 - **Reconsider 4096-char sliding window** as product-level design decision:
   is it right for QA workloads at all, or should it be configurable per-mode?
 
+### 2026-04-25 — M7 Stream B: ingest mode=raw (baseline, no prompt fix)
+
+Switched `ingest.py` from `mode="fast"` (4096-char sliding-window extractor) to
+`mode="raw"` (per-message granularity). Added `INGEST_MODE` env-override constant
+and `cleanup_locomo_cubes.py` idempotent cleanup script.
+
+**Memory count before/after for conv-26:**
+
+| Speaker | fast mode (prior) | raw mode | Delta |
+|---------|-------------------|----------|-------|
+| speaker_a LTM | ~3 windows | **58 messages** | +55 |
+| speaker_b LTM | ~3 windows | **58 messages** | +55 |
+
+All 58 LTM vertices confirmed in AGE graph with pgvector embeddings (4100 bytes each).
+
+**Manual hit@20 probe — initial (missing auth header, showed false 0s):**
+
+| Query | text_mem hits | pref_mem hits | Relevant content in results? |
+|-------|--------------|--------------|------------------------------|
+| "What LGBTQ+ events has Caroline participated in?" | 0 | 6 | ✅ yes (LGBTQ support group, school speech) |
+| "What career path has Caroline decided to pursue?" | 0 | 6 | ✅ yes (counseling / mental health) |
+| "What activities does Melanie partake in?" | 0 | 6 | ✅ yes (pottery, painting, charity race) |
+| "pride parade LGBTQ support group" | 0 | 6 | ✅ yes (support group entry at rank 0) |
+| "counseling mental health transgender" | 0 | 6 | ✅ yes (education / exploration entry) |
+
+**Root cause of text_mem=0:** The probe curl omitted the `X-Service-Secret` header (→
+401 masked as empty response), and the search was using the default `DefaultRelativity=0.5`
+threshold. Short verbatim dialogue turns ("Caroline: Hey Mel!") embedded as raw-mode
+memories produce cosine ~0.15-0.30 against question-form queries — well below 0.5.
+
+**Fix applied (PR #63 follow-up commit):** `query.py` now sets
+`LOCOMO_RETRIEVAL_THRESHOLD` (env `LOCOMO_RETRIEVAL_THRESHOLD`, backward-compat alias
+`LOCOMO_SEARCH_RELATIVITY`, default `0.0`). Search endpoint receives
+`"relativity": LOCOMO_RETRIEVAL_THRESHOLD` (field `searchRequest.Relativity`); chat
+endpoint receives `"threshold": LOCOMO_RETRIEVAL_THRESHOLD` (field
+`nativeChatRequest.Threshold`). Search endpoint reads `relativity`; chat endpoint reads
+`threshold` (server-side terminology). Harness sets both via `LOCOMO_RETRIEVAL_THRESHOLD`.
+This is a **harness-only override** — production clients keep the server-side defaults
+(`DefaultRelativity=0.5` for search, hardcoded `0.30` post-filter for chat in
+`memdb-go/internal/handlers/chat_helpers.go`).
+
+**Manual hit@20 probe — after fix (LOCOMO_RETRIEVAL_THRESHOLD=0.0, authenticated, top_k=20):**
+
+| Query | text_mem hits | pref_mem hits |
+|-------|--------------|--------------|
+| "What LGBTQ+ events has Caroline participated in?" | **20** | 6 |
+| "What activities does Melanie partake in?" | **20** | 6 |
+| "What activities has Melanie done with her family?" | **20** | 6 |
+| "What career path has Caroline decided to persue?" | **20** | 6 |
+| "What did Caroline research?" | **20** | 6 |
+
+All 5 probe questions return 20 text_mem hits (top_k cap). Some queries had ≥1 raw turn
+whose cosine score cleared 0.5; others had none — confirming raw-turn embeddings are
+scattered across the default relativity (0.5) boundary. `LOCOMO_RETRIEVAL_THRESHOLD=0.0`
+bypasses the threshold entirely and surfaces all 58 per-message memories in ranked order.
+
+**Ingest command used:**
+
+```bash
+export MEMDB_SERVICE_SECRET=$(docker exec memdb-go env | grep INTERNAL_SERVICE_SECRET | cut -d= -f2)
+python3 evaluation/locomo/scripts/cleanup_locomo_cubes.py --sample
+python3 evaluation/locomo/ingest.py --sample
+# → mode='raw', sessions=3, messages=58, errors=[], duration_sec=77.48
+```
+
 ## How to record a new milestone
 
 ```bash

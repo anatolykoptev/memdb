@@ -33,6 +33,12 @@ from pathlib import Path
 
 import requests
 
+# LoCoMo is a factual QA benchmark; per-message granularity (raw) lets question
+# embeddings match atomic facts instead of 4096-char aggregated windows that
+# collapse 58 messages into ~3 coarse chunks, killing per-question cosine match.
+# Env LOCOMO_INGEST_MODE overrides for experiments (e.g. "fast" to compare).
+INGEST_MODE = os.getenv("LOCOMO_INGEST_MODE", "raw")
+
 
 def build_headers() -> dict:
     """Auth headers from env: MEMDB_API_KEY (Bearer) or MEMDB_SERVICE_SECRET."""
@@ -147,7 +153,7 @@ def ingest_one_session(
         "session_id": session_id,
         "messages": chat_messages,
         "async_mode": "sync",  # deterministic: block until stored
-        "mode": "fast",
+        "mode": INGEST_MODE,
     }
     resp = requests.post(
         f"{memdb_url.rstrip('/')}/product/add",
@@ -252,6 +258,7 @@ def main() -> int:
     conversations = list(data.values()) if isinstance(data, dict) else data
 
     cat_label = ",".join(str(c) for c in categories)
+    print(f"[ingest] mode={INGEST_MODE!r}", flush=True)
     print(f"[ingest] categories={cat_label!r} (ingest always pushes full conversation)", flush=True)
 
     start = time.time()
