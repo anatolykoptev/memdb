@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `src/memdb/graph_dbs/polardb/schema.py` deleted entirely. `SchemaMixin` removed from `PolarDBGraphDB` mixin chain in `__init__.py`. All DDL management lives in `memdb-go/migrations/` (8 versioned files via the runner).
+
 ## [1.1.0] — 2026-04-23
 
 ### Highlights
