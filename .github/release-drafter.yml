@@ -98,6 +98,7 @@ version-resolver:
 exclude-labels:
   - 'skip-changelog'
   - 'no-release-note'
+  - 'changelog-sync'   # auto-sync PRs from changelog-sync.yml
 
 change-template: '- $TITLE (#$NUMBER) @$AUTHOR'
 change-title-escapes: '\<*_&'
