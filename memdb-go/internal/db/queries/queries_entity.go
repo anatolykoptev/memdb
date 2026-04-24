@@ -54,11 +54,14 @@ WHERE user_name = $1
 // Bi-temporal filter: only returns edges where invalid_at IS NULL (currently valid facts).
 // Invalidated edges (from deleted/superseded memories) are excluded from recall.
 // Args: $1 = user_name (text), $2 = user_id (text), $3 = entity_ids (text[]), $4 = limit (int)
+//
+// Returned id is the stable property UUID (properties->>'id'), matching
+// memory_edges.from_id which also stores property UUIDs.
 const GetMemoriesByEntityIDs = `
-SELECT m.id::text,
+SELECT m.properties->>(('id'::text)) AS memory_id,
        (m.properties::text::jsonb - 'sources')::text
 FROM %[1]s."Memory" m
-JOIN memory_edges e ON m.id::text = e.from_id
+JOIN memory_edges e ON m.properties->>(('id'::text)) = e.from_id
 WHERE e.to_id = ANY($3)
   AND e.relation = 'MENTIONS_ENTITY'
   AND e.invalid_at IS NULL

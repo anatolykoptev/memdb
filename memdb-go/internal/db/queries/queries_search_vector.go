@@ -16,8 +16,11 @@ package queries
 //	$4 = memory_types (text[]),
 //	$5 = limit (int),
 //	$6 = agent_id (text, '' for any)
+//
+// Returns the stable property UUID (properties->>'id'), NOT the AGE graphid —
+// callers mix this ID with write-path / handler code which store property UUIDs.
 const VectorSearch = `
-SELECT id::text,
+SELECT properties->>(('id'::text)) AS memory_id,
        (properties::text::jsonb - 'sources')::text,
        1 - (embedding::halfvec(1024) <=> $1::halfvec(1024)) AS score,
        embedding::text
@@ -43,7 +46,7 @@ LIMIT $5`
 //	$5 = limit (int),
 //	$6 = agent_id (text, '' for any)
 const VectorSearchMultiCube = `
-SELECT id::text,
+SELECT properties->>(('id'::text)) AS memory_id,
        (properties::text::jsonb - 'sources')::text,
        1 - (embedding::halfvec(1024) <=> $1::halfvec(1024)) AS score,
        embedding::text
@@ -68,7 +71,7 @@ LIMIT $5`
 //	$6 = cutoff ISO timestamp (text),
 //	$7 = agent_id (text, '' for any)
 const VectorSearchWithCutoff = `
-SELECT id::text,
+SELECT properties->>(('id'::text)) AS memory_id,
        (properties::text::jsonb - 'sources')::text,
        1 - (embedding::halfvec(1024) <=> $1::halfvec(1024)) AS score,
        embedding::text

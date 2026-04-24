@@ -14,8 +14,11 @@ package queries
 //	$4 = memory_types (text[]),
 //	$5 = limit (int),
 //	$6 = agent_id (text, '' for any)
+//
+// Returns the stable property UUID (properties->>'id'), NOT the AGE graphid —
+// callers mix this ID with write-path / handler code which store property UUIDs.
 const FulltextSearch = `
-SELECT id::text,
+SELECT properties->>(('id'::text)) AS memory_id,
        (properties::text::jsonb - 'sources')::text,
        ts_rank(properties_tsvector_zh, to_tsquery('simple', $1)) AS rank
 FROM %[1]s."Memory"
@@ -39,7 +42,7 @@ LIMIT $5`
 //	$6 = cutoff ISO timestamp (text),
 //	$7 = agent_id (text, '' for any)
 const FulltextSearchWithCutoff = `
-SELECT id::text,
+SELECT properties->>(('id'::text)) AS memory_id,
        (properties::text::jsonb - 'sources')::text,
        ts_rank(properties_tsvector_zh, to_tsquery('simple', $1)) AS rank
 FROM %[1]s."Memory"
