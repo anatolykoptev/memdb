@@ -40,6 +40,8 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const (
@@ -94,11 +96,19 @@ func RunStagedRetrieval(ctx context.Context, logger *slog.Logger, query string, 
 	// Stage 2: refinement
 	shortlist, err := stagedStage2Refine(ctx, query, candidates, cfg)
 	if err != nil {
+		searchMx().D5Staged.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("stage", "2_refine"),
+			attribute.String("outcome", "error"),
+		))
 		if logger != nil {
 			logger.Debug("staged stage2 failed, returning original", slog.Any("error", err))
 		}
 		return items
 	}
+	searchMx().D5Staged.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("stage", "2_refine"),
+		attribute.String("outcome", "success"),
+	))
 	if len(shortlist) == 0 {
 		return items
 	}
@@ -106,17 +116,31 @@ func RunStagedRetrieval(ctx context.Context, logger *slog.Logger, query string, 
 	// Stage 3: justification
 	justified, err := stagedStage3Justify(ctx, query, shortlist, candidates, cfg)
 	if err != nil {
+		searchMx().D5Staged.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("stage", "3_justify"),
+			attribute.String("outcome", "fallback"),
+		))
 		if logger != nil {
 			logger.Debug("staged stage3 failed, using stage2 output as final", slog.Any("error", err))
 		}
 		// Fall back to stage 2 without justification filtering.
 		return reorderByIDs(items, shortlist)
 	}
+	searchMx().D5Staged.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("stage", "3_justify"),
+		attribute.String("outcome", "success"),
+	))
 
 	relevantIDs := make([]string, 0, len(justified))
 	for _, j := range justified {
-		if j.Relevant && j.ID != "" {
+		if j.ID == "" {
+			continue
+		}
+		if j.Relevant {
+			searchMx().D5Justified.Add(ctx, 1, metric.WithAttributes(attribute.String("relevance", "relevant")))
 			relevantIDs = append(relevantIDs, j.ID)
+		} else {
+			searchMx().D5Justified.Add(ctx, 1, metric.WithAttributes(attribute.String("relevance", "irrelevant")))
 		}
 	}
 	if len(relevantIDs) == 0 {

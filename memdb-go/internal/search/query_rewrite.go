@@ -30,6 +30,8 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const (
@@ -82,12 +84,15 @@ type QueryRewriteResult struct {
 func RewriteQueryForRetrieval(ctx context.Context, query, nowISO string, cfg QueryRewriteConfig) QueryRewriteResult {
 	result := QueryRewriteResult{Original: query, Rewritten: query}
 	if !queryRewriteEnabled() || cfg.APIURL == "" {
+		searchMx().D4Rewrite.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
 		return result
 	}
 	if len(query) > queryRewriteMaxOrigLen {
+		searchMx().D4Rewrite.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
 		return result
 	}
 	if len(strings.Fields(query)) < queryRewriteMinTokens {
+		searchMx().D4Rewrite.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
 		return result
 	}
 
@@ -95,12 +100,15 @@ func RewriteQueryForRetrieval(ctx context.Context, query, nowISO string, cfg Que
 
 	rewritten, conf, err := callRewriteLLM(ctx, userMsg, cfg)
 	if err != nil {
+		searchMx().D4Rewrite.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "error")))
 		result.Err = err
 		return result
 	}
 	if strings.TrimSpace(rewritten) == "" || conf < queryRewriteMinConf {
+		searchMx().D4Rewrite.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "low_confidence")))
 		return result
 	}
+	searchMx().D4Rewrite.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "rewritten")))
 	result.Rewritten = rewritten
 	result.Confidence = conf
 	result.Used = true

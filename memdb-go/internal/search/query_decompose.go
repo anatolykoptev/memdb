@@ -27,11 +27,14 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const (
@@ -71,15 +74,18 @@ func cotDecomposeEnabled() bool {
 func DecomposeQuery(ctx context.Context, logger *slog.Logger, query string, cfg CoTConfig) []string {
 	original := []string{query}
 	if !cotDecomposeEnabled() || cfg.APIURL == "" {
+		searchMx().D7CoT.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
 		return original
 	}
 	wordCount := len(strings.Fields(query))
 	if wordCount < cotMinQueryWords {
+		searchMx().D7CoT.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
 		return original
 	}
 
 	subs, err := callCoTLLM(ctx, query, cfg)
 	if err != nil {
+		searchMx().D7CoT.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "error")))
 		if logger != nil {
 			logger.Debug("cot decompose failed, using original", slog.Any("error", err))
 		}
@@ -93,15 +99,21 @@ func DecomposeQuery(ctx context.Context, logger *slog.Logger, query string, cfg 
 		}
 	}
 	if len(cleaned) == 0 {
+		searchMx().D7CoT.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "atomic")))
 		return original
 	}
 	// LLM returned a single item equal to the original → atomic query.
 	if len(cleaned) == 1 && strings.EqualFold(cleaned[0], strings.TrimSpace(query)) {
+		searchMx().D7CoT.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "atomic")))
 		return original
 	}
 	if len(cleaned) > cotMaxSubqueries {
 		cleaned = cleaned[:cotMaxSubqueries]
 	}
+	searchMx().D7CoT.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("outcome", "decomposed"),
+		attribute.String("subq_count", strconv.Itoa(len(cleaned))),
+	))
 	if logger != nil {
 		logger.Info("cot decompose applied",
 			slog.String("original", query),
