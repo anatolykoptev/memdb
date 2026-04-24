@@ -88,7 +88,7 @@ func TestExpandViaGraph_Disabled_IsNoOp(t *testing.T) {
 		returnExpansions: []db.GraphExpansion{{ID: "x", Hop: 1, SeedID: "seed-0"}},
 	}
 	seeds := mkSeeds(3)
-	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, "cube", "user", "")
+	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, nil, "cube", "user", "")
 	if pg.callCount != 0 {
 		t.Fatalf("DB called while disabled: callCount=%d", pg.callCount)
 	}
@@ -105,7 +105,7 @@ func TestExpandViaGraph_Disabled_IsNoOp(t *testing.T) {
 func TestExpandViaGraph_EmptyInput(t *testing.T) {
 	t.Setenv("MEMDB_SEARCH_MULTIHOP", "true")
 	pg := &mockExpansionPG{}
-	got := expandViaGraph(context.Background(), pg, discardTestLogger(), nil, "cube", "user", "")
+	got := expandViaGraph(context.Background(), pg, discardTestLogger(), nil, nil, "cube", "user", "")
 	if pg.callCount != 0 {
 		t.Fatalf("DB called for empty input: callCount=%d", pg.callCount)
 	}
@@ -117,7 +117,7 @@ func TestExpandViaGraph_EmptyInput(t *testing.T) {
 func TestExpandViaGraph_NilPostgres(t *testing.T) {
 	t.Setenv("MEMDB_SEARCH_MULTIHOP", "true")
 	seeds := mkSeeds(2)
-	got := expandViaGraph(context.Background(), nil, discardTestLogger(), seeds, "cube", "user", "")
+	got := expandViaGraph(context.Background(), nil, discardTestLogger(), seeds, nil, "cube", "user", "")
 	if len(got) != len(seeds) {
 		t.Fatalf("len(got)=%d want %d", len(got), len(seeds))
 	}
@@ -127,7 +127,7 @@ func TestExpandViaGraph_DBError_FallsBack(t *testing.T) {
 	t.Setenv("MEMDB_SEARCH_MULTIHOP", "true")
 	pg := &mockExpansionPG{returnErr: errors.New("boom")}
 	seeds := mkSeeds(2)
-	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, "cube", "user", "")
+	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, nil, "cube", "user", "")
 	if pg.callCount != 1 {
 		t.Fatalf("expected 1 DB call, got %d", pg.callCount)
 	}
@@ -146,7 +146,7 @@ func TestExpandViaGraph_HopDecay(t *testing.T) {
 		},
 	}
 	seeds := []MergedResult{{ID: "seed-0", Score: 1.0}}
-	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, "cube", "user", "")
+	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, nil, "cube", "user", "")
 
 	// With origSize=1 and cap=2, we expect [seed-0, one of n1/n2]. But
 	// the higher-scoring hop-1 neighbor (0.8) wins over hop-2 (0.64).
@@ -187,7 +187,7 @@ func TestExpandViaGraph_CappedAt2x(t *testing.T) {
 		}
 	}
 	pg := &mockExpansionPG{returnExpansions: expansions}
-	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, "cube", "user", "")
+	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, nil, "cube", "user", "")
 
 	if len(got) != 20 {
 		t.Fatalf("expected cap=20, got %d", len(got))
@@ -216,7 +216,7 @@ func TestExpandViaGraph_DuplicateOfSeed_Ignored(t *testing.T) {
 	pg := &mockExpansionPG{returnExpansions: []db.GraphExpansion{
 		{ID: "seed-0", Hop: 1, SeedID: "seed-0"},
 	}}
-	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, "cube", "user", "")
+	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, nil, "cube", "user", "")
 	if len(got) != 1 {
 		t.Fatalf("duplicate of seed merged: len=%d", len(got))
 	}
@@ -233,7 +233,7 @@ func TestExpandViaGraph_OrphanSeedIDSkipped(t *testing.T) {
 	pg := &mockExpansionPG{returnExpansions: []db.GraphExpansion{
 		{ID: "n1", Hop: 1, SeedID: "seed-99"},
 	}}
-	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, "cube", "user", "")
+	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, nil, "cube", "user", "")
 	if len(got) != 1 {
 		t.Fatalf("orphan-seed expansion leaked: len=%d %+v", len(got), got)
 	}

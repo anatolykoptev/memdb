@@ -22,11 +22,15 @@ type GraphRecallResult struct {
 // Hop = minimum hop distance from any seed (1-based; seeds themselves are
 // excluded from output). SeedID = the seed whose walk first reached this
 // node (used by the caller to inherit score with 0.8^hop penalty).
+// Embedding = the neighbor's pgvector value (parsed from text), used by
+// expandViaGraph to score via cosine vs the query (M8 fix). Nil when the
+// stored embedding column is NULL or fails to parse.
 type GraphExpansion struct {
-	ID         string // property UUID of the reached neighbor
-	Properties string // raw JSON properties (sources stripped)
-	Hop        int    // minimum hop distance from any seed (>= 1)
-	SeedID     string // the seed property UUID that reached this node first
+	ID         string    // property UUID of the reached neighbor
+	Properties string    // raw JSON properties (sources stripped)
+	Hop        int       // minimum hop distance from any seed (>= 1)
+	SeedID     string    // the seed property UUID that reached this node first
+	Embedding  []float32 // pgvector parsed from "[...]" — empty when unset/parse-fail
 }
 
 // GraphRecallByEdge returns memory nodes reachable from seed IDs via directed edges of a given relation.
@@ -144,9 +148,14 @@ func (p *Postgres) MultiHopEdgeExpansion(ctx context.Context, seedIDs []string, 
 	var results []GraphExpansion
 	for rows.Next() {
 		var r GraphExpansion
-		if err := rows.Scan(&r.ID, &r.Properties, &r.Hop, &r.SeedID); err != nil {
+		var embText string
+		if err := rows.Scan(&r.ID, &r.Properties, &r.Hop, &r.SeedID, &embText); err != nil {
 			return nil, fmt.Errorf("multi-hop edge expansion scan: %w", err)
 		}
+		// Parse pgvector text form ("[0.1,0.2,...]") into []float32. ParseVectorString
+		// returns nil on empty / unparseable input, which is fine — expandViaGraph
+		// then falls back to the hop-decayed RRF score for that item.
+		r.Embedding = ParseVectorString(embText)
 		results = append(results, r)
 	}
 	return results, rows.Err()

@@ -155,10 +155,10 @@ LIMIT $6`
 
 // MultiHopEdgeExpansion performs a depth-limited BFS over the memory_edges
 // table starting from a set of seed memory property UUIDs. Returns each
-// reachable neighbor together with its minimum hop distance and the seed
-// it was first reached from. Used by the D2 multi-hop expansion step
-// (post-vector-search) to inject graph neighbors into the candidate pool
-// before CE rerank.
+// reachable neighbor together with its minimum hop distance, the seed it
+// was first reached from, and the neighbor's pgvector embedding. Used by
+// the D2 multi-hop expansion step (post-vector-search) to inject graph
+// neighbors into the candidate pool before CE rerank.
 //
 // Traversal is undirected: an edge (a -> b) is followed in both directions
 // to match the Cypher MATCH (m)-[*1..2]-(n) semantics. Only currently
@@ -167,6 +167,11 @@ LIMIT $6`
 // All returned node IDs are property UUIDs (properties->>'id'), matching
 // memory_edges.from_id / to_id which also store property UUIDs. Seeds are
 // excluded from the output — only newly discovered neighbors surface.
+//
+// Embedding is returned as pgvector text form ("[0.1,0.2,...]") so the
+// caller can score expanded items by cosine vs the query vector — without
+// embeddings, D2-injected items kept their tiny RRF-derived score and
+// always lost to cosine-reranked seeds at TrimSlice time (M8 root cause).
 //
 // Args: $1 = seed_ids (text[]) — starting property UUIDs (vector top-K),
 //
@@ -196,7 +201,8 @@ WITH RECURSIVE walk(node_id, seed_id, hop) AS (
 SELECT m.properties->>(('id'::text)) AS memory_id,
        (m.properties::text::jsonb - 'sources')::text AS properties,
        min_hop.hop                                  AS hop,
-       min_hop.seed_id                              AS seed_id
+       min_hop.seed_id                              AS seed_id,
+       m.embedding::text                            AS embedding
 FROM (
   -- Collapse multiple walk rows for the same node to the minimum hop
   SELECT node_id, MIN(hop) AS hop, (ARRAY_AGG(seed_id ORDER BY hop ASC))[1] AS seed_id
