@@ -63,9 +63,15 @@ func isAuthExempt(r *http.Request) bool {
 	// reached via internal `backend` network from Prometheus. No PII in
 	// OTel instruments. Keeping auth would require Prometheus to send a
 	// header it doesn't support natively.
+	//
+	// /debug/pprof/ is exempt: pprofHandler (server_routes.go) is the sole
+	// authentication gate for this subtree, enforcing X-Service-Secret.
+	// If you add /debug/pprof/ here you change the security model — do not
+	// remove this exemption without also updating pprofHandler.
 	return r.URL.Path == "/health" || r.URL.Path == "/ready" ||
 		r.URL.Path == "/metrics" ||
-		strings.HasPrefix(r.URL.Path, "/v1/")
+		strings.HasPrefix(r.URL.Path, "/v1/") ||
+		strings.HasPrefix(r.URL.Path, "/debug/pprof/")
 }
 
 // checkServiceSecret checks the X-Service-Secret / X-Internal-Service headers.
