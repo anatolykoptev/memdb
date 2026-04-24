@@ -50,8 +50,19 @@ import requests
 # Question-form queries match these at cosine ~0.15-0.30, well below the
 # DefaultRelativity=0.5 threshold in memdb-go/internal/search/config.go.
 # Override to 0.0 so retrieval surfaces raw turns and the harness can score
-# the actual hit@k. Production clients keep the default 0.5.
-LOCOMO_SEARCH_RELATIVITY = float(os.getenv("LOCOMO_SEARCH_RELATIVITY", "0.0"))
+# the actual hit@k. Production clients keep the server-side defaults.
+#
+# Field-name inconsistency in memdb-go server:
+#   /product/search         → searchRequest.Relativity  → field "relativity"
+#   /product/chat/complete  → nativeChatRequest.Threshold *float64 → field "threshold"
+# Both represent the same concept (cosine floor before returning memories) but
+# the chat endpoint does NOT parse "relativity" — it silently drops it and falls
+# back to a hardcoded 0.30 post-filter in chatSearchMemories. We must send the
+# right field to each endpoint, controlled by a single env var here.
+#
+# Env priority: LOCOMO_RETRIEVAL_THRESHOLD → LOCOMO_SEARCH_RELATIVITY (legacy) → 0.0
+_raw_threshold = os.getenv("LOCOMO_RETRIEVAL_THRESHOLD") or os.getenv("LOCOMO_SEARCH_RELATIVITY", "0.0")
+LOCOMO_RETRIEVAL_THRESHOLD = float(_raw_threshold)
 
 
 def build_headers() -> dict:
@@ -289,7 +300,7 @@ def query_search(
         "include_preference": False,
         "search_tool_memory": False,
         "include_skill_memory": False,
-        "relativity": LOCOMO_SEARCH_RELATIVITY,
+        "relativity": LOCOMO_RETRIEVAL_THRESHOLD,  # searchRequest.Relativity field
     }
     if session_id:
         payload["session_id"] = session_id
@@ -319,7 +330,7 @@ def query_chat(
         "top_k": top_k,
         "mode": "fast",
         "include_preference": False,
-        "relativity": LOCOMO_SEARCH_RELATIVITY,
+        "threshold": LOCOMO_RETRIEVAL_THRESHOLD,  # nativeChatRequest.Threshold field (NOT "relativity")
     }
     start = time.time()
     resp = requests.post(

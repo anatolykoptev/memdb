@@ -173,10 +173,9 @@ def main() -> int:
             outcome = delete_cube(args.memdb_url, cube.cube_id, cube.owner_id, args.dry_run)
             tag = "[DRY-RUN]" if args.dry_run else ""
             print(f"  {tag} cube_id={cube.cube_id!r} owner={cube.owner_id!r} → {outcome}", flush=True)
-            if outcome in ("deleted", "dry_run", "not_found"):
-                if outcome == "deleted":
-                    deleted += 1
-            else:
+            if outcome == "deleted":
+                deleted += 1
+            elif outcome.startswith("error:"):
                 errors.append(f"{cube.cube_id}/{cube.owner_id}: {outcome}")
 
     summary = {"scanned": scanned, "deleted": deleted, "errors": errors}
