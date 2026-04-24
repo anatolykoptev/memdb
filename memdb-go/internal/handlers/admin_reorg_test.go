@@ -10,6 +10,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 )
 
 // mockReorg implements reorgRunner for tests.
@@ -20,6 +21,7 @@ type mockReorg struct {
 	targeted  []targetedCall
 	treeCalls []string // cube IDs passed to RunTreeReorgForCube
 	done      chan struct{}
+	treeDone  chan struct{} // fires on every RunTreeReorgForCube call
 }
 
 type targetedCall struct {
@@ -28,7 +30,7 @@ type targetedCall struct {
 }
 
 func newMockReorg() *mockReorg {
-	return &mockReorg{done: make(chan struct{}, 1)}
+	return &mockReorg{done: make(chan struct{}, 1), treeDone: make(chan struct{}, 1)}
 }
 
 func (m *mockReorg) Run(_ context.Context, cubeID string) {
@@ -51,13 +53,29 @@ func (m *mockReorg) RunTargeted(_ context.Context, cubeID string, ids []string) 
 	}
 }
 
-// RunTreeReorgForCube records the cube id for the D3 tree reorg dispatch.
-// Does not signal done so the existing tests (which only wait for Run /
-// RunTargeted) remain deterministic.
+// RunTreeReorgForCube records the cube id for the D3 tree reorg dispatch
+// and signals treeDone (a separate channel from done so existing tests
+// that wait on done remain deterministic).
 func (m *mockReorg) RunTreeReorgForCube(_ context.Context, cubeID string) {
 	m.mu.Lock()
 	m.treeCalls = append(m.treeCalls, cubeID)
 	m.mu.Unlock()
+	select {
+	case m.treeDone <- struct{}{}:
+	default:
+	}
+}
+
+// waitTree blocks until RunTreeReorgForCube fires once, or the deadline
+// elapses. Used only by the TreeHierarchyGate test — a deadline avoids a
+// hang when the flag is off and the method is never invoked by design.
+func (m *mockReorg) waitTree(d time.Duration) bool {
+	select {
+	case <-m.treeDone:
+		return true
+	case <-time.After(d):
+		return false
+	}
 }
 
 func (m *mockReorg) wait() { <-m.done }
@@ -217,10 +235,9 @@ func TestAdminReorg_TreeHierarchyGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Swap the package-level flag stub for this subtest only.
-			orig := treeHierarchyEnabledFn
-			treeHierarchyEnabledFn = func() bool { return tc.flagEnabled }
-			defer func() { treeHierarchyEnabledFn = orig }()
+			flag := tc.flagEnabled
+			restore := SetTreeHierarchyEnabledForTest(func() bool { return flag })
+			defer restore()
 
 			mock := newMockReorg()
 			h := newTestHandler(mock)
@@ -237,10 +254,20 @@ func TestAdminReorg_TreeHierarchyGate(t *testing.T) {
 			if w.Code != http.StatusAccepted {
 				t.Fatalf("status = %d, want 202", w.Code)
 			}
-			// Wait for Run to complete — RunTreeReorgForCube fires right after
-			// on the same goroutine, so by the time we observe done the tree
-			// call (if any) has also executed.
+			// Wait for Run to complete; flag read + tree call (if any)
+			// happens immediately after on the same goroutine.
 			mock.wait()
+			if tc.wantTreeCall {
+				if !mock.waitTree(2 * time.Second) {
+					t.Fatal("RunTreeReorgForCube was not called within 2s")
+				}
+			} else {
+				// Give the goroutine a moment to finish its (nil) tree path
+				// so the deferred restore doesn't race with the flag read.
+				if mock.waitTree(250 * time.Millisecond) {
+					t.Fatal("RunTreeReorgForCube fired unexpectedly")
+				}
+			}
 
 			mock.mu.Lock()
 			defer mock.mu.Unlock()
