@@ -40,11 +40,13 @@ ON CONFLICT (from_id, to_id, relation) DO NOTHING`
 // Args: $1 = seed_ids (text[]), $2 = relation (text), $3 = user_name (text),
 //
 //	$4 = user_id (text), $5 = limit (int)
+// Returned id is the stable property UUID (properties->>'id'), matching
+// memory_edges.from_id / to_id which also store property UUIDs.
 const GraphRecallByEdge = `
-SELECT m.id::text,
+SELECT m.properties->>(('id'::text)) AS memory_id,
        (m.properties::text::jsonb - 'sources')::text
 FROM %[1]s."Memory" m
-JOIN memory_edges e ON m.id = e.to_id
+JOIN memory_edges e ON m.properties->>(('id'::text)) = e.to_id
 WHERE e.from_id = ANY($1)
   AND e.relation = $2
   AND e.invalid_at IS NULL
@@ -66,7 +68,9 @@ WHERE properties->('info'::text)->>(('content_hash'::text)) = ANY($1)
 // IncrRetrievalCount increments retrieval_count and boosts importance_score for a batch of nodes.
 // Called asynchronously after search to track memory usage frequency.
 // importance_score is capped at 2.0 (prevents unbounded growth for very popular memories).
-// Args: $1 = ids (text[]), $2 = now (text, ISO timestamp)
+// Args: $1 = ids (text[]) — property UUIDs (properties->>'id'), NOT AGE graphids,
+//
+//	$2 = now (text, ISO timestamp)
 const IncrRetrievalCount = `
 UPDATE %[1]s."Memory"
 SET properties = (
@@ -76,7 +80,7 @@ SET properties = (
             'importance_score',  LEAST(2.0, COALESCE((properties->>(('importance_score'::text)))::float, 1.0) + 0.1)
         ))::text
     )::agtype
-WHERE id = ANY($1)
+WHERE properties->>(('id'::text)) = ANY($1)
   AND properties->>(('status'::text)) = 'activated'`
 
 // DecayImportanceScores multiplies importance_score by 0.95 for all LTM/UserMemory nodes of a user.

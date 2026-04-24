@@ -13,8 +13,10 @@ package queries
 //	$4 = keys (text[]),
 //	$5 = limit (int),
 //	$6 = agent_id (text, '' for any)
+//
+// Returns the stable property UUID (properties->>'id'), NOT the AGE graphid.
 const GraphRecallByKey = `
-SELECT id::text,
+SELECT properties->>(('id'::text)) AS memory_id,
        (properties::text::jsonb - 'sources')::text
 FROM %[1]s."Memory"
 WHERE properties->>(('status'::text)) = 'activated'
@@ -36,12 +38,13 @@ LIMIT $5`
 //	$4 = tags (text[]) — candidate tags to check overlap,
 //	$5 = limit (int),
 //	$6 = agent_id (text, '' for any)
+// Returns the stable property UUID (properties->>'id'), NOT the AGE graphid.
 const GraphRecallByTags = `
-SELECT id::text,
+SELECT properties->>(('id'::text)) AS memory_id,
        (properties::text::jsonb - 'sources')::text,
        tag_overlap
 FROM (
-    SELECT id, properties,
+    SELECT properties,
            array_length(
                ARRAY(
                    SELECT unnest(ARRAY(SELECT jsonb_array_elements_text((properties->('tags'::text))::text::jsonb)))
@@ -71,8 +74,10 @@ LIMIT $5`
 //	$2 = user_id (text),
 //	$3 = limit (int),
 //	$4 = agent_id (text, '' for any)
+//
+// Returns the stable property UUID (properties->>'id'), NOT the AGE graphid.
 const GetWorkingMemory = `
-SELECT id::text,
+SELECT properties->>(('id'::text)) AS memory_id,
        (properties::text::jsonb - 'sources')::text,
        embedding::text
 FROM %[1]s."Memory"
@@ -93,7 +98,7 @@ LIMIT $3`
 // The recursive CTE expands up to `depth` hops from the seeds. Results exclude the original
 // seed IDs so the caller receives only newly discovered neighbor nodes.
 //
-// Args: $1 = seed_ids (text[]) — starting node IDs (typically the top-k vector hits),
+// Args: $1 = seed_ids (text[]) — starting property UUIDs (typically the top-k vector hits),
 //
 //	$2 = user_name (text),
 //	$3 = user_id (text),
@@ -101,12 +106,17 @@ LIMIT $3`
 //	$5 = depth (int) — max BFS depth (recommended: 2),
 //	$6 = limit (int) — max total results returned,
 //	$7 = agent_id (text, '' for any)
+//
+// All node IDs — seeds, CTE node_id column, final projection — are property
+// UUIDs (properties->>'id'), NOT AGE graphids. The `background` property of WM
+// nodes encodes "[working_binding:<ltm_property_uuid>]" after the P1 write-path
+// fix, so the recursive join is entirely UUID-to-UUID.
 const GraphBFSTraversal = `
 WITH RECURSIVE bfs AS (
   -- Base case: seed nodes (matched by caller from vector/key/tag recall)
-  SELECT id::text AS node_id, 0 AS depth
+  SELECT properties->>(('id'::text)) AS node_id, 0 AS depth
   FROM %[1]s."Memory"
-  WHERE id = ANY($1::text[])
+  WHERE properties->>(('id'::text)) = ANY($1::text[])
     AND properties->>(('status'::text)) = 'activated'
     AND properties->>(('user_name'::text)) = $2
     AND properties->>(('user_id'::text))   = $3
@@ -115,12 +125,12 @@ WITH RECURSIVE bfs AS (
   UNION ALL
 
   -- Recursive step: follow working_binding references up to depth hops
-  SELECT m.id::text AS node_id, b.depth + 1
+  SELECT m.properties->>(('id'::text)) AS node_id, b.depth + 1
   FROM %[1]s."Memory" m
   JOIN bfs b ON (
-    -- a) LTM node referenced by existing WM: "[working_binding:<ltm_id>]"
-    m.id::text = substring(
-      (SELECT properties->>(('background'::text)) FROM %[1]s."Memory" WHERE id::text = b.node_id),
+    -- a) LTM node referenced by existing WM: "[working_binding:<ltm_property_uuid>]"
+    m.properties->>(('id'::text)) = substring(
+      (SELECT properties->>(('background'::text)) FROM %[1]s."Memory" WHERE properties->>(('id'::text)) = b.node_id),
       '\[working_binding:([^\]]+)\]'
     )
     OR
@@ -133,11 +143,12 @@ WITH RECURSIVE bfs AS (
     AND m.properties->>(('user_id'::text))   = $3
     AND m.properties->>(('memory_type'::text)) = ANY($4)
 )
-SELECT DISTINCT m.id::text, (m.properties::text::jsonb - 'sources')::text
+SELECT DISTINCT m.properties->>(('id'::text)) AS memory_id,
+                (m.properties::text::jsonb - 'sources')::text
 FROM %[1]s."Memory" m
-JOIN bfs ON m.id::text = bfs.node_id
+JOIN bfs ON m.properties->>(('id'::text)) = bfs.node_id
 WHERE m.properties->>(('status'::text)) = 'activated'
-  AND NOT (m.id = ANY($1::text[]))  -- exclude original seeds
+  AND NOT (m.properties->>(('id'::text)) = ANY($1::text[]))  -- exclude original seeds
   AND m.properties->>(('memory_type'::text)) = ANY($4)
-ORDER BY m.id::text
+ORDER BY m.properties->>(('id'::text))
 LIMIT $6`
