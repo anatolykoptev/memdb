@@ -81,6 +81,10 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 		}
 		h.SetTaskTracker(scheduler.NewTaskStatusTracker(rd.Client()))
 		logger.Info("scheduler worker started")
+		// Surface any MEMDB_D3_* / search tuning overrides that were picked
+		// up from .env — invisible otherwise and a common source of "why is
+		// my threshold still the default" confusion during D3 tuning sweeps.
+		scheduler.LogTuningOverrides(logger)
 	}
 
 	// Create router and apply middleware

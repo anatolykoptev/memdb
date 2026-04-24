@@ -10,15 +10,18 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 )
 
 // mockReorg implements reorgRunner for tests.
 // It records which method was called and with what arguments, and unblocks via done channel.
 type mockReorg struct {
-	mu       sync.Mutex
-	runCalls []string // cube IDs passed to Run
-	targeted []targetedCall
-	done     chan struct{}
+	mu        sync.Mutex
+	runCalls  []string // cube IDs passed to Run
+	targeted  []targetedCall
+	treeCalls []string // cube IDs passed to RunTreeReorgForCube
+	done      chan struct{}
+	treeDone  chan struct{} // fires on every RunTreeReorgForCube call
 }
 
 type targetedCall struct {
@@ -27,7 +30,7 @@ type targetedCall struct {
 }
 
 func newMockReorg() *mockReorg {
-	return &mockReorg{done: make(chan struct{}, 1)}
+	return &mockReorg{done: make(chan struct{}, 1), treeDone: make(chan struct{}, 1)}
 }
 
 func (m *mockReorg) Run(_ context.Context, cubeID string) {
@@ -47,6 +50,31 @@ func (m *mockReorg) RunTargeted(_ context.Context, cubeID string, ids []string) 
 	select {
 	case m.done <- struct{}{}:
 	default:
+	}
+}
+
+// RunTreeReorgForCube records the cube id for the D3 tree reorg dispatch
+// and signals treeDone (a separate channel from done so existing tests
+// that wait on done remain deterministic).
+func (m *mockReorg) RunTreeReorgForCube(_ context.Context, cubeID string) {
+	m.mu.Lock()
+	m.treeCalls = append(m.treeCalls, cubeID)
+	m.mu.Unlock()
+	select {
+	case m.treeDone <- struct{}{}:
+	default:
+	}
+}
+
+// waitTree blocks until RunTreeReorgForCube fires once, or the deadline
+// elapses. Used only by the TreeHierarchyGate test — a deadline avoids a
+// hang when the flag is off and the method is never invoked by design.
+func (m *mockReorg) waitTree(d time.Duration) bool {
+	select {
+	case <-m.treeDone:
+		return true
+	case <-time.After(d):
+		return false
 	}
 }
 
@@ -187,6 +215,68 @@ func TestAdminReorg(t *testing.T) {
 				if len(call.ids) != len(tt.wantTargetIDs) {
 					t.Errorf("RunTargeted ids = %v, want %v", call.ids, tt.wantTargetIDs)
 				}
+			}
+		})
+	}
+}
+
+// TestAdminReorg_TreeHierarchyGate asserts that AdminReorg dispatches
+// RunTreeReorgForCube iff the hierarchy flag is enabled. Covers the gate
+// added for M5 so admin-triggered reorg produces D3 edges on small cubes.
+func TestAdminReorg_TreeHierarchyGate(t *testing.T) {
+	cases := []struct {
+		name         string
+		flagEnabled  bool
+		wantTreeCall bool
+	}{
+		{"flag off — tree reorg skipped", false, false},
+		{"flag on — tree reorg dispatched", true, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			flag := tc.flagEnabled
+			restore := SetTreeHierarchyEnabledForTest(func() bool { return flag })
+			defer restore()
+
+			mock := newMockReorg()
+			h := newTestHandler(mock)
+
+			var buf bytes.Buffer
+			if err := json.NewEncoder(&buf).Encode(map[string]any{"cube_id": "memos"}); err != nil {
+				t.Fatalf("encode body: %v", err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/product/admin/reorg", &buf)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			h.AdminReorg(w, req)
+			if w.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202", w.Code)
+			}
+			// Wait for Run to complete; flag read + tree call (if any)
+			// happens immediately after on the same goroutine.
+			mock.wait()
+			if tc.wantTreeCall {
+				if !mock.waitTree(2 * time.Second) {
+					t.Fatal("RunTreeReorgForCube was not called within 2s")
+				}
+			} else {
+				// Give the goroutine a moment to finish its (nil) tree path
+				// so the deferred restore doesn't race with the flag read.
+				if mock.waitTree(250 * time.Millisecond) {
+					t.Fatal("RunTreeReorgForCube fired unexpectedly")
+				}
+			}
+
+			mock.mu.Lock()
+			defer mock.mu.Unlock()
+			gotTreeCall := len(mock.treeCalls) > 0
+			if gotTreeCall != tc.wantTreeCall {
+				t.Fatalf("tree reorg call = %v, want %v (treeCalls=%v)", gotTreeCall, tc.wantTreeCall, mock.treeCalls)
+			}
+			if tc.wantTreeCall && mock.treeCalls[0] != "memos" {
+				t.Errorf("tree reorg cube_id = %q, want memos", mock.treeCalls[0])
 			}
 		})
 	}
