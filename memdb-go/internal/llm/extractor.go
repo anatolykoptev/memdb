@@ -53,10 +53,23 @@ const (
 type ExtractedFact struct {
 	// Reasoning is the chain-of-thought explaining why this fact is being extracted and its action.
 	Reasoning string `json:"reasoning,omitempty"`
-	// Memory is the atomic fact text (for add/update).
+	// Memory is the atomic fact text (for add/update). Primary retrieval form —
+	// populated from ResolvedText when present, else falls back to the raw extraction.
 	Memory string `json:"memory"`
-	// Type classifies the memory: "LongTermMemory" or "UserMemory".
+	// RawText is the verbatim original text from the conversation (audit trail).
+	// Kept alongside Memory so operators can trace the resolved form back to the
+	// exact source utterance. (D6 — pronoun/temporal resolution audit)
+	RawText string `json:"raw_text,omitempty"`
+	// ResolvedText is the pronoun+temporal-resolved form of the fact.
+	// When set, parseExtractedFacts promotes it to Memory so retrieval uses the
+	// resolved (self-contained, context-free) text. (D6)
+	ResolvedText string `json:"resolved_text,omitempty"`
+	// Type classifies the memory: "LongTermMemory", "UserMemory", or "PreferenceMemory".
 	Type string `json:"type"`
+	// PreferenceCategory is the 22-category MemOS-style taxonomy key
+	// (food|communication|schedule|...) for PreferenceMemory entries. Empty for
+	// non-preference facts. Enables per-category retrieval filters. (D8)
+	PreferenceCategory string `json:"preference_category,omitempty"`
 	// Action is what to do: add, update, delete, or skip.
 	Action MemAction `json:"action"`
 	// Confidence is the LLM's certainty 0.0–1.0. Facts below MinConfidence are dropped.
@@ -83,6 +96,37 @@ type ExtractedFact struct {
 	// ContentHash is the SHA-256 content hash set by the add pipeline before insert.
 	// Not populated by LLM — set by filterAddsByContentHash for dedup tracking.
 	ContentHash string `json:"-"`
+}
+
+// PreferenceCategories is the closed enum of valid preference_category values
+// emitted by the LLM for PreferenceMemory entries. 14 explicit + 8 implicit
+// (MemOS-style taxonomy). Kept exported so retrieval-side filter validation
+// can share the same source of truth.
+var PreferenceCategories = map[string]bool{
+	// Explicit (spoken/written preferences)
+	"food":          true,
+	"communication": true,
+	"schedule":      true,
+	"entertainment": true,
+	"social":        true,
+	"professional":  true,
+	"learning":      true,
+	"health":        true,
+	"location":      true,
+	"technology":    true,
+	"finance":       true,
+	"values":        true,
+	"product":       true,
+	"service":       true,
+	// Implicit (inferred from behaviour)
+	"frequency":        true,
+	"confidence_level": true,
+	"risk_tolerance":   true,
+	"detail_preference": true,
+	"proactivity":      true,
+	"humour":           true,
+	"formality":        true,
+	"consistency":      true,
 }
 
 // EntityMention is a named entity extracted from a memory fact.
@@ -163,12 +207,27 @@ func (e *LLMExtractor) Model() string { return e.client.Model() }
 
 const unifiedSystemPrompt = `You are a long-term memory manager. Given a conversation and a list of EXISTING MEMORIES, extract atomic facts and decide what to do with each one.
 
+Resolution rules (D6 — apply BEFORE extracting any fact):
+- Resolve all pronouns ("she", "he", "they", "it", "this", "that") using the preceding conversation context. Replace them with the concrete referent name (e.g. "she" → "Caroline").
+- Convert relative temporal references to absolute when the context makes them unambiguous (e.g. "next Thursday" → "2026-04-30", "last week" → "the week of 2026-04-14", "yesterday" → the prior calendar date).
+- If a pronoun or temporal reference CANNOT be resolved reliably from context, leave it AS-IS and cap "confidence" at 0.7.
+- Store BOTH forms: "raw_text" = verbatim original from the conversation (for audit), "resolved_text" = the pronoun+temporal-resolved form (used as primary retrieval text).
+
+Third-person rule (D8):
+- ALWAYS express facts in third person with an explicit subject. Never use first-person pronouns ("I", "me", "my", "we", "our").
+- When the user speaks, replace with the user's name if known, otherwise with "The user" (e.g. "I love hiking" → "The user loves hiking").
+- When the assistant speaks, prefix with "The assistant..." (e.g. "I recommend X" → "The assistant recommends X").
+- Third person applies to BOTH "memory" (resolved) and "raw_text" is kept verbatim — do NOT rewrite raw_text to third person.
+
 For each fact, output a JSON object with these fields:
 - "reasoning": 1-2 sentence chain-of-thought explaining why this fact is being extracted and the chosen action. This MUST be the FIRST field in the object.
-- "memory": concise, standalone factual statement (1-2 sentences, no filler words)
-- "type": "UserMemory" if exclusively about the user's personal info/preferences/opinions; otherwise "LongTermMemory"
+- "raw_text": verbatim original utterance from the conversation (keeps first-person/pronouns AS-IS for audit).
+- "resolved_text": third-person, pronoun-resolved, temporally-resolved form — 1-2 sentences, no filler words. This is the primary retrieval text.
+- "memory": same as "resolved_text" (kept for backward compatibility; when both present, resolved_text wins).
+- "type": "UserMemory" for the user's general personal info; "PreferenceMemory" for explicit preferences or inferred behavioural patterns; otherwise "LongTermMemory".
+- "preference_category": (ONLY when type=="PreferenceMemory") one of the 22 taxonomy keys below. Omit for non-preference facts.
 - "action": one of "add", "update", "delete", or "skip"
-- "confidence": float 0.0–1.0 — your certainty this is a real, useful fact
+- "confidence": float 0.0–1.0 — your certainty this is a real, useful fact. Cap at 0.7 when resolution (D6) left pronouns/temporal refs unresolved.
 - "target_id": (only for "update" or "delete") the id of the existing memory to change
 - "valid_at": ISO-8601 timestamp when this fact became true (resolve from conversation dates/times; omit if unknown)
 - "hallucinated": true if the fact is NOT explicitly stated by the user (inferred, assumed, or contradicted by the user's words). Omit or set false for facts the user clearly stated.
@@ -176,10 +235,36 @@ For each fact, output a JSON object with these fields:
 - "entities": array of named entities in this fact (up to 5): [{"name": "...", "type": "PERSON|ORG|PLACE|CONCEPT|PRODUCT"}]. Omit if no clear named entities exist.
 - "relations": array of directed entity-to-entity relationships (up to 3): [{"subject": "...", "predicate": "WORKS_AT|LIVES_IN|KNOWS|PART_OF|CREATED_BY|OWNS|LOCATED_IN|MEMBER_OF", "object": "..."}]. Subject and object must be names from the entities array. Omit if no clear relationships between entities exist.
 
+Preference categories (D8 — only for type=="PreferenceMemory"):
+Explicit (14):
+  food — diet, favourite/disliked foods
+  communication — preferred style (formal/casual, email/voice, verbose/terse)
+  schedule — typical wake/sleep/work hours, time zones, availability
+  entertainment — media, games, books, music genres
+  social — relationship status, family, friend circle
+  professional — job, industry, career goals
+  learning — subjects/skills of interest, learning style
+  health — fitness, dietary restrictions, medical conditions (sensitive)
+  location — home city, travel patterns
+  technology — preferred tools, OS, languages
+  finance — budget habits, savings goals (sensitive)
+  values — ethical stances, political views (sensitive)
+  product — product preferences, brand loyalty
+  service — service providers (banks, carriers)
+Implicit (8, inferred from behaviour):
+  frequency — how often user does X
+  confidence_level — user's self-assessed skill
+  risk_tolerance — willingness to try new things
+  detail_preference — prefers brief or verbose responses
+  proactivity — wants suggestions or waits for questions
+  humour — style/frequency of humour
+  formality — consistent tone across context
+  consistency — stable over time or drifts
+
 Action rules:
 - "add": genuinely new fact not covered by any existing memory
-- "update": new fact refines, corrects, or extends an existing one — set target_id and write the merged text in "memory"
-- "delete": new fact directly contradicts an existing one — set target_id, leave "memory" empty
+- "update": new fact refines, corrects, or extends an existing one — set target_id and write the merged text in "resolved_text"/"memory"
+- "delete": new fact directly contradicts an existing one — set target_id, leave "resolved_text"/"memory" empty
 - "skip": fact is redundant or already perfectly covered — omit from output entirely
 
 Quality rules (LangMem SNR principle):
@@ -191,9 +276,9 @@ Quality rules (LangMem SNR principle):
 - Prefer "add" over "skip" when uncertain; prefer "update" over "add" when there is a matching existing memory
 
 Confidence guidelines:
-- 0.9+: explicitly stated, unambiguous
-- 0.7–0.9: clearly implied, high confidence
-- 0.5–0.7: inferred, moderate confidence
+- 0.9+: explicitly stated, unambiguous, all pronouns/temporal refs resolved
+- 0.7–0.9: clearly implied, high confidence, resolution clean
+- 0.5–0.7: inferred, moderate confidence, OR pronoun/temporal resolution uncertain
 - <0.5: speculative — omit these entirely
 
 Return ONLY a JSON array of fact objects (no "skip" entries needed). Return [] if no meaningful facts exist.`
@@ -277,6 +362,11 @@ func (e *LLMExtractor) JudgeDedupMerge(ctx context.Context, newMem string, candi
 
 // parseExtractedFacts parses, validates, and filters a JSON array of ExtractedFact.
 // Facts with confidence < MinConfidence or empty memory (non-delete) are dropped.
+//
+// D6: promotes resolved_text to the primary Memory field when the LLM returned it.
+// raw_text is preserved AS-IS (verbatim audit trail — never rewritten).
+// D8: validates preference_category against the closed enum and clears the field
+// when type != "PreferenceMemory" or the key is unknown.
 func parseExtractedFacts(raw string) ([]ExtractedFact, error) {
 	var facts []ExtractedFact
 	if err := json.Unmarshal(StripJSONFence([]byte(raw)), &facts); err != nil {
@@ -285,6 +375,16 @@ func parseExtractedFacts(raw string) ([]ExtractedFact, error) {
 	var valid []ExtractedFact
 	for _, f := range facts {
 		f.Memory = strings.TrimSpace(f.Memory)
+		f.RawText = strings.TrimSpace(f.RawText)
+		f.ResolvedText = strings.TrimSpace(f.ResolvedText)
+
+		// D6: when resolved_text is present, it is the primary retrieval form.
+		// Promote it to Memory so downstream code (embedding, storage, dedup)
+		// sees the resolved (self-contained) text.
+		if f.ResolvedText != "" {
+			f.Memory = f.ResolvedText
+		}
+
 		// Normalize action
 		switch f.Action {
 		case MemAdd, MemUpdate, MemDelete, MemSkip:
@@ -299,9 +399,17 @@ func parseExtractedFacts(raw string) ([]ExtractedFact, error) {
 		if f.Memory == "" && f.Action != MemDelete {
 			continue
 		}
-		// Normalize type
-		if f.Type != "UserMemory" && f.Type != "LongTermMemory" {
+		// Normalize type (UserMemory | LongTermMemory | PreferenceMemory).
+		// PreferenceMemory is a valid extraction-time type (D8); non-pref
+		// values fall back to LongTermMemory.
+		if f.Type != "UserMemory" && f.Type != "LongTermMemory" && f.Type != "PreferenceMemory" {
 			f.Type = "LongTermMemory"
+		}
+		// D8: preference_category is only meaningful for PreferenceMemory, and
+		// must be one of the 22 taxonomy keys. Clear it otherwise.
+		f.PreferenceCategory = strings.TrimSpace(f.PreferenceCategory)
+		if f.Type != "PreferenceMemory" || !PreferenceCategories[f.PreferenceCategory] {
+			f.PreferenceCategory = ""
 		}
 		// Skip action: drop from output
 		if f.Action == MemSkip {

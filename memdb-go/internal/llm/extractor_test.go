@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -431,6 +432,233 @@ func TestExtractAndDedup_NoEntitiesOmitted(t *testing.T) {
 	}
 	if len(facts[0].Relations) != 0 {
 		t.Errorf("expected 0 relations, got %d", len(facts[0].Relations))
+	}
+}
+
+// --- D6: pronoun + temporal resolution tests ---
+
+func TestExtractAndDedup_D6_PronounResolved(t *testing.T) {
+	// LLM resolves "She" → "Caroline" using preceding context; we assert
+	// that resolved_text wins over memory and raw_text is preserved verbatim.
+	rawLLM := `[{
+		"memory":"She said she'd come Thursday",
+		"raw_text":"She said she'd come Thursday",
+		"resolved_text":"Caroline said she would come on 2026-04-30",
+		"type":"LongTermMemory",
+		"action":"add",
+		"confidence":0.92
+	}]`
+	srv, ext := mockLLM(t, rawLLM)
+	defer srv.Close()
+
+	facts, err := ext.ExtractAndDedup(context.Background(),
+		"user: Caroline called.\nuser: She said she'd come Thursday", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(facts))
+	}
+	f := facts[0]
+	if f.Memory != "Caroline said she would come on 2026-04-30" {
+		t.Errorf("expected resolved_text promoted to Memory, got %q", f.Memory)
+	}
+	if f.ResolvedText != "Caroline said she would come on 2026-04-30" {
+		t.Errorf("ResolvedText not populated: %q", f.ResolvedText)
+	}
+	if f.RawText != "She said she'd come Thursday" {
+		t.Errorf("RawText not preserved verbatim: %q", f.RawText)
+	}
+}
+
+func TestExtractAndDedup_D6_TemporalResolved(t *testing.T) {
+	rawLLM := `[{
+		"memory":"The user has a meeting on 2026-04-30 at 14:00",
+		"raw_text":"I have a meeting next Thursday at 2pm",
+		"resolved_text":"The user has a meeting on 2026-04-30 at 14:00",
+		"type":"UserMemory",
+		"action":"add",
+		"confidence":0.9,
+		"valid_at":"2026-04-23T00:00:00Z"
+	}]`
+	srv, ext := mockLLM(t, rawLLM)
+	defer srv.Close()
+
+	facts, err := ext.ExtractAndDedup(context.Background(),
+		"user: I have a meeting next Thursday at 2pm", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(facts))
+	}
+	if facts[0].Memory != "The user has a meeting on 2026-04-30 at 14:00" {
+		t.Errorf("expected absolute date in Memory, got %q", facts[0].Memory)
+	}
+	if facts[0].RawText != "I have a meeting next Thursday at 2pm" {
+		t.Errorf("raw_text should preserve relative phrasing, got %q", facts[0].RawText)
+	}
+}
+
+func TestExtractAndDedup_D6_NoResolvedTextFallsBackToMemory(t *testing.T) {
+	// When the LLM does not emit resolved_text, Memory stays as-is (back-compat
+	// with old callers and failures where the LLM skips the new field).
+	rawLLM := `[{
+		"memory":"The user likes jazz",
+		"type":"UserMemory",
+		"action":"add",
+		"confidence":0.88
+	}]`
+	srv, ext := mockLLM(t, rawLLM)
+	defer srv.Close()
+
+	facts, err := ext.ExtractAndDedup(context.Background(), "user: I like jazz", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(facts) != 1 || facts[0].Memory != "The user likes jazz" {
+		t.Errorf("expected Memory intact, got %+v", facts)
+	}
+	if facts[0].ResolvedText != "" || facts[0].RawText != "" {
+		t.Errorf("new fields should stay empty when LLM omits them: %+v", facts[0])
+	}
+}
+
+// --- D8: third-person + preference taxonomy tests ---
+
+func TestExtractAndDedup_D8_ThirdPersonEnforced(t *testing.T) {
+	// LLM rewrites first-person user utterance into third person.
+	rawLLM := `[{
+		"memory":"The user loves hiking",
+		"raw_text":"I love hiking",
+		"resolved_text":"The user loves hiking",
+		"type":"UserMemory",
+		"action":"add",
+		"confidence":0.95
+	}]`
+	srv, ext := mockLLM(t, rawLLM)
+	defer srv.Close()
+
+	facts, err := ext.ExtractAndDedup(context.Background(), "user: I love hiking", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(facts))
+	}
+	if !strings.Contains(facts[0].Memory, "The user") {
+		t.Errorf("Memory should be third-person, got %q", facts[0].Memory)
+	}
+	if facts[0].RawText != "I love hiking" {
+		t.Errorf("RawText should preserve first person, got %q", facts[0].RawText)
+	}
+}
+
+func TestExtractAndDedup_D8_PreferenceCategoryFood(t *testing.T) {
+	rawLLM := `[{
+		"memory":"The user is vegetarian",
+		"raw_text":"I'm vegetarian",
+		"resolved_text":"The user is vegetarian",
+		"type":"PreferenceMemory",
+		"preference_category":"food",
+		"action":"add",
+		"confidence":0.97
+	}]`
+	srv, ext := mockLLM(t, rawLLM)
+	defer srv.Close()
+
+	facts, err := ext.ExtractAndDedup(context.Background(), "user: I'm vegetarian", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(facts))
+	}
+	f := facts[0]
+	if f.Type != "PreferenceMemory" {
+		t.Errorf("expected PreferenceMemory type, got %q", f.Type)
+	}
+	if f.PreferenceCategory != "food" {
+		t.Errorf("expected preference_category=food, got %q", f.PreferenceCategory)
+	}
+}
+
+func TestExtractAndDedup_D8_InvalidCategoryCleared(t *testing.T) {
+	// LLM hallucinates a category key not in the 22-taxonomy. parseExtractedFacts
+	// must null it out rather than persist garbage.
+	rawLLM := `[{
+		"memory":"The user is vegetarian",
+		"type":"PreferenceMemory",
+		"preference_category":"not_a_real_category",
+		"action":"add",
+		"confidence":0.9
+	}]`
+	srv, ext := mockLLM(t, rawLLM)
+	defer srv.Close()
+
+	facts, err := ext.ExtractAndDedup(context.Background(), "user: I'm vegetarian", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(facts))
+	}
+	if facts[0].PreferenceCategory != "" {
+		t.Errorf("invalid category should be cleared, got %q", facts[0].PreferenceCategory)
+	}
+}
+
+func TestExtractAndDedup_D8_CategoryOnlyOnPreferenceMemory(t *testing.T) {
+	// LLM emits preference_category on a non-PreferenceMemory fact.
+	// Must be cleared (only meaningful for PreferenceMemory).
+	rawLLM := `[{
+		"memory":"The project deadline is 2026-03-01",
+		"type":"LongTermMemory",
+		"preference_category":"schedule",
+		"action":"add",
+		"confidence":0.95
+	}]`
+	srv, ext := mockLLM(t, rawLLM)
+	defer srv.Close()
+
+	facts, err := ext.ExtractAndDedup(context.Background(), "user: deadline March 1", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(facts) != 1 {
+		t.Fatalf("expected 1 fact, got %d", len(facts))
+	}
+	if facts[0].PreferenceCategory != "" {
+		t.Errorf("preference_category on non-PreferenceMemory should be cleared, got %q",
+			facts[0].PreferenceCategory)
+	}
+}
+
+func TestExtractAndDedup_D8_ImplicitCategoryFormality(t *testing.T) {
+	// Implicit inferred preference (formality is one of the 8 implicit keys).
+	rawLLM := `[{
+		"memory":"The user prefers casual tone",
+		"type":"PreferenceMemory",
+		"preference_category":"formality",
+		"action":"add",
+		"confidence":0.78
+	}]`
+	srv, ext := mockLLM(t, rawLLM)
+	defer srv.Close()
+
+	facts, err := ext.ExtractAndDedup(context.Background(), "conversation", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(facts) != 1 || facts[0].PreferenceCategory != "formality" {
+		t.Errorf("expected implicit category formality, got %+v", facts)
+	}
+}
+
+func TestPreferenceCategoriesCount(t *testing.T) {
+	// Sanity-check the taxonomy is exactly 22 keys (14 explicit + 8 implicit).
+	if len(PreferenceCategories) != 22 {
+		t.Errorf("expected 22 preference categories, got %d", len(PreferenceCategories))
 	}
 }
 
