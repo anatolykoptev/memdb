@@ -37,7 +37,7 @@ func schedMx() *schedMetricsStruct {
 			metric.WithDescription("Total messages moved to Dead Letter Queue by label"),
 		)
 		tr, _ := meter.Int64Counter("memdb.scheduler.tree_reorg",
-			metric.WithDescription("D3 tree reorganizer cluster outcomes (tier in episodic/semantic/all, outcome in created/skipped_below_threshold/error)"),
+			metric.WithDescription("D3 tree reorganizer outcomes (tier in episodic/semantic/all/relation, outcome in created/skipped_below_threshold/error/edge_write_error/hierarchy_write_error/audit_write_error/relation_attempted/relation_written_<RELATION>/relation_skipped/relation_error)"),
 		)
 		schedMetricsInstruments = &schedMetricsStruct{
 			Messages:  msgs,
