@@ -29,7 +29,7 @@ func TestFindNearDuplicatesHNSWByIDsSQL_Shape(t *testing.T) {
 	sql := queries.FindNearDuplicatesHNSWByIDsSQL()
 	for _, want := range []string{
 		"CROSS JOIN LATERAL",
-		"a.id = ANY($2)",
+		"a.properties->>(('id'::text)) = ANY($2)",
 		"LIMIT $4",
 		"LIMIT $5",
 		"1 - (a.embedding <=> b.embedding) >= $3",

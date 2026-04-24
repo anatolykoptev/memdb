@@ -33,7 +33,10 @@ func (p *Postgres) InsertMemoryNodes(ctx context.Context, nodes []MemoryInsertNo
 	batch := &pgx.Batch{}
 	for _, n := range nodes {
 		batch.Queue(delQ, n.ID)
-		batch.Queue(insQ, n.ID, n.PropertiesJSON, n.EmbeddingVec)
+		// insQ uses ($1 = properties, $2 = embedding). The Memory.id column is an
+		// AGE-managed graphid (auto-generated); n.ID goes only into properties->>'id'
+		// via the caller-serialised PropertiesJSON, never into the id column.
+		batch.Queue(insQ, n.PropertiesJSON, n.EmbeddingVec)
 	}
 
 	br := tx.SendBatch(ctx, batch)

@@ -2,6 +2,14 @@ package queries
 
 // queries_memory_ltm.go — SQL queries for LongTermMemory vector search and dedup.
 // Covers: LTM vector search, near-duplicate detection (full scan + ID-scoped).
+//
+// NOTE: the Memory vertex's id column is an AGE-managed graphid. The stable UUID
+// identity lives in properties->>(('id'::text)). Exposed id_a / id_b / memory_id
+// aliases return the property UUID so callers can feed them into SoftDeleteMerged /
+// UpdateMemoryNodeFull which now match by property UUID.
+//
+// a.id < b.id in self-join predicates keeps symmetric-pair deduplication; it
+// compares row-local graphids and does not leak into exposed results.
 
 // SearchLTMByVector returns the top-k activated LongTermMemory/UserMemory/EpisodicMemory nodes
 // for a user sorted by cosine similarity to the given query embedding.
@@ -12,10 +20,10 @@ package queries
 //	$3 = min_score (float64), $4 = limit (int)
 const SearchLTMByVector = `
 SELECT
-    id                    AS memory_id,
-    properties->>(('memory'::text)) AS memory_text,
+    properties->>(('id'::text))       AS memory_id,
+    properties->>(('memory'::text))   AS memory_text,
     1 - (embedding::halfvec(1024) <=> $2::halfvec(1024)) AS score,
-    embedding::text       AS embedding_text
+    embedding::text                   AS embedding_text
 FROM %[1]s."Memory"
 WHERE properties->>(('user_name'::text)) = $1
   AND properties->>(('status'::text)) = 'activated'
@@ -32,9 +40,9 @@ LIMIT $4`
 // Args: $1 = user_name (text), $2 = similarity threshold (float64), $3 = limit (int)
 const FindNearDuplicates = `
 SELECT
-    a.id                    AS id_a,
+    a.properties->>(('id'::text))     AS id_a,
     a.properties->>(('memory'::text)) AS mem_a,
-    b.id                    AS id_b,
+    b.properties->>(('id'::text))     AS id_b,
     b.properties->>(('memory'::text)) AS mem_b,
     1 - (a.embedding <=> b.embedding) AS score
 FROM %[1]s."Memory" a
@@ -59,9 +67,9 @@ LIMIT $3`
 // Args: $1 = user_name (text), $2 = ids (text[]), $3 = similarity threshold (float64), $4 = limit (int)
 const FindNearDuplicatesByIDs = `
 SELECT
-    a.id                    AS id_a,
+    a.properties->>(('id'::text))     AS id_a,
     a.properties->>(('memory'::text)) AS mem_a,
-    b.id                    AS id_b,
+    b.properties->>(('id'::text))     AS id_b,
     b.properties->>(('memory'::text)) AS mem_b,
     1 - (a.embedding <=> b.embedding) AS score
 FROM %[1]s."Memory" a
@@ -72,7 +80,7 @@ WHERE a.properties->>(('user_name'::text)) = $1
   AND b.properties->>(('status'::text)) = 'activated'
   AND a.properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
   AND b.properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
-  AND (a.id = ANY($2) OR b.id = ANY($2))
+  AND (a.properties->>(('id'::text)) = ANY($2) OR b.properties->>(('id'::text)) = ANY($2))
   AND a.embedding IS NOT NULL
   AND b.embedding IS NOT NULL
   AND 1 - (a.embedding <=> b.embedding) >= $3
@@ -90,15 +98,16 @@ func FindNearDuplicatesSQL() string { return FindNearDuplicates }
 // then filters by the cosine-similarity threshold. O(N·topK·log N) vs the O(N²) self-join
 // in FindNearDuplicates. Approximate — recall depends on hnsw.ef_search (caller must SET LOCAL).
 //
-// The a.id < b.id predicate deduplicates symmetric pairs.
+// The a.id < b.id predicate (inside the LATERAL: m.id > a.id) deduplicates symmetric
+// pairs via graphid ordering — intentional internal plumbing, does not leak outside.
 // %[1]s = graph schema name (e.g. memos_graph).
 //
 // Args: $1 = user_name (text), $2 = similarity threshold (float64), $3 = limit (int), $4 = per-node top-K (int)
 const FindNearDuplicatesHNSW = `
 SELECT
-    a.id                    AS id_a,
+    a.properties->>(('id'::text))     AS id_a,
     a.properties->>(('memory'::text)) AS mem_a,
-    b.id                    AS id_b,
+    b.properties->>(('id'::text))     AS id_b,
     b.properties->>(('memory'::text)) AS mem_b,
     1 - (a.embedding <=> b.embedding) AS score
 FROM %[1]s."Memory" a
@@ -122,16 +131,16 @@ ORDER BY score DESC
 LIMIT $3`
 
 // FindNearDuplicatesHNSWByIDs is the HNSW variant of FindNearDuplicatesByIDs.
-// Restricted to pairs where at least one node is in $2 (text[] of memory IDs).
+// Restricted to pairs where at least one node has its property UUID in $2 (text[]).
 //
 // Args: $1 = user_name (text), $2 = ids (text[]), $3 = similarity threshold (float64),
 //
 //	$4 = limit (int), $5 = per-node top-K (int)
 const FindNearDuplicatesHNSWByIDs = `
 SELECT
-    a.id                    AS id_a,
+    a.properties->>(('id'::text))     AS id_a,
     a.properties->>(('memory'::text)) AS mem_a,
-    b.id                    AS id_b,
+    b.properties->>(('id'::text))     AS id_b,
     b.properties->>(('memory'::text)) AS mem_b,
     1 - (a.embedding <=> b.embedding) AS score
 FROM %[1]s."Memory" a
@@ -150,7 +159,7 @@ WHERE a.properties->>(('user_name'::text)) = $1
   AND a.properties->>(('status'::text)) = 'activated'
   AND a.properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
   AND a.embedding IS NOT NULL
-  AND (a.id = ANY($2) OR b.id = ANY($2))
+  AND (a.properties->>(('id'::text)) = ANY($2) OR b.properties->>(('id'::text)) = ANY($2))
   AND 1 - (a.embedding <=> b.embedding) >= $3
 ORDER BY score DESC
 LIMIT $4`
