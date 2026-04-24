@@ -36,12 +36,14 @@ BEGIN
         RETURN;
     END IF;
 
-    -- If AGE vertex, drop it. drop_vlabel is the AGE-native way.
-    -- Fall back to DROP TABLE CASCADE if drop_vlabel fails (e.g., label considered in-use).
+    -- If AGE vertex, drop it. AGE 1.7 renamed drop_vlabel → drop_label
+    -- (signature: graph_name name, label_name name, force boolean). force=true
+    -- is not supported in 1.7 — pass false. Fall back to DROP TABLE CASCADE on
+    -- any exception (e.g., label considered in-use by edges).
     IF is_age_vertex THEN
         RAISE NOTICE 'dropping AGE vertex cubes';
         BEGIN
-            PERFORM ag_catalog.drop_vlabel('memos_graph', 'cubes');
+            PERFORM ag_catalog.drop_label('memos_graph', 'cubes', false);
         EXCEPTION WHEN OTHERS THEN
             RAISE NOTICE 'drop_vlabel failed (%), falling back to DROP TABLE CASCADE', SQLERRM;
             DROP TABLE IF EXISTS memos_graph.cubes CASCADE;
