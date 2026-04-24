@@ -7,14 +7,12 @@ from memdb.graph_dbs.polardb.filters import FilterMixin
 from memdb.graph_dbs.polardb.maintenance import MaintenanceMixin
 from memdb.graph_dbs.polardb.nodes import NodeMixin
 from memdb.graph_dbs.polardb.queries import QueryMixin
-from memdb.graph_dbs.polardb.schema import SchemaMixin
 from memdb.graph_dbs.polardb.search import SearchMixin
 from memdb.graph_dbs.polardb.traversal import TraversalMixin
 
 
 class PolarDBGraphDB(
     ConnectionMixin,
-    SchemaMixin,
     NodeMixin,
     EdgeMixin,
     TraversalMixin,
