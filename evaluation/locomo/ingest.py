@@ -6,9 +6,17 @@ Deterministic: conversations sorted by sample_id, sessions sorted by
 key, messages in original order. One /product/add call per session.
 
 Usage:
-    python3 ingest.py --sample                        # 2 convs
-    python3 ingest.py --full                          # all 10
-    python3 ingest.py --conversations <path.json>     # custom
+    python3 ingest.py --sample                         # 1 conv (category-1 mode, 10 QAs)
+    python3 ingest.py --sample --categories=1,2,3,4,5  # 1 conv (5-category mode, 50 QAs)
+    python3 ingest.py --full                            # all 10 convs
+    python3 ingest.py --conversations <path.json>       # custom
+
+Env:
+    LOCOMO_CATEGORIES  comma-separated category list (default: "1").
+                       Overridden by --categories.  Affects only which
+                       gold QAs are sampled — ingest always pushes the
+                       full conversation so every QA category has
+                       evidence to retrieve.
 """
 
 from __future__ import annotations
@@ -40,6 +48,30 @@ EVAL_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EVAL_DIR.parent.parent
 FULL_DATA = REPO_ROOT / "evaluation" / "data" / "locomo" / "locomo10.json"
 SAMPLE_DATA = EVAL_DIR / "sample_conversations.json"
+
+# Category constants (LoCoMo categories 1-5)
+ALL_CATEGORIES = {1, 2, 3, 4, 5}
+
+
+def parse_categories(raw: str | None) -> list[int]:
+    """Parse a comma-separated category string like '1,2,3,4,5' → [1, 2, 3, 4, 5].
+
+    Returns the parsed list or raises ValueError on bad input.
+    """
+    if not raw:
+        return [1]
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    cats: list[int] = []
+    for part in parts:
+        try:
+            c = int(part)
+        except ValueError:
+            raise ValueError(f"Invalid category {part!r} — must be an integer 1-5.") from None
+        if c not in ALL_CATEGORIES:
+            raise ValueError(f"Category {c} out of range — valid: 1-5.")
+        if c not in cats:
+            cats.append(c)
+    return sorted(cats)
 
 
 def parse_session_date(raw: str | None) -> str | None:
@@ -180,12 +212,28 @@ def ingest(conversations: list[dict], memdb_url: str, dry_run: bool = False) -> 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     g = p.add_mutually_exclusive_group(required=True)
-    g.add_argument("--sample", action="store_true", help="Use sample_conversations.json (20 QAs).")
+    g.add_argument("--sample", action="store_true", help="Use sample_conversations.json (1 conv).")
     g.add_argument("--full", action="store_true", help="Use full locomo10.json (10 convs).")
     g.add_argument("--conversations", type=Path, help="Path to a conversations JSON.")
     p.add_argument("--memdb-url", default="http://localhost:8080", help="memdb-go base URL.")
     p.add_argument("--dry-run", action="store_true", help="Parse only, do not POST.")
+    p.add_argument(
+        "--categories",
+        default=os.getenv("LOCOMO_CATEGORIES", ""),
+        help=(
+            "Comma-separated QA categories to include in the gold sample "
+            "(default: '1' = backward-compat single-hop only). "
+            "Use '1,2,3,4,5' to enable the 5-category 50-QA mode. "
+            "Ingest always pushes the full conversation regardless of this flag."
+        ),
+    )
     args = p.parse_args()
+
+    try:
+        categories = parse_categories(args.categories)
+    except ValueError as exc:
+        print(f"ERROR: --categories: {exc}", file=sys.stderr)
+        return 2
 
     if args.sample:
         path = SAMPLE_DATA
@@ -203,11 +251,15 @@ def main() -> int:
     # locomo10.json is a list; locomo10_rag.json is a dict
     conversations = list(data.values()) if isinstance(data, dict) else data
 
+    cat_label = ",".join(str(c) for c in categories)
+    print(f"[ingest] categories={cat_label!r} (ingest always pushes full conversation)", flush=True)
+
     start = time.time()
     stats = ingest(conversations, args.memdb_url, dry_run=args.dry_run)
     stats["duration_sec"] = round(time.time() - start, 2)
     stats["memdb_url"] = args.memdb_url
     stats["data_path"] = str(path)
+    stats["categories"] = categories
     print(json.dumps(stats, indent=2))
     return 0 if not stats["errors"] else 1
 

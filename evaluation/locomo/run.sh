@@ -12,6 +12,8 @@
 #                         — at least one of MEMDB_API_KEY / _SERVICE_SECRET required
 #   LOCOMO_FULL=1         run against full locomo10.json (else: sample)
 #   LOCOMO_SKIP_CHAT=1    skip /product/chat/complete, score retrieval only
+#   LOCOMO_CATEGORIES     comma-separated categories (default: "1" = backward compat).
+#                         Use "1,2,3,4,5" for 5-category 50-QA sample mode.
 #   LLM_URL, LLM_API_KEY  for embedding-based semsim (optional)
 #   OUT_SUFFIX            override default <commit-sha> output filename
 
@@ -23,14 +25,21 @@ RESULTS_DIR="$EVAL_DIR/results"
 mkdir -p "$RESULTS_DIR"
 
 MEMDB_URL="${MEMDB_URL:-http://localhost:8080}"
+LOCOMO_CATEGORIES="${LOCOMO_CATEGORIES:-1}"
 
 if [[ "${LOCOMO_FULL:-0}" == "1" ]]; then
     MODE_FLAG="--full"
-    echo "==> mode: FULL LoCoMo (10 convs, ~1990 QAs)"
+    echo "==> mode: FULL LoCoMo (10 convs, ~1990 QAs, categories=${LOCOMO_CATEGORIES})"
 else
     MODE_FLAG="--sample"
-    echo "==> mode: SAMPLE (2 convs, 20 QAs)"
+    if [[ "${LOCOMO_CATEGORIES}" == "1,2,3,4,5" || "${LOCOMO_CATEGORIES}" == "1,2,3,4,5," ]]; then
+        echo "==> mode: SAMPLE 5-category (conv-26, 50 QAs)"
+    else
+        echo "==> mode: SAMPLE (conv-26, 10 category-1 QAs)"
+    fi
 fi
+
+CATEGORIES_FLAG="--categories=${LOCOMO_CATEGORIES}"
 
 # 0. Sanity: memdb-go reachable
 echo "==> checking memdb-go at $MEMDB_URL"
@@ -47,7 +56,7 @@ SCORE_OUT="$RESULTS_DIR/$SUFFIX.json"
 
 # 1. Ingest
 echo "==> [1/3] ingest"
-python3 "$EVAL_DIR/ingest.py" $MODE_FLAG --memdb-url "$MEMDB_URL"
+python3 "$EVAL_DIR/ingest.py" $MODE_FLAG --memdb-url "$MEMDB_URL" $CATEGORIES_FLAG
 
 # Give memdb-go scheduler a moment to settle (async_mode=sync is already blocking,
 # but background consolidation can still be in flight).
@@ -62,6 +71,7 @@ fi
 python3 "$EVAL_DIR/query.py" $MODE_FLAG \
     --memdb-url "$MEMDB_URL" \
     --out "$PREDS_OUT" \
+    $CATEGORIES_FLAG \
     "${QUERY_ARGS[@]}"
 
 # 3. Score
