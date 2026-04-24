@@ -18,6 +18,17 @@ type GraphRecallResult struct {
 	TagOverlap int    // number of overlapping tags (0 for key-based recall)
 }
 
+// GraphExpansion holds a single result from multi-hop BFS over memory_edges.
+// Hop = minimum hop distance from any seed (1-based; seeds themselves are
+// excluded from output). SeedID = the seed whose walk first reached this
+// node (used by the caller to inherit score with 0.8^hop penalty).
+type GraphExpansion struct {
+	ID         string // property UUID of the reached neighbor
+	Properties string // raw JSON properties (sources stripped)
+	Hop        int    // minimum hop distance from any seed (>= 1)
+	SeedID     string // the seed property UUID that reached this node first
+}
+
 // GraphRecallByEdge returns memory nodes reachable from seed IDs via directed edges of a given relation.
 func (p *Postgres) GraphRecallByEdge(ctx context.Context, seedIDs []string, relation, cubeID, personID string, limit int) ([]GraphRecallResult, error) {
 	if len(seedIDs) == 0 {
@@ -105,6 +116,36 @@ func (p *Postgres) GraphBFSTraversal(ctx context.Context, seedIDs []string, cube
 		var r GraphRecallResult
 		if err := rows.Scan(&r.ID, &r.Properties); err != nil {
 			return nil, fmt.Errorf("graph bfs scan: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// MultiHopEdgeExpansion performs a depth-limited BFS over the memory_edges
+// table from a set of seed property UUIDs. Returns each reachable neighbor
+// with its minimum hop distance and the seed it was first reached from.
+//
+// Used by the D2 multi-hop expansion step after VectorSearch top-K to
+// inject graph neighbors into the candidate pool before CE rerank.
+// Gated at the caller side — this method is cheap (indexed join) but
+// returns [] when seed list is empty or depth is non-positive.
+func (p *Postgres) MultiHopEdgeExpansion(ctx context.Context, seedIDs []string, cubeID, personID string, depth, limit int, agentID string) ([]GraphExpansion, error) {
+	if len(seedIDs) == 0 || depth <= 0 {
+		return nil, nil
+	}
+	q := fmt.Sprintf(queries.MultiHopEdgeExpansion, graphName)
+	rows, err := p.pool.Query(ctx, q, seedIDs, cubeID, personID, depth, limit, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("multi-hop edge expansion: %w", err)
+	}
+	defer rows.Close()
+
+	var results []GraphExpansion
+	for rows.Next() {
+		var r GraphExpansion
+		if err := rows.Scan(&r.ID, &r.Properties, &r.Hop, &r.SeedID); err != nil {
+			return nil, fmt.Errorf("multi-hop edge expansion scan: %w", err)
 		}
 		results = append(results, r)
 	}
