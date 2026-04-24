@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync/atomic"
 	"testing"
 
@@ -115,8 +114,9 @@ func TestRunRelationPhase_WritesEdges(t *testing.T) {
 	r, stub := newRelationReorg(t, srv, &bytes.Buffer{})
 	r.runRelationPhase(context.Background(), "cube", makeParents(3))
 
-	if len(stub.edges) == 0 {
-		t.Fatalf("expected CAUSES edges written, got 0")
+	// 3 parents × topK=2 = 6 directed pairs.
+	if len(stub.edges) != 6 {
+		t.Errorf("expected 6 CAUSES edges, got %d", len(stub.edges))
 	}
 	for _, e := range stub.edges {
 		if e.Relation != db.EdgeCauses {
@@ -172,7 +172,11 @@ func TestPromoteCluster_EdgeWriteError_LogsWarn(t *testing.T) {
 		t.Errorf("expected WARN-level log, got: %s", logs)
 	}
 	// Sanity: ensure we did not leak Debug on this path (old behaviour).
-	os.Stderr.Sync()
+	for _, line := range bytes.Split(buf.Bytes(), []byte("\n")) {
+		if bytes.Contains(line, []byte("edge write failed")) && bytes.Contains(line, []byte("level=DEBUG")) {
+			t.Errorf("edge-write failure regressed to DEBUG level: %s", line)
+		}
+	}
 }
 
 // edgeFailStub fails the first N CreateMemoryEdge calls, then succeeds.

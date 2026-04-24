@@ -155,6 +155,9 @@ func selectRelationCandidates(parents []parentInfo, topK int) []relationCandidat
 			peers = peers[:topK]
 		}
 		for _, p := range peers {
+			if parents[i].ID == parents[p.idx].ID {
+				continue
+			}
 			key := parents[i].ID + "|" + parents[p.idx].ID
 			if _, dup := seen[key]; dup {
 				continue
