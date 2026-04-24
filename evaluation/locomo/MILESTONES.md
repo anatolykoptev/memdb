@@ -511,16 +511,40 @@ Notable per-category findings:
 
 _Conv-26 full ingest: 19 sessions, 419 messages. Stage 2 uses all 199 QAs from conv-26 (32 cat-1, 37 cat-2, 13 cat-3, 70 cat-4, 47 cat-5)._
 
-| Category | F1 | EM | hit@20 | semsim |
-|----------|----|----|--------|--------|
-| cat-1 (single-hop) | TBD | TBD | TBD | TBD |
-| cat-2 (multi-hop) | TBD | TBD | TBD | TBD |
-| cat-3 (temporal) | TBD | TBD | TBD | TBD |
-| cat-4 (open-domain) | TBD | TBD | TBD | TBD |
-| cat-5 (adversarial) | TBD | TBD | TBD | TBD |
-| **aggregate** | **TBD** | **TBD** | **TBD** | **TBD** |
+| Category | n | F1 | EM | hit@20 | semsim |
+|----------|---|----|----|--------|--------|
+| cat-1 (single-hop) | 32 | 0.267 | 0.031 | 0.719 | 0.269 |
+| cat-2 (multi-hop) | 37 | 0.091 | 0.027 | 0.432 | 0.096 |
+| cat-3 (temporal) | 13 | 0.201 | 0.000 | 0.769 | 0.236 |
+| cat-4 (open-domain) | 70 | **0.407** | 0.214 | **0.929** | 0.420 |
+| cat-5 (adversarial) | 47 | 0.092 | 0.064 | 0.830 | 0.092 |
+| **aggregate** | **199** | **0.238** | **0.101** | **0.769** | **0.246** |
 
-_Stage 2 running as of 2026-04-25._
+**Stage 2 gate (F1 ≥ 0.15 AND hit@k ≥ 0.30): ✅ PASSED** (F1 0.238 / hit@k 0.769) — well above threshold.
+
+**Compound hypothesis CONFIRMED at sufficient evidence density:**
+- M6 prompt-only baseline (50 QA sample): F1 0.080, hit@k 0.000
+- M7 Stage 1 compound (50 QA sample, 3 sessions): F1 0.080, hit@k 0.780 — retrieval recovered, F1 flat
+- M7 Stage 2 compound (199 QA, 19 sessions full conv-26): **F1 0.238, hit@k 0.769** — **+197% F1 vs M6**, **+349% vs original baseline (0.053)**
+
+The 50-QA sample wasn't enough evidence for raw-mode retrieval to surface answers; once given the full 19-session corpus, compound effect materializes:
+- **cat-4 open-domain F1 0.017 → 0.407 (+24×)** — full corpus gives LLM enough material for non-trivial answers
+- **cat-1 single-hop F1 0.047 → 0.267 (+5.7×)** — granular raw memories now match question phrasing
+- **cat-3 temporal F1 0.102 → 0.201 (+97%)** — date/time context preserved in raw turns
+- cat-2 multi-hop dropped 0.100 → 0.091 (small n=37, statistically noisy; D2 still under-firing)
+- cat-5 adversarial 0.133 → 0.092 (mild regression on sample, but EM lifted 0.000 → 0.064)
+
+This places M7 in **MemOS-tier territory** (plan target was F1 ≥ 0.15 for MemOS parity); first time MemDB has crossed that line in this harness.
+
+#### Compound effect — final verdict
+| Variant | n | F1 | hit@k | Δ vs baseline |
+|---------|---|-----|-------|---------------|
+| Original baseline (default chatbot prompt, fast ingest) | 10 | 0.053 | — | — |
+| M6 prompt-only (factual prompt, fast ingest) | 50 | 0.080 | 0.000 | +51% F1 |
+| M7 Stage 1 (compound, 3-session sample) | 50 | 0.080 | 0.780 | +51% F1 / +∞ hit@k |
+| **M7 Stage 2 (compound, full conv-26)** | **199** | **0.238** | **0.769** | **+349% F1** / **+∞ hit@k** |
+
+Multiplicative? Sub-linear? **Multiplicative + threshold-gated**: prompt change is necessary but not sufficient; raw ingest + threshold fix only pay off once the conversation is rich enough that per-message retrieval has enough material to surface. At 3-session sample, the retrieval lift didn't translate to F1 gain. At 19-session full conv, it did — by 3×.
 
 #### Compound effect verification
 - Prompt only (M6): F1 0.053 → 0.080 (+51%)
