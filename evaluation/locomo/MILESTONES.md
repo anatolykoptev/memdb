@@ -255,14 +255,52 @@ After shipping all 10 Phase D features (v2.0.0, commit `0261225f`), re-ran harne
 
 Sample variance on 10 QAs dominates the F1/EM gap. On retrieval recall (hit@20) where sample size matters less — **we match within 2 points**. M2 (5-category × 10 = 50 sample) + optional full-dataset run will give statistically comparable F1/EM numbers.
 
-### Outstanding work (M-series)
+### 2026-04-24 — M1 + M2 closure + per-category diagnosis
+
+**M1** (PR #53, commit `1b909426`) — 7 Prometheus counters + 1 histogram covering every D-feature: `memdb_search_d4_rewrite_total{outcome}`, `d7_cot_total{outcome,subq_count}`, `d5_staged_total{stage,outcome}`, `d5_justified_total{relevance}`, `d10_enhance_total{outcome}`, `d10_confidence` histogram (buckets 0.1-1.0), `multihop_total{outcome}`, `scheduler_tree_reorg_total{tier,outcome}`. Pre-registered at zero. Grafana-queryable from first scrape.
+
+**M2** (PR #52, commit `f23b4785`) — harness extended with `--categories`/`LOCOMO_CATEGORIES` flag, per-category score breakdown, 5-category sample of 50 QAs.
+
+**5-category skip-chat run** (all D-features on, commit `400ed9a9`, 50 QAs from conv-26):
+
+| cat | name | n | EM | F1 | semsim | hit@20 |
+|-----|------|---|---|---|---|---|
+| 1 | single-hop | 10 | 0.000 | 0.007 | 0.049 | 0.600 |
+| **2** | **multi-hop** | 10 | 0.000 | **0.001** | **0.002** | **0.100 ← weak spot** |
+| 3 | temporal | 10 | 0.000 | 0.006 | 0.031 | 0.500 |
+| 4 | open-domain | 10 | 0.000 | 0.012 | 0.053 | 0.700 |
+| 5 | adversarial | 10 | 0.000 | 0.008 | 0.040 | 0.600 |
+| **aggregate** | — | **50** | 0.000 | 0.007 | 0.035 | **0.500** |
+
+**Key diagnosis from per-category data**:
+
+1. **Category 2 (multi-hop) is the bottleneck** — hit@k=0.100 vs 0.5-0.7 elsewhere. D2 multi-hop retrieval is deployed and env-on, but `memory_edges` table has **zero Memory↔Memory edges** for conv-26. Extractor creates entity edges only; CONSOLIDATED_INTO edges come from D3 reorganizer which needs ≥3 raw memories per cube (we have 1-2 per conv×speaker).
+
+2. **Aggregate hit@20 dropped 0.700 → 0.500** compared to the original 10-QA cat-1-only baseline. Two reasons:
+   - Mix of harder categories (cat-2 multi-hop pulls down average)
+   - Cat-1 hit@20 itself dropped 0.700 → 0.600 — different 10-QA sample (`build_sample_gold` picks first 10 per category from `locomo10.json`, not deterministic-match-to-earlier sample). Within-cat variance on 10 QAs is ±0.1.
+
+3. **Open-domain (cat-4) outperforms everything** at hit@k=0.700. D4 query rewriting + D7 CoT decomposition likely contributing — exactly the categories designed for these features.
+
+### Actionable tuning targets (informs M4)
+
+| Feature | Current | Candidate tuning | Expected category lift |
+|---|---|---|---|
+| D2 multihop `maxHop` | 2 | 3 on cat-2 queries | +0.1 hit@k cat-2 |
+| D3 cluster `minClusterSize` | 3 | 2 for small cubes | Populates `memory_edges` → D2 activates → cat-2 lift |
+| D10 `enhanceMinRelativity` | 0.4 | 0.3 | Lets more candidates through → more synthetic answers on cat-3 temporal |
+| D5 `stagedShortlistSize` | 10 | 15 | Larger justification pool → cat-2 multi-hop evidence capture |
+
+### Outstanding work
 
 | # | Scope | Status |
 |---|-------|--------|
-| M1 | Per-D-feature Prometheus counters (d4_rewrite, d7_cot, d5_staged, d10_enhance, multihop, tree_reorg, d10_confidence histogram) | 🔄 in flight |
-| M2 | Expand harness to 5-category × 10-QA (50 total); per-category score breakdown | 🔄 in flight |
-| M3 | Chat/complete mode harness | ✅ **done (this milestone)** |
-| M4 | Hyperparam grid (enhanceMinRelativity / stagedShortlistSize / hierarchyBoost / half_life) | ⏳ pending (after M1+M2) |
+| M1 | Per-D-feature Prometheus counters | ✅ done (PR #53) |
+| M2 | 5-category harness + per-cat breakdown | ✅ done (PR #52) |
+| M3 | Chat/complete mode harness (cat-1, 10 QAs) | ✅ done (F1 +14×) |
+| M4 | Hyperparam grid on tuning targets above | ⏳ next |
+
+Also pending — rerun M3 chat-mode on the 5-category sample for end-to-end F1/EM measurement with category splits. Expected cat-4 open-domain gets the biggest F1 lift because D7 CoT + D10 synthesis compound there.
 
 M4 starts when M1 + M2 land — needs per-feature firing rates (from M1) + per-category deltas (from M2) to know which hyperparams actually move the needle for which category.
 
