@@ -17,11 +17,14 @@ import (
 
 // EdgeRelation constants for the relation column of memory_edges.
 const (
-	EdgeMergedInto     = "MERGED_INTO"
-	EdgeExtractedFrom  = "EXTRACTED_FROM"
-	EdgeContradicts    = "CONTRADICTS"
-	EdgeRelated        = "RELATED"
-	EdgeMentionsEntity = "MENTIONS_ENTITY"
+	EdgeMergedInto       = "MERGED_INTO"
+	EdgeExtractedFrom    = "EXTRACTED_FROM"
+	EdgeContradicts      = "CONTRADICTS"
+	EdgeRelated          = "RELATED"
+	EdgeMentionsEntity   = "MENTIONS_ENTITY"
+	EdgeConsolidatedInto = "CONSOLIDATED_INTO" // D3 hierarchy: raw→episodic, episodic→semantic
+	EdgeCauses           = "CAUSES"            // D3 relation detector: causal link
+	EdgeSupports         = "SUPPORTS"          // D3 relation detector: evidential link
 )
 
 // EnsureEntityEdgesTableSQL is the reference DDL for entity_edges.
@@ -50,6 +53,49 @@ func (p *Postgres) CreateMemoryEdge(ctx context.Context, fromID, toID, relation,
 	_, err := p.pool.Exec(ctx, queries.InsertMemoryEdge, fromID, toID, relation, createdAt, validAt)
 	if err != nil {
 		return fmt.Errorf("create memory edge %s -[%s]-> %s: %w", fromID, relation, toID, err)
+	}
+	return nil
+}
+
+// CreateMemoryEdgeWithConfidence inserts an edge carrying the relation-detector
+// confidence score + rationale (D3). Same ON CONFLICT idempotence as
+// CreateMemoryEdge — the first writer wins (later retries no-op).
+//
+// confidence is clamped silently to [0, 1] so callers cannot corrupt the
+// property. rationale is an opaque LLM justification, truncated by the caller
+// if necessary (we do not police length here).
+func (p *Postgres) CreateMemoryEdgeWithConfidence(ctx context.Context, fromID, toID, relation, createdAt, validAt string, confidence float64, rationale string) error {
+	if fromID == "" || toID == "" || relation == "" {
+		return nil
+	}
+	if confidence < 0 {
+		confidence = 0
+	} else if confidence > 1 {
+		confidence = 1
+	}
+	_, err := p.pool.Exec(ctx, queries.InsertMemoryEdgeWithConfidence, fromID, toID, relation, createdAt, validAt, confidence, rationale)
+	if err != nil {
+		return fmt.Errorf("create memory edge w/confidence %s -[%s]-> %s: %w", fromID, relation, toID, err)
+	}
+	return nil
+}
+
+// InsertTreeConsolidationEvent appends a row to memos_graph.tree_consolidation_log.
+// Used by TreeManager (D3) to preserve the audit trail of every promotion
+// (raw → episodic, episodic → semantic). tier is 'episodic' or 'semantic'.
+// childIDs must be the full list of UUIDs that merged into parentID.
+// llmModel / promptSHA may be empty for auto-merge (no LLM call).
+func (p *Postgres) InsertTreeConsolidationEvent(ctx context.Context, eventID, cubeID, parentID string, childIDs []string, tier, llmModel, promptSHA, createdAt string) error {
+	if eventID == "" || cubeID == "" || parentID == "" || len(childIDs) == 0 || tier == "" {
+		return nil
+	}
+	const q = `
+INSERT INTO memos_graph.tree_consolidation_log
+    (event_id, cube_id, parent_id, child_ids, tier, llm_model, prompt_sha, created_at)
+VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), $8)`
+	_, err := p.pool.Exec(ctx, q, eventID, cubeID, parentID, childIDs, tier, llmModel, promptSHA, createdAt)
+	if err != nil {
+		return fmt.Errorf("insert tree consolidation event %s: %w", eventID, err)
 	}
 	return nil
 }

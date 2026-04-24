@@ -34,6 +34,17 @@ INSERT INTO memory_edges (from_id, to_id, relation, created_at, valid_at)
 VALUES ($1, $2, $3, $4, NULLIF($5, ''))
 ON CONFLICT (from_id, to_id, relation) DO NOTHING`
 
+// InsertMemoryEdgeWithConfidence is the D3 variant that stores the relation
+// detector's confidence score + rationale. Same PK conflict resolution as
+// InsertMemoryEdge — first insert wins so retries stay idempotent.
+// Args: $1 = from_id, $2 = to_id, $3 = relation, $4 = created_at,
+//
+//	$5 = valid_at (empty string = NULL), $6 = confidence (0..1), $7 = rationale
+const InsertMemoryEdgeWithConfidence = `
+INSERT INTO memory_edges (from_id, to_id, relation, created_at, valid_at, confidence, rationale)
+VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, NULLIF($7, ''))
+ON CONFLICT (from_id, to_id, relation) DO NOTHING`
+
 // GraphRecallByEdge returns memory nodes reachable from seed_ids via edges of a given relation.
 // Used to traverse EXTRACTED_FROM, MERGED_INTO, and CONTRADICTS relationships in graph recall.
 // Bi-temporal filter: only follows edges where invalid_at IS NULL (currently valid edges).
