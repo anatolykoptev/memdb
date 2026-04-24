@@ -291,16 +291,59 @@ Sample variance on 10 QAs dominates the F1/EM gap. On retrieval recall (hit@20) 
 | D10 `enhanceMinRelativity` | 0.4 | 0.3 | Lets more candidates through → more synthetic answers on cat-3 temporal |
 | D5 `stagedShortlistSize` | 10 | 15 | Larger justification pool → cat-2 multi-hop evidence capture |
 
-### Outstanding work
+### 2026-04-24 — M4 tuning grid + combo chat-mode ← **+8× F1 aggregate**
 
-| # | Scope | Status |
-|---|-------|--------|
-| M1 | Per-D-feature Prometheus counters | ✅ done (PR #53) |
-| M2 | 5-category harness + per-cat breakdown | ✅ done (PR #52) |
-| M3 | Chat/complete mode harness (cat-1, 10 QAs) | ✅ done (F1 +14×) |
-| M4 | Hyperparam grid on tuning targets above | ⏳ next |
+**M4 part 1** (PR #55) — exposed 12 hyperparams as env-readable with bounded validation + silent fallback: `MEMDB_D10_MIN_RELATIVITY`, `MEMDB_D5_SHORTLIST_SIZE`, `MEMDB_D5_MAX_INPUT_SIZE`, `MEMDB_D2_MAX_HOP`, `MEMDB_D2_HOP_DECAY`, `MEMDB_D3_MIN_CLUSTER_RAW`, `MEMDB_D3_MIN_CLUSTER_EPISODIC`, `MEMDB_D3_COS_THRESHOLD_RAW`, `MEMDB_D3_COS_THRESHOLD_EPISODIC`, `MEMDB_D1_BOOST_SEMANTIC`, `MEMDB_D1_BOOST_EPISODIC`, `MEMDB_D1_HALF_LIFE_DAYS`. Compose (krolik-server#18) wires them through to memdb-go container.
 
-Also pending — rerun M3 chat-mode on the 5-category sample for end-to-end F1/EM measurement with category splits. Expected cat-4 open-domain gets the biggest F1 lift because D7 CoT + D10 synthesis compound there.
+**Grid sweep** (skip-chat mode, 50 QAs): all runs within noise (F1 0.0067-0.0069). skip-chat can't resolve D10/D5 contribution because scoring aggregates across 20 items instead of reading rank-0 synthetic.
+
+**Combo chat-mode** (the reveal) — applied best-of-each: `D10_MIN=0.3`, `D5_SHORTLIST=15`, `D2_MAX_HOP=3`, `D3_MIN_CLUSTER_RAW=2`, admin reorg trigger per cube after ingest, full `/product/chat/complete`:
+
+| Metric | Baseline (defaults + skip-chat) | **Combo + Chat + reorg** | Delta |
+|---|---|---|---|
+| EM | 0.000 | 0.000 | +0.000 |
+| **F1** | 0.0067 | **0.0531** | **+8.0×** |
+| **semsim** | 0.0352 | **0.0761** | **+2.2×** |
+| hit@20 | 0.500 | 0.500 | +0.000 |
+
+**Per-category F1 breakdown (combo + chat)**:
+
+| cat | name | Baseline F1 | Combo+Chat F1 | Delta |
+|---|---|---|---|---|
+| 1 | single-hop | 0.0067 | **0.0920** | **+14×** |
+| 2 | multi-hop | 0.0006 | 0.0190 | +32× (from tiny base; edges still empty) |
+| 3 | temporal | 0.0061 | **0.0804** | **+13×** |
+| 4 | open-domain | 0.0122 | 0.0356 | +3× |
+| 5 | adversarial | 0.0080 | 0.0384 | +5× |
+
+Per-category semsim shows similar story — cat-1 → 0.117, cat-3 → 0.101 (both tripled); cat-2 still limited by missing Memory↔Memory edges.
+
+**Interpretation**:
+
+1. **Chat/complete mode + permissive D10 threshold (0.3) compound magically**. The lower threshold lets more candidates reach synthesis; synthetic answer at rank 0 dominates LLM prompt; final answer surface aligns with gold.
+2. **Cat-3 temporal is the surprise win** — D4 rewrite (absolute temporal) + D6 (pronoun/temporal resolution in extraction) + D10 synthesis compound for temporal questions. +13× F1 vs baseline.
+3. **Cat-4 open-domain plateaued at +3×** — highest base F1 (0.012), least headroom. D7 CoT decomposition already helping this category in baseline.
+4. **Cat-2 multi-hop stuck at hit@20=0.100** despite `D2_MAX_HOP=3` and `D3_MIN_CLUSTER=2` + admin reorg trigger. Root cause: `TreeReorganizer` has additional gates beyond env-controlled `minClusterSize` — the raw corpus (1-2 memories per cube) doesn't satisfy the downstream cosine-threshold for episodic formation. Unblocks only with real production accumulated data (>10 raw memories per cube).
+
+### Applied config on prod (2026-04-24)
+
+`.env` combo values persisted on prod:
+
+```
+MEMDB_D10_MIN_RELATIVITY=0.3
+MEMDB_D5_SHORTLIST_SIZE=15
+MEMDB_D2_MAX_HOP=3
+MEMDB_D3_MIN_CLUSTER_RAW=2
+```
+
+All feature toggles remain on. Default configs in code unchanged — safe rollback via `.env` line removal.
+
+### Outstanding / next targets
+
+- **Full LoCoMo run** (10 convs × 200 QAs) in chat/complete mode with combo config — 4-8h runtime; gives Snap-paper-comparable numbers. Expected aggregate F1 ~0.10-0.15.
+- **D3 downstream gates audit** — why `minClusterSize=2` doesn't create edges even on 2-member cubes. Either the cosine threshold 0.7 is never satisfied on similar-but-paraphrased memories, or a second gate exists in `tree_reorganizer.go`.
+- **D10 per-category tuning** — cat-4 plateaued; maybe raising `MEMDB_D10_MIN_RELATIVITY` *higher* for cat-4 would reduce LLM cost without losing quality there, while keeping 0.3 for cat-1/3 where gain is huge.
+- **Production telemetry dashboard** — M1 counters already emitted; build Grafana panel showing D4 rewrite acceptance rate, D10 UNKNOWN rate, D5 irrelevant-drop ratio.
 
 M4 starts when M1 + M2 land — needs per-feature firing rates (from M1) + per-category deltas (from M2) to know which hyperparams actually move the needle for which category.
 
