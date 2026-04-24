@@ -35,14 +35,26 @@ func recordOverride(name, value string) {
 // LogTuningOverrides writes a single slog.Info line listing every
 // MEMDB_D3_* hyperparameter override picked up from the environment.
 // Idempotent — subsequent calls are no-ops.
+//
+// Primes each accessor before dumping the override map: otherwise the map
+// is empty at startup (getters are only invoked from RunTreeReorgForCube,
+// which fires at the first periodic tick ≫ minutes after boot).
 func LogTuningOverrides(logger *slog.Logger) {
 	envOverrideLogOnce.Do(func() {
 		if logger == nil {
 			return
 		}
+		// Prime — force every accessor to run its parseEnv* routine so
+		// recordOverride fires for any non-default env value.
+		_ = episodicMinClusterSize()
+		_ = semanticMinClusterSize()
+		_ = episodicCosineThreshold()
+		_ = semanticCosineThreshold()
+
 		envOverrideMu.Lock()
 		defer envOverrideMu.Unlock()
 		if len(envOverrides) == 0 {
+			logger.Info("scheduler: tuning env overrides active", slog.String("state", "all defaults"))
 			return
 		}
 		attrs := make([]any, 0, 2*len(envOverrides))
