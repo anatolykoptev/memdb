@@ -30,6 +30,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 
 	// Initialize Python proxy client and base handler
 	h := handlers.NewHandler(rpc.NewPythonClient(cfg.PythonBackendURL, logger), logger)
+	h.SetConfig(cfg)
 
 	// Initialize database clients for Phase 2 native handlers (non-fatal)
 	pg, qd, rd, wmCache := initDBClients(ctx, cfg, h, logger)

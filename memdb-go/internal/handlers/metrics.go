@@ -92,3 +92,32 @@ func chatPromptMx() *chatPromptMetricsInstruments {
 	})
 	return chatPromptMetrics
 }
+
+// ── Canary acceptance counter ─────────────────────────────────────────────────
+
+var (
+	chatAcceptanceOnce    sync.Once
+	chatAcceptanceMetrics *chatAcceptanceInstruments
+)
+
+type chatAcceptanceInstruments struct {
+	// Total counts answer-acceptance events with attributes style and outcome.
+	// style  ∈ {factual, conversational, <any>}
+	// outcome ∈ {accept, reject, <any>}  — label values are caller-defined.
+	// Stream 8 PRODUCT increments this counter as part of the canary logic;
+	// registering here decouples the metric lifecycle from the canary feature flag.
+	Total metric.Int64Counter
+}
+
+// chatAcceptanceMx returns the singleton canary-acceptance instruments, lazy-initialised.
+// Counter memdb.chat.answer_acceptance_total{style=...,outcome=...}.
+func chatAcceptanceMx() *chatAcceptanceInstruments {
+	chatAcceptanceOnce.Do(func() {
+		meter := otel.Meter("memdb-go/chat")
+		total, _ := meter.Int64Counter("memdb.chat.answer_acceptance_total",
+			metric.WithDescription("Answer acceptance canary counter by style and outcome. Incremented by Stream 8 PRODUCT."),
+		)
+		chatAcceptanceMetrics = &chatAcceptanceInstruments{Total: total}
+	})
+	return chatAcceptanceMetrics
+}

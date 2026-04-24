@@ -62,6 +62,11 @@ type Config struct {
 	// API settings
 	EnableChatAPI bool `json:"enable_chat_api"`
 
+	// Chat defaults — applied when the per-request field is absent.
+	// Valid values: "" (no override), "conversational", "factual".
+	// Invalid values fall back to "conversational" with a log warning.
+	DefaultAnswerStyle string `json:"default_answer_style"`
+
 	// LLM proxy (OpenAI-compatible API base URL)
 	LLMProxyURL       string   `json:"llm_proxy_url"`
 	LLMProxyAPIKey    string   `json:"llm_proxy_api_key"`
@@ -164,7 +169,8 @@ func Load() *Config {
 		EmbedURL:         envStr("MEMDB_EMBED_URL", ""),
 		EmbedURLCode:     envStr("MEMDB_EMBED_URL_CODE", ""),
 
-		EnableChatAPI: envBool("ENABLE_CHAT_API", false),
+		EnableChatAPI:      envBool("ENABLE_CHAT_API", false),
+		DefaultAnswerStyle: validatedAnswerStyle(envStr("MEMDB_DEFAULT_ANSWER_STYLE", "")),
 
 		LLMProxyURL:       envStr("MEMDB_LLM_PROXY_URL", "https://api.openai.com/v1"),
 		LLMProxyAPIKey:    envStr("CLI_PROXY_API_KEY", ""),

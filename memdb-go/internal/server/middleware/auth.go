@@ -10,6 +10,14 @@ import (
 	"strings"
 )
 
+// Header name constants for service-to-service authentication.
+const (
+	// HeaderServiceSecret is the canonical header for internal service calls.
+	HeaderServiceSecret = "X-Service-Secret"
+	// HeaderInternalServiceLeg is the legacy alias; accepted for backward compatibility.
+	HeaderInternalServiceLeg = "X-Internal-Service"
+)
+
 // AuthConfig holds authentication settings.
 type AuthConfig struct {
 	Enabled       bool
@@ -34,7 +42,7 @@ func Auth(logger *slog.Logger, cfg AuthConfig) func(http.Handler) http.Handler {
 				return
 			}
 
-			if ok, granted := checkServiceSecret(r, cfg.ServiceSecret); ok {
+			if ok, granted := CheckServiceSecret(r, cfg.ServiceSecret); ok {
 				if granted {
 					next.ServeHTTP(w, r)
 					return
@@ -74,15 +82,16 @@ func isAuthExempt(r *http.Request) bool {
 		strings.HasPrefix(r.URL.Path, "/debug/pprof/")
 }
 
-// checkServiceSecret checks the X-Service-Secret / X-Internal-Service headers.
-// Returns (presented, valid): presented=true if a secret header was sent, valid=true if it matches.
-func checkServiceSecret(r *http.Request, expected string) (presented bool, valid bool) {
+// CheckServiceSecret reads HeaderServiceSecret or HeaderInternalServiceLeg and
+// constant-time compares to expected.
+// Returns (presented, valid): presented=false means neither header was set.
+func CheckServiceSecret(r *http.Request, expected string) (presented bool, valid bool) {
 	if expected == "" {
 		return false, false
 	}
-	secret := r.Header.Get("X-Service-Secret")
+	secret := r.Header.Get(HeaderServiceSecret)
 	if secret == "" {
-		secret = r.Header.Get("X-Internal-Service")
+		secret = r.Header.Get(HeaderInternalServiceLeg)
 	}
 	if secret == "" {
 		return false, false
@@ -95,13 +104,13 @@ func checkServiceSecret(r *http.Request, expected string) (presented bool, valid
 func checkBearerToken(w http.ResponseWriter, r *http.Request, logger *slog.Logger, masterKeyHash string) bool {
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		writeAuthError(w, http.StatusUnauthorized, "missing Authorization header")
+		WriteAuthError(w, http.StatusUnauthorized, "missing Authorization header")
 		return false
 	}
 
 	token, ok := parseBearerToken(authHeader)
 	if !ok {
-		writeAuthError(w, http.StatusUnauthorized, "invalid Authorization header format, expected: Bearer <token>")
+		WriteAuthError(w, http.StatusUnauthorized, "invalid Authorization header format, expected: Bearer <token>")
 		return false
 	}
 
@@ -110,7 +119,7 @@ func checkBearerToken(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 			slog.String("path", r.URL.Path),
 			slog.String("remote", r.RemoteAddr),
 		)
-		writeAuthError(w, http.StatusForbidden, "invalid API key")
+		WriteAuthError(w, http.StatusForbidden, "invalid API key")
 		return false
 	}
 
@@ -141,7 +150,9 @@ func validateToken(token, expectedHash string) bool {
 	return subtle.ConstantTimeCompare([]byte(tokenHash), []byte(expectedHash)) == 1
 }
 
-func writeAuthError(w http.ResponseWriter, code int, message string) {
+// WriteAuthError emits the canonical auth-error JSON body.
+// Used by Auth middleware and any caller that needs a uniform 401/403 response.
+func WriteAuthError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	fmt.Fprintf(w, `{"code":%d,"message":"%s","data":null}`, code, message)

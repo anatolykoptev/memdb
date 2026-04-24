@@ -52,6 +52,19 @@ func (h *Handler) chatCanNative() bool {
 	return h.searchService != nil && h.searchService.CanSearch() && h.llmChat != nil
 }
 
+// resolveAnswerStyle returns the effective answer_style for a request.
+// Request-level value always wins; if absent or empty and a server-wide default
+// is configured (MEMDB_DEFAULT_ANSWER_STYLE), that default is used instead.
+func (h *Handler) resolveAnswerStyle(req *nativeChatRequest) string {
+	if req.AnswerStyle != nil && *req.AnswerStyle != "" {
+		return *req.AnswerStyle
+	}
+	if h.cfg != nil && h.cfg.DefaultAnswerStyle != "" {
+		return h.cfg.DefaultAnswerStyle
+	}
+	return stringOrEmpty(req.AnswerStyle)
+}
+
 // NativeChatComplete handles POST /product/chat/complete.
 func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	body, ok := h.readBody(w, r)
@@ -81,7 +94,7 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	basePrompt := stringOrEmpty(req.SystemPrompt)
-	answerStyle := stringOrEmpty(req.AnswerStyle)
+	answerStyle := h.resolveAnswerStyle(&req)
 	prompt := buildSystemPrompt(*req.Query, memories, prefString, basePrompt, answerStyle)
 	recordChatPromptUsed(ctx, basePrompt, answerStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
@@ -137,7 +150,7 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	basePrompt := stringOrEmpty(req.SystemPrompt)
-	answerStyle := stringOrEmpty(req.AnswerStyle)
+	answerStyle := h.resolveAnswerStyle(&req)
 	prompt := buildSystemPrompt(*req.Query, memories, prefString, basePrompt, answerStyle)
 	recordChatPromptUsed(ctx, basePrompt, answerStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
