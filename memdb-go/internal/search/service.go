@@ -69,6 +69,24 @@ func (s *SearchService) CanSearch() bool {
 func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutput, error) {
 	pipelineStart := time.Now()
 
+	// Step 0.25: D7 — optional LLM Chain-of-Thought query decomposition.
+	// Env-gated (MEMDB_SEARCH_COT=true, default off). Multi-part questions
+	// get split into up to 3 atomic sub-questions. subqueries[0] is always
+	// the original; each of subqueries[1:] drives an extra vector search
+	// after the primary parallel phase. Graceful degrade: single-element
+	// slice on any error / short query / disabled env.
+	subqueries := DecomposeQuery(ctx, s.logger, p.Query, CoTConfig{
+		APIURL: s.LLMReranker.APIURL,
+		APIKey: s.LLMReranker.APIKey,
+		Model:  s.LLMReranker.Model,
+	})
+	// Ensure the original query is always the first subquery. The primary
+	// pipeline (rewrite → embed → parallel search) always runs on p.Query;
+	// subqueries[1:] drive the D7 augmentation below.
+	if len(subqueries) == 0 || subqueries[0] != p.Query {
+		subqueries = append([]string{p.Query}, subqueries...)
+	}
+
 	// Step 0.5: D4 — optional LLM rewrite of the query before embedding.
 	// Env-gated (MEMDB_QUERY_REWRITE=true, default off). Falls back to the
 	// original query on any error / low confidence / short or long query.
@@ -104,6 +122,14 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 		return nil, err
 	}
 	parallelDur := time.Since(t0)
+
+	// Step 3.25: D7 — per-subquery vector augmentation. No-op for atomic
+	// queries (len(subqueries) <= 1). For multi-part queries, runs an extra
+	// VectorSearch per scope for each sub-question and unions the results
+	// into psr by id (max-score). The rest of the pipeline is unchanged.
+	cotStart := time.Now()
+	s.augmentWithSubqueries(ctx, psr, subqueries, p, budget)
+	cotDur := time.Since(cotStart)
 
 	// BFS multi-hop expansion (serially after parallel phase)
 	t0 = time.Now()
@@ -160,6 +186,7 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 		slog.Duration("total", time.Since(pipelineStart)),
 		slog.Duration("embed", embedDur),
 		slog.Duration("parallel_db", parallelDur),
+		slog.Duration("cot_augment", cotDur),
 		slog.Duration("bfs", bfsDur),
 		slog.Duration("multihop", multihopDur),
 		slog.Duration("contradicts", contradictsDur),
