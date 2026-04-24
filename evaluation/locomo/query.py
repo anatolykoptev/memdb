@@ -331,6 +331,10 @@ def query_chat(
         "mode": "fast",
         "include_preference": False,
         "threshold": LOCOMO_RETRIEVAL_THRESHOLD,  # nativeChatRequest.Threshold field (NOT "relativity")
+        # Use server-side factual QA prompt (Stream A: answer_style=factual in buildSystemPrompt).
+        # This exercises the production code path instead of the harness-side QA_SYSTEM_PROMPT
+        # override that was used during M6 ablation experiments.
+        "answer_style": "factual",
     }
     start = time.time()
     resp = requests.post(
