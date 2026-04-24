@@ -564,6 +564,69 @@ Gate: F1 ≥ 0.15
 Output: `evaluation/locomo/results/m7-stage3-full.json`
 Note: full ingest takes ~60-90 min (272 sessions × 2 speakers × ~20s each). Use `LOCOMO_SKIP_CHAT=1` for retrieval-only scoring if time-constrained; switch to full chat mode for final measurement.
 
+
+### 2026-04-25 — M7 Stage 3 (full 10 convs, retrieval-only) — **MEASUREMENT INVALID due to ingest failure**
+
+Full benchmark across all 10 LoCoMo conversations (~1986 QAs) attempted. Goal: confirm
+whether M7 Stage 2 F1=0.238 on conv-26 generalises to the full dataset.
+
+**Setup intent**: `LOCOMO_INGEST_MODE=raw`, `LOCOMO_RETRIEVAL_THRESHOLD=0.0`, all D-features
+on (D1-D10), combo config (`D10_MIN=0.3`, `D5_SHORTLIST=15`, `D2_MAX_HOP=3`,
+`D3_MIN_CLUSTER_RAW=2`), `answer_style=factual`.
+
+**What actually happened — full transparency**:
+
+1. **memdb-go OOM crash during initial ingest** (~21 minutes in, around conv-41) caused
+   478 of 544 ingest API calls for conv-41–50 to fail. Docker auto-restarted the container.
+2. **Recovery script attempted re-ingest** of conv-41–50 but reported **465 errors out of
+   544 retry calls** — re-ingest also largely failed (likely cube-state inconsistency from
+   the OOM, or repeated OOM under retry pressure).
+3. **Recovery script crashed silently** after Phase 3B v2 retrieval finished — `set -euo
+   pipefail` caught an unknown error during the score.py invocation, so Phase 3C
+   (stratified chat scoring) never ran.
+4. Conv-41–50 effectively have **no retrievable memories** in the database; queries against
+   them dominate the aggregate with hit@k=0.
+
+#### Phase 3B v2 — Retrieval-only on partially-broken dataset (1986 QAs)
+
+| Category | n | hit@k | F1 | EM |
+|----------|---|-------|-----|-----|
+| cat-1 (single-hop) | 282 | 0.106 | 0.007 | 0.000 |
+| cat-2 (multi-hop) | 321 | 0.056 | 0.001 | 0.000 |
+| cat-3 (temporal) | 96 | 0.104 | 0.002 | 0.000 |
+| cat-4 (open-domain) | 841 | 0.105 | 0.009 | 0.000 |
+| cat-5 (adversarial) | 446 | 0.092 | 0.007 | 0.000 |
+| **aggregate** | **1986** | **0.094** | **0.007** | **0.000** |
+
+**Aggregate hit@k = 0.094** vs Stage 2 conv-26-only **0.769** — **NOT a fair comparison**.
+Roughly half the conversations (5 out of 10) had broken ingest; their queries return no
+memories regardless of how well retrieval works on the working half.
+
+#### Phase 3C — Stratified chat scoring
+
+**Did not run** — recovery script died before Phase 3C was invoked.
+
+#### Conclusion
+
+**Stage 3 generalisation is UNKNOWN.** Stage 2's F1=0.238 on conv-26 stands as a
+single-conv result. Whether it generalises requires re-running with a stable ingest pipeline.
+
+**Hypotheses for the OOM**:
+- 10× conv ingest with raw-mode + factual prompt = much larger memory footprint than Stage 2
+  (which ingested only 1 conv). Possibly need `MEMDB_GOMEMLIMIT` tuning or chunked ingest.
+- The post-PR-#71 embed-batching change may interact poorly with high-volume back-to-back ingest;
+  worth investigating in a controlled benchmark.
+
+#### Recovery plan (deferred to next session)
+
+1. Bump container memory limit and/or add `GOMEMLIMIT=4GiB` to memdb-go env.
+2. Re-run full ingest of conv-41–50 only after cleanup of inconsistent cubes.
+3. Re-run Phase 3B v3 + Phase 3C v3 against the now-complete dataset.
+4. If Phase 3C lands F1 ≥ 0.15 across stratified 50 QAs, Stage 2 generalises. If significantly
+   below, investigate per-conv variance (some convs may be inherently harder).
+
+Filed as backlog item — this is a measurement-tooling failure, not a model regression.
+
 ## How to record a new milestone
 
 ```bash
