@@ -39,14 +39,17 @@ import (
 )
 
 const (
-	answerEnhanceTopN           = 5
-	answerEnhanceTimeout        = 10 * time.Second
-	answerEnhanceMinRelativity  = 0.4
-	answerEnhanceMaxTokens      = 120
-	answerEnhanceRespBodyLimit  = 16 * 1024
-	answerEnhanceSynthIDHexLen  = 12 // sha256 prefix length for synthetic item id
-	answerEnhanceUnknownAnswer  = "UNKNOWN"
+	answerEnhanceTopN          = 5
+	answerEnhanceTimeout       = 10 * time.Second
+	answerEnhanceMaxTokens     = 120
+	answerEnhanceRespBodyLimit = 16 * 1024
+	answerEnhanceSynthIDHexLen = 12 // sha256 prefix length for synthetic item id
+	answerEnhanceUnknownAnswer = "UNKNOWN"
 )
+
+// answerEnhanceMinRelativity is the min relativity threshold — moved to
+// tuning.go as an env-readable accessor (MEMDB_D10_MIN_RELATIVITY).
+// Default: 0.4. See defaultAnswerEnhanceMinRelativity.
 
 const answerEnhanceSystemPrompt = `You are a precise answer extractor. Given a user's question and a list of retrieved memories, respond with the SHORTEST possible answer that directly answers the question.
 
@@ -83,7 +86,7 @@ type AnswerEnhanceResponse struct {
 //
 // Semantics:
 //   - empty items → ("UNKNOWN", nil, 0, nil)
-//   - no items with relativity ≥ answerEnhanceMinRelativity → ("UNKNOWN", nil, 0, nil)
+//   - no items with relativity ≥ answerEnhanceMinRelativity() → ("UNKNOWN", nil, 0, nil)
 //   - LLM error or malformed JSON → ("UNKNOWN", nil, 0, err) (caller should
 //     log Debug and continue without enhancement)
 //   - LLM returns literal "UNKNOWN" → propagated as-is, err = nil
@@ -98,12 +101,13 @@ func EnhanceRetrievalAnswer(
 	}
 
 	// Keep only items above the relativity floor, cap at top-N.
+	minRel := answerEnhanceMinRelativity()
 	candidates := make([]map[string]any, 0, answerEnhanceTopN)
 	for _, it := range items {
 		if len(candidates) >= answerEnhanceTopN {
 			break
 		}
-		if getRelativity(it) < answerEnhanceMinRelativity {
+		if getRelativity(it) < minRel {
 			continue
 		}
 		candidates = append(candidates, it)
@@ -253,9 +257,10 @@ func applyAnswerEnhancement(
 	}
 	// Pre-check relativity floor to distinguish "threshold below" (skipped)
 	// from a genuine LLM UNKNOWN response.
+	minRel := answerEnhanceMinRelativity()
 	anyRelevant := false
 	for _, it := range items {
-		if getRelativity(it) >= answerEnhanceMinRelativity {
+		if getRelativity(it) >= minRel {
 			anyRelevant = true
 			break
 		}
