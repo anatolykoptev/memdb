@@ -169,3 +169,27 @@ func FindNearDuplicatesHNSWSQL() string { return FindNearDuplicatesHNSW }
 
 // FindNearDuplicatesHNSWByIDsSQL returns the HNSW ByIDs query string for testing.
 func FindNearDuplicatesHNSWByIDsSQL() string { return FindNearDuplicatesHNSWByIDs }
+
+// ListMemoriesByHierarchyLevel returns activated memories for a cube at a given
+// hierarchy_level ('raw' | 'episodic' | 'semantic'). Used by the D3 tree
+// reorganizer to batch-load candidates for clustering + LLM consolidation.
+//
+// Returns id, text, user_id, and the embedding as text (for ParseVectorString).
+// Memories without an explicit hierarchy_level default to 'raw' after migration
+// 0013's backfill, so the = $2 predicate matches them too.
+//
+// Args: $1 = user_name (cube partition), $2 = hierarchy_level, $3 = limit
+const ListMemoriesByHierarchyLevel = `
+SELECT
+    properties->>(('id'::text))                         AS memory_id,
+    properties->>(('memory'::text))                     AS memory_text,
+    COALESCE(properties->>(('user_id'::text)), '')      AS user_id,
+    embedding::text                                     AS embedding_text
+FROM %[1]s."Memory"
+WHERE properties->>(('user_name'::text)) = $1
+  AND properties->>(('status'::text)) = 'activated'
+  AND properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory', 'EpisodicMemory')
+  AND COALESCE(properties->>(('hierarchy_level'::text)), 'raw') = $2
+  AND embedding IS NOT NULL
+ORDER BY properties->>(('created_at'::text)) DESC
+LIMIT $3`

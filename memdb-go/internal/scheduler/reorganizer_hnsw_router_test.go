@@ -76,6 +76,16 @@ func (s *spyPostgres) GetWorkingMemoryOldestFirst(_ context.Context, _ string, _
 func (s *spyPostgres) DecayAndArchiveImportance(_ context.Context, _ string, _, _ float64, _ string) (int64, error) {
 	return 0, nil
 }
+func (s *spyPostgres) ListMemoriesByHierarchyLevel(_ context.Context, _, _ string, _ int) ([]db.HierarchyMemory, error) {
+	return nil, nil
+}
+func (s *spyPostgres) CreateMemoryEdgeWithConfidence(_ context.Context, _, _, _, _, _ string, _ float64, _ string) error {
+	return nil
+}
+func (s *spyPostgres) InsertTreeConsolidationEvent(_ context.Context, _, _, _ string, _ []string, _, _, _, _ string) error {
+	return nil
+}
+func (s *spyPostgres) SetHierarchyLevel(_ context.Context, _, _, _, _ string) error { return nil }
 
 func TestReorganizer_Router_LegacyByDefault(t *testing.T) {
 	spy := &spyPostgres{}

@@ -48,6 +48,16 @@ type reorgPostgres interface {
 
 	// Importance lifecycle
 	DecayAndArchiveImportance(ctx context.Context, userName string, decayFactor, archiveThreshold float64, now string) (int64, error)
+
+	// D3 hierarchy — batch-load memories at a given tier for clustering + LLM consolidation.
+	ListMemoriesByHierarchyLevel(ctx context.Context, userName, level string, limit int) ([]db.HierarchyMemory, error)
+	// D3 relation detector — edge insert with confidence + rationale.
+	CreateMemoryEdgeWithConfidence(ctx context.Context, fromID, toID, relation, createdAt, validAt string, confidence float64, rationale string) error
+	// D3 history audit trail.
+	InsertTreeConsolidationEvent(ctx context.Context, eventID, cubeID, parentID string, childIDs []string, tier, llmModel, promptSHA, createdAt string) error
+	// D3 — promote a memory into a higher tier (sets hierarchy_level + parent_memory_id
+	// on parent_memory_id for children; sets hierarchy_level on the parent itself).
+	SetHierarchyLevel(ctx context.Context, memoryID, level, parentMemoryID, updatedAt string) error
 }
 
 const (
