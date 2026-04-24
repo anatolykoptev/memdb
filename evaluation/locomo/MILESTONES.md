@@ -31,9 +31,33 @@ After Phase A (observability: 3 new metrics + 3 alert rules + Prometheus scrape)
 
 **Interpretation.** Zero delta is expected and correct: Phase A/B/C is refactoring, observability, and dead-code removal — no retrieval-behaviour changes. The write-path blocker persists: until it's fixed, every metric stays at 0 regardless of what Phase D we ship. **Phase D cannot produce measurable lift until the AGE/agtype INSERT path is repaired.**
 
-### TODO — write-path repair (tracked separately)
+### 2026-04-23 — post-P1 write-path repair (commit `74659311`) ← **real baseline**
 
-Fix `cubes` table schema (Go code writes to `cube_id` text column; actual table is AGE vertex with `properties agtype`) + resolve `agtype_in(text)` function missing. After fix, rerun this harness — first milestone with non-zero numbers will establish the true post-infrastructure baseline. Every Phase D task (D1–D8, D10) measures against that new baseline.
+Fixed three cascading blockers that together gated all retrieval:
+1. **AGE 1.7 removed `agtype_in(text)` overload** → migrated 10 SQL sites to `::agtype` cast (PR #26)
+2. **`memos_graph.cubes` was AGE vertex label, Go expected plain table** → migration 0009 drops label + recreates plain, hotfix for AGE 1.7 `drop_label` rename (PRs #26, #27)
+3. **`memos_graph."Memory".id` is auto-gen graphid, Go was binding text UUIDs** → refactor: INSERT drops id column (AGE auto-gen), all WHERE/DELETE/UPDATE/SELECT shift to `properties->>(('id'::text))` as UUID identity (PR #28, 13 SQL sites + Go caller)
+
+| Metric | Pre-fix baseline | Post-P1 | Delta |
+|---|---|---|---|
+| EM | 0.000 | 0.000 | +0.000 |
+| F1 | 0.000 | 0.010 | +0.010 |
+| semsim | 0.000 | 0.039 | +0.039 |
+| **hit@20** | **0.000** | **0.700** | **+0.700** |
+
+**Interpretation.** `hit@20=0.700` is the signal — 7 of 10 gold memories are now retrieved into the top-20 candidate pool. Retrieval works. F1/semsim remain low because scoring compares surface text (not retrieved memory payload) — the gold answers are short spans ("dancing", "sexual assault") while stored memories are verbose rephrasings ("Caroline is advocating against sexual assault and child protection through her work"). This is **exactly the gap Phase D features (D4 query rewrite, D5 staged retrieval, D10 post-retrieval enhancement) target**.
+
+**Written as `results/baseline-v1.1.0-post-p1.json`** — from here on, the real baseline for measuring D1-D10 lift. The earlier all-zero `baseline-v1.1.0.json` is retained as a historical marker of the pre-fix state.
+
+### Phase D measurement plan
+
+Each D task re-runs the harness after deploy and adds a `### YYYY-MM-DD — D<N> <name>` row showing delta vs `baseline-v1.1.0-post-p1.json`. Expected impact ballpark per Phase D plan:
+- D1 (temporal decay): +0.02 F1 on longitudinal queries
+- D2 (multi-hop AGE): +0.05 hit@k on multi-fact questions
+- D3 (hierarchical reorganizer): +0.03 semsim on abstract queries
+- D4 (query rewrite): +0.10 F1 (biggest win — closes surface-text gap)
+- D5 (staged prompts): +0.08 EM
+- D10 (post-retrieval enhancement): +0.15 F1 (surface alignment)
 
 ## How to record a new milestone
 
