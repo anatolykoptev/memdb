@@ -32,12 +32,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [2.0.0] - 2026-04-24
+## [2.0.0] — 2026-04-24
 
 ### Added
 
 - Phase D shipped.
 
+[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v2.0.0...HEAD
 [2.0.0]: https://github.com/anatolykoptev/memdb/releases/tag/v2.0.0
 """
 
@@ -86,27 +87,32 @@ class InsertSectionTests(unittest.TestCase):
             existing=MINIMAL_CHANGELOG,
             repo="anatolykoptev/memdb",
             tag="v2.1.0",
-            idempotent=True,
         )
         self.assertEqual(result.status, "written")
         out = result.new_changelog
 
-        # New section heading is present with the correct date.
-        self.assertIn("## [2.1.0] - 2026-04-24", out)
+        # New section heading is present with the correct date (em-dash).
+        self.assertIn("## [2.1.0] — 2026-04-24", out)
 
         # Old [Unreleased] heading is preserved (so future syncs work).
         self.assertIn("## [Unreleased]", out)
 
         # Old version is still there.
-        self.assertIn("## [2.0.0] - 2026-04-24", out)
+        self.assertIn("## [2.0.0] — 2026-04-24", out)
 
-        # Footer link prepended for v2.1.0 and v2.0.0 retained.
+        # Footer link present for v2.1.0; v2.0.0 link retained.
         self.assertIn(
             "[2.1.0]: https://github.com/anatolykoptev/memdb/releases/tag/v2.1.0",
             out,
         )
         self.assertIn(
             "[2.0.0]: https://github.com/anatolykoptev/memdb/releases/tag/v2.0.0",
+            out,
+        )
+        # [Unreleased] link is present and refreshed to compare against the
+        # new tag.
+        self.assertIn(
+            "[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v2.1.0...HEAD",
             out,
         )
 
@@ -116,13 +122,74 @@ class InsertSectionTests(unittest.TestCase):
             out.index("## [2.0.0]"),
         )
 
-        # Footer link ordering: 2.1.0 link precedes 2.0.0 link.
+        # Footer link ordering: [Unreleased] -> [2.1.0] -> [2.0.0].
+        self.assertLess(
+            out.index("[Unreleased]:"),
+            out.index("[2.1.0]:"),
+        )
         self.assertLess(
             out.index("[2.1.0]:"),
             out.index("[2.0.0]:"),
         )
 
-    def test_idempotent_skip_when_version_present(self) -> None:
+    def test_unreleased_link_stays_on_top(self) -> None:
+        result = sync_mod.sync(
+            version="v2.1.0",
+            date="2026-04-24",
+            body=SAMPLE_BODY_V21,
+            existing=MINIMAL_CHANGELOG,
+            repo="anatolykoptev/memdb",
+            tag="v2.1.0",
+        )
+        out = result.new_changelog
+        # Pull just the trailing footer block for ordering assertions.
+        footer_lines = [
+            ln
+            for ln in out.splitlines()
+            if ln.startswith("[") and "]: " in ln
+        ]
+        self.assertGreaterEqual(len(footer_lines), 3)
+        self.assertTrue(footer_lines[0].startswith("[Unreleased]:"))
+        self.assertTrue(footer_lines[1].startswith("[2.1.0]:"))
+        # Whatever was previously below must still be below the new entry.
+        self.assertTrue(footer_lines[2].startswith("[2.0.0]:"))
+
+    def test_unreleased_link_url_refreshed(self) -> None:
+        result = sync_mod.sync(
+            version="v2.1.0",
+            date="2026-04-24",
+            body=SAMPLE_BODY_V21,
+            existing=MINIMAL_CHANGELOG,
+            repo="anatolykoptev/memdb",
+            tag="v2.1.0",
+        )
+        out = result.new_changelog
+        # Old compare URL (against v2.0.0) is gone; new one targets v2.1.0.
+        self.assertNotIn(
+            "[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v2.0.0...HEAD",
+            out,
+        )
+        self.assertIn(
+            "[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v2.1.0...HEAD",
+            out,
+        )
+
+    def test_em_dash_in_section_heading(self) -> None:
+        result = sync_mod.sync(
+            version="v2.1.0",
+            date="2026-04-24",
+            body=SAMPLE_BODY_V21,
+            existing=MINIMAL_CHANGELOG,
+            repo="anatolykoptev/memdb",
+            tag="v2.1.0",
+        )
+        out = result.new_changelog
+        # Em-dash (U+2014) form, not the ASCII hyphen form.
+        self.assertIn("## [2.1.0] — 2026-04-24", out)
+        self.assertNotIn("## [2.1.0] - 2026-04-24", out)
+
+    def test_default_idempotent_no_flag(self) -> None:
+        # Default behaviour: section already present -> noop on second call.
         first = sync_mod.sync(
             version="v2.1.0",
             date="2026-04-24",
@@ -130,7 +197,6 @@ class InsertSectionTests(unittest.TestCase):
             existing=MINIMAL_CHANGELOG,
             repo="anatolykoptev/memdb",
             tag="v2.1.0",
-            idempotent=True,
         )
         second = sync_mod.sync(
             version="v2.1.0",
@@ -139,13 +205,56 @@ class InsertSectionTests(unittest.TestCase):
             existing=first.new_changelog,
             repo="anatolykoptev/memdb",
             tag="v2.1.0",
-            idempotent=True,
         )
         self.assertEqual(second.status, "noop")
         self.assertEqual(second.new_changelog, first.new_changelog)
 
+    def test_force_flag_inserts_duplicate(self) -> None:
+        first = sync_mod.sync(
+            version="v2.1.0",
+            date="2026-04-24",
+            body=SAMPLE_BODY_V21,
+            existing=MINIMAL_CHANGELOG,
+            repo="anatolykoptev/memdb",
+            tag="v2.1.0",
+        )
+        second = sync_mod.sync(
+            version="v2.1.0",
+            date="2026-04-24",
+            body=SAMPLE_BODY_V21,
+            existing=first.new_changelog,
+            repo="anatolykoptev/memdb",
+            tag="v2.1.0",
+            force=True,
+        )
+        self.assertEqual(second.status, "written")
+        # The same heading should now appear twice in the output.
+        self.assertEqual(
+            second.new_changelog.count("## [2.1.0] — 2026-04-24"),
+            2,
+        )
+
+    def test_empty_body_emits_placeholder(self) -> None:
+        # A body that cleans to empty (only the cruft sections) should still
+        # produce a valid section with a placeholder line.
+        empty_body = (
+            "## What's Changed\n\n"
+            "- nothing categorised\n\n"
+            "**Full Changelog:** https://example/compare/A...B\n"
+        )
+        result = sync_mod.sync(
+            version="v2.1.0",
+            date="2026-04-24",
+            body=empty_body,
+            existing=MINIMAL_CHANGELOG,
+            repo="anatolykoptev/memdb",
+            tag="v2.1.0",
+        )
+        self.assertEqual(result.status, "written")
+        self.assertIn("_No notable changes._", result.new_changelog)
+
     def test_raises_when_unreleased_missing(self) -> None:
-        bad = "# Changelog\n\n## [1.0.0] - 2026-01-01\n\n- old\n"
+        bad = "# Changelog\n\n## [1.0.0] — 2026-01-01\n\n- old\n"
         with self.assertRaises(ValueError):
             sync_mod.sync(
                 version="v2.0.0",
@@ -154,7 +263,7 @@ class InsertSectionTests(unittest.TestCase):
                 existing=bad,
                 repo="anatolykoptev/memdb",
                 tag="v2.0.0",
-                idempotent=False,
+                force=True,
             )
 
 
@@ -175,7 +284,6 @@ class CliDryRunTests(unittest.TestCase):
                 str(cl),
                 "--body-file",
                 str(body_file),
-                "--idempotent",
                 "--dry-run",
             ]
             rc = sync_mod.main(argv)
@@ -201,12 +309,11 @@ class CliWriteAndIdempotentTests(unittest.TestCase):
                 str(cl),
                 "--body-file",
                 str(body_file),
-                "--idempotent",
             ]
 
             self.assertEqual(sync_mod.main(argv), 0)
             after_first = cl.read_text(encoding="utf-8")
-            self.assertIn("## [2.1.0] - 2026-04-24", after_first)
+            self.assertIn("## [2.1.0] — 2026-04-24", after_first)
 
             self.assertEqual(sync_mod.main(argv), 0)
             after_second = cl.read_text(encoding="utf-8")

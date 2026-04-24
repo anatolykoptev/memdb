@@ -38,8 +38,7 @@ jobs:
             --version "${{ github.event.release.tag_name }}" \
             --date   "${{ github.event.release.published_at }}" \
             --changelog CHANGELOG.md \
-            --repo   "${{ github.repository }}" \
-            --idempotent
+            --repo   "${{ github.repository }}"
 
       - name: Open PR if CHANGELOG.md changed
         uses: peter-evans/create-pull-request@v6

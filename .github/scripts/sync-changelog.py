@@ -3,18 +3,21 @@
 
 Drops release-drafter cruft (``## What's Changed`` block, ``**Full
 Changelog:**`` footer), demotes ``##`` category headers to ``###``,
-inserts a ``## [<version>] - <YYYY-MM-DD>`` section after
-``## [Unreleased]``, and prepends a footer link mapping ``[<version>]``
-to the GitHub release tag URL.
+inserts a ``## [<version>] — <YYYY-MM-DD>`` section after
+``## [Unreleased]`` (em-dash matches established project style), and
+rewrites the footer link table so ``[Unreleased]`` stays on top with
+its compare URL refreshed to the new tag, followed by ``[<version>]``,
+followed by the rest of the existing links.
 
-Idempotency (``--idempotent``): if a ``## [<version>]`` heading is
-already present, exits 0 with ``status=noop``.
+Idempotency: by default, if a ``## [<version>]`` heading is already
+present, exits 0 with ``status=noop``. Pass ``--force`` to insert a
+duplicate section (rare manual override).
 
 Release body source: ``--body-file PATH`` or ``BODY`` env var (workaround
 for special chars in YAML inline interpolation).
 
 Exit status:
-    0 - success (file written or noop in idempotent mode)
+    0 - success (file written or noop)
     1 - usage / I/O error
     2 - input malformed (e.g. CHANGELOG missing ``## [Unreleased]``)
 """
@@ -31,6 +34,7 @@ from typing import Optional
 
 GITHUB_REPO_DEFAULT = "anatolykoptev/memdb"
 UNRELEASED_HEADER = "## [Unreleased]"
+EMPTY_BODY_PLACEHOLDER = "_No notable changes._"
 
 
 @dataclasses.dataclass
@@ -97,7 +101,10 @@ def normalise_version(tag: str) -> str:
 
 
 def build_section(version: str, date: str, cleaned_body: str) -> str:
-    return f"## [{version}] - {date}\n\n{cleaned_body}\n"
+    # Em-dash (U+2014) matches the established project convention used by
+    # existing entries in CHANGELOG.md (e.g. ``## [2.0.0] — 2026-04-24``).
+    body = cleaned_body if cleaned_body.strip() else EMPTY_BODY_PLACEHOLDER
+    return f"## [{version}] — {date}\n\n{body}\n"
 
 
 def insert_section(
@@ -139,14 +146,24 @@ def insert_section(
     replacement = f"{UNRELEASED_HEADER}\n\n{section}\n"
     new_body = pattern.sub(replacement, body_text, count=1)
 
-    # Update footer: prepend new entry (or replace if a stale one exists).
+    # Rebuild footer link table per Keep-a-Changelog convention:
+    #   1. ``[Unreleased]:`` on top (URL refreshed to compare/<tag>...HEAD).
+    #   2. ``[<version>]:`` for the new release directly below.
+    #   3. The remaining existing links (any stale ``[<version>]:`` line for
+    #      the same version is dropped — replaced by the new release URL).
+    unreleased_link = (
+        f"[Unreleased]: https://github.com/{repo}/compare/{tag}...HEAD"
+    )
     new_link = f"[{version}]: https://github.com/{repo}/releases/tag/{tag}"
-    footer_lines = [
-        ln for ln in footer_lines if not ln.startswith(f"[{version}]:")
+    rest = [
+        ln
+        for ln in footer_lines
+        if not ln.startswith("[Unreleased]:")
+        and not ln.startswith(f"[{version}]:")
     ]
-    footer_lines.insert(0, new_link)
+    ordered_footer = [unreleased_link, new_link, *rest]
 
-    new_footer = "\n".join(footer_lines) + "\n"
+    new_footer = "\n".join(ordered_footer) + "\n"
     return new_body.rstrip() + "\n\n" + new_footer
 
 
@@ -158,12 +175,14 @@ def sync(
     existing: str,
     repo: str,
     tag: str,
-    idempotent: bool,
+    force: bool = False,
 ) -> SyncResult:
     cleaned_version = normalise_version(version)
     cleaned_date = parse_date(date)
 
-    if idempotent and re.search(
+    # Idempotent by default: if a section for this version already exists,
+    # return noop. ``--force`` overrides this to allow duplicate insertion.
+    if not force and re.search(
         rf"^##\s+\[{re.escape(cleaned_version)}\]",
         existing,
         flags=re.MULTILINE,
@@ -227,9 +246,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         help=f"owner/name of the repo (default: {GITHUB_REPO_DEFAULT})",
     )
     parser.add_argument(
-        "--idempotent",
+        "--force",
         action="store_true",
-        help="exit noop if version section already present",
+        help=(
+            "insert section even if a heading for this version already "
+            "exists (default: skip with status=noop)"
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -253,7 +275,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             existing=existing,
             repo=args.repo,
             tag=args.version,
-            idempotent=args.idempotent,
+            force=args.force,
         )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
