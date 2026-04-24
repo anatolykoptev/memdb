@@ -21,6 +21,9 @@ import (
 	"log/slog"
 	"os"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // TreeHierarchyEnabled reports whether the D3 tree reorganizer is active.
@@ -80,6 +83,10 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 	// ---- tier 1: raw → episodic -----------------------------------------
 	rawMems, err := r.postgres.ListMemoriesByHierarchyLevel(ctx, cubeID, hierarchyLevelRaw, rawCandidateLimit)
 	if err != nil {
+		schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("tier", "all"),
+			attribute.String("outcome", "error"),
+		))
 		log.Error("tree reorg: list raw failed", slog.Any("error", err))
 		return
 	}
@@ -97,19 +104,44 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 				return
 			default:
 			}
+			if len(cluster) < episodicMinClusterSize {
+				schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("tier", "episodic"),
+					attribute.String("outcome", "skipped_below_threshold"),
+				))
+				continue
+			}
 			if err := r.promoteCluster(ctx, cubeID, cluster, hierarchyLevelEpisodic); err != nil {
+				schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("tier", "episodic"),
+					attribute.String("outcome", "error"),
+				))
 				log.Warn("tree reorg: episodic promote failed",
 					slog.Int("cluster_size", len(cluster)),
 					slog.Any("error", err))
 				continue
 			}
+			schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("tier", "episodic"),
+				attribute.String("outcome", "created"),
+			))
 			episodicCreated++
 		}
+	} else {
+		// Whole raw tier is below the threshold for any clustering.
+		schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("tier", "episodic"),
+			attribute.String("outcome", "skipped_below_threshold"),
+		))
 	}
 
 	// ---- tier 2: episodic → semantic ------------------------------------
 	epMems, err := r.postgres.ListMemoriesByHierarchyLevel(ctx, cubeID, hierarchyLevelEpisodic, episodicCandidateLimit)
 	if err != nil {
+		schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("tier", "all"),
+			attribute.String("outcome", "error"),
+		))
 		log.Error("tree reorg: list episodic failed", slog.Any("error", err))
 		return
 	}
@@ -127,14 +159,34 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 				return
 			default:
 			}
+			if len(cluster) < semanticMinClusterSize {
+				schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("tier", "semantic"),
+					attribute.String("outcome", "skipped_below_threshold"),
+				))
+				continue
+			}
 			if err := r.promoteCluster(ctx, cubeID, cluster, hierarchyLevelSemantic); err != nil {
+				schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("tier", "semantic"),
+					attribute.String("outcome", "error"),
+				))
 				log.Warn("tree reorg: semantic promote failed",
 					slog.Int("cluster_size", len(cluster)),
 					slog.Any("error", err))
 				continue
 			}
+			schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("tier", "semantic"),
+				attribute.String("outcome", "created"),
+			))
 			semanticCreated++
 		}
+	} else {
+		schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("tier", "semantic"),
+			attribute.String("outcome", "skipped_below_threshold"),
+		))
 	}
 
 	log.Info("tree reorg: cycle complete",

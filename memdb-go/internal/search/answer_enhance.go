@@ -34,6 +34,8 @@ import (
 	"bytes"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const (
@@ -246,17 +248,35 @@ func applyAnswerEnhancement(
 	cfg AnswerEnhanceConfig,
 ) []map[string]any {
 	if !answerEnhanceEnabled() || len(items) == 0 || cfg.APIURL == "" {
+		searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
+		return items
+	}
+	// Pre-check relativity floor to distinguish "threshold below" (skipped)
+	// from a genuine LLM UNKNOWN response.
+	anyRelevant := false
+	for _, it := range items {
+		if getRelativity(it) >= answerEnhanceMinRelativity {
+			anyRelevant = true
+			break
+		}
+	}
+	if !anyRelevant {
+		searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
 		return items
 	}
 	answer, sources, conf, err := EnhanceRetrievalAnswer(ctx, query, items, cfg)
 	if err != nil {
+		searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "error")))
 		if logger != nil {
 			logger.Debug("enhance failed, continuing without", slog.Any("error", err))
 		}
 		return items
 	}
 	if answer == "" || answer == answerEnhanceUnknownAnswer {
+		searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "unknown")))
 		return items
 	}
+	searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "answered")))
+	searchMx().D10Conf.Record(ctx, conf)
 	return prependEnhancedAnswer(items, answer, sources, conf, query)
 }

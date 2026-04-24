@@ -13,6 +13,9 @@ import (
 	"math"
 	"os"
 	"sort"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // multihopDecay is the per-hop score penalty multiplier. A neighbor at
@@ -54,7 +57,12 @@ func expandViaGraph(
 	origCandidates []MergedResult,
 	cubeID, personID, agentID string,
 ) []MergedResult {
-	if !multihopEnabled() || len(origCandidates) == 0 || pg == nil {
+	if !multihopEnabled() {
+		searchMx().Multihop.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "disabled")))
+		return origCandidates
+	}
+	if len(origCandidates) == 0 || pg == nil {
+		searchMx().Multihop.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "empty_seeds")))
 		return origCandidates
 	}
 	origSize := len(origCandidates)
@@ -73,14 +81,17 @@ func expandViaGraph(
 
 	expansions, err := pg.MultiHopEdgeExpansion(ctx, seedIDs, cubeID, personID, multihopMaxDepth, cap2x, agentID)
 	if err != nil {
+		searchMx().Multihop.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "error")))
 		if logger != nil {
 			logger.Debug("multi-hop graph expansion failed", slog.Any("error", err))
 		}
 		return origCandidates
 	}
 	if len(expansions) == 0 {
+		searchMx().Multihop.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "empty_seeds")))
 		return origCandidates
 	}
+	searchMx().Multihop.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "expanded")))
 
 	// Build merged pool keyed by ID, starting from the seeds so their
 	// scores always win vs. a hop-decayed inherited score if a duplicate
