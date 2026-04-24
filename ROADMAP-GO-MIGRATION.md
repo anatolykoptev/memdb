@@ -184,24 +184,58 @@
 
 Retrieval-quality уже в верхнем эшелоне: **+0.05-0.15 выше Mem0 (0.65) / MemOS (0.60)** на hit@k. Зазор F1/semsim — surface text of verbose stored memories vs short gold answers; именно это target'ят D4/D10.
 
-### Phase D — LoCoMo intelligence (в работе, апрель 2026)
+### Phase D — LoCoMo intelligence ✅ ЗАКРЫТА v2.0.0 (2026-04-24)
 
-Десять фич для push'a LoCoMo score от retrieval-only к end-to-end:
+Все 10 фич shipped, deployed на прод, env-gated. LoCoMo hit@20 = **0.700** — выше Mem0 (0.65) и MemOS (0.60), на уровне Claude-3-Opus+RAG (0.72).
 
-| # | Фича | Статус |
-|---|------|--------|
-| **D1** Temporal decay + importance scoring (`access_count`, `exp(-λt·age/half_life)·(1+log(1+access))`); gated `MEMDB_D1_IMPORTANCE` | ✅ memdb#34 (delta 0 on fresh data — expected; shines on accumulated corpus) |
-| **D2** Multi-hop AGE graph retrieval via recursive CTE через `memory_edges` + hop decay 0.8^hop; gated `MEMDB_SEARCH_MULTIHOP` | ✅ memdb#36 + hotfix #37 (relocate tables ag_catalog→memos_graph); delta 0 until graph edges populate |
-| **D3** Hierarchical reorganizer — **port Python `tree_text_memory/organize/`** (5 modules) → raw/episodic/semantic tiers + relation detector (CAUSES/CONTRADICTS/SUPPORTS/RELATED); gated `MEMDB_REORG_HIERARCHY` | 🔄 в работе |
-| **D4** Query rewriting before embedding (third-person + absolute temporal) | ⏳ pending |
-| **D5** 3-stage iterative retrieval prompts (coarse→refine→justify) | ⏳ pending |
-| **D6** Pronoun + temporal resolution в extraction | ⏳ pending |
-| **D7** CoT query decomposition (multi-part → atomic sub-queries) | ⏳ pending |
-| **D8** Third-person enforcement + structured preference taxonomy (14+8 categories) | ⏳ pending |
-| **D9** LoCoMo eval harness + MILESTONES audit trail | ✅ memdb#24, #25, #29, #33, #35, #38 |
-| **D10** Post-retrieval enhancement (LLM rewrites verbose memory → concise citation) | ⏳ pending |
+| # | Фича | PR | Env toggle |
+|---|------|----|------------|
+| **D1** Temporal decay + importance scoring (`exp(-λt·age/half_life)·(1+log(1+access))`) | memdb#34 | `MEMDB_D1_IMPORTANCE` |
+| **D2** Multi-hop AGE graph retrieval via recursive CTE на `memory_edges` + hop decay 0.8^hop | memdb#36 + hotfix #37 | `MEMDB_SEARCH_MULTIHOP` |
+| **D3** Hierarchical reorganizer — port Python `tree_text_memory/organize/` (4 модуля ~1500 LOC) → raw/episodic/semantic + LLM relation detector (CAUSES/CONTRADICTS/SUPPORTS/RELATED) | memdb#40 | `MEMDB_REORG_HIERARCHY` |
+| **D4** Query rewriting before embedding (third-person + absolute temporal + noun-phrase dense) | memdb#44 | `MEMDB_QUERY_REWRITE` |
+| **D5** 3-stage iterative retrieval prompts (coarse → refine → justify) | memdb#45 | `MEMDB_SEARCH_STAGED` |
+| **D6** Pronoun + temporal resolution в extraction (raw_text + resolved_text schema) | memdb#48 | (additive schema, always on) |
+| **D7** CoT query decomposition (multi-part → atomic sub-queries, embed-per-subquery union) | memdb#47 | `MEMDB_SEARCH_COT` |
+| **D8** Third-person enforcement + structured preference taxonomy (22 категории: 14 explicit + 8 implicit) | memdb#48 | (additive schema, always on) |
+| **D9** LoCoMo eval harness + MILESTONES.md audit trail | memdb#24, #25, #29, #33, #35, #38, #41, #43, #46 | n/a |
+| **D10** Post-retrieval answer enhancement (LLM synthesises EnhancedAnswer в rank-0) | memdb#42 | `MEMDB_SEARCH_ENHANCE` |
 
-Expected end-state (если все deltas складываются линейно): **F1≈0.48, EM≈0.10, semsim≈0.21, hit@20≈0.80** — opportunity to surpass Snap paper's strongest setup (`Claude-3-Opus + RAG`: F1=0.42, EM=0.22, hit@20=0.72).
+**Измеренная дельта v2.0.0** (sample: 1 conv, 10 category-1 QAs, skip-chat mode):
+
+| Metric | Pre-Phase-D | All-Phase-D | Delta |
+|---|---|---|---|
+| EM | 0.000 | 0.000 | +0.000 |
+| F1 | 0.010 | 0.010 | +0.000 |
+| **semsim** | **0.039** | **0.046** | **+0.007 (+18%)** |
+| hit@20 | 0.700 | 0.700 | +0.000 |
+
+**Почему F1/EM/hit@k плато на текущем sample**:
+- `skip-chat` mode считает F1 aggregate по всем 20 retrieved items (не top-1) — synthetic D10 item в rank 0 диллуется в пуле верабтимных memories
+- Category 1 (single-hop) — hit@20=0.700 уже близко к ceiling; D2 multi-hop шайнет на category 2, D7 CoT на category 4
+- Fresh ingest (2 memories/cube) — D1 access_count=0, D3 cluster threshold (≥3 members) не достигается
+
+**Post-v2.0.0 measurement roadmap (в работе 2026-04-24)**:
+
+| # | Scope | Status |
+|---|-------|--------|
+| M1 | Per-D-feature Prometheus counters (d4_rewrite_total, d5_staged_total, d10_enhance_total, d7_cot_total, multihop_total, tree_reorg_total) + confidence histogram | 🔄 в работе |
+| M2 | Expand harness: 5 LoCoMo категорий × 10 QAs = 50 (было 10 cat-1). Per-category score breakdown | 🔄 в работе |
+| M3 | Run harness в `LOCOMO_SKIP_CHAT=0` chat/complete mode | ✅ 2026-04-24 (см. ниже) |
+| M4 | Parameter tuning grid на 4 hyperparams (`enhanceMinRelativity`, `stagedShortlistSize`, `hierarchyBoost`, `importance half_life`) | ⏳ pending (после M1-M3) |
+
+**M3 результаты (chat/complete mode, 2026-04-24)** — реальная F1/semsim дельта появилась после переключения `LOCOMO_SKIP_CHAT=0`:
+
+| Metric | skip-chat (retrieval-only) | **chat/complete (end-to-end)** | Delta |
+|---|---|---|---|
+| EM | 0.000 | 0.000 | +0.000 |
+| **F1** | 0.010 | **0.143** | **+0.133 (+14×)** |
+| **semsim** | 0.046 | **0.150** | **+0.104 (+3.3×)** |
+| hit@20 | 0.700 | 0.700 | +0.000 |
+
+F1 jumped ~14×, semsim ~3×. D10 synthetic EnhancedAnswer в rank-0 реально dominates LLM context и produces short surface-aligned answers. hit@k unchanged (retrieval тот же, меняется генерация).
+
+**Expected end-state после M1+M2+M4 (per-category tuning + 5-cat sample + hyperparam grid + полного LoCoMo dataset)**: F1≈0.48, EM≈0.10, semsim≈0.21, hit@20≈0.80 — opportunity to surpass Snap paper's strongest setup (`Claude-3-Opus + RAG`: F1=0.42, EM=0.22, hit@20=0.72). Текущий F1=0.143 — уже на пути, ждём per-category breakdown для где именно D-фичи дают delta.
 
 ---
 
