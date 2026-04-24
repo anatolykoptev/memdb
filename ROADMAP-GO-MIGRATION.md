@@ -184,6 +184,18 @@
 
 Retrieval-quality уже в верхнем эшелоне: **+0.05-0.15 выше Mem0 (0.65) / MemOS (0.60)** на hit@k. Зазор F1/semsim — surface text of verbose stored memories vs short gold answers; именно это target'ят D4/D10.
 
+### M7 Compound Lift Sprint ✅ ЗАКРЫТА v2.1.0 (2026-04-25)
+
+| Фича | PR / Commit |
+|------|-------------|
+| `answer_style` (factual\|conversational) on chat endpoint — server-side prompt routing | `c57cc904` |
+| `window_chars` per-request override on `/product/add` (fast/async modes) | `841febc2` |
+| pprof routes registered behind `X-Service-Secret` auth | `c6f2250d` |
+| Embed batching in fast-add pipeline (24× → 1× embed calls; latency 13s → 1.0s at window=512) | `c0525784` |
+| LoCoMo threshold fix: chat reads `threshold`, harness now wires `LOCOMO_RETRIEVAL_THRESHOLD` to both endpoints | `52938d14` |
+
+**LoCoMo Stage 2 result:** aggregate F1 0.053 → 0.238 (+349%). See `CHANGELOG.md [2.1.0]`.
+
 ### Phase D — LoCoMo intelligence ✅ ЗАКРЫТА v2.0.0 (2026-04-24)
 
 Все 10 фич shipped, deployed на прод, env-gated. LoCoMo hit@20 = **0.700** — выше Mem0 (0.65) и MemOS (0.60), на уровне Claude-3-Opus+RAG (0.72).

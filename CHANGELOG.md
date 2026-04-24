@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-04-25
+
+### Highlights
+
+**M7 Compound Lift Sprint — first MemOS-tier LoCoMo result.** Aggregate F1 0.053 → 0.238 (+349%) on the LoCoMo benchmark via three orthogonal fixes (server-side QA prompt + per-message ingest granularity + retrieval-threshold tuning) plus an embed-batching perf win that makes small-window ingest production-safe. answer_style=factual is also 2.1× faster on chat (bonus: shorter prompt = less LLM input = faster TTFT). cat-4 open-domain F1 0.017 → 0.407 (+24×).
+
+### Added — Server-side knobs
+
+- `answer_style` field on `/product/chat/complete` and `/product/chat[/stream]` requests (`conversational` default, `factual` for short fact-extraction). New templates `factualQAPromptEN/ZH`. Validation: unknown value → 400.
+- `window_chars` field on `/product/add` requests (mode=fast/async). Per-request override, range [128, 16384], default 4096 unchanged. Out-of-range silently falls back to default.
+
+### Added — Observability
+
+- OTel counter `memdb.chat.prompt_template_used_total{template={factual|conversational|custom}}` — adoption tracking for the new prompt mode.
+- OTel histogram `memdb.add.embed_batch_size{mode}` — visibility into embed batch sizes after the perf refactor.
+- `/debug/pprof/*` routes registered behind `X-Service-Secret` auth.
+
+### Performance
+
+- **Embed batching in fast-add pipeline.** `nativeFastAddForCube` collects window texts upfront and issues a single `embedder.Embed(texts)` call instead of N sequential calls. Latency at window=512 drops from ~13s p95 to ~1.0s (13× speedup). No regression at default window=4096.
+- **`answer_style=factual` chat is 2.1× faster at p95** (14.7s → 7.0s) — short prompt cuts LLM input tokens by ~80%.
+
+### Documentation
+
+- M7 perf report `docs/perf/2026-04-25-m7-latency-report.md`.
+- M7 regression report `docs/testing/2026-04-25-m7-regression-report.md`.
+- Sliding-window design doc `docs/design/2026-04-25-sliding-window-decision.md` (Option A chosen: additive opt-in).
+- Compound-sprint orchestration pattern `docs/process/2026-04-25-compound-sprint-orchestration-pattern.md`.
+- Backlog file `docs/backlog/2026-04-26-followups.md` (10 items deferred from M7).
+- `WindowChars` godoc with explicit +1551% latency cliff documentation.
+
+### Fixed
+
+- LoCoMo eval harness chat-endpoint threshold override was silently dropped (chat reads `threshold` field, harness was sending `relativity`). Now reads `LOCOMO_RETRIEVAL_THRESHOLD` and sends to BOTH endpoints with correct field names.
+
+### Eval — LoCoMo
+
+- Stage 2 aggregate F1 **0.238** at hit@k **0.769** (n=199, conv-26 full, 19 sessions). +349% F1 vs original baseline (0.053), +197% vs M6 prompt-only.
+- Per-category Stage 2: cat-1 0.267, cat-2 0.091, cat-3 0.201, cat-4 0.407, cat-5 0.092.
+- Stage 3 (full 1986 QA across 10 convs) running in background.
+
 ## [2.0.0] — 2026-04-24
 
 ### Highlights
@@ -230,7 +271,9 @@ Initial public release. Baseline for changelog. See
 [ROADMAP-GO-MIGRATION.md](ROADMAP-GO-MIGRATION.md) for the detailed history
 of Python → Go migration phases 1–4.5 that preceded this tag.
 
-[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/anatolykoptev/memdb/compare/v2.0.0...v2.1.0
+[2.0.0]: https://github.com/anatolykoptev/memdb/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/anatolykoptev/memdb/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/anatolykoptev/memdb/compare/v1.0.0...v1.0.4
 [1.0.0]: https://github.com/anatolykoptev/memdb/releases/tag/v1.0.0
