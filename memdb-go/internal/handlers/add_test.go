@@ -20,7 +20,7 @@ func TestExtractFastMemories_SingleMessage(t *testing.T) {
 		{Role: "user", Content: "Remember I like coffee", ChatTime: "2026-02-16T10:00:00"},
 	}
 
-	results := extractFastMemories(msgs)
+	results := extractFastMemories(msgs, windowChars)
 
 	if len(results) != 1 {
 		t.Fatalf("expected 1 memory, got %d", len(results))
@@ -45,7 +45,7 @@ func TestExtractFastMemories_MixedRoles(t *testing.T) {
 		{Role: "assistant", Content: "Go is a programming language.", ChatTime: "2026-02-16T10:00:01"},
 	}
 
-	results := extractFastMemories(msgs)
+	results := extractFastMemories(msgs, windowChars)
 
 	if len(results) != 1 {
 		t.Fatalf("expected 1 memory, got %d", len(results))
@@ -59,12 +59,12 @@ func TestExtractFastMemories_MixedRoles(t *testing.T) {
 }
 
 func TestExtractFastMemories_EmptyMessages(t *testing.T) {
-	results := extractFastMemories(nil)
+	results := extractFastMemories(nil, windowChars)
 	if results != nil {
 		t.Errorf("expected nil for empty messages, got %v", results)
 	}
 
-	results = extractFastMemories([]chatMessage{})
+	results = extractFastMemories([]chatMessage{}, windowChars)
 	if results != nil {
 		t.Errorf("expected nil for empty slice, got %v", results)
 	}
@@ -78,7 +78,7 @@ func TestExtractFastMemories_LargeContent_MultipleWindows(t *testing.T) {
 		{Role: "user", Content: longContent, ChatTime: "2026-02-16T10:00:01"},
 	}
 
-	results := extractFastMemories(msgs)
+	results := extractFastMemories(msgs, windowChars)
 
 	if len(results) < 2 {
 		t.Errorf("expected multiple windows for large content, got %d", len(results))
@@ -121,7 +121,7 @@ func TestExtractFastMemories_UserOnlyVsMixed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results := extractFastMemories(tt.msgs)
+			results := extractFastMemories(tt.msgs, windowChars)
 			if len(results) == 0 {
 				t.Fatal("expected at least 1 result")
 			}

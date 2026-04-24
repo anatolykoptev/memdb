@@ -33,7 +33,7 @@ type fastAddContext struct {
 //  3. Batch insert into Postgres
 //  4. Cleanup old WorkingMemory
 func (h *Handler) nativeFastAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
-	memories := extractFastMemories(req.Messages)
+	memories := extractFastMemories(req.Messages, windowSizeFor(req))
 	if len(memories) == 0 {
 		return nil, nil
 	}
