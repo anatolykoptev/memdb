@@ -392,10 +392,13 @@ func buildUpdateWMNode(
 	if f.ContentHash != "" {
 		factInfo["content_hash"] = f.ContentHash
 	}
-	wmJSON, err := marshalProps(buildMemoryPropertiesAt(
-		wmID, f.Memory, "WorkingMemory", cubeID, userID, agentID, sessionID, now, createdAt,
-		factInfo, allTags, sources, "",
-	))
+	wmJSON, err := marshalProps(buildNodeProps(memoryNodeProps{
+		ID: wmID, Memory: f.Memory, MemoryType: "WorkingMemory",
+		UserName: cubeID, UserID: userID, AgentID: agentID, SessionID: sessionID,
+		Mode: modeFine, Now: now, CreatedAt: createdAt,
+		Info: factInfo, CustomTags: allTags, Sources: sources, Background: "",
+		RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
+	}))
 	if err != nil {
 		return db.MemoryInsertNode{}, wmVSetInsert{}, false
 	}
@@ -500,14 +503,20 @@ func buildAddNodes(
 	allTags := append([]string{}, customTags...)
 	allTags = append(allTags, f.Tags...)
 
-	wmJSON, err1 := marshalProps(buildMemoryPropertiesAt(
-		wmID, f.Memory, "WorkingMemory", cubeID, userID, agentID, sessionID, now, createdAt,
-		factInfo, allTags, sources, "",
-	))
-	ltJSON, err2 := marshalProps(buildMemoryPropertiesAt(
-		ltID, f.Memory, f.Type, cubeID, userID, agentID, sessionID, now, createdAt,
-		factInfo, allTags, sources, background,
-	))
+	wmJSON, err1 := marshalProps(buildNodeProps(memoryNodeProps{
+		ID: wmID, Memory: f.Memory, MemoryType: "WorkingMemory",
+		UserName: cubeID, UserID: userID, AgentID: agentID, SessionID: sessionID,
+		Mode: modeFine, Now: now, CreatedAt: createdAt,
+		Info: factInfo, CustomTags: allTags, Sources: sources, Background: "",
+		RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
+	}))
+	ltJSON, err2 := marshalProps(buildNodeProps(memoryNodeProps{
+		ID: ltID, Memory: f.Memory, MemoryType: f.Type,
+		UserName: cubeID, UserID: userID, AgentID: agentID, SessionID: sessionID,
+		Mode: modeFine, Now: now, CreatedAt: createdAt,
+		Info: factInfo, CustomTags: allTags, Sources: sources, Background: background,
+		RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
+	}))
 	if err1 != nil || err2 != nil {
 		return nil, nil
 	}

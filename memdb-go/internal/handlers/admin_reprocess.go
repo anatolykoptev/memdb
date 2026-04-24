@@ -275,6 +275,14 @@ func buildReprocessLTMNode(f llm.ExtractedFact, embVec, cubeID, now string) *db.
 		"graph_id":         uuid.New().String(),
 		"importance_score": 1.0, "retrieval_count": 0,
 	}
+	// D6/D8: carry audit + taxonomy fields through reprocess so reprocessed
+	// memories match the shape written by the fine-mode add path.
+	if f.RawText != "" {
+		props["raw_text"] = f.RawText
+	}
+	if f.PreferenceCategory != "" {
+		props["preference_category"] = f.PreferenceCategory
+	}
 	propsJSON, err := json.Marshal(props)
 	if err != nil {
 		return nil
