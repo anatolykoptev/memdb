@@ -55,9 +55,11 @@ func fmtStrVal(escaped string) string {
 	return fmt.Sprintf(`'"%s"'::agtype`, escaped)
 }
 
-// fmtNonStrVal JSON-marshals a non-string scalar (int/float/bool) and wraps
-// it in ag_catalog.agtype_in() for inline numeric comparisons.
+// fmtNonStrVal JSON-marshals a non-string scalar (int/float/bool) and casts
+// it to agtype for inline numeric comparisons.
 // Returns an error for unmarshalable or unsafe values.
+// Note: AGE 1.7 removed the agtype_in(text) overload, so we use the
+// '<literal>'::agtype cast form (text → agtype implicit cast chain).
 func fmtNonStrVal(value any) (string, error) {
 	switch value.(type) {
 	case int64, float64, bool:
@@ -67,7 +69,7 @@ func fmtNonStrVal(value any) (string, error) {
 		}
 		// Marshal output for int64/float64/bool never contains quotes, so
 		// escapeSQLString is belt-and-braces only.
-		return fmt.Sprintf("ag_catalog.agtype_in('%s')", escapeSQLString(string(raw))), nil
+		return fmt.Sprintf("'%s'::agtype", escapeSQLString(string(raw))), nil
 	default:
 		return "", fmt.Errorf("filter: unsupported scalar value type %T", value)
 	}

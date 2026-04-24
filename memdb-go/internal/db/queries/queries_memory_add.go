@@ -15,19 +15,19 @@ DELETE FROM %[1]s."Memory" WHERE id = $1`
 // Args: $1 = id (text), $2 = properties (jsonb), $3 = embedding (text, cast to vector(1024))
 const InsertMemoryNode = `
 INSERT INTO %[1]s."Memory"(id, properties, embedding)
-VALUES ($1, ag_catalog.agtype_in($2::text), $3::vector(1024))`
+VALUES ($1, $2::text::agtype, $3::vector(1024))`
 
 // UpdateMemoryNodeFull updates the memory text, embedding, and updated_at for an existing activated node.
 // Used by the fine-mode dedup-merge pipeline when JudgeDedupMerge returns action="update".
 // Args: $1 = memory_id (properties->>(('id'::text))), $2 = new memory text, $3 = new embedding (text cast to vector(1024)), $4 = updated_at (text)
 const UpdateMemoryNodeFull = `
 UPDATE %[1]s."Memory"
-SET properties = ag_catalog.agtype_in(
+SET properties = (
         (properties::text::jsonb || jsonb_build_object(
             'memory',     $2::text,
             'updated_at', $4::text
         ))::text
-    ),
+    )::agtype,
     embedding = CASE WHEN $3::text = '' THEN embedding ELSE $3::vector(1024) END
 WHERE id = $1
   AND properties->>(('status'::text)) = 'activated'`
