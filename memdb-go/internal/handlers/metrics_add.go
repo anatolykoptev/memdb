@@ -14,9 +14,10 @@ var (
 )
 
 type addMetricsStruct struct {
-	Requests metric.Int64Counter     // labels: mode, outcome
-	Duration metric.Float64Histogram // labels: mode
-	Memories metric.Int64Counter     // labels: mode (records len(items))
+	Requests       metric.Int64Counter     // labels: mode, outcome
+	Duration       metric.Float64Histogram // labels: mode
+	Memories       metric.Int64Counter     // labels: mode (records len(items))
+	EmbedBatchSize metric.Float64Histogram // labels: mode (texts per batched Embed call in fast-add)
 }
 
 func addMx() *addMetricsStruct {
@@ -32,7 +33,10 @@ func addMx() *addMetricsStruct {
 		mems, _ := meter.Int64Counter("memdb.add.memories_total",
 			metric.WithDescription("Total memories written by add pipeline"),
 		)
-		addInstruments = &addMetricsStruct{Requests: reqs, Duration: dur, Memories: mems}
+		batch, _ := meter.Float64Histogram("memdb.add.embed_batch_size",
+			metric.WithDescription("Number of texts per batched Embed call in fast-add pipeline"),
+		)
+		addInstruments = &addMetricsStruct{Requests: reqs, Duration: dur, Memories: mems, EmbedBatchSize: batch}
 	})
 	return addInstruments
 }
