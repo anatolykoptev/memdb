@@ -18,16 +18,14 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// multihopDecay is the per-hop score penalty multiplier. A neighbor at
-// hop=1 inherits 0.8× its seed's score; hop=2 → 0.64×. The coefficient is
+// multihopDecay / multihopMaxDepth — defaults live in tuning.go as
+// defaultMultihopDecay (0.8) and defaultMultihopMaxDepth (2).
+// Accessors are env-readable via MEMDB_D2_HOP_DECAY / MEMDB_D2_MAX_HOP so
+// grid-runs can sweep them without a rebuild. The per-hop decay is
 // deliberately aggressive — 1-hop neighbors rarely match the seed in
-// relevance, 2-hop neighbors very rarely do.
-const multihopDecay = 0.8
-
-// multihopMaxDepth is the recursive BFS depth. Matches the spec's
-// [*1..2] Cypher semantics — any deeper and false-positive rate
-// explodes while marginal recall gain drops off.
-const multihopMaxDepth = 2
+// relevance, 2-hop neighbors very rarely do. Depth matches the spec's
+// [*1..2] Cypher semantics — deeper and false-positive rate explodes
+// while marginal recall gain drops off.
 
 // multihopExpandFactor caps the expanded pool size relative to the
 // original seed set. 2× lets CE rerank see some new candidates without
@@ -79,7 +77,7 @@ func expandViaGraph(
 		}
 	}
 
-	expansions, err := pg.MultiHopEdgeExpansion(ctx, seedIDs, cubeID, personID, multihopMaxDepth, cap2x, agentID)
+	expansions, err := pg.MultiHopEdgeExpansion(ctx, seedIDs, cubeID, personID, multihopMaxDepth(), cap2x, agentID)
 	if err != nil {
 		searchMx().Multihop.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "error")))
 		if logger != nil {
@@ -114,7 +112,7 @@ func expandViaGraph(
 		if hop < 1 {
 			hop = 1
 		}
-		score := parent * math.Pow(multihopDecay, float64(hop))
+		score := parent * math.Pow(multihopDecay(), float64(hop))
 		merged[e.ID] = MergedResult{
 			ID:         e.ID,
 			Properties: e.Properties,
