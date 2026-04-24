@@ -47,22 +47,35 @@ def main() -> int:
         c = ca.get(m, 0.0)
         print(f"| {m:<8s} | {b:8.3f} | {c:9.3f} | {fmt_delta(c - b):>8s} |")
 
-    # By category
-    b_cats = ba.get("by_category", {})
-    c_cats = ca.get("by_category", {})
-    all_cats = sorted(set(b_cats) | set(c_cats))
+    # By category — read from top-level "by_category" (M2 layout) with
+    # fallback to aggregate.by_category (pre-M2 baseline format).
+    b_cats = base.get("by_category") or ba.get("by_category", {})
+    c_cats = cand.get("by_category") or ca.get("by_category", {})
+    all_cats = sorted(set(b_cats) | set(c_cats), key=lambda c: int(c) if c.isdigit() else 99)
+    cat_names = {
+        "1": "single-hop",
+        "2": "multi-hop",
+        "3": "temporal",
+        "4": "open-domain",
+        "5": "adversarial",
+    }
     if all_cats:
         print("\n## By category\n")
-        print("| cat | metric   | baseline | candidate | delta   | n_base | n_cand |")
-        print("|-----|----------|----------|-----------|---------|--------|--------|")
+        print(
+            "| cat | name         | metric   | baseline | candidate | delta    | n_base | n_cand |"
+        )
+        print(
+            "|-----|--------------|----------|----------|-----------|----------|--------|--------|"
+        )
         for cat in all_cats:
             b = b_cats.get(cat, {})
             c = c_cats.get(cat, {})
+            name = cat_names.get(cat, "unknown")
             for m in metrics:
                 bv = b.get(m, 0.0)
                 cv = c.get(m, 0.0)
                 print(
-                    f"| {cat:<3s} | {m:<8s} | {bv:8.3f} | {cv:9.3f} | {fmt_delta(cv - bv):>7s} "
+                    f"| {cat:<3s} | {name:<12s} | {m:<8s} | {bv:8.3f} | {cv:9.3f} | {fmt_delta(cv - bv):>8s} "
                     f"| {b.get('n', 0):>6d} | {c.get('n', 0):>6d} |"
                 )
     return 0

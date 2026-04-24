@@ -235,6 +235,9 @@ def main() -> int:
             }
         )
 
+    agg = summarize(per_qa)
+    # by_category is available both nested in aggregate (backward compat with compare.py)
+    # and as a top-level key per M2 spec so callers can read it directly.
     out = {
         "meta": {
             "commit_sha": git_sha(),
@@ -243,17 +246,39 @@ def main() -> int:
             "semsim_mode": semsim_mode,
             **pred_doc.get("meta", {}),
         },
-        "aggregate": summarize(per_qa),
+        "aggregate": agg,
+        "by_category": agg.get("by_category", {}),
         "per_qa": per_qa,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w") as f:
         json.dump(out, f, indent=2, ensure_ascii=False)
-    agg = out["aggregate"]
     print(
         f"n={agg['n']}  em={agg['em']:.3f}  f1={agg['f1']:.3f}  "
         f"semsim={agg['semsim']:.3f}  hit@k={agg['hit_at_k']:.3f}"
     )
+    # Print per-category summary if more than one category present
+    by_cat = agg.get("by_category", {})
+    if len(by_cat) > 1:
+        cat_names = {
+            "1": "single-hop",
+            "2": "multi-hop",
+            "3": "temporal",
+            "4": "open-domain",
+            "5": "adversarial",
+        }
+        print("\nPer-category breakdown:")
+        print(
+            f"  {'cat':<3}  {'name':<12}  {'n':>4}  {'em':>6}  {'f1':>6}  {'semsim':>7}  {'hit@k':>6}"
+        )
+        for cat in sorted(by_cat.keys(), key=lambda c: int(c) if c.isdigit() else 99):
+            cv = by_cat[cat]
+            name = cat_names.get(cat, "unknown")
+            print(
+                f"  {cat:<3}  {name:<12}  {cv['n']:>4}  "
+                f"{cv['em']:>6.3f}  {cv['f1']:>6.3f}  "
+                f"{cv['semsim']:>7.3f}  {cv['hit_at_k']:>6.3f}"
+            )
     print(f"wrote → {args.out}")
     return 0
 
