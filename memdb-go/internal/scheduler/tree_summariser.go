@@ -22,14 +22,27 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
+// tierParentResult carries everything the caller needs about a freshly-created
+// tier parent. Kept as a named struct (rather than a pile of positional
+// returns) because callers pass these fields directly into the relation phase.
+type tierParentResult struct {
+	ParentID  string
+	PromptSHA string
+	Summary   string
+	Embedding []float32
+}
+
 // createTierParent calls the LLM to summarise the cluster, embeds the summary,
 // and inserts the resulting node as an Episodic/SemanticMemory. Returns the
-// new parent's UUID and the sha256 of the LLM prompt (for audit-log diagnostics).
+// new parent's UUID, the sha256 of the LLM prompt (for audit-log diagnostics),
+// the summary text itself (for downstream relation detection), and the raw
+// summary embedding so callers can reuse it for relation detection without
+// re-embedding.
 //
-// Empty summary → empty parentID returned and no DB write; caller treats this
+// Empty summary → empty ParentID returned and no DB write; caller treats this
 // as a no-op (not a failure). Matches the Python manager.py convention of
 // dropping clusters whose summariser returns "".
-func (r *Reorganizer) createTierParent(ctx context.Context, cubeID string, cluster []hierarchyNode, targetLevel, now string) (string, string, error) {
+func (r *Reorganizer) createTierParent(ctx context.Context, cubeID string, cluster []hierarchyNode, targetLevel, now string) (tierParentResult, error) {
 	systemPrompt, memoryType := tierPromptFor(targetLevel)
 
 	// Build the user payload — {id, text} so the LLM sees each child as a source.
@@ -54,7 +67,7 @@ func (r *Reorganizer) createTierParent(ctx context.Context, cubeID string, clust
 		{"role": "user", "content": userMsg},
 	}, tierSummaryMaxTokens)
 	if err != nil {
-		return "", promptSHA, fmt.Errorf("tier summarise llm: %w", err)
+		return tierParentResult{PromptSHA: promptSHA}, fmt.Errorf("tier summarise llm: %w", err)
 	}
 	raw = string(llm.StripJSONFence([]byte(raw)))
 
@@ -62,11 +75,11 @@ func (r *Reorganizer) createTierParent(ctx context.Context, cubeID string, clust
 		Summary string `json:"summary"`
 	}
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
-		return "", promptSHA, fmt.Errorf("parse tier summary json (%s): %w", truncate(raw, 200), err)
+		return tierParentResult{PromptSHA: promptSHA}, fmt.Errorf("parse tier summary json (%s): %w", truncate(raw, 200), err)
 	}
 	summary := strings.TrimSpace(parsed.Summary)
 	if summary == "" {
-		return "", promptSHA, nil
+		return tierParentResult{PromptSHA: promptSHA}, nil
 	}
 
 	return r.persistTierParent(ctx, cubeID, cluster, targetLevel, memoryType, summary, promptSHA, now)
@@ -74,9 +87,11 @@ func (r *Reorganizer) createTierParent(ctx context.Context, cubeID string, clust
 
 // persistTierParent embeds the summary, marshals properties, and writes the
 // new parent node. Split out of createTierParent to keep the LLM-call path
-// and the DB-write path separately testable / mockable.
-func (r *Reorganizer) persistTierParent(ctx context.Context, cubeID string, cluster []hierarchyNode, targetLevel, memoryType, summary, promptSHA, now string) (string, string, error) {
+// and the DB-write path separately testable / mockable. Returns the raw
+// embedding alongside parentID so upstream callers can reuse it.
+func (r *Reorganizer) persistTierParent(ctx context.Context, cubeID string, cluster []hierarchyNode, targetLevel, memoryType, summary, promptSHA, now string) (tierParentResult, error) {
 	embVec := ""
+	var embRaw []float32
 	userID := ""
 	if len(cluster) > 0 {
 		userID = cluster[0].UserID
@@ -84,6 +99,7 @@ func (r *Reorganizer) persistTierParent(ctx context.Context, cubeID string, clus
 	if r.embedder != nil {
 		embs, err := r.embedder.Embed(ctx, []string{summary})
 		if err == nil && len(embs) > 0 && len(embs[0]) > 0 {
+			embRaw = embs[0]
 			embVec = db.FormatVector(embs[0])
 		}
 	}
@@ -106,7 +122,7 @@ func (r *Reorganizer) persistTierParent(ctx context.Context, cubeID string, clus
 	}
 	propsJSON, err := json.Marshal(props)
 	if err != nil {
-		return "", promptSHA, fmt.Errorf("marshal tier parent props: %w", err)
+		return tierParentResult{PromptSHA: promptSHA}, fmt.Errorf("marshal tier parent props: %w", err)
 	}
 
 	if err := r.postgres.InsertMemoryNodes(ctx, []db.MemoryInsertNode{{
@@ -114,7 +130,7 @@ func (r *Reorganizer) persistTierParent(ctx context.Context, cubeID string, clus
 		PropertiesJSON: propsJSON,
 		EmbeddingVec:   embVec,
 	}}); err != nil {
-		return "", promptSHA, fmt.Errorf("insert tier parent: %w", err)
+		return tierParentResult{PromptSHA: promptSHA}, fmt.Errorf("insert tier parent: %w", err)
 	}
 	r.logger.Debug("tree reorg: tier parent created",
 		slog.String("cube_id", cubeID),
@@ -122,7 +138,12 @@ func (r *Reorganizer) persistTierParent(ctx context.Context, cubeID string, clus
 		slog.String("parent_id", parentID),
 		slog.Int("children", len(cluster)),
 	)
-	return parentID, promptSHA, nil
+	return tierParentResult{
+		ParentID:  parentID,
+		PromptSHA: promptSHA,
+		Summary:   summary,
+		Embedding: embRaw,
+	}, nil
 }
 
 // tierPromptFor returns (system prompt, memory_type) for a given target tier.
