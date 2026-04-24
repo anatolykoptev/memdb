@@ -164,6 +164,33 @@ Env-gated `MEMDB_SEARCH_ENHANCE=true`. LLM distills top-5 memories into a synthe
 
 **What will unlock full D10 F1 lift**: running harness without `LOCOMO_SKIP_CHAT=1` so chat/complete uses the enhanced answer as the authoritative retrieval context.
 
+### 2026-04-24 — D4 + D5 + D10 combined (full Phase D retrieval-side on)
+
+All six Phase D retrieval-side toggles live. LLM_SEARCH_MODEL propagation fixed (krolik-server#14).
+
+| Metric | Baseline (post-P1) | All-D-ON | Delta |
+|---|---|---|---|
+| EM | 0.000 | 0.000 | +0.000 |
+| F1 | 0.010 | 0.010 | +0.000 |
+| **semsim** | **0.039** | **0.050** | **+0.011 (+28%)** |
+| hit@20 | 0.700 | 0.700 | +0.000 |
+
+**Verified live on prod**:
+
+D4 query rewrites (from memdb-go INFO logs):
+- `"What career path has Caroline decided to persue?"` → `"Caroline's decided career path"` (conf 0.9) ✓
+- `"What does Caroline do for work?"` → `"Caroline's occupation"` (conf 0.9) ✓
+- `"What instruments does Melanie play?"` → `"What musical instruments does Melanie play?"` (conf 0.9) ✓
+
+D10 synthetic (from /product/search sample):
+- `[0] type=EnhancedAnswer mem="counseling or mental health"` at rank 0 ✓
+
+D5 active in LLM rerank chain (+1 stage 2 call + 1 stage 3 per query). Graceful no-op on fresh data where only 2 memories/cube exist (below min input size 5).
+
+**Why F1/EM plateau**: `score.py` computes token-level F1 across all 20 retrieved items aggregated — one surgical synthetic at rank 0 adds 1 good-token-cluster to a pool of 19 verbose ones. Real F1 lift requires **chat/complete mode** (`LOCOMO_SKIP_CHAT=0`) where the final answer is LLM-generated from retrieval context and the synthetic rank-0 item dominates.
+
+**Next measurement milestone**: run harness WITHOUT `LOCOMO_SKIP_CHAT=1` after D6/D7/D8 land. Expected F1 lift from combined D1-D10 cascade: baseline-post-p1 0.010 → ~0.45 (based on synthetic rank-0 + query-rewritten recall + staged justification).
+
 ### Phase D measurement plan
 
 Each D task re-runs the harness after deploy and adds a `### YYYY-MM-DD — D<N> <name>` row showing delta vs `baseline-v1.1.0-post-p1.json`. Expected impact ballpark per Phase D plan:
