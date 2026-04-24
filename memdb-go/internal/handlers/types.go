@@ -171,4 +171,14 @@ type nativeChatRequest struct {
 	AddMessageOnAnswer *bool               `json:"add_message_on_answer,omitempty"`
 	MemCubeID          *string             `json:"mem_cube_id,omitempty"`
 	InternetSearch     *bool               `json:"internet_search,omitempty"`
+
+	// AnswerStyle selects the system-prompt template.
+	// Allowed values:
+	//   - ""               — default behaviour (cloudChatPromptEN/ZH), zero regression for existing clients.
+	//   - "conversational" — explicit default; identical to "".
+	//   - "factual"        — factual-extraction QA prompt (factualQAPromptEN/ZH).
+	//                        Tuned for short-phrase answers (e.g. LoCoMo benchmark).
+	// A non-empty SystemPrompt always wins over AnswerStyle (basePrompt path is preserved
+	// for backward compatibility). Unknown values yield 400.
+	AnswerStyle *string `json:"answer_style,omitempty"`
 }

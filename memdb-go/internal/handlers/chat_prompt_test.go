@@ -47,7 +47,7 @@ func TestBuildSystemPrompt_DefaultEN(t *testing.T) {
 		{"memory": "User likes Go"},
 		{"memory": "User lives in Moscow"},
 	}
-	prompt := buildSystemPrompt("Hello", memories, "", "")
+	prompt := buildSystemPrompt("Hello", memories, "", "", "")
 
 	if !strings.Contains(prompt, "1. User likes Go") {
 		t.Error("prompt missing memory 1")
@@ -65,7 +65,7 @@ func TestBuildSystemPrompt_DefaultZH(t *testing.T) {
 	memories := []map[string]any{
 		{"memory": "用户喜欢编程"},
 	}
-	prompt := buildSystemPrompt("你好", memories, "", "")
+	prompt := buildSystemPrompt("你好", memories, "", "", "")
 
 	// Should use ZH template (query is Chinese)
 	if !strings.Contains(prompt, "智能助手") {
@@ -74,7 +74,7 @@ func TestBuildSystemPrompt_DefaultZH(t *testing.T) {
 }
 
 func TestBuildSystemPrompt_CustomBase(t *testing.T) {
-	prompt := buildSystemPrompt("test", nil, "", "You are a helpful assistant.")
+	prompt := buildSystemPrompt("test", nil, "", "You are a helpful assistant.", "")
 	if prompt != "You are a helpful assistant." {
 		t.Errorf("prompt = %q, want custom base", prompt)
 	}
@@ -84,7 +84,7 @@ func TestBuildSystemPrompt_CustomBaseWithPlaceholder(t *testing.T) {
 	memories := []map[string]any{
 		{"memory": "fact one"},
 	}
-	prompt := buildSystemPrompt("test", memories, "", "Context: {memories}")
+	prompt := buildSystemPrompt("test", memories, "", "Context: {memories}", "")
 	if !strings.Contains(prompt, "1. fact one") {
 		t.Errorf("prompt = %q, missing formatted memories", prompt)
 	}
@@ -97,7 +97,7 @@ func TestBuildSystemPrompt_CustomBaseAppendMemories(t *testing.T) {
 	memories := []map[string]any{
 		{"memory": "fact one"},
 	}
-	prompt := buildSystemPrompt("test", memories, "", "Base system prompt.")
+	prompt := buildSystemPrompt("test", memories, "", "Base system prompt.", "")
 	if !strings.Contains(prompt, "## Fact Memories:") {
 		t.Error("prompt missing '## Fact Memories:' header")
 	}
@@ -110,7 +110,7 @@ func TestBuildSystemPrompt_WithPrefString(t *testing.T) {
 	memories := []map[string]any{
 		{"memory": "fact"},
 	}
-	prompt := buildSystemPrompt("hello", memories, "User prefers short answers", "")
+	prompt := buildSystemPrompt("hello", memories, "User prefers short answers", "", "")
 	if !strings.Contains(prompt, "User prefers short answers") {
 		t.Error("prompt missing pref string")
 	}
