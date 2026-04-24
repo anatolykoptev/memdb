@@ -47,11 +47,17 @@ type addRequest struct {
 
 // fullAddRequest is the complete POST /product/add request for the native handler.
 type fullAddRequest struct {
-	UserID          *string        `json:"user_id"`
-	AgentID         *string        `json:"agent_id,omitempty"`
-	AsyncMode       *string        `json:"async_mode,omitempty"`
-	Mode            *string        `json:"mode,omitempty"`
-	Messages        []chatMessage  `json:"messages,omitempty"`
+	UserID    *string       `json:"user_id"`
+	AgentID   *string       `json:"agent_id,omitempty"`
+	AsyncMode *string       `json:"async_mode,omitempty"`
+	Mode      *string       `json:"mode,omitempty"`
+	Messages  []chatMessage `json:"messages,omitempty"`
+	// WindowChars overrides the sliding-window character budget used by
+	// extractFastMemories (mode=fast and the async path; other modes ignore it).
+	// Allowed range: [128, 16384]. Out-of-range or zero values fall back to the
+	// default windowChars (currently 4096) silently — this is a tuning hint,
+	// not a contract, so we do not 400 on garbage input. Nil/omitted = default.
+	WindowChars     *int           `json:"window_chars,omitempty"`
 	WritableCubeIDs []string       `json:"writable_cube_ids,omitempty"`
 	SessionID       *string        `json:"session_id,omitempty"`
 	CustomTags      []string       `json:"custom_tags,omitempty"`
