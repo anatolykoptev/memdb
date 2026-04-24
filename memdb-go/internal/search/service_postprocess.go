@@ -5,6 +5,7 @@ package search
 import (
 	"context"
 	"log/slog"
+	"os"
 	"slices"
 	"time"
 )
@@ -141,10 +142,21 @@ func (s *SearchService) runIterativeExpansion(ctx context.Context, queryVec []fl
 }
 
 // applyTemporalDecay applies temporal decay to all formatted result slices.
+//
+// Alpha selection order:
+//  1. Explicit p.DecayAlpha (>0) — overrides everything (per-request tuning).
+//  2. MEMDB_D1_HALF_LIFE_DAYS env set → alpha = ln(2)/halfLife.
+//  3. DefaultDecayAlpha (0.0039, ~180d half-life).
+//
+// p.DecayAlpha = -1 disables decay entirely (profile opt-out).
 func (s *SearchService) applyTemporalDecay(text, skill, tool []map[string]any, p SearchParams) ([]map[string]any, []map[string]any, []map[string]any) {
 	decayAlpha := p.DecayAlpha
 	if decayAlpha == 0 {
-		decayAlpha = DefaultDecayAlpha
+		if os.Getenv("MEMDB_D1_HALF_LIFE_DAYS") != "" {
+			decayAlpha = d1DecayAlpha()
+		} else {
+			decayAlpha = DefaultDecayAlpha
+		}
 	}
 	if decayAlpha <= 0 {
 		return text, skill, tool

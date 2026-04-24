@@ -35,16 +35,20 @@ func hierarchyBoostEnabled() bool {
 
 // hierarchyBoost returns a retrieval multiplier based on hierarchy_level.
 // Semantic and episodic memories represent compressed, LLM-curated insight
-// and outrank raw memories for identical cosine scores. Numbers chosen to
-// match the D3 plan (1.15 / 1.08 / 1.0) and to stay below the D1 importance
-// cap so the overall score remains bounded.
+// and outrank raw memories for identical cosine scores. Defaults match the
+// D3 plan (1.15 / 1.08 / 1.0) and stay below the D1 importance cap so the
+// overall score remains bounded.
+//
+// Values are runtime-tunable via MEMDB_D1_BOOST_SEMANTIC and
+// MEMDB_D1_BOOST_EPISODIC — see tuning.go. Raw / unknown / missing levels
+// always return 1.0.
 func hierarchyBoost(meta map[string]any) float64 {
 	lvl, _ := meta["hierarchy_level"].(string)
 	switch lvl {
 	case "semantic":
-		return 1.15
+		return d1BoostSemantic()
 	case "episodic":
-		return 1.08
+		return d1BoostEpisodic()
 	default:
 		return 1.0
 	}

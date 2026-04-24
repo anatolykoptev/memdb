@@ -40,13 +40,12 @@ const (
 	hierarchyLevelEpisodic = "episodic"
 	hierarchyLevelSemantic = "semantic"
 
-	// Cluster size bounds — match Python tree_text_memory/organize defaults.
-	episodicMinClusterSize = 3
-	semanticMinClusterSize = 2
-
-	// Cosine thresholds for in-cluster connectivity.
-	episodicCosineThreshold = 0.70
-	semanticCosineThreshold = 0.60
+	// Cluster size + cosine thresholds — moved to tuning.go as env-readable
+	// accessors. Defaults match Python tree_text_memory/organize:
+	//   episodicMinClusterSize  = 3    (MEMDB_D3_MIN_CLUSTER_RAW)
+	//   semanticMinClusterSize  = 2    (MEMDB_D3_MIN_CLUSTER_EPISODIC)
+	//   episodicCosineThreshold = 0.70 (MEMDB_D3_COS_THRESHOLD_RAW)
+	//   semanticCosineThreshold = 0.60 (MEMDB_D3_COS_THRESHOLD_EPISODIC)
 
 	// Per-cube candidate caps. Bound memory + LLM cost per run. Deliberately
 	// modest — a busy conversational cube rarely exceeds 500 raw memories
@@ -93,8 +92,9 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 	log.Debug("tree reorg: loaded raw memories", slog.Int("count", len(rawMems)))
 
 	episodicCreated := 0
-	if len(rawMems) >= episodicMinClusterSize {
-		clusters := clusterByCosine(rawMems, episodicCosineThreshold, episodicMinClusterSize)
+	epMinSize := episodicMinClusterSize()
+	if len(rawMems) >= epMinSize {
+		clusters := clusterByCosine(rawMems, episodicCosineThreshold(), epMinSize)
 		log.Info("tree reorg: raw clusters formed", slog.Int("clusters", len(clusters)))
 
 		for _, cluster := range clusters {
@@ -104,7 +104,7 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 				return
 			default:
 			}
-			if len(cluster) < episodicMinClusterSize {
+			if len(cluster) < epMinSize {
 				schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
 					attribute.String("tier", "episodic"),
 					attribute.String("outcome", "skipped_below_threshold"),
@@ -148,8 +148,9 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 	log.Debug("tree reorg: loaded episodic memories", slog.Int("count", len(epMems)))
 
 	semanticCreated := 0
-	if len(epMems) >= semanticMinClusterSize {
-		clusters := clusterByCosine(epMems, semanticCosineThreshold, semanticMinClusterSize)
+	semMinSize := semanticMinClusterSize()
+	if len(epMems) >= semMinSize {
+		clusters := clusterByCosine(epMems, semanticCosineThreshold(), semMinSize)
 		log.Info("tree reorg: episodic clusters formed", slog.Int("clusters", len(clusters)))
 
 		for _, cluster := range clusters {
@@ -159,7 +160,7 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 				return
 			default:
 			}
-			if len(cluster) < semanticMinClusterSize {
+			if len(cluster) < semMinSize {
 				schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
 					attribute.String("tier", "semantic"),
 					attribute.String("outcome", "skipped_below_threshold"),
