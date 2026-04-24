@@ -2,7 +2,59 @@
 
 > Качество поиска — главный дифференциатор MemDB. Цель: LoCoMo > 75 (обогнать MemOS 73.31).
 >
-> _Составлен: февраль 2026, обновлён март 2026._
+> _Составлен: февраль 2026, обновлён апрель 2026 (M6 prompt ablation)._
+
+---
+
+## 🔜 Следующая сессия — 2026-04-25 (M7 compound lift)
+
+**Контекст:** M6 ablation (2026-04-24) показала что default `cloudChatPromptEN` — **#1 quality bottleneck**, +51% aggregate F1 (0.053 → 0.080) от одного 10-строчного prompt override. Экспериментальная ветка `exp/locomo-qa-prompt` содержит рабочий Fix 1, но не мерджено — решено переносить серверно и compound'ить с ingest-фиксом, затем измерить единый lift.
+
+### Приоритеты на завтра (по ROI × effort)
+
+**P1 — Port QA prompt в Go как `answer_style: "factual"`** (1-2h, high ROI)
+- Добавить `AnswerStyle *string` в `handlers.fullAddRequest` / chat complete payload
+- Новая константа `factualQAPromptEN` в `chat_prompt_tpl.go`
+- Switch в `buildSystemPrompt`: если `answer_style == "factual"` → использовать фактологический шаблон
+- Юнит-тест: шаблон выбирается по param
+- Ветка `feat/answer-style-factual`, PR → main
+- После merge — harness передаёт `{..., "answer_style": "factual"}` вместо `system_prompt`, получаем те же +51% F1 без завязки на Python-специфичный prompt
+
+**P2 — Ingest mode=raw для LoCoMo** (30m, high ROI)
+- Изменить `evaluation/locomo/ingest.py`: `"mode": "fast"` → `"mode": "raw"`
+- Это даст per-message granularity (~100 memories per session vs 3 windows сейчас)
+- Ожидаемо: **hit@k 0.000 → 0.3-0.5** (восстанавливается retrieval)
+- Замер на 50 QA сэмпле + compare vs Fix 1
+- **Compound hypothesis**: prompt fix + raw ingest = aggregate F1 0.15-0.20 (3× baseline)
+
+**P3 — Диагностика 4096-char sliding window как product decision** (1h, medium ROI)
+- `add_windowing.go:windowChars = 4096` — hardcoded константа
+- Вопрос: зачем он для QA-type workloads? LoCoMo evidence refers to 1 turn, не 15 exchanges
+- Варианты:
+  - Сделать configurable per-request (`window_chars` param в add request)
+  - Или per-mode: `fast` остается 4096, появляется `fast-qa` с 512
+  - Или дефолт снижаем до 1024 (~4 messages), sliding более "гранулярный"
+- Решение нужно будет обсудить до коммита — влияет на все существующие клиенты (vaelor, go-nerv)
+
+**P4 — Full LoCoMo прогон после P1+P2** (4-8h runtime, low effort)
+- Если P1+P2 подтвердят compound lift на 50 QA → запустить `LOCOMO_FULL=1`
+- 10 convs × 200 QA ≈ 2000 QA даст statistically-sound числа для сравнения с Mem0/Zep/MemOS
+- Цель: пройти 0.15 aggregate F1 barrier, что ставит нас в один ряд с MemOS
+
+### Что НЕ трогать завтра
+
+- Модель (gemini-flash-lite → pro/3.x): прирост mini (~5%) относительно prompt+ingest fixes (~150%), отложить
+- Embedder swap на BGE-M3 / Voyage: нет bottleneck — search работает, проблема в prompt/granularity
+- CE rerank: план 2026-04-20 ещё актуален, но compound lift от P1+P2 может его закрыть, — мерить после
+- Semantic tier promotion tuning (D3): ждёт естественной аккумуляции multi-topic данных
+
+### Definition of done на день
+
+- [ ] `feat/answer-style-factual` merged в main
+- [ ] LoCoMo harness обновлён на `mode=raw` + `answer_style=factual`
+- [ ] Прогон на 50 QA сэмпле — новый entry в `evaluation/locomo/MILESTONES.md` с F1 по категориям
+- [ ] Решение по sliding window: configurable или fixed — зафиксировано в issue/PR
+- [ ] Если F1 > 0.12 aggregate: full-data прогон запущен в фоне, результаты смотрим послезавтра
 
 ---
 
