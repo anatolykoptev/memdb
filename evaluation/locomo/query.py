@@ -46,6 +46,13 @@ from pathlib import Path
 
 import requests
 
+# LoCoMo's raw-mode memories are short verbatim dialogue turns ("Caroline: Hey Mel!").
+# Question-form queries match these at cosine ~0.15-0.30, well below the
+# DefaultRelativity=0.5 threshold in memdb-go/internal/search/config.go.
+# Override to 0.0 so retrieval surfaces raw turns and the harness can score
+# the actual hit@k. Production clients keep the default 0.5.
+LOCOMO_SEARCH_RELATIVITY = float(os.getenv("LOCOMO_SEARCH_RELATIVITY", "0.0"))
+
 
 def build_headers() -> dict:
     """Auth headers from env: MEMDB_API_KEY (Bearer) or MEMDB_SERVICE_SECRET."""
@@ -282,6 +289,7 @@ def query_search(
         "include_preference": False,
         "search_tool_memory": False,
         "include_skill_memory": False,
+        "relativity": LOCOMO_SEARCH_RELATIVITY,
     }
     if session_id:
         payload["session_id"] = session_id
@@ -311,6 +319,7 @@ def query_chat(
         "top_k": top_k,
         "mode": "fast",
         "include_preference": False,
+        "relativity": LOCOMO_SEARCH_RELATIVITY,
     }
     start = time.time()
     resp = requests.post(

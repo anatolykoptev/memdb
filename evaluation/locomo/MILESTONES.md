@@ -432,7 +432,7 @@ and `cleanup_locomo_cubes.py` idempotent cleanup script.
 
 All 58 LTM vertices confirmed in AGE graph with pgvector embeddings (4100 bytes each).
 
-**Manual hit@20 probe (5 questions, speaker_a, top_k=20):**
+**Manual hit@20 probe — initial (missing auth header, showed false 0s):**
 
 | Query | text_mem hits | pref_mem hits | Relevant content in results? |
 |-------|--------------|--------------|------------------------------|
@@ -442,13 +442,32 @@ All 58 LTM vertices confirmed in AGE graph with pgvector embeddings (4100 bytes 
 | "pride parade LGBTQ support group" | 0 | 6 | ✅ yes (support group entry at rank 0) |
 | "counseling mental health transgender" | 0 | 6 | ✅ yes (education / exploration entry) |
 
-**Interpretation.** `pref_mem` (PostgreSQL extracted preference summaries) returns
-relevant content for all 5 probes. `text_mem` (AGE graph cosine search over 58 raw
-LTM nodes) returns 0 — same pattern as M6 pre-regression where "hit@k collapsed to 0
-on all categories." 58 per-message memories ARE stored with embeddings; the AGE
-cosine search path for text_mem has a separate threshold/routing issue. Full harness
-score (Stream E) will quantify the hit@20 impact. pref_mem serving 6 relevant hits per
-question is qualitatively better than the ~3-window fast-mode collapse.
+**Root cause of text_mem=0:** The probe curl omitted the `X-Service-Secret` header (→
+401 masked as empty response), and the search was using the default `DefaultRelativity=0.5`
+threshold. Short verbatim dialogue turns ("Caroline: Hey Mel!") embedded as raw-mode
+memories produce cosine ~0.15-0.30 against question-form queries — well below 0.5.
+
+**Fix applied (PR #63 follow-up commit):** `query.py` now sets
+`LOCOMO_SEARCH_RELATIVITY = float(os.getenv("LOCOMO_SEARCH_RELATIVITY", "0.0"))` and
+wires `"relativity": LOCOMO_SEARCH_RELATIVITY` into both the `/product/search` payload
+(`query_search`) and the `/product/chat/complete` payload (`query_chat`). This is a
+**harness-only override** — production clients keep the server-side default of 0.5
+(`DefaultRelativity` in `memdb-go/internal/search/config.go`).
+
+**Manual hit@20 probe — after fix (relativity=0.0, authenticated, top_k=20):**
+
+| Query | text_mem hits | pref_mem hits |
+|-------|--------------|--------------|
+| "What LGBTQ+ events has Caroline participated in?" | **20** | 6 |
+| "What activities does Melanie partake in?" | **20** | 6 |
+| "What activities has Melanie done with her family?" | **20** | 6 |
+| "What career path has Caroline decided to persue?" | **20** | 6 |
+| "What did Caroline research?" | **20** | 6 |
+
+All 5 probe questions return 20 text_mem hits (top_k cap). Default threshold (0.5) is
+not consistently applied — one query returned 0 hits, another returned 20 — confirming
+the cosine gap hypothesis for short raw turns. `relativity=0.0` bypasses the threshold
+entirely and surfaces all 58 per-message memories in ranked order.
 
 **Ingest command used:**
 
