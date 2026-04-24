@@ -1,3 +1,9 @@
+> **STATUS: ✅ COMPLETED 2026-04-25.**
+> 7/7 streams shipped. F1 0.053 → 0.238 (+349%, MemOS-tier).
+> Bonus: `answer_style=factual` chat is 2.1× faster (Stream F finding).
+> 5 follow-ups also shipped same-day (F1-F6).
+> See `CHANGELOG.md [2.1.0]`, `evaluation/locomo/MILESTONES.md` (M7 section), `docs/perf/2026-04-25-m7-latency-report.md`.
+
 # M7 — Compound Lift Sprint (prompt × ingest × window × full-system validation)
 
 > **Цель дня:** доказать что compound'ный эффект трёх ортогональных фиксов (prompt, ingest granularity, sliding window) выводит MemDB LoCoMo aggregate F1 с 0.053 на 0.15+ (MemOS tier), не ломая vaelor / go-nerv / oxpulse-chat / piter.now, и делает измерение воспроизводимым.

@@ -6,6 +6,13 @@
 
 ---
 
+## Recent Milestones
+
+- **2026-04-25 — M7 Compound Lift Sprint**: F1 0.053 → 0.238 (+349%); first MemOS-tier result. answer_style + raw ingest + threshold + embed batching. See `CHANGELOG.md [2.1.0]`.
+- **2026-04-24 — v2.0.0**: Full Phase D LoCoMo intelligence stack (10 features). hit@20 = 0.700 (above Mem0/MemOS). See `CHANGELOG.md [2.0.0]`.
+
+---
+
 ## 1. Image Memory + Multimodal ❌ НЕ НАЧАТО
 
 **Источник:** MemOS v2.0

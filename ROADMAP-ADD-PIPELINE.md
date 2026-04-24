@@ -19,6 +19,9 @@
 | importance_score + retrieval_count decay | Есть | A-MEM (только retrieval_count) |
 | Multi-layer dedup (hash → cosine → near-dup) | 3 слоя | mem0: 2 (cosine + LLM) |
 | Python proxy для /product/add | Удалён ✅ | — |
+| **window_chars per-request override** | Есть (v2.1.0) | Ни у кого нет |
+| **Embed batching in fast-add pipeline** | Есть (`memdb.add.embed_batch_size` histogram) | Ни у кого нет |
+| **mode=raw per-message ingest granularity** | Есть | Ни у кого нет |
 
 ---
 
@@ -335,10 +338,10 @@ Deferred:
 | Memory types | 7 (LTM/WM/UM/Skill/Tool/Episodic/Pref) | 3 | 3 (Episode/Entity/Community) | 3 | 3 |
 | Async ingestion | Redis Streams + semaphore | asyncio | semaphore_gather | Нет | ThreadPool |
 | Hot cache | Redis VSET HNSW (~1ms) | Нет | Нет | Redis embed cache | Нет |
-| Observability | slog → **OTel (planned)** | PostHog | OTel Tracer | OTel @trace_method | LangSmith |
+| Observability | **OTel** (counters + histograms) | PostHog | OTel Tracer | OTel @trace_method | LangSmith |
 | Soft-delete | merged only → **full (planned)** | SQLite audit | expired_at (полный) | Нет | Нет |
 | Rate limiting | addSem (sync) → **llmSem (planned)** | Нет | semaphore_gather | Нет | Нет |
-| Backend latency | Go ~15-30ms | Python ~200ms | Python ~300ms | Python ~100ms | Python ~200ms |
+| Backend latency | Go ~15-30ms (fast-add); ~1.0s p95 at window=512 after embed batching (v2.1.0) | Python ~200ms | Python ~300ms | Python ~100ms | Python ~200ms |
 
 ### Ключевые паттерны конкурентов (reference)
 

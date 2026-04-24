@@ -74,15 +74,48 @@ func (h *Handler) canHandleNativeAdd(req) bool {
 }
 ```
 
+#### Параметры запроса (v2.1.0+)
+
+| Поле | Тип | Описание |
+|------|-----|---------|
+| `window_chars` | `*int` | Per-request override for sliding window size. Range [128, 16384]; out-of-range silently falls back to default 4096. **Warning:** values < 1024 add significant latency at small windows (before embed batching: +1551% at 512; after v2.1.0 embed batching: ~1.0s p95). |
+
 #### Константы
 
 | Константа | Значение | Описание |
 |---|---|---|
-| `windowChars` | 4096 | Размер скользящего окна (символы) |
+| `windowChars` | 4096 | Default sliding window size (chars). Override per-request with `window_chars`. |
 | `overlapChars` | 800 | Перекрытие между окнами |
 | `maxWorkingMemory` | 20 | Максимум WorkingMemory узлов на куб |
 | `dedupThreshold` | 0.92 | Порог cosine для dedup при fast-add |
 | `maxMessages` | 200 | Максимум сообщений на запрос |
+
+---
+
+## Обработчики чата
+
+### `NativeChatComplete` — POST /product/chat/complete
+### `NativeChatStream` — POST /product/chat (streaming)
+
+**Файл:** `chat.go`
+
+RAG-based chat: retrieves memories for the user, builds context, calls LLM.
+
+#### Параметры запроса (v2.1.0+)
+
+| Поле | Тип | По умолчанию | Описание |
+|------|-----|-------------|---------|
+| `answer_style` | `*string` | `"conversational"` | Prompt template. `"factual"` selects short fact-extraction QA prompt (2.1× faster p95, ~80% fewer input tokens). `"conversational"` — default chatbot prompt. Unknown value → 400. |
+
+**Example:**
+```json
+{
+  "user_id": "alice",
+  "readable_cube_ids": ["my-cube"],
+  "messages": [{"role": "user", "content": "What is my cat's name?"}],
+  "answer_style": "factual"
+}
+```
 
 ---
 
