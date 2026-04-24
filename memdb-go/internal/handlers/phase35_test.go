@@ -160,3 +160,82 @@ func TestBuildMemoryProperties_InfoNotMutated(t *testing.T) {
 		t.Fatal("content_hash leaked into sharedInfo")
 	}
 }
+
+// --- D6/D8: raw_text + preference_category serialised into properties ---
+
+func TestBuildNodeProps_RawTextAndPreferenceCategory(t *testing.T) {
+	props := buildNodeProps(memoryNodeProps{
+		ID:                 "pref-1",
+		Memory:             "The user is vegetarian",
+		MemoryType:         "PreferenceMemory",
+		UserName:           "cube1",
+		UserID:             "user1",
+		Mode:               modeFine,
+		Now:                "2026-04-23T00:00:00",
+		CreatedAt:          "2026-04-23T00:00:00",
+		Info:               map[string]any{},
+		RawText:            "I'm vegetarian",
+		PreferenceCategory: "food",
+	})
+	if props["raw_text"] != "I'm vegetarian" {
+		t.Errorf("expected raw_text=%q, got %v", "I'm vegetarian", props["raw_text"])
+	}
+	if props["preference_category"] != "food" {
+		t.Errorf("expected preference_category=food, got %v", props["preference_category"])
+	}
+}
+
+func TestBuildNodeProps_NewFieldsOmittedWhenEmpty(t *testing.T) {
+	// Back-compat: callers that don't set RawText / PreferenceCategory must
+	// produce properties without those keys (keeps payload lean and
+	// non-breaking for downstream JSON consumers).
+	props := buildNodeProps(memoryNodeProps{
+		ID:         "id1",
+		Memory:     "regular fact",
+		MemoryType: "LongTermMemory",
+		UserName:   "cube1",
+		Mode:       modeFast,
+		Now:        "2026-04-23T00:00:00",
+		CreatedAt:  "2026-04-23T00:00:00",
+		Info:       map[string]any{},
+	})
+	if _, ok := props["raw_text"]; ok {
+		t.Error("raw_text must be absent when RawText is empty")
+	}
+	if _, ok := props["preference_category"]; ok {
+		t.Error("preference_category must be absent when PreferenceCategory is empty")
+	}
+}
+
+func TestBuildAddNodes_PropagatesD6D8Fields(t *testing.T) {
+	fact := llm.ExtractedFact{
+		Memory:             "The user is vegetarian",
+		RawText:            "I'm vegetarian",
+		ResolvedText:       "The user is vegetarian",
+		Type:               "PreferenceMemory",
+		PreferenceCategory: "food",
+		Action:             llm.MemAdd,
+		Confidence:         0.95,
+	}
+	embVec := "[0.1,0.2,0.3]"
+	nodes, item := buildAddNodes(fact, embVec, nil, "cube1", "user1", "", "sess1",
+		"2026-04-23T00:00:00", map[string]any{}, nil, nil)
+	if len(nodes) != 2 {
+		t.Fatalf("expected 2 nodes (WM+LTM), got %d", len(nodes))
+	}
+	if item == nil {
+		t.Fatal("expected non-nil item")
+	}
+	for i, n := range nodes {
+		var props map[string]any
+		if err := json.Unmarshal(n.PropertiesJSON, &props); err != nil {
+			t.Fatalf("unmarshal node[%d]: %v", i, err)
+		}
+		if props["raw_text"] != "I'm vegetarian" {
+			t.Errorf("node[%d]: raw_text missing/wrong: %v", i, props["raw_text"])
+		}
+		if props["preference_category"] != "food" {
+			t.Errorf("node[%d]: preference_category missing/wrong: %v", i, props["preference_category"])
+		}
+	}
+}

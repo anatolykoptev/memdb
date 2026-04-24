@@ -322,6 +322,13 @@ func (h *Handler) processPureAdd(ctx context.Context, cubeID, userID, feedbackCo
 			"source":     "feedback_pure_add",
 			"tags":       f.Tags,
 		}
+		// D6/D8: carry audit + taxonomy fields through feedback pure-add path.
+		if f.RawText != "" {
+			props["raw_text"] = f.RawText
+		}
+		if f.PreferenceCategory != "" {
+			props["preference_category"] = f.PreferenceCategory
+		}
 		propsJSON, err := json.Marshal(props)
 		if err != nil {
 			continue
