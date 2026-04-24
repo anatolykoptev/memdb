@@ -2,20 +2,26 @@ package queries
 
 // queries_memory_add.go — SQL queries for the native add pipeline.
 // Covers: insert, dedup helpers, content-hash check, working memory cleanup.
+//
+// NOTE: the Memory vertex's id column is an AGE-managed graphid (auto-generated).
+// The stable UUID identity lives in properties->>(('id'::text)) and is the column
+// the Go layer uses for all lookups / updates / deletes. Never bind a UUID string
+// into the id column — that fails with SQLSTATE 22P02 (invalid input for graphid).
 
-// DeleteMemoryByPropID deletes a memory node by its table id (which equals properties->>(('id'::text))).
+// DeleteMemoryByPropID deletes a memory node matching properties->>(('id'::text)).
 // Used as the first half of an upsert (DELETE then INSERT).
 // Args: $1 = id (text, UUID)
 const DeleteMemoryByPropID = `
-DELETE FROM %[1]s."Memory" WHERE id = $1`
+DELETE FROM %[1]s."Memory" WHERE properties->>(('id'::text)) = $1`
 
-// InsertMemoryNode inserts a new memory node with id, properties and embedding.
-// The table id column must match properties->>(('id'::text)).
+// InsertMemoryNode inserts a new memory node with properties and embedding.
+// The id column is AGE-managed (graphid) and auto-generated — we never bind it.
+// properties->>(('id'::text)) carries the stable UUID identity used by all other queries.
 // Used as the second half of an upsert (DELETE then INSERT).
-// Args: $1 = id (text), $2 = properties (jsonb), $3 = embedding (text, cast to vector(1024))
+// Args: $1 = properties (jsonb), $2 = embedding (text, cast to vector(1024))
 const InsertMemoryNode = `
-INSERT INTO %[1]s."Memory"(id, properties, embedding)
-VALUES ($1, $2::text::agtype, $3::vector(1024))`
+INSERT INTO %[1]s."Memory"(properties, embedding)
+VALUES ($1::text::agtype, $2::vector(1024))`
 
 // UpdateMemoryNodeFull updates the memory text, embedding, and updated_at for an existing activated node.
 // Used by the fine-mode dedup-merge pipeline when JudgeDedupMerge returns action="update".
@@ -29,7 +35,7 @@ SET properties = (
         ))::text
     )::agtype,
     embedding = CASE WHEN $3::text = '' THEN embedding ELSE $3::vector(1024) END
-WHERE id = $1
+WHERE properties->>(('id'::text)) = $1
   AND properties->>(('status'::text)) = 'activated'`
 
 // CheckContentHashExists checks whether an activated memory with the given content_hash exists for a user.
@@ -44,6 +50,8 @@ SELECT EXISTS(
 
 // CleanupOldestWorkingMemory deletes the oldest WorkingMemory nodes beyond a keep limit.
 // Keeps the N newest (by updated_at DESC) and deletes the rest.
+// The inner SELECT / outer DELETE both match on the graphid id column — this is
+// self-consistent AGE-native plumbing and stays as-is.
 // Args: $1 = user_name (text), $2 = keep_count (int)
 const CleanupOldestWorkingMemory = `
 DELETE FROM %[1]s."Memory"
@@ -69,4 +77,4 @@ WHERE id IN (
     ORDER BY (properties->>(('updated_at'::text))) DESC NULLS LAST
     OFFSET $2
 )
-RETURNING id AS node_id`
+RETURNING properties->>(('id'::text)) AS node_id`
