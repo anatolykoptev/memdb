@@ -128,3 +128,45 @@ func TestLoad_DefaultAnswerStyle_BadValueFallback(t *testing.T) {
 		t.Errorf("bad value should fall back to conversational, got %q", cfg.DefaultAnswerStyle)
 	}
 }
+
+// ── MEMDB_FACTUAL_CANARY_PCT tests ────────────────────────────────────────────
+
+func TestLoad_FactualCanaryPct_Unset(t *testing.T) {
+	unsetEnv(t, "MEMDB_FACTUAL_CANARY_PCT")
+	cfg := Load()
+	if cfg.FactualCanaryPct != 0 {
+		t.Errorf("unset env should produce 0 (canary off), got %d", cfg.FactualCanaryPct)
+	}
+}
+
+func TestLoad_FactualCanaryPct_ValidTen(t *testing.T) {
+	setEnv(t, "MEMDB_FACTUAL_CANARY_PCT", "10")
+	cfg := Load()
+	if cfg.FactualCanaryPct != 10 {
+		t.Errorf("expected 10, got %d", cfg.FactualCanaryPct)
+	}
+}
+
+func TestLoad_FactualCanaryPct_ValidHundred(t *testing.T) {
+	setEnv(t, "MEMDB_FACTUAL_CANARY_PCT", "100")
+	cfg := Load()
+	if cfg.FactualCanaryPct != 100 {
+		t.Errorf("expected 100, got %d", cfg.FactualCanaryPct)
+	}
+}
+
+func TestLoad_FactualCanaryPct_ClampAbove100(t *testing.T) {
+	setEnv(t, "MEMDB_FACTUAL_CANARY_PCT", "150")
+	cfg := Load()
+	if cfg.FactualCanaryPct != 100 {
+		t.Errorf("value > 100 should clamp to 100, got %d", cfg.FactualCanaryPct)
+	}
+}
+
+func TestLoad_FactualCanaryPct_ClampBelow0(t *testing.T) {
+	setEnv(t, "MEMDB_FACTUAL_CANARY_PCT", "-5")
+	cfg := Load()
+	if cfg.FactualCanaryPct != 0 {
+		t.Errorf("value < 0 should clamp to 0, got %d", cfg.FactualCanaryPct)
+	}
+}

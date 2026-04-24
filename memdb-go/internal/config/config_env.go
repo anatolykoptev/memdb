@@ -65,6 +65,19 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 	return fallback
 }
 
+// clampCanaryPct clamps v to [0, 100]. Values outside the range are clamped and a warning is logged.
+func clampCanaryPct(v int) int {
+	if v < 0 {
+		slog.Warn("MEMDB_FACTUAL_CANARY_PCT is below 0, clamping to 0", slog.Int("value", v))
+		return 0
+	}
+	if v > 100 {
+		slog.Warn("MEMDB_FACTUAL_CANARY_PCT is above 100, clamping to 100", slog.Int("value", v))
+		return 100
+	}
+	return v
+}
+
 // validatedAnswerStyle returns v if it is a recognised answer_style value,
 // otherwise logs a warning and returns "" (no default applied — conversational is
 // the handler-level fallback). Recognised values: "" (no override), "conversational", "factual".
