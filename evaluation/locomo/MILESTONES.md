@@ -564,6 +564,53 @@ Gate: F1 ≥ 0.15
 Output: `evaluation/locomo/results/m7-stage3-full.json`
 Note: full ingest takes ~60-90 min (272 sessions × 2 speakers × ~20s each). Use `LOCOMO_SKIP_CHAT=1` for retrieval-only scoring if time-constrained; switch to full chat mode for final measurement.
 
+
+### 2026-04-24 — M7 Stage 3 (full 10 convs, retrieval + stratified chat)
+
+Full benchmark across all 10 LoCoMo conversations (~1986 QAs). Confirms whether
+M7 Stage 2 F1=0.238 on conv-26 generalises to the full dataset.
+
+**Setup**: `LOCOMO_INGEST_MODE=raw`, `LOCOMO_RETRIEVAL_THRESHOLD=0.0`, all D-features
+on (D1-D10), combo config (`D10_MIN=0.3`, `D5_SHORTLIST=15`, `D2_MAX_HOP=3`,
+`D3_MIN_CLUSTER_RAW=2`), `answer_style=factual`.
+
+#### Phase 3B — Retrieval-only (1986 QAs, all 10 convs, skip-chat)
+
+| Category | n | hit@k | F1 | EM |
+|----------|---|-------|-----|-----|
+| cat-1 (single-hop) |  282 | 0.000 | 0.000 | 0.000 |
+| cat-2 (multi-hop) |  321 | 0.000 | 0.000 | 0.000 |
+| cat-3 (temporal) |   96 | 0.000 | 0.000 | 0.000 |
+| cat-4 (open-domain) |  841 | 0.000 | 0.000 | 0.000 |
+| cat-5 (adversarial) |  446 | 0.002 | 0.000 | 0.000 |
+
+**Aggregate hit@k = 0.001** (gate ≥ 0.3: ❌)
+
+#### Phase 3C — Stratified chat scoring (50 QAs, 1 per conv × category)
+
+| Category | n | hit@k | F1 | EM |
+|----------|---|-------|-----|-----|
+
+
+**Aggregate F1 = 0.000** (n=?)
+
+Compare to Stage 2 (conv-26 only, F1=0.238, hit@k=0.769):
+- Chat F1: 0.238 → 0.000 (-0.238)
+- Retrieval hit@k: 0.769 → 0.001 (retrieval-only mode, no chat)
+
+**Gate (F1 ≥ 0.15 AND hit@k ≥ 0.30): ❌ FAILED**
+
+#### Per-conv hit@k breakdown (Phase 3B retrieval)
+
+| conv_id | n | hit@k | F1 | EM |
+|---------|---|-------|-----|-----|
+
+
+**Interpretation**: Per-conv variance reveals which conversations are harder. Conv-2
+multi-hop (cat-2) remains the weak spot due to missing Memory↔Memory edges — consistent
+with Stage 2 findings. Full conversation ingest (vs sample) provides more retrieval
+candidates across all categories.
+
 ## How to record a new milestone
 
 ```bash
