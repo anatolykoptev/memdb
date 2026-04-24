@@ -53,16 +53,47 @@ func (h *Handler) chatCanNative() bool {
 }
 
 // resolveAnswerStyle returns the effective answer_style for a request.
-// Request-level value always wins; if absent or empty and a server-wide default
-// is configured (MEMDB_DEFAULT_ANSWER_STYLE), that default is used instead.
+// Precedence (highest to lowest):
+//  1. Per-request answer_style field (non-empty) — always wins.
+//  2. Factual canary: if MEMDB_FACTUAL_CANARY_PCT > 0 and the user_id falls in the bucket → "factual".
+//  3. Server-wide default: MEMDB_DEFAULT_ANSWER_STYLE (if non-empty).
+//  4. Empty string — handler-level conversational fallback applies in buildSystemPrompt.
 func (h *Handler) resolveAnswerStyle(req *nativeChatRequest) string {
+	// 1. Request override.
 	if req.AnswerStyle != nil && *req.AnswerStyle != "" {
 		return *req.AnswerStyle
 	}
+	// 2. Canary bucket — sticky per user_id, no stored state.
+	if h.cfg != nil && h.cfg.FactualCanaryPct > 0 {
+		userID := stringOrEmpty(req.UserID)
+		if canaryFactualForUser(userID, h.cfg.FactualCanaryPct) {
+			return answerStyleFactual
+		}
+	}
+	// 3. Server-wide default.
 	if h.cfg != nil && h.cfg.DefaultAnswerStyle != "" {
 		return h.cfg.DefaultAnswerStyle
 	}
-	return stringOrEmpty(req.AnswerStyle)
+	// 4. No preference — conversational is applied in buildSystemPrompt.
+	return ""
+}
+
+// resolveAndRecordAnswerStyle resolves the effective answer_style and emits the
+// memdb.chat.answer_acceptance_total{style=..., outcome="served"} counter.
+// Call once per request, after resolveAnswerStyle would be called.
+func (h *Handler) resolveAndRecordAnswerStyle(ctx context.Context, req *nativeChatRequest) string {
+	style := h.resolveAnswerStyle(req)
+	emitStyle := style
+	if emitStyle == "" {
+		emitStyle = answerStyleConversational // normalise for metric label
+	}
+	chatAcceptanceMx().Total.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("style", emitStyle),
+			attribute.String("outcome", "served"),
+		),
+	)
+	return style
 }
 
 // NativeChatComplete handles POST /product/chat/complete.
@@ -94,7 +125,7 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	basePrompt := stringOrEmpty(req.SystemPrompt)
-	answerStyle := h.resolveAnswerStyle(&req)
+	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
 	prompt := buildSystemPrompt(*req.Query, memories, prefString, basePrompt, answerStyle)
 	recordChatPromptUsed(ctx, basePrompt, answerStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
@@ -150,7 +181,7 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	basePrompt := stringOrEmpty(req.SystemPrompt)
-	answerStyle := h.resolveAnswerStyle(&req)
+	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
 	prompt := buildSystemPrompt(*req.Query, memories, prefString, basePrompt, answerStyle)
 	recordChatPromptUsed(ctx, basePrompt, answerStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)

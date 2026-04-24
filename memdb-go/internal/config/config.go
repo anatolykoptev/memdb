@@ -67,6 +67,11 @@ type Config struct {
 	// Invalid values fall back to "conversational" with a log warning.
 	DefaultAnswerStyle string `json:"default_answer_style"`
 
+	// FactualCanaryPct is the percentage of users routed to the factual answer-style canary.
+	// Range [0, 100]. 0 = canary off (default). Out-of-range values are clamped with a log warning.
+	// Env: MEMDB_FACTUAL_CANARY_PCT.
+	FactualCanaryPct int `json:"factual_canary_pct"`
+
 	// LLM proxy (OpenAI-compatible API base URL)
 	LLMProxyURL       string   `json:"llm_proxy_url"`
 	LLMProxyAPIKey    string   `json:"llm_proxy_api_key"`
@@ -171,6 +176,7 @@ func Load() *Config {
 
 		EnableChatAPI:      envBool("ENABLE_CHAT_API", false),
 		DefaultAnswerStyle: validatedAnswerStyle(envStr("MEMDB_DEFAULT_ANSWER_STYLE", "")),
+		FactualCanaryPct:   clampCanaryPct(envInt("MEMDB_FACTUAL_CANARY_PCT", 0)),
 
 		LLMProxyURL:       envStr("MEMDB_LLM_PROXY_URL", "https://api.openai.com/v1"),
 		LLMProxyAPIKey:    envStr("CLI_PROXY_API_KEY", ""),
