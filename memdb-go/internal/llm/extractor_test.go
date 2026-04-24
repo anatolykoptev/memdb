@@ -444,9 +444,9 @@ func TestStripFences(t *testing.T) {
 		{"  [\"a\"]  ", `["a"]`},
 	}
 	for _, c := range cases {
-		got := stripFences(c.in)
+		got := string(StripJSONFence([]byte(c.in)))
 		if got != c.want {
-			t.Errorf("stripFences(%q) = %q, want %q", c.in, got, c.want)
+			t.Errorf("StripJSONFence(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

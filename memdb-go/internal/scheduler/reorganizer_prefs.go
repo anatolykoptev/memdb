@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 const (
@@ -155,7 +156,7 @@ func (r *Reorganizer) llmExtractPreferences(ctx context.Context, conversation st
 		return nil, err
 	}
 
-	raw = stripFences(raw)
+	raw = string(llm.StripJSONFence([]byte(raw)))
 	var result struct {
 		Preferences []struct {
 			Text string `json:"text"`

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 const (
@@ -118,7 +119,7 @@ func (r *Reorganizer) llmAnalyzeFeedback(ctx context.Context, feedbackContent st
 		return nil, err
 	}
 
-	raw = stripFences(raw)
+	raw = string(llm.StripJSONFence([]byte(raw)))
 	var result struct {
 		Actions []feedbackAction `json:"actions"`
 	}

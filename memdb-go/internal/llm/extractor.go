@@ -275,15 +275,6 @@ func (e *LLMExtractor) JudgeDedupMerge(ctx context.Context, newMem string, candi
 
 // --- Internal helpers ---
 
-// stripFences removes optional ```json ... ``` markdown fences from LLM output.
-func stripFences(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	return strings.TrimSpace(s)
-}
-
 // parseExtractedFacts parses, validates, and filters a JSON array of ExtractedFact.
 // Facts with confidence < MinConfidence or empty memory (non-delete) are dropped.
 func parseExtractedFacts(raw string) ([]ExtractedFact, error) {
