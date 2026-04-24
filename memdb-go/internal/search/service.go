@@ -69,9 +69,22 @@ func (s *SearchService) CanSearch() bool {
 func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutput, error) {
 	pipelineStart := time.Now()
 
+	// Step 0.5: D4 — optional LLM rewrite of the query before embedding.
+	// Env-gated (MEMDB_QUERY_REWRITE=true, default off). Falls back to the
+	// original query on any error / low confidence / short or long query.
+	// Only the embed call uses embedQuery; BM25, CE rerank, LLM rerank,
+	// and D10 enhance keep p.Query for user-intent fidelity.
+	embedQuery, _ := applyQueryRewrite(ctx, s.logger, p.Query,
+		time.Now().UTC().Format(time.RFC3339),
+		QueryRewriteConfig{
+			APIURL: s.LLMReranker.APIURL,
+			APIKey: s.LLMReranker.APIKey,
+			Model:  s.LLMReranker.Model,
+		})
+
 	// Step 1: Embed query (uses EmbedQuery for query-specific prefix if configured)
 	t0 := time.Now()
-	queryVec, err := s.embedder.EmbedQuery(ctx, p.Query)
+	queryVec, err := s.embedder.EmbedQuery(ctx, embedQuery)
 	if err != nil {
 		return nil, err
 	}
