@@ -4,9 +4,42 @@ package search
 
 import (
 	"math"
+	"os"
 	"sort"
 	"time"
 )
+
+// d1ImportanceCap bounds the importance multiplier so that a runaway
+// access_count (e.g. 10k+) cannot dominate the final score. 1 + ln(1+148) ≈ 5,
+// so 148 hits already saturate — beyond that the multiplier is flat.
+const d1ImportanceCap = 5.0
+
+// d1ImportanceEnabled reports whether the D1 combined-formula branch is
+// active. Read on every call (not at init) so tests can flip the env var
+// with t.Setenv without package-level var gymnastics.
+//
+// Default FALSE: ships the migration + access_count plumbing safely, the
+// ranking formula itself is opt-in via MEMDB_D1_IMPORTANCE=true for A/B
+// rollout.
+func d1ImportanceEnabled() bool {
+	return os.Getenv("MEMDB_D1_IMPORTANCE") == "true"
+}
+
+// importanceMultiplier returns 1 + log(1 + access_count), capped at
+// d1ImportanceCap (5.0). access_count is read from metadata as float64
+// (FormatMemoryItem normalizes it). Missing / negative values clamp to 0,
+// giving a multiplier of 1.0 (i.e. no importance boost).
+func importanceMultiplier(meta map[string]any) float64 {
+	c, _ := meta["access_count"].(float64)
+	if c < 0 {
+		c = 0
+	}
+	m := 1.0 + math.Log(1.0+c)
+	if m > d1ImportanceCap {
+		return d1ImportanceCap
+	}
+	return m
+}
 
 // ReRankByCosine re-scores items using cosine similarity between queryVec
 // and each item's stored embedding. Items without embeddings keep their
@@ -81,6 +114,23 @@ func ApplyTemporalDecay(items []map[string]any, now time.Time, alpha float64) []
 }
 
 // applyDecayToItem applies temporal decay to a single item's metadata in place.
+//
+// Two combiner formulas, gated by MEMDB_D1_IMPORTANCE:
+//
+//  1. Default (env unset / false) — legacy weighted sum:
+//     final = DecaySemanticWeight*cosine + DecayRecencyWeight*recency
+//
+//  2. D1 combined (env = "true") — multiplicative with importance boost:
+//     final = cosine * recency * (1 + log(1+access_count))   capped at 1.0
+//     where recency = exp(-alpha * days) so alpha=ln(2)/180 gives a 180d
+//     half-life. The importance multiplier is bounded at d1ImportanceCap
+//     to keep runaway access_count from dominating the ranking.
+//
+// WorkingMemory is always exempt (session context — recency is its purpose).
+// Items beyond MaxDecayAgeDays in the legacy branch keep the semantic floor;
+// in D1 they get recency=0 which zeroes `final` (semantic cannot rescue
+// very old memories — consistent with the D1 design goal of decaying out
+// stale content).
 func applyDecayToItem(item map[string]any, now time.Time, alpha float64) {
 	meta, ok := item["metadata"].(map[string]any)
 	if !ok || meta == nil {
@@ -101,18 +151,30 @@ func applyDecayToItem(item map[string]any, now time.Time, alpha float64) {
 		days = 0
 	}
 
-	// Memories beyond MaxDecayAgeDays get recency=0 (semantic still counts).
+	// Memories beyond MaxDecayAgeDays get recency=0 (semantic still counts in legacy mode).
 	var recency float64
 	if days <= MaxDecayAgeDays {
 		recency = math.Exp(-alpha * days)
 	}
 
-	// Weighted combination: semantic relevance + recency tiebreaker.
-	// Matches MemOS pattern (0.6 sem + 0.3 rec + 0.1 imp) but without
-	// importance score (not yet stored). We use 0.75/0.25 split.
-	if cosine, ok := meta["relativity"].(float64); ok {
-		meta["relativity"] = DecaySemanticWeight*cosine + DecayRecencyWeight*recency
+	cosine, hasCosine := meta["relativity"].(float64)
+	if !hasCosine {
+		return
 	}
+
+	if d1ImportanceEnabled() {
+		// D1 combined formula: cosine * decay * importance, capped at 1.0.
+		imp := importanceMultiplier(meta)
+		combined := cosine * recency * imp
+		if combined > 1.0 {
+			combined = 1.0
+		}
+		meta["relativity"] = combined
+		return
+	}
+
+	// Legacy weighted combination (default, matches MemOS/mem0-style patterns).
+	meta["relativity"] = DecaySemanticWeight*cosine + DecayRecencyWeight*recency
 }
 
 // resolveRefTimestamp returns the most relevant timestamp from metadata.
