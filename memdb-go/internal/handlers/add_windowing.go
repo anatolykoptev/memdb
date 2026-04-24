@@ -27,12 +27,39 @@ type extractedMemory struct {
 	MemoryType string // "LongTermMemory" or "UserMemory"
 }
 
-// extractFastMemories splits messages into sliding windows of ~windowChars characters.
+// Allowed range for per-request window-size overrides. Values outside this
+// range fall back to the default windowChars constant.
+const (
+	windowCharsMin = 128
+	windowCharsMax = 16384
+)
+
+// windowSizeFor returns the window-char size for an add request.
+// Honours req.WindowChars when set and within [windowCharsMin, windowCharsMax];
+// otherwise returns the default windowChars constant. Out-of-range, zero, and
+// negative values fall back silently — this is a tuning hint, not a contract.
+func windowSizeFor(req *fullAddRequest) int {
+	if req == nil || req.WindowChars == nil {
+		return windowChars
+	}
+	v := *req.WindowChars
+	if v < windowCharsMin || v > windowCharsMax {
+		return windowChars
+	}
+	return v
+}
+
+// extractFastMemories splits messages into sliding windows of ~windowSize characters.
 // Each window becomes one memory candidate. Windows containing only user messages
 // are classified as UserMemory; mixed windows become LongTermMemory.
-func extractFastMemories(messages []chatMessage) []extractedMemory {
+// windowSize ≤ 0 falls back to the default windowChars constant (defence-in-depth;
+// callers should funnel through windowSizeFor which already guards this).
+func extractFastMemories(messages []chatMessage, windowSize int) []extractedMemory {
 	if len(messages) == 0 {
 		return nil
+	}
+	if windowSize <= 0 {
+		windowSize = windowChars
 	}
 
 	formatted := formatMessages(messages)
@@ -41,7 +68,7 @@ func extractFastMemories(messages []chatMessage) []extractedMemory {
 	start := 0
 
 	for start < len(formatted) {
-		window, end := buildWindow(formatted, start)
+		window, end := buildWindow(formatted, start, windowSize)
 		if window == nil {
 			break
 		}
@@ -84,9 +111,9 @@ func formatMessages(messages []chatMessage) []formattedMsg {
 	return out
 }
 
-// buildWindow accumulates messages starting at start until the window exceeds windowChars.
+// buildWindow accumulates messages starting at start until the window exceeds windowSize.
 // Returns the assembled extractedMemory and the exclusive end index.
-func buildWindow(msgs []formattedMsg, start int) (*extractedMemory, int) {
+func buildWindow(msgs []formattedMsg, start, windowSize int) (*extractedMemory, int) {
 	var sb strings.Builder
 	var sources []map[string]any
 	userOnly := true
@@ -94,7 +121,7 @@ func buildWindow(msgs []formattedMsg, start int) (*extractedMemory, int) {
 
 	for end < len(msgs) {
 		line := msgs[end].text + "\n"
-		if sb.Len()+len(line) > windowChars && sb.Len() > 0 {
+		if sb.Len()+len(line) > windowSize && sb.Len() > 0 {
 			break
 		}
 		sb.WriteString(line)

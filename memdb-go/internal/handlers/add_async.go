@@ -45,7 +45,7 @@ func (h *Handler) nativeAsyncAddForCube(ctx context.Context, req *fullAddRequest
 	now := nowTimestamp()
 
 	// --- Step 1: extract sliding-window text (CPU-only) ---
-	memories := extractFastMemories(req.Messages)
+	memories := extractFastMemories(req.Messages, windowSizeFor(req))
 	if len(memories) == 0 {
 		// No text to process — still submit pref_add if messages present
 		h.submitPrefAdd(ctx, req, cubeID)
