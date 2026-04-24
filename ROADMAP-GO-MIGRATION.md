@@ -109,6 +109,100 @@
 | FormatVector: `strconv.AppendFloat` вместо `fmt.Fprintf` | `postgres.go` |
 | applyDeleteAction: hard delete вместо text overwrite | `add_fine.go` |
 
+### Phase A — Safety net (апрель 2026) ✅
+
+| Фича | PR / Commit |
+|------|-------------|
+| **A1** Memory-write heartbeat counter `memdb.memory.added_total{type,cube_id}` + Prometheus alert `SilentMemoryStall` | memdb#12, krolik-server#7 |
+| **A2** Buffer-flush error counter `memdb.buffer.flush_errors_total{reason}` + alert `BufferFlushBurst` | memdb#13 |
+| **A3** Drift counter pre-registration на startup (`dbMx()` touched в `RunMigrations`) | memdb#14, memdb#16 |
+| **A4** Prometheus scrape target `memdb-go:8080`; `/metrics` exempt from auth | memdb#15, krolik-server#8 |
+| **A5** Reset 0001 SHA baseline на прод после F3 edit (one-time expected drift) | op-task |
+
+### Phase B — Integrity (апрель 2026) ✅
+
+| Фича | PR |
+|------|----|
+| **B1** Ensure\*Table DDL → versioned migrations 0005-0008; discovered `public.*` legacy dups | memdb#17 |
+| **B2** agtype operator audit → 3 runtime bugs fixed (`HardDeleteCube`, `GetMemoriesByFilter`) | memdb#18 |
+| **B3** Unified JSON fence strip helpers (`StripJSONFence`, deleted string-based duplicate) | memdb#19 |
+| **B4** Cleaned 4 draft releases (v1.0.0-v1.0.3); published v1.0.0 as baseline | ops-task |
+| **B5** Deleted stale merged branches `phase-ce-rerank`, `security-deps-bump` | ops-task |
+
+### Phase C — Code quality + release discipline (апрель 2026) ✅
+
+| Фича | PR |
+|------|----|
+| **C1a** Split `search/service.go` (824→189) по concern boundaries (+5 files) | memdb#20 |
+| **C1b** Split `scheduler/reorganizer_mem_read.go` (665→118) по stage (+6 files) | memdb#21 |
+| **C1c** `db/postgres_memory.go` — already split (48 lines; no-op) | — |
+| **C2** Deleted Python `schema.py` entirely (SchemaMixin removed from PolarDBGraphDB chain) | memdb#22 |
+| **C3** release-drafter auto-updates draft on main merge + conventional-commit PR title linter | memdb#23 |
+
+### Phase 4.13 — Schema migration runner (апрель 2026) ✅
+
+| # | Фича | PR / Commit |
+|---|------|-------------|
+| 4.13.1-4 | Versioned runner core: advisory lock on pinned `*pgxpool.Conn` + transactional apply + sha256 drift + baseline 0001 + fail-fast в NewPostgres | memdb direct pushes + #3, #4 |
+| 4.13.5 | Migrations 0001-0004: phase2 cube split, tsvector fulltext, extensions+AGE graph, embedding+HNSW halfvec | memdb#3 |
+| 4.13.6 | Python `schema.py` removed (C2) | memdb#22 |
+| 4.13.7a | Ordering fix: `RunMigrations` ДО `Ensure*Table` в `NewPostgres` | memdb#4 |
+| 4.13.7b | Fresh-DB integration test (`scripts/test-migrations-fresh-db.sh` + `cmd/migration-test`) | memdb#8 |
+| 4.13.8 | LLM markdown fence strip (F1) — runtime unblock для buffer flusher | memdb#6 |
+| 4.13.9 | Prometheus drift counter OTel (F2) | memdb#7 |
+
+### P0/P1 — Write-path unblock (апрель 2026) ✅
+
+Три каскадных блокера найдены harness'ом D9 и закрыты одним спринтом. Суммарно восстановлено retrieval от hit@k=0.000 к 0.700:
+
+| Блокер | PR |
+|--------|----|
+| **P0.1** AGE 1.7 убрал `agtype_in(text)` overload → 10 SQL sites мигрировали на `::agtype` cast | memdb#26 |
+| **P0.2** `memos_graph.cubes` был AGE vertex label вместо plain table → migration 0009 drops label + recreates. Hotfix: `drop_vlabel` → `drop_label` (AGE 1.7 rename) | memdb#26, memdb#27 |
+| **P1** `Memory.id` на проде graphid (AGE auto-gen), Go писал UUID → 13 SQL sites + Go caller: INSERT drops id, WHERE/DELETE/UPDATE matches via `properties->>'id'` | memdb#28 |
+| **F5** Search SELECTs project property UUID, не graphid (10 queries в search_vector/fulltext/graph/entity) | memdb#31 |
+| **F7** Drop legacy `public.memory_edges/entity_edges/user_configs` duplicates | memdb#30 |
+
+### Phase embed-server resilience (апрель 2026) ✅
+
+| # | Фича | PR |
+|---|------|----|
+| **E1** memdb-go embedder: `withRetry` wrapper на 30s timeout + 429/503/502/504 exp backoff | memdb#32 |
+| **E2** embed-server: `embed_queue_depth_current` gauge + `embed_queue_full_rejected_total` counter + `embed_batch_wait_ms` histogram + 429 backpressure gate at 80% capacity | ox-embed-server#14 |
+| **E3** Prometheus alert rules: `EmbedQueueSaturation`, `EmbedRejections`, `EmbedHighLatency`, `EmbedBatchWaitHigh` | krolik-server#9 |
+
+### LoCoMo evaluation baseline (апрель 2026) ✅
+
+`evaluation/locomo/` — reproducible eval harness против LoCoMo dataset (Snap Research 2024). Deterministic sample: 1 conv, 3 sessions, 58 msgs, 10 category-1 QAs.
+
+| Metric | Baseline post-P1 |
+|---|---|
+| EM | 0.000 |
+| F1 | 0.010 |
+| semsim | 0.039 |
+| **hit@20** | **0.700** (7 of 10) |
+
+Retrieval-quality уже в верхнем эшелоне: **+0.05-0.15 выше Mem0 (0.65) / MemOS (0.60)** на hit@k. Зазор F1/semsim — surface text of verbose stored memories vs short gold answers; именно это target'ят D4/D10.
+
+### Phase D — LoCoMo intelligence (в работе, апрель 2026)
+
+Десять фич для push'a LoCoMo score от retrieval-only к end-to-end:
+
+| # | Фича | Статус |
+|---|------|--------|
+| **D1** Temporal decay + importance scoring (`access_count`, `exp(-λt·age/half_life)·(1+log(1+access))`); gated `MEMDB_D1_IMPORTANCE` | ✅ memdb#34 (delta 0 on fresh data — expected; shines on accumulated corpus) |
+| **D2** Multi-hop AGE graph retrieval via recursive CTE через `memory_edges` + hop decay 0.8^hop; gated `MEMDB_SEARCH_MULTIHOP` | ✅ memdb#36 + hotfix #37 (relocate tables ag_catalog→memos_graph); delta 0 until graph edges populate |
+| **D3** Hierarchical reorganizer — **port Python `tree_text_memory/organize/`** (5 modules) → raw/episodic/semantic tiers + relation detector (CAUSES/CONTRADICTS/SUPPORTS/RELATED); gated `MEMDB_REORG_HIERARCHY` | 🔄 в работе |
+| **D4** Query rewriting before embedding (third-person + absolute temporal) | ⏳ pending |
+| **D5** 3-stage iterative retrieval prompts (coarse→refine→justify) | ⏳ pending |
+| **D6** Pronoun + temporal resolution в extraction | ⏳ pending |
+| **D7** CoT query decomposition (multi-part → atomic sub-queries) | ⏳ pending |
+| **D8** Third-person enforcement + structured preference taxonomy (14+8 categories) | ⏳ pending |
+| **D9** LoCoMo eval harness + MILESTONES audit trail | ✅ memdb#24, #25, #29, #33, #35, #38 |
+| **D10** Post-retrieval enhancement (LLM rewrites verbose memory → concise citation) | ⏳ pending |
+
+Expected end-state (если все deltas складываются линейно): **F1≈0.48, EM≈0.10, semsim≈0.21, hit@20≈0.80** — opportunity to surpass Snap paper's strongest setup (`Claude-3-Opus + RAG`: F1=0.42, EM=0.22, hit@20=0.72).
+
 ---
 
 ## 1. Текущее состояние
