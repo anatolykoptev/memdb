@@ -298,6 +298,31 @@ def query_search(
     return items, elapsed_ms
 
 
+# LoCoMo is a factual-extraction benchmark, not a chat benchmark. The default
+# MemDB cloudChatPrompt is a conversational-assistant template that instructs
+# the model to "answer directly, never mention retrieved memories" — which
+# produces multi-sentence natural answers that tank F1 (target = short phrase).
+# This QA_SYSTEM_PROMPT overrides it so the LLM returns LoCoMo-style replies:
+# tight factual phrases, matching the gold answer style. MemDB's buildSystemPrompt
+# substitutes {memories} with the numbered retrieved list.
+QA_SYSTEM_PROMPT = """You are answering factual questions about a conversation history between two people.
+
+Below are numbered memories retrieved from their past conversations, ordered by relevance.
+
+<memories>
+{memories}
+</memories>
+
+Answer rules — follow strictly:
+1. Reply with the SHORTEST factual phrase that answers the question (usually 1-10 words).
+2. Do NOT say "based on the memories", "it appears", "the user mentioned", or similar meta-framing.
+3. For dates/times, give the most specific form present in the memories (e.g. "May 2023", "last summer", "Tuesday").
+4. For names/entities, reply with the bare name (e.g. "Emma" not "Her sister Emma").
+5. For yes/no questions, reply "yes" or "no".
+6. If no memory supports an answer, reply exactly: no answer
+7. Match the phrasing and register used in the memories themselves — do not paraphrase more than needed."""
+
+
 def query_chat(
     memdb_url: str,
     user_id: str,
@@ -311,6 +336,7 @@ def query_chat(
         "top_k": top_k,
         "mode": "fast",
         "include_preference": False,
+        "system_prompt": QA_SYSTEM_PROMPT,
     }
     start = time.time()
     resp = requests.post(
