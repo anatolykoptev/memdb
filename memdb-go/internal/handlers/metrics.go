@@ -67,7 +67,7 @@ func feedbackMx() *feedbackMetricsInstruments {
 }
 
 var (
-	chatPromptOnce sync.Once
+	chatPromptOnce    sync.Once
 	chatPromptMetrics *chatPromptMetricsInstruments
 )
 
