@@ -108,6 +108,12 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler, serviceSecret strin
 // behind X-Service-Secret. Requests without a valid secret get 401.
 // Bearer token is intentionally not accepted: pprof exposes goroutine stacks,
 // heap snapshots, and source paths — internal tooling only.
+//
+// Mounted as auth-exempt: isAuthExempt() in middleware/auth.go skips the
+// /debug/pprof/ prefix, so pprofHandler is the SOLE authentication gate.
+// If you remove the isAuthExempt exemption, Auth middleware runs first and
+// rejects unauthenticated requests before pprofHandler is reached — breaking
+// the intended security model (X-Service-Secret only, no bearer tokens).
 func pprofHandler(serviceSecret string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if serviceSecret == "" {
