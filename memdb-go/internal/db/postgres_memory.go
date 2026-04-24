@@ -46,3 +46,14 @@ type RawMemory struct {
 	ID     string // properties->>'id' (UUID)
 	Memory string // raw conversation text
 }
+
+// HierarchyMemory is a lightweight memory row fetched by ListMemoriesByHierarchyLevel.
+// Used by the D3 TreeManager to batch-load candidates for clustering and LLM
+// consolidation per tier. Embedding is parsed from the text representation so
+// callers can use it for local cosine clustering without re-embedding.
+type HierarchyMemory struct {
+	ID        string
+	Text      string
+	UserID    string
+	Embedding []float32
+}

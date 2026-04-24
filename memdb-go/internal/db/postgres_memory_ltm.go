@@ -172,6 +172,31 @@ func FindNearDuplicatesHNSWSQL() string { return queries.FindNearDuplicatesHNSW 
 // FindNearDuplicatesHNSWByIDsSQL returns the HNSW ByIDs SQL template for testing.
 func FindNearDuplicatesHNSWByIDsSQL() string { return queries.FindNearDuplicatesHNSWByIDs }
 
+// ListMemoriesByHierarchyLevel returns activated memories for a cube at a given
+// hierarchy_level ('raw' | 'episodic' | 'semantic'). Used by the D3 TreeManager
+// to batch-load candidates for clustering + LLM consolidation per tier.
+func (p *Postgres) ListMemoriesByHierarchyLevel(ctx context.Context, userName, level string, limit int) ([]HierarchyMemory, error) {
+	if userName == "" || level == "" || limit <= 0 {
+		return nil, nil
+	}
+	rows, err := p.pool.Query(ctx, fmt.Sprintf(queries.ListMemoriesByHierarchyLevel, graphName), userName, level, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list memories by hierarchy level: %w", err)
+	}
+	defer rows.Close()
+	var out []HierarchyMemory
+	for rows.Next() {
+		var r HierarchyMemory
+		var embText string
+		if err := rows.Scan(&r.ID, &r.Text, &r.UserID, &embText); err != nil {
+			return nil, fmt.Errorf("list memories by hierarchy level scan: %w", err)
+		}
+		r.Embedding = ParseVectorString(embText)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // SoftDeleteMerged marks a memory as merged (activated → merged lifecycle transition).
 func (p *Postgres) SoftDeleteMerged(ctx context.Context, memoryID, mergedIntoID, updatedAt string) error {
 	_, err := p.pool.Exec(ctx, fmt.Sprintf(queries.SoftDeleteMerged, graphName), memoryID, mergedIntoID, updatedAt)
