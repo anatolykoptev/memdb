@@ -67,6 +67,26 @@ Closes pre-D follow-ups without changing retrieval behaviour:
 
 **Interpretation.** Zero delta confirms follow-ups are behaviour-preserving: observability additions + API consistency + resilience under load — not retrieval changes. A false regression appeared mid-session because stale conv-* Memory rows written between P1 and F5 contained graphid-format `working_binding` links that post-F5 queries no longer matched. Flushing and re-ingesting restored parity. Going forward, any re-ingest-after-query-change is a standard procedure — captured in the harness.
 
+### 2026-04-24 — D1 temporal decay + importance (commit `5445667c`, PR #34)
+
+Combined-formula rerank gated by `MEMDB_D1_IMPORTANCE=true`. Toggle flipped on prod via ops repo `.env` addition.
+
+| Metric | D1-OFF | D1-ON | Delta |
+|---|---|---|---|
+| EM | 0.000 | 0.000 | +0.000 |
+| F1 | 0.010 | 0.010 | +0.000 |
+| semsim | 0.039 | 0.039 | +0.000 |
+| hit@20 | 0.700 | 0.700 | +0.000 |
+
+**Interpretation — honest zero delta, expected.** D1 formula is `cosine * exp(-λ_t * age / half_life) * (1 + log(1 + access_count))`. On a fresh ingest:
+- `access_count = 0` → importance multiplier = 1.0
+- `valid_at ≈ created_at ≈ NOW` → decay multiplier = 1.0
+- `final = cosine * 1 * 1 = cosine` — identical to pre-D1 scoring
+
+D1 shines on **accumulated longitudinal memories** where either (a) same items retrieved repeatedly over weeks → access_count > 0, or (b) stored memories predate query by weeks+ → age-driven decay separates stale from fresh. Neither condition present in a single-run harness.
+
+Feature is correct, deployed, observable. Real measurement requires a multi-week prod cohort or a synthetic test that varies `valid_at` across ingested memories. Parking both as followups; not blocking D2.
+
 ### Phase D measurement plan
 
 Each D task re-runs the harness after deploy and adds a `### YYYY-MM-DD — D<N> <name>` row showing delta vs `baseline-v1.1.0-post-p1.json`. Expected impact ballpark per Phase D plan:
