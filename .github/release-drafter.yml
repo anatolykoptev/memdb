@@ -1,0 +1,110 @@
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+
+categories:
+  - title: 'Features'
+    labels:
+      - 'feature'
+      - 'enhancement'
+    collapse-after: 10
+  - title: 'Bug Fixes'
+    labels:
+      - 'fix'
+      - 'bugfix'
+      - 'bug'
+    collapse-after: 10
+  - title: 'Security'
+    labels:
+      - 'security'
+    collapse-after: 10
+  - title: 'Performance'
+    labels:
+      - 'performance'
+  - title: 'Refactoring'
+    labels:
+      - 'refactor'
+    collapse-after: 10
+  - title: 'Tests'
+    labels:
+      - 'test'
+    collapse-after: 10
+  - title: 'Documentation'
+    labels:
+      - 'docs'
+    collapse-after: 20
+  - title: 'Dependencies'
+    labels:
+      - 'dependencies'
+      - 'deps'
+  - title: 'Internal'
+    labels:
+      - 'chore'
+      - 'internal'
+    collapse-after: 20
+
+# Auto-apply labels from conventional-commit-style PR titles.
+autolabeler:
+  - label: 'feature'
+    title:
+      - '/^feat(\(.+\))?:/i'
+  - label: 'fix'
+    title:
+      - '/^fix(\(.+\))?:/i'
+  - label: 'security'
+    title:
+      - '/^sec(\(.+\))?:/i'
+      - '/^security(\(.+\))?:/i'
+  - label: 'performance'
+    title:
+      - '/^perf(\(.+\))?:/i'
+  - label: 'refactor'
+    title:
+      - '/^refactor(\(.+\))?:/i'
+  - label: 'test'
+    title:
+      - '/^test(\(.+\))?:/i'
+  - label: 'docs'
+    title:
+      - '/^docs(\(.+\))?:/i'
+  - label: 'chore'
+    title:
+      - '/^chore(\(.+\))?:/i'
+  - label: 'dependencies'
+    title:
+      - '/^chore\(deps\):/i'
+      - '/^deps(\(.+\))?:/i'
+
+# Semver auto-bump based on labels present in the next release.
+version-resolver:
+  major:
+    labels:
+      - 'major'
+      - 'breaking'
+  minor:
+    labels:
+      - 'feature'
+      - 'security'
+  patch:
+    labels:
+      - 'fix'
+      - 'performance'
+      - 'refactor'
+      - 'dependencies'
+      - 'test'
+      - 'docs'
+      - 'chore'
+  default: patch
+
+exclude-labels:
+  - 'skip-changelog'
+  - 'no-release-note'
+
+change-template: '- $TITLE (#$NUMBER) @$AUTHOR'
+change-title-escapes: '\<*_&'
+
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  **Full Changelog:** https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
