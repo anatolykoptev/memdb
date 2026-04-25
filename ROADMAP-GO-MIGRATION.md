@@ -1,13 +1,21 @@
-# MemDB Go Migration Roadmap
+# MemDB Go Migration Roadmap — ✅ COMPLETE 2026-04-26
 
-> План перевода memdb-api (Python) → memdb-go. Только миграция, без новых фич.
+> Перевод memdb-api (Python) → memdb-go. **Migration finished**: Python container shut down 2026-04-26 после M9 Stream 8 (PR memdb#93 + krolik-server#21). Стек pure-Go: postgres + redis + qdrant + embed-server + memdb-go + memdb-mcp.
 >
-> _Составлен: февраль 2026. Обновлён: апрель 2026 (code audit via go-code)._
+> _Составлен: февраль 2026. Обновлён: 2026-04-26 (Phase 5 complete, post-shutdown verification)._
 >
-> **Связанные roadmap:**
-> - [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md) — качество поиска, VEC_COT, LoCoMo benchmarks
-> - [ROADMAP-ADD-PIPELINE.md](ROADMAP-ADD-PIPELINE.md) — качество add pipeline, soft-delete, OTel, конкурентный анализ
+> **Финальный empirical state**: `docker ps` больше не показывает `memdb-api`. Контейнер остановлен `docker stop memdb-api && docker rm memdb-api` после merge krolik-server#21 (compose: memdb-api block commented, depends_on cleaned). Перед shutdown: 2 days uptime, 0 non-/health requests — Python был idle. После shutdown: ноль регрессий, memdb-go продолжает обслуживать прод.
+>
+> **Что произошло сегодня (M9 Phase 5)**:
+> 1. **memdb#93** (`chore: phase 5 python shutdown`) — конвертировал 43 proxy-call sites (24 `proxyWithBody` + 19 `ProxyToProduct`) → HTTP 503 (safety-net) или 422 (3 complex-filter edge cases). Удалены оба метода `proxyWithBody` и `ProxyToProduct`. `phase5_shutdown_test.go` — 10 unit тестов через httptest.
+> 2. **krolik-server#21** (`chore(memdb): shutdown memdb-api python container`) — закомментировал `memdb-api` блок в `compose/memdb.yml`, убрал из `depends_on` у memdb-go и memdb-mcp. Persist'нул M8 mem bumps (GOMEMLIMIT 4915MiB, mem_limit 6144M, mem_swappiness 0).
+> 3. **Manual cleanup**: `docker stop memdb-api && docker rm memdb-api` (compose CLI больше не знал service после уборки из YAML).
+>
+> **Связанные roadmap (продолжают развиваться, не migration)**:
+> - [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md) — качество поиска, D1-D11 retrieval features, LoCoMo benchmarks
+> - [ROADMAP-ADD-PIPELINE.md](ROADMAP-ADD-PIPELINE.md) — качество add pipeline, soft-delete, OTel
 > - [ROADMAP-FEATURES.md](ROADMAP-FEATURES.md) — новые фичи (Image Memory, MemCube sharing)
+> - [docs/competitive/2026-04-26-memobase-deep-dive.md](docs/competitive/2026-04-26-memobase-deep-dive.md) — M9 Memobase port (dual-speaker, [mention DATE], LLM Judge)
 
 ---
 
