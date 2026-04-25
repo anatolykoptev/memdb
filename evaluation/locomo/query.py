@@ -6,7 +6,7 @@ For each question:
   1. GET /product/search  → retrieved memory texts (top-k).
   2. (optional) POST /product/chat/complete → full generated answer.
 
-Predictions JSON layout:
+Predictions JSON layout (dual-speaker mode, M9+):
   [
     {
       "conv_id": "...",
@@ -15,12 +15,21 @@ Predictions JSON layout:
       "gold_answer": "...",
       "evidence": ["D1:3"],
       "category": 2,
-      "retrieved": [{"content": "...", "score": 0.87, "id": "..."}, ...],
+      "retrieved": [{"content": "...", "score": 0.87, "id": "...",
+                     "speaker_label": "A"}, ...],
       "chat_answer": "...",
       "search_ms": 123,
-      "chat_ms": 456
+      "chat_ms": 456,
+      "dual_speaker": true,
+      "speaker_a_memories": [...],
+      "speaker_b_memories": [...],
+      "merged_top_k": 20
     }, ...
   ]
+
+When LOCOMO_DUAL_SPEAKER=false the dual-speaker fields (`speaker_*_memories`,
+`merged_top_k`, `speaker_label` on retrieved items) are omitted; the rest of
+the schema matches the M7/M8 single-speaker baseline.
 
 Deterministic: QAs sorted by (conv_id, question_idx).
 
@@ -30,13 +39,19 @@ Category modes:
   --full                     : all QAs from all 10 convs
 
 Env:
-  LOCOMO_CATEGORIES  comma-separated list (e.g. "1,2,3,4,5"). Overridden
-                     by --categories.  Default: "1" (backward compat).
+  LOCOMO_CATEGORIES   comma-separated list (e.g. "1,2,3,4,5"). Overridden
+                      by --categories.  Default: "1" (backward compat).
+  LOCOMO_DUAL_SPEAKER true|false (default: true). Fan-out per question to
+                      BOTH `<conv>__speaker_a` and `<conv>__speaker_b` user
+                      stores in parallel and merge results. Set to `false`
+                      (or `0`) to reproduce M7/M8 single-speaker baselines.
+                      M9 Stream 1 (HARNESS-DUAL).
 """
 
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import sys
@@ -63,6 +78,29 @@ import requests
 # Env priority: LOCOMO_RETRIEVAL_THRESHOLD → LOCOMO_SEARCH_RELATIVITY (legacy) → 0.0
 _raw_threshold = os.getenv("LOCOMO_RETRIEVAL_THRESHOLD") or os.getenv("LOCOMO_SEARCH_RELATIVITY", "0.0")
 LOCOMO_RETRIEVAL_THRESHOLD = float(_raw_threshold)
+
+
+# M9 Stream 1 (HARNESS-DUAL): dual-speaker retrieval per question.
+# When enabled (default), each question fans out to BOTH `<conv>__speaker_a`
+# and `<conv>__speaker_b` user stores in parallel, merges the result lists
+# (dedup by memory id, keep higher score), and presents the combined context
+# to the chat endpoint with explicit `[speaker:A]` / `[speaker:B]` provenance
+# markers in the system prompt.  Mirrors Memobase's reference benchmark
+# implementation (see compete-research/memobase/.../memobase_search.py:71-105).
+#
+# Disable with `LOCOMO_DUAL_SPEAKER=false` (or `0`) to reproduce M7/M8
+# single-speaker baselines.  Case-insensitive parse.
+def _parse_dual_speaker_env(raw: str | None) -> bool:
+    if raw is None:
+        return True
+    return raw.strip().lower() not in {"false", "0", "no", "off", ""}
+
+
+LOCOMO_DUAL_SPEAKER = _parse_dual_speaker_env(os.getenv("LOCOMO_DUAL_SPEAKER"))
+
+# Suppresses server-side retrieval in chat: above this cosine score, server
+# returns nothing extra so we rely on our pre-fetched dual-speaker context.
+_CHAT_RETRIEVAL_SUPPRESS_THRESHOLD = 0.99
 
 
 def build_headers() -> dict:
@@ -359,6 +397,203 @@ def query_chat(
     return json.dumps(body)[:2000], elapsed_ms
 
 
+# --- M9 Stream 1: dual-speaker retrieval helpers -------------------------------
+
+def _speaker_user_ids(conv_id: str) -> tuple[str, str]:
+    """Return `(speaker_a_uid, speaker_b_uid)` for a LoCoMo conv id."""
+    return f"{conv_id}__speaker_a", f"{conv_id}__speaker_b"
+
+
+def _merge_dual_results(
+    speaker_a_items: list[dict],
+    speaker_b_items: list[dict],
+    top_k: int,
+) -> list[dict]:
+    """Merge dual-speaker search results.
+
+    Rules:
+      * Dedup by memory `id`.  When the same id appears in both speakers'
+        lists, keep the higher `score` and remember which speaker contributed
+        the winning copy via `speaker_label` ("A" or "B").
+      * Items with empty/None id are kept as distinct entries (best-effort
+        — no reasonable dedup key available); they still get `speaker_label`.
+      * Each merged item carries `speaker_label` provenance.
+      * Result is sorted by score (descending; missing/None score → 0.0)
+        and truncated to `top_k`.
+    """
+    by_id: dict[str, dict] = {}
+    no_id: list[dict] = []
+
+    def _ingest(items: list[dict], label: str) -> None:
+        for it in items:
+            tagged = dict(it)
+            tagged["speaker_label"] = label
+            mid = tagged.get("id") or ""
+            if not mid:
+                no_id.append(tagged)
+                continue
+            existing = by_id.get(mid)
+            if existing is None:
+                by_id[mid] = tagged
+                continue
+            # Higher score wins; treat None as 0.0 for comparison.
+            existing_score = existing.get("score") or 0.0
+            new_score = tagged.get("score") or 0.0
+            if new_score > existing_score:
+                by_id[mid] = tagged
+
+    _ingest(speaker_a_items, "A")
+    _ingest(speaker_b_items, "B")
+
+    merged = list(by_id.values()) + no_id
+    merged.sort(key=lambda m: (m.get("score") or 0.0), reverse=True)
+    return merged[:top_k]
+
+
+def query_search_dual(
+    memdb_url: str,
+    conv_id: str,
+    query: str,
+    top_k: int,
+    session_id: str | None = None,
+    timeout: int = 60,
+) -> tuple[list[dict], list[dict], list[dict], int]:
+    """Dual-speaker fan-out of `query_search`.
+
+    Issues two parallel `/product/search` calls — one for `<conv>__speaker_a`
+    and one for `<conv>__speaker_b` — using a 2-worker thread pool, then
+    returns `(speaker_a_items, speaker_b_items, merged_items, elapsed_ms)`.
+    The merged list is bounded to `top_k` by `_merge_dual_results`.
+
+    Network errors propagate (caller handles `requests.RequestException`).
+    """
+    uid_a, uid_b = _speaker_user_ids(conv_id)
+    start = time.time()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        fut_a = pool.submit(
+            query_search, memdb_url, uid_a, query, top_k, session_id, timeout
+        )
+        fut_b = pool.submit(
+            query_search, memdb_url, uid_b, query, top_k, session_id, timeout
+        )
+        items_a, _ = fut_a.result()
+        items_b, _ = fut_b.result()
+    elapsed_ms = int((time.time() - start) * 1000)
+    merged = _merge_dual_results(items_a, items_b, top_k)
+    return items_a, items_b, merged, elapsed_ms
+
+
+def _build_dual_speaker_system_prompt(
+    speaker_a_items: list[dict],
+    speaker_b_items: list[dict],
+) -> str:
+    """Assemble a system prompt that exposes both speakers' memories.
+
+    Mirrors Memobase's `answer_question` template (memobase_search.py:81-88):
+    each speaker's memories are presented as a labelled block so the model
+    cannot "miss" cross-speaker evidence.  The current date placeholder
+    matches the server-side `factualQAPromptEN` style.
+    """
+    def _fmt(items: list[dict], label: str) -> str:
+        if not items:
+            return f"[speaker:{label}] (no memories retrieved)"
+        lines = [f"[speaker:{label}]"]
+        for i, it in enumerate(items, 1):
+            content = (it.get("content") or "").strip()
+            if not content:
+                continue
+            lines.append(f"{i}. {content}")
+        return "\n".join(lines)
+
+    now = time.strftime("%Y-%m-%d %H:%M (%A)")
+    block_a = _fmt(speaker_a_items, "A")
+    block_b = _fmt(speaker_b_items, "B")
+    return (
+        "You are a factual QA assistant answering a question about a recorded "
+        "two-speaker conversation.  Below are memories retrieved separately "
+        "from each speaker's personal memory store; treat both speakers' "
+        "evidence as equally authoritative and combine across speakers when "
+        "the question requires it.\n\n"
+        f"Current time: {now}\n\n"
+        "## Memories\n"
+        f"{block_a}\n\n"
+        f"{block_b}\n\n"
+        "Answer the user's question with a short, direct factual response. "
+        "If the memories do not contain the answer, say so plainly."
+    )
+
+
+def query_chat_dual(
+    memdb_url: str,
+    conv_id: str,
+    query: str,
+    top_k: int,
+    speaker_a_items: list[dict] | None = None,
+    speaker_b_items: list[dict] | None = None,
+    timeout: int = 120,
+) -> tuple[str, list[dict], list[dict], int]:
+    """Dual-speaker chat: pass both speakers' memories to `/product/chat/complete`.
+
+    If `speaker_a_items` / `speaker_b_items` are provided (typical caller
+    path — they come from a prior `query_search_dual` call), they are reused
+    verbatim to avoid duplicate retrieval.  Otherwise, a fresh dual fan-out
+    runs first.
+
+    Builds an explicit `[speaker:A]`/`[speaker:B]` system prompt that
+    overrides the server's default `answer_style=factual` template and
+    minimises server-side retrieval noise by setting `top_k=1` for the
+    chat call (the model relies on our pre-fetched dual-speaker context).
+
+    Returns `(answer, speaker_a_items, speaker_b_items, elapsed_ms)`.
+    """
+    if speaker_a_items is None or speaker_b_items is None:
+        speaker_a_items, speaker_b_items, _, _ = query_search_dual(
+            memdb_url, conv_id, query, top_k, session_id=None, timeout=timeout
+        )
+
+    system_prompt = _build_dual_speaker_system_prompt(
+        speaker_a_items, speaker_b_items
+    )
+
+    # The chat endpoint requires a user_id; pick speaker_a deterministically.
+    # Server-side retrieval is suppressed with top_k=1 + a high threshold —
+    # the model's primary context comes from `system_prompt`.
+    uid_a, _ = _speaker_user_ids(conv_id)
+    payload = {
+        "user_id": uid_a,
+        "query": query,
+        "top_k": 1,
+        "mode": "fast",
+        "include_preference": False,
+        "threshold": _CHAT_RETRIEVAL_SUPPRESS_THRESHOLD,
+        "system_prompt": system_prompt,
+    }
+    start = time.time()
+    resp = requests.post(
+        f"{memdb_url.rstrip('/')}/product/chat/complete",
+        json=payload,
+        headers=build_headers(),
+        timeout=timeout,
+    )
+    elapsed_ms = int((time.time() - start) * 1000)
+    resp.raise_for_status()
+    body = resp.json()
+    answer = ""
+    if isinstance(body, dict):
+        data = body.get("data", body)
+        if isinstance(data, str):
+            answer = data
+        elif isinstance(data, dict):
+            for key in ("response", "answer", "content", "message", "text"):
+                val = data.get(key)
+                if isinstance(val, str) and val:
+                    answer = val
+                    break
+    if not answer:
+        answer = json.dumps(body)[:2000]
+    return answer, speaker_a_items, speaker_b_items, elapsed_ms
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     g = p.add_mutually_exclusive_group(required=True)
@@ -421,10 +656,16 @@ def main() -> int:
 
     gold.sort(key=lambda g: (g["conv_id"], g["question_idx"]))
 
+    dual_speaker = LOCOMO_DUAL_SPEAKER
+    print(
+        f"[query] dual_speaker={dual_speaker} "
+        f"(env LOCOMO_DUAL_SPEAKER={os.getenv('LOCOMO_DUAL_SPEAKER', '<unset>')!r})",
+        flush=True,
+    )
+
     predictions: list[dict] = []
     errors: list[str] = []
     for qi, qa in enumerate(gold, 1):
-        user_id = f"{qa['conv_id']}__speaker_{args.speaker}"
         question = qa["question"]
         print(f"[{qi}/{len(gold)}] {qa['conv_id']} q={question[:70]!r}", flush=True)
         rec = {
@@ -439,31 +680,72 @@ def main() -> int:
             "search_ms": None,
             "chat_ms": None,
             "error": None,
+            "dual_speaker": dual_speaker,
         }
-        try:
-            items, ms = query_search(
-                args.memdb_url,
-                user_id,
-                question,
-                args.top_k,
-                session_id=None,
-            )
-            rec["retrieved"] = items
-            rec["search_ms"] = ms
-        except requests.RequestException as exc:
-            rec["error"] = f"search: {exc}"
-            errors.append(rec["error"])
-            print(f"  SEARCH ERROR: {exc}", file=sys.stderr, flush=True)
 
-        if not args.skip_chat and rec["error"] is None:
+        if dual_speaker:
+            speaker_a_items: list[dict] = []
+            speaker_b_items: list[dict] = []
             try:
-                answer, ms = query_chat(args.memdb_url, user_id, question, args.top_k)
-                rec["chat_answer"] = answer
-                rec["chat_ms"] = ms
+                speaker_a_items, speaker_b_items, merged, ms = query_search_dual(
+                    args.memdb_url,
+                    qa["conv_id"],
+                    question,
+                    args.top_k,
+                    session_id=None,
+                )
+                rec["retrieved"] = merged
+                rec["search_ms"] = ms
+                rec["speaker_a_memories"] = speaker_a_items
+                rec["speaker_b_memories"] = speaker_b_items
+                rec["merged_top_k"] = len(merged)
             except requests.RequestException as exc:
-                rec["error"] = f"chat: {exc}"
+                rec["error"] = f"search: {exc}"
                 errors.append(rec["error"])
-                print(f"  CHAT ERROR: {exc}", file=sys.stderr, flush=True)
+                print(f"  SEARCH ERROR: {exc}", file=sys.stderr, flush=True)
+
+            if not args.skip_chat and rec["error"] is None:
+                try:
+                    answer, _, _, ms = query_chat_dual(
+                        args.memdb_url,
+                        qa["conv_id"],
+                        question,
+                        args.top_k,
+                        speaker_a_items=speaker_a_items,
+                        speaker_b_items=speaker_b_items,
+                    )
+                    rec["chat_answer"] = answer
+                    rec["chat_ms"] = ms
+                except requests.RequestException as exc:
+                    rec["error"] = f"chat: {exc}"
+                    errors.append(rec["error"])
+                    print(f"  CHAT ERROR: {exc}", file=sys.stderr, flush=True)
+        else:
+            user_id = f"{qa['conv_id']}__speaker_{args.speaker}"
+            try:
+                items, ms = query_search(
+                    args.memdb_url,
+                    user_id,
+                    question,
+                    args.top_k,
+                    session_id=None,
+                )
+                rec["retrieved"] = items
+                rec["search_ms"] = ms
+            except requests.RequestException as exc:
+                rec["error"] = f"search: {exc}"
+                errors.append(rec["error"])
+                print(f"  SEARCH ERROR: {exc}", file=sys.stderr, flush=True)
+
+            if not args.skip_chat and rec["error"] is None:
+                try:
+                    answer, ms = query_chat(args.memdb_url, user_id, question, args.top_k)
+                    rec["chat_answer"] = answer
+                    rec["chat_ms"] = ms
+                except requests.RequestException as exc:
+                    rec["error"] = f"chat: {exc}"
+                    errors.append(rec["error"])
+                    print(f"  CHAT ERROR: {exc}", file=sys.stderr, flush=True)
 
         predictions.append(rec)
 
@@ -480,6 +762,7 @@ def main() -> int:
                     "errors": len(errors),
                     "skip_chat": args.skip_chat,
                     "categories": categories,
+                    "dual_speaker": dual_speaker,
                 },
             },
             f,
