@@ -62,6 +62,9 @@ var ToolScopes = []string{"ToolSchemaMemory", "ToolTrajectoryMemory"}
 // GraphRecallScopes are the scopes searched by graph-based recall (key/tag match).
 var GraphRecallScopes = []string{"LongTermMemory", "UserMemory", "SkillMemory", "EpisodicMemory"}
 
+// EpisodicScopes restricts vector search to episodic memories only (MemOS L2).
+var EpisodicScopes = []string{"EpisodicMemory"}
+
 // Internet search defaults.
 const (
 	DefaultInternetLimit = 5   // max web results to embed and merge
