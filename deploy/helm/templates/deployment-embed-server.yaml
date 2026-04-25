@@ -1,0 +1,77 @@
+{{- if .Values.embedServer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "memdb.fullname" . }}-embed-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: embed-server
+spec:
+  replicas: {{ .Values.embedServer.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "memdb.componentSelectorLabels" (dict "root" . "component" "embed-server") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "memdb.componentSelectorLabels" (dict "root" . "component" "embed-server") | nindent 8 }}
+    spec:
+      containers:
+        - name: embed-server
+          image: "{{ .Values.embedServer.image.repository }}:{{ .Values.embedServer.image.tag }}"
+          imagePullPolicy: {{ .Values.embedServer.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.embedServer.port }}
+              protocol: TCP
+          volumeMounts:
+            - name: models
+              mountPath: /models
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 4
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.embedServer.resources | nindent 12 }}
+      volumes:
+        - name: models
+          {{- if .Values.embedServer.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "memdb.fullname" . }}-embed-models
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- if .Values.embedServer.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "memdb.fullname" . }}-embed-models
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: embed-server
+spec:
+  accessModes:
+    - {{ .Values.embedServer.persistence.accessMode | quote }}
+  {{- if .Values.embedServer.persistence.storageClass }}
+  storageClassName: {{ .Values.embedServer.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.embedServer.persistence.size | quote }}
+{{- end }}
+{{- end }}

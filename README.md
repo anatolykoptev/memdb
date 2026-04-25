@@ -177,6 +177,35 @@ Full API reference: [docs/openapi.json](docs/openapi.json). Runnable examples:
 
 ---
 
+## Kubernetes Install (Helm)
+
+For Kubernetes deployments, use the bundled Helm chart (single-namespace, no external subcharts):
+
+```bash
+# 1. Create namespace + secret (secrets never go in values.yaml)
+kubectl create namespace memdb
+kubectl create secret generic memdb-secrets \
+  --namespace memdb \
+  --from-literal=postgresPassword=<STRONG_PASSWORD> \
+  --from-literal=llmApiKey=<YOUR_LLM_API_KEY>
+
+# 2. Install
+helm install memdb ./deploy/helm \
+  --namespace memdb \
+  --create-namespace
+
+# 3. Verify
+kubectl -n memdb get pods
+kubectl -n memdb port-forward svc/memdb-memdb-go 8080:8080
+curl http://localhost:8080/health
+```
+
+Brings up: **postgres + redis + qdrant + embed-server + memdb-go + memdb-mcp** in a single namespace.
+
+Full values reference and upgrade / ingress / persistence docs: [deploy/helm/README.md](deploy/helm/README.md).
+
+---
+
 ## Architecture
 
 Default deployment is **two containers** (Postgres + memdb-go); enable the embed sidecar

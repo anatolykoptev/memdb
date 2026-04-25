@@ -1,0 +1,125 @@
+---
+# memdb-go API service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "memdb.fullname" . }}-memdb-go
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: memdb-go
+spec:
+  type: {{ .Values.memdbGo.service.type }}
+  ports:
+    - port: {{ .Values.memdbGo.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "memdb.componentSelectorLabels" (dict "root" . "component" "memdb-go") | nindent 4 }}
+
+---
+# memdb-mcp service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "memdb.fullname" . }}-memdb-mcp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: memdb-mcp
+spec:
+  type: {{ .Values.memdbMcp.service.type }}
+  ports:
+    - port: {{ .Values.memdbMcp.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "memdb.componentSelectorLabels" (dict "root" . "component" "memdb-mcp") | nindent 4 }}
+
+---
+# postgres service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "memdb.fullname" . }}-postgres
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  type: {{ .Values.postgres.service.type }}
+  ports:
+    - port: {{ .Values.postgres.service.port }}
+      targetPort: postgres
+      protocol: TCP
+      name: postgres
+  selector:
+    {{- include "memdb.componentSelectorLabels" (dict "root" . "component" "postgres") | nindent 4 }}
+
+---
+# redis service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "memdb.fullname" . }}-redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+spec:
+  type: {{ .Values.redis.service.type }}
+  ports:
+    - port: {{ .Values.redis.service.port }}
+      targetPort: redis
+      protocol: TCP
+      name: redis
+  selector:
+    {{- include "memdb.componentSelectorLabels" (dict "root" . "component" "redis") | nindent 4 }}
+
+---
+# qdrant service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "memdb.fullname" . }}-qdrant
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: qdrant
+spec:
+  type: {{ .Values.qdrant.service.type }}
+  ports:
+    - port: {{ .Values.qdrant.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: {{ .Values.qdrant.service.grpcPort }}
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+  selector:
+    {{- include "memdb.componentSelectorLabels" (dict "root" . "component" "qdrant") | nindent 4 }}
+
+{{- if .Values.embedServer.enabled }}
+---
+# embed-server service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "memdb.fullname" . }}-embed-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: embed-server
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.embedServer.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "memdb.componentSelectorLabels" (dict "root" . "component" "embed-server") | nindent 4 }}
+{{- end }}
