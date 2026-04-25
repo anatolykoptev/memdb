@@ -812,11 +812,12 @@ Output adds `llm_judge` key in each aggregate track, `llm_judge` per category in
 | mem0 | 66.88 | 67.13 | 51.15 | 72.93 | 55.51 | basic vector |
 | LangMem | 58.10 | 62.23 | 47.92 | 71.12 | 23.43 | — |
 | OpenAI Memory | 52.75 | 63.79 | 42.92 | 62.29 | 21.71 | — |
-| **MemDB (target)** | **> 76** | — | — | — | — | +VEC_COT+profile (planned) |
+| **MemDB v0.22.0** (M9, 2026-04-26) | **70.0** | — | — | — | — | chat-50 stratified, excl cat-5 — see "M9 Stage 3 v3" below |
+| **MemDB (M10 target)** | **> 76** | — | — | — | — | +`user_profiles` layer + perf items |
 
-Note: MemDB M7 Stage 2 measurement (F1 0.238, hit@k 0.769) uses a different metric
-(token-level F1, not LLM Judge) and a different scope (conv-26 only, 199 QAs).
-LLM-Judge comparable number is pending Stage 3 re-run (OOM deferred, see above).
+Note: MemDB M7 Stage 2 token-level F1 (0.238) used a different metric than LLM Judge —
+those numbers are not directly comparable to the leaderboard above. M9 Stage 3 v3
+(below) reports actual Memobase-comparable LLM Judge results.
 
 ---
 
