@@ -52,26 +52,39 @@ func (h *Handler) chatCanNative() bool {
 	return h.searchService != nil && h.searchService.CanSearch() && h.llmChat != nil
 }
 
-// chatProfileSection fetches the user's profile rows (M10 Stream 3) and
-// renders them as the "## User Profile" prompt section.
+// chatProfileSection fetches the user's profile rows (M10 Stream 3) for a
+// SINGLE cube and renders them as the "## User Profile" prompt section.
 //
-// Returns "" when the env gate MEMDB_PROFILE_INJECT is disabled or when the
-// postgres client is unavailable — in both cases buildSystemPromptWithProfile
-// will skip the section, preserving M9 baseline behaviour.
+// Cube isolation (security audit C1, migration 0017): the underlying query
+// (GetProfilesByUserCube) excludes rows from other cubes AND legacy NULL
+// cube_id rows, so a user's profile facts extracted in cube=A never bleed
+// into a chat scoped to cube=B. When the chat request spans multiple
+// readable cubes (rare in production today), we use the first resolved
+// cube — chat search merges memories across cubes, but profile injection
+// stays single-tenant: the system prompt already has limited budget and
+// cross-cube identity merging belongs in a future M11 stream.
 //
-// Errors from GetProfilesByUser are logged and swallowed: profile injection is
-// best-effort and must never block chat. Empty rows render as "(none)" per
-// the Memobase contract (absence is signal).
-func (h *Handler) chatProfileSection(ctx context.Context, userID string) string {
+// Returns "" when the env gate MEMDB_PROFILE_INJECT is disabled, when the
+// postgres client is unavailable, or when no cube can be resolved — in all
+// cases buildSystemPromptWithProfile will skip the section, preserving M9
+// baseline behaviour.
+//
+// Errors from GetProfilesByUserCube are logged and swallowed: profile
+// injection is best-effort and must never block chat. Empty rows render as
+// "(none)" per the Memobase contract (absence is signal).
+func (h *Handler) chatProfileSection(ctx context.Context, userID, cubeID string) string {
 	if !profileInjectEnabled() {
 		return ""
 	}
-	if h.postgres == nil || userID == "" {
+	if h.postgres == nil || userID == "" || cubeID == "" {
 		return ""
 	}
-	entries, err := h.postgres.GetProfilesByUser(ctx, userID)
+	entries, err := h.postgres.GetProfilesByUserCube(ctx, userID, cubeID)
 	if err != nil {
-		h.logger.Warn("chat profile fetch failed", slog.String("user_id", userID), slog.Any("error", err))
+		h.logger.Warn("chat profile fetch failed",
+			slog.String("user_id", userID),
+			slog.String("cube_id", cubeID),
+			slog.Any("error", err))
 		return ""
 	}
 	return formatProfileSection(ctx, entries)
@@ -158,7 +171,7 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 
 	basePrompt := stringOrEmpty(req.SystemPrompt)
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
-	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID))
+	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID), profileCubeIDForRequest(&req))
 	prompt := buildSystemPromptWithProfile(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
 	recordChatPromptUsed(ctx, basePrompt, answerStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
@@ -222,7 +235,7 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 
 	basePrompt := stringOrEmpty(req.SystemPrompt)
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
-	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID))
+	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID), profileCubeIDForRequest(&req))
 	prompt := buildSystemPromptWithProfile(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
 	recordChatPromptUsed(ctx, basePrompt, answerStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)

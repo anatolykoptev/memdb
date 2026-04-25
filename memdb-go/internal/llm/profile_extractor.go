@@ -55,7 +55,9 @@ func (e *ProfileExtractor) Model() string { return e.client.Model() }
 // ExtractProfile sends the conversation memo to the LLM and returns the
 // parsed []db.InsertProfileParams rows ready for postgres BulkUpsert.
 //
-// The userID is stamped on every returned entry. Confidence defaults to
+// The userID and cubeID are stamped on every returned entry. cubeID is
+// required: profiles are tenant-scoped (security audit C1, migration 0017),
+// and BulkUpsert rejects rows with an empty cube_id. Confidence defaults to
 // 0.9 (we trust the verbatim Memobase prompt + only persist what survives
 // strict TSV parsing). ValidAt is set to the call time so M11 can later
 // invalidate stale rows.
@@ -64,13 +66,16 @@ func (e *ProfileExtractor) Model() string { return e.client.Model() }
 // output format" suffix and returns the merged result; if the second pass
 // also yields nothing, it returns an empty slice + nil error so the
 // fire-and-forget caller logs an "empty" outcome rather than an error.
-func (e *ProfileExtractor) ExtractProfile(ctx context.Context, conversation, userID string) ([]db.InsertProfileParams, error) {
+func (e *ProfileExtractor) ExtractProfile(ctx context.Context, conversation, userID, cubeID string) ([]db.InsertProfileParams, error) {
 	memo := strings.TrimSpace(conversation)
 	if len(memo) < profileMinMemoChars {
 		return nil, ErrEmptyConversation
 	}
 	if userID == "" {
 		return nil, errors.New("profile extract: user_id required")
+	}
+	if cubeID == "" {
+		return nil, errors.New("profile extract: cube_id required")
 	}
 
 	msgs := []map[string]string{
@@ -84,7 +89,7 @@ func (e *ProfileExtractor) ExtractProfile(ctx context.Context, conversation, use
 	}
 
 	now := time.Now().UTC()
-	entries := parseProfileResponse(raw, userID, now)
+	entries := parseProfileResponse(raw, userID, cubeID, now)
 	if len(entries) > 0 {
 		return entries, nil
 	}
@@ -100,7 +105,7 @@ func (e *ProfileExtractor) ExtractProfile(ctx context.Context, conversation, use
 		// Treat retry transport error as empty (caller logs "llm_error").
 		return nil, fmt.Errorf("profile extract retry: %w", err)
 	}
-	return parseProfileResponse(raw, userID, now), nil
+	return parseProfileResponse(raw, userID, cubeID, now), nil
 }
 
 // --- parser -----------------------------------------------------------------
@@ -130,19 +135,19 @@ type jsonProfileEnvelope struct {
 //   - missing `---` divider
 //   - ``` fences (json or unmarked)
 //   - blank/short lines
-func parseProfileResponse(raw, userID string, now time.Time) []db.InsertProfileParams {
+func parseProfileResponse(raw, userID, cubeID string, now time.Time) []db.InsertProfileParams {
 	stripped := string(StripJSONFence([]byte(raw)))
 
 	// Try JSON envelope first — cheap, fails fast on non-JSON.
-	if entries, ok := tryParseProfileJSON(stripped, userID, now); ok {
+	if entries, ok := tryParseProfileJSON(stripped, userID, cubeID, now); ok {
 		return entries
 	}
 
 	// Fall back to Memobase TSV markdown.
-	return parseProfileTSV(stripped, userID, now)
+	return parseProfileTSV(stripped, userID, cubeID, now)
 }
 
-func tryParseProfileJSON(raw, userID string, now time.Time) ([]db.InsertProfileParams, bool) {
+func tryParseProfileJSON(raw, userID, cubeID string, now time.Time) ([]db.InsertProfileParams, bool) {
 	trimmed := strings.TrimSpace(raw)
 	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
 		return nil, false
@@ -153,7 +158,7 @@ func tryParseProfileJSON(raw, userID string, now time.Time) ([]db.InsertProfileP
 	if err := json.Unmarshal([]byte(trimmed), &env); err == nil && len(env.Facts) > 0 {
 		out := make([]db.InsertProfileParams, 0, len(env.Facts))
 		for _, f := range env.Facts {
-			if e, ok := buildProfileEntry(f.Topic, f.SubTopic, f.Memo, userID, now); ok {
+			if e, ok := buildProfileEntry(f.Topic, f.SubTopic, f.Memo, userID, cubeID, now); ok {
 				out = append(out, e)
 			}
 		}
@@ -169,7 +174,7 @@ func tryParseProfileJSON(raw, userID string, now time.Time) ([]db.InsertProfileP
 	if err := json.Unmarshal([]byte(trimmed), &arr); err == nil && len(arr) > 0 {
 		out := make([]db.InsertProfileParams, 0, len(arr))
 		for _, f := range arr {
-			if e, ok := buildProfileEntry(f.Topic, f.SubTopic, f.Memo, userID, now); ok {
+			if e, ok := buildProfileEntry(f.Topic, f.SubTopic, f.Memo, userID, cubeID, now); ok {
 				out = append(out, e)
 			}
 		}
@@ -179,7 +184,7 @@ func tryParseProfileJSON(raw, userID string, now time.Time) ([]db.InsertProfileP
 	return nil, false
 }
 
-func parseProfileTSV(raw, userID string, now time.Time) []db.InsertProfileParams {
+func parseProfileTSV(raw, userID, cubeID string, now time.Time) []db.InsertProfileParams {
 	// Drop everything before the `---` divider when present; otherwise scan
 	// the whole body so prose-wrapped output still parses.
 	body := raw
@@ -199,7 +204,7 @@ func parseProfileTSV(raw, userID string, now time.Time) []db.InsertProfileParams
 		if m == nil {
 			continue
 		}
-		if e, ok := buildProfileEntry(m[1], m[2], m[3], userID, now); ok {
+		if e, ok := buildProfileEntry(m[1], m[2], m[3], userID, cubeID, now); ok {
 			out = append(out, e)
 		}
 	}
@@ -207,8 +212,9 @@ func parseProfileTSV(raw, userID string, now time.Time) []db.InsertProfileParams
 }
 
 // buildProfileEntry normalises whitespace, lower-cases topic/sub_topic
-// (Memobase canonical form), and rejects empty memos.
-func buildProfileEntry(topic, subTopic, memo, userID string, now time.Time) (db.InsertProfileParams, bool) {
+// (Memobase canonical form), and rejects empty memos. The cubeID is stamped
+// verbatim — callers must validate it (ExtractProfile rejects empty values).
+func buildProfileEntry(topic, subTopic, memo, userID, cubeID string, now time.Time) (db.InsertProfileParams, bool) {
 	topic = strings.ToLower(strings.TrimSpace(topic))
 	subTopic = strings.ToLower(strings.TrimSpace(subTopic))
 	memo = strings.TrimSpace(memo)
@@ -218,6 +224,7 @@ func buildProfileEntry(topic, subTopic, memo, userID string, now time.Time) (db.
 	validAt := now
 	return db.InsertProfileParams{
 		UserID:     userID,
+		CubeID:     cubeID,
 		Topic:      topic,
 		SubTopic:   subTopic,
 		Memo:       memo,
