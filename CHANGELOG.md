@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-04-26 — First public release
+
+This is MemDB's first public release. Earlier v1.x and v2.x tags were internal
+pre-public iterations — see [docs/versioning.md](docs/versioning.md) for the
+re-versioning rationale.
+
+### Why now
+
+After M9 sprint (this week), MemDB has:
+- Pure-Go stack (Python `memdb-api` removed 2026-04-26)
+- Memobase-comparable LLM Judge measurement (publishable numbers)
+- Phase D retrieval features fully shipped (D1-D11)
+- Auto-release infrastructure validated (release-drafter + goreleaser + changelog-sync)
+
+### Highlights since v2.2.0 (no breaking changes)
+
+- **Pure Go runtime**: 6 containers (was 7); no more Python in hot path. See
+  ROADMAP-GO-MIGRATION.md for details.
+- **Memobase port** (M9 Streams 1-4): dual-speaker retrieval, LLM Judge metric,
+  cat-5 exclusion + dual-track reporting, [mention DATE] time-anchoring in
+  extract prompts.
+- **Public release artifacts**: README rewritten for broad audience, LICENSE
+  verified MIT, CONTRIBUTING / SECURITY / CODE_OF_CONDUCT added, versioning
+  policy documented.
+
+### Versioning reset
+
+Previous: internal v2.2.0 (2026-04-26 morning).
+Now: public v0.22.0 (2026-04-26 evening).
+
+API/wire format unchanged. Update your image tag from
+`anatolykoptev/memdb:v2.2.0` → `anatolykoptev/memdb:v0.22.0`. Schema migrations
+(postgres_migrations.go) are automatic.
+
+See [docs/versioning.md](docs/versioning.md) for full rationale.
+
+### Migration from v2.x
+
+- Update image tag in compose
+- No code changes required for SDK/REST clients
+- Schema auto-migrates on memdb-go startup
+
+### Breaking changes
+
+None at on-the-wire level. The version reset itself is the only "breaking"
+change — `^v2` ranges no longer satisfy the latest release.
+
 ## [2.2.0] — 2026-04-25
 
 ### Features

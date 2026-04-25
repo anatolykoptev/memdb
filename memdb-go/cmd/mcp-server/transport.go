@@ -47,7 +47,7 @@ func runHTTP(ctx context.Context, server *mcp.Server, port string, logger *slog.
 	mux.Handle("/mcp/", handler)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"ok","service":"memdb-mcp","version":"1.0.0"}`))
+		_, _ = w.Write([]byte(`{"status":"ok","service":"memdb-mcp","version":"0.22.0"}`))
 	})
 
 	srv := &http.Server{
