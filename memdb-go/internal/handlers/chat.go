@@ -283,5 +283,10 @@ func validateChatRequest(req *nativeChatRequest) []string {
 			))
 		}
 	}
+	if req.Level != nil && *req.Level != "" {
+		if _, err := parseChatLevel(req); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
 	return errs
 }

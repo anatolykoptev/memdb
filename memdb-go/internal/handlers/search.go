@@ -52,16 +52,27 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 		params.InternetSearch = true
 	}
 
+	// Level parameter — parse and validate.
+	if req.Level != nil && *req.Level != "" {
+		lvl, lerr := search.ParseLevel(*req.Level)
+		if lerr != nil {
+			h.writeValidationError(w, []string{lerr.Error()})
+			return
+		}
+		params.Level = lvl
+	}
+
 	ctx := r.Context()
 
-	// Check cache (includes mode in key)
+	// Check cache (includes mode and level in key)
 	profileKey := derefStringOr(req.Profile, "default")
 	modeKey := derefStringOr(req.Mode, "fast")
+	levelKey := derefStringOr(req.Level, "all")
 	// Include CubeID in the cache key: two requests for the same user but different
 	// readable_cube_ids must not collide. UserName is kept for audit/debug purposes
 	// but CubeID is the actual storage scope used by the read path.
-	cacheKey := fmt.Sprintf("%ssearch:%s:%s:%s:%s:%s:%d:%d:%d:%s",
-		cachePrefix, profileKey, modeKey, params.UserName, params.CubeID,
+	cacheKey := fmt.Sprintf("%ssearch:%s:%s:%s:%s:%s:%s:%d:%d:%d:%s",
+		cachePrefix, profileKey, modeKey, levelKey, params.UserName, params.CubeID,
 		hashQuery(params.Query), params.TopK, params.SkillTopK, params.PrefTopK, params.Dedup)
 	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
 		w.Header().Set("Content-Type", "application/json")
@@ -70,9 +81,12 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Route by mode
+	// Route by level first, then by mode for the full-search (LevelAll) path.
 	var output *search.SearchOutput
-	if req.Mode != nil && *req.Mode == modeFine {
+	if params.Level != search.LevelAll {
+		// Level-scoped search — mode override (fine) is not applied for tier-scoped calls.
+		output, err = h.searchService.SearchByLevel(ctx, params)
+	} else if req.Mode != nil && *req.Mode == modeFine {
 		output, err = h.searchService.SearchFine(ctx, params)
 	} else {
 		output, err = h.searchService.Search(ctx, params)

@@ -5,6 +5,7 @@ package search
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
@@ -40,6 +41,28 @@ const (
 	DedupModeNo  = "no"  // no deduplication
 )
 
+// Level selects which MemOS memory tier(s) to query.
+// Empty string means "all" (full search, backward-compat default).
+type Level string
+
+const (
+	LevelAll Level = ""   // full search — default, backward-compat
+	LevelL1  Level = "l1" // working memory only (postgres WorkingMemory rows)
+	LevelL2  Level = "l2" // episodic only  (Postgres Memory where memory_type='EpisodicMemory')
+	LevelL3  Level = "l3" // LTM full graph (Postgres LongTermMemory + UserMemory + EpisodicMemory + graph)
+)
+
+// ParseLevel parses a raw level string; returns LevelAll for "".
+// Returns an error for any unrecognised value.
+func ParseLevel(s string) (Level, error) {
+	switch Level(s) {
+	case LevelAll, LevelL1, LevelL2, LevelL3:
+		return Level(s), nil
+	default:
+		return LevelAll, fmt.Errorf("invalid level %q: must be l1, l2, or l3 (or omit for full search)", s)
+	}
+}
+
 // SearchParams configures a single search invocation.
 type SearchParams struct {
 	Query    string
@@ -66,6 +89,10 @@ type SearchParams struct {
 	NumStages        int  // iterative expansion stages (0 = disabled, 2 = fast, 3 = fine)
 	LLMRerank        bool // enable LLM-based reranking (adds ~3-4s latency)
 	InternetSearch   bool // enable web search via SearXNG
+	// Level restricts the search to a specific MemOS memory tier.
+	// LevelAll (empty string, the zero value) = full search (backward compat).
+	// LevelL1 = working memory only; LevelL2 = episodic only; LevelL3 = LTM full graph.
+	Level Level
 }
 
 // SearchOutput holds the formatted result plus optional embedding sidecar.
