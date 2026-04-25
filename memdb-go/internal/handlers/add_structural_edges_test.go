@@ -14,6 +14,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -281,6 +282,81 @@ func TestRawBatchRefs(t *testing.T) {
 	}
 	if refs[0].ID != "a" || refs[1].ID != "c" {
 		t.Errorf("refs IDs = [%q,%q]", refs[0].ID, refs[1].ID)
+	}
+}
+
+// TestEmitStructuralEdges_CapFiredPath exercises the cap-fired branch of the
+// structural-edge orchestrator at the pure-helper level — no DB required.
+// Simulates adding memory-26 into a session that already has 25 neighbors:
+//   - buildSameSessionEdges must cap at sameSessionMaxPartners (20), not 25.
+//   - buildTimelineNextEdges must link to the most-recent neighbor (last in
+//     DESC-returned slice = index 0) rather than the oldest one.
+//
+// This mirrors the live assertion in TestLivePG_StructuralEdges_CapFires but
+// runs entirely hermetically, confirming the cap and ordering logic in the
+// pure helpers without touching Postgres.
+func TestEmitStructuralEdges_CapFiredPath(t *testing.T) {
+	const numExisting = 25
+
+	// Build a pool of 25 existing neighbors with monotonically-increasing
+	// timestamps. GetSessionMemoryNeighborsRecent returns DESC, so the
+	// most-recent neighbor is first in the slice.
+	neighbors := make([]db.SessionMemoryNeighbor, numExisting)
+	for i := 0; i < numExisting; i++ {
+		neighbors[i] = db.SessionMemoryNeighbor{
+			ID:        fmt.Sprintf("existing-%02d", i+1),
+			CreatedAt: fmt.Sprintf("2026-04-26T10:%02d:00.000000", i), // 10:00 .. 10:24
+		}
+	}
+	// DESC ordering: most-recent is neighbors[0] (existing-25 = 10:24),
+	// oldest is neighbors[24] (existing-01 = 10:00).
+	// Reverse to simulate DESC: highest index = earliest minute.
+	// Re-order: index 0 = most recent (minute 24), index 24 = oldest (minute 0).
+	for i, j := 0, len(neighbors)-1; i < j; i, j = i+1, j-1 {
+		neighbors[i], neighbors[j] = neighbors[j], neighbors[i]
+	}
+	// Now neighbors[0] = existing-25 (10:24), neighbors[24] = existing-01 (10:00).
+
+	newMem := newMemoryRef{
+		ID:        "new-26",
+		CreatedAt: "2026-04-26T10:25:00.000000",
+	}
+	newMems := []newMemoryRef{newMem}
+
+	// --- SAME_SESSION cap ---
+	edges, capped := buildSameSessionEdges(newMems, neighbors, sameSessionMaxPartners)
+	if len(edges) != sameSessionMaxPartners {
+		t.Errorf("SAME_SESSION edges = %d, want %d (cap)", len(edges), sameSessionMaxPartners)
+	}
+	expectedCapped := (numExisting - sameSessionMaxPartners) * len(newMems)
+	if capped != expectedCapped {
+		t.Errorf("capped = %d, want %d", capped, expectedCapped)
+	}
+
+	// --- TIMELINE_NEXT most-recent predecessor ---
+	// buildTimelineNextEdges merges newMems + neighbors and sorts ASC internally.
+	// After the sort, new-26 (10:25) is last; its predecessor is existing-25 (10:24).
+	tlEdges := buildTimelineNextEdges(newMems, neighbors)
+	// Find the edge whose from is new-26.
+	var linkToID string
+	for _, e := range tlEdges {
+		if e.FromID == newMem.ID {
+			linkToID = e.ToID
+			break
+		}
+	}
+	if linkToID == "" {
+		t.Fatalf("no TIMELINE_NEXT edge from new-26; got edges=%+v", tlEdges)
+	}
+	// Most-recent existing neighbor has CreatedAt 10:24 → ID existing-25.
+	wantPredecessor := neighbors[0].ID // existing-25 (most recent after DESC inversion)
+	if linkToID != wantPredecessor {
+		t.Errorf("TIMELINE_NEXT new-26 → %s, want %s (most-recent predecessor)", linkToID, wantPredecessor)
+		// Diagnose if it linked to the oldest row instead.
+		oldestID := neighbors[len(neighbors)-1].ID
+		if linkToID == oldestID {
+			t.Errorf("  REGRESSION: linked to oldest neighbor %s — ORDER BY ASC bug in query", oldestID)
+		}
 	}
 }
 

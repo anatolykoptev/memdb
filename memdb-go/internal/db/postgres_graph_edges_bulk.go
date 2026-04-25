@@ -80,14 +80,44 @@ func (p *Postgres) BulkInsertMemoryEdges(ctx context.Context, rows []MemoryEdgeR
 	return nil
 }
 
-// GetSessionMemoryNeighbors returns up to limit activated LTM/UserMemory rows
-// for (cubeID, sessionID), sorted by created_at ASC. Empty sessionID short-
-// circuits to nil — the caller (structural-edge emitter) skips edge work
-// entirely when no session is set, so we don't waste a query.
+// GetSessionMemoryNeighborsRecent returns the most-recent (ORDER BY
+// created_at DESC) activated LTM/UserMemory rows for (cubeID, sessionID).
+// Use this for SAME_SESSION / TIMELINE_NEXT structural edges — the first
+// row is the immediate predecessor of the turn being ingested.
 //
 // Embedding text is returned but NOT parsed here — most callers only need
-// SAME_SESSION/TIMELINE_NEXT, which are embedding-free. The SIMILAR_COSINE
+// SAME_SESSION/TIMELINE_NEXT which are embedding-free. The SIMILAR_COSINE
 // path parses on demand to keep the no-similar-edges hot path allocation-free.
+func (p *Postgres) GetSessionMemoryNeighborsRecent(ctx context.Context, cubeID, sessionID string, limit int) ([]SessionMemoryNeighbor, error) {
+	if cubeID == "" || sessionID == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		return nil, nil
+	}
+	q := fmt.Sprintf(queries.SessionMemoryNeighborsRecent, graphName)
+	rows, err := p.pool.Query(ctx, q, cubeID, sessionID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("session memory neighbors (recent): %w", err)
+	}
+	defer rows.Close()
+
+	var out []SessionMemoryNeighbor
+	for rows.Next() {
+		var n SessionMemoryNeighbor
+		if err := rows.Scan(&n.ID, &n.CreatedAt, &n.EmbeddingStr); err != nil {
+			return nil, fmt.Errorf("session neighbors scan: %w", err)
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// GetSessionMemoryNeighbors returns activated LTM/UserMemory rows sorted ASC.
+// Deprecated: use GetSessionMemoryNeighborsRecent for SAME_SESSION /
+// TIMELINE_NEXT edge emission — ASC order anchors TIMELINE_NEXT to the oldest
+// rows, not the immediate predecessor. Kept for any future caller that
+// explicitly needs chronological-oldest-first semantics.
 func (p *Postgres) GetSessionMemoryNeighbors(ctx context.Context, cubeID, sessionID string, limit int) ([]SessionMemoryNeighbor, error) {
 	if cubeID == "" || sessionID == "" {
 		return nil, nil

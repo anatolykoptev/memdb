@@ -46,6 +46,11 @@ const (
 	// session does not produce 200 edges per new memory.
 	sameSessionMaxPartners = 20
 
+	// maxFetchLimit is the upper bound for the GetSessionMemoryNeighborsRecent
+	// fetch. Guards against sameSessionMaxPartners growing without a matching
+	// review of memory pressure.
+	maxFetchLimit = 100
+
 	// similarCosineMinScore is the lower bound for SIMILAR_COSINE_HIGH —
 	// below this threshold the pair is uninteresting topically.
 	similarCosineMinScore = 0.85
@@ -77,12 +82,18 @@ func (h *Handler) emitStructuralEdges(ctx context.Context, fac fastAddContext, n
 		return
 	}
 
-	// Step 1 — fetch session pool (if any). Cap fetch at sameSessionMaxPartners*2
-	// so we have headroom over the per-new-memory cap without unbounded reads.
+	// Step 1 — fetch session pool (if any). ORDER BY DESC so the first rows
+	// are the most-recent prior turns — critical for TIMELINE_NEXT to link to
+	// the immediate predecessor, not the oldest turn in a long session.
+	// Fetch slightly more than sameSessionMaxPartners so buildSameSessionEdges
+	// has pool headroom; hard cap at maxFetchLimit to bound the read.
 	var neighbors []db.SessionMemoryNeighbor
 	if fac.sessionID != "" {
 		fetchLimit := sameSessionMaxPartners*2 + len(newMems)
-		nb, err := h.postgres.GetSessionMemoryNeighbors(ctx, fac.cubeID, fac.sessionID, fetchLimit)
+		if fetchLimit > maxFetchLimit {
+			fetchLimit = maxFetchLimit
+		}
+		nb, err := h.postgres.GetSessionMemoryNeighborsRecent(ctx, fac.cubeID, fac.sessionID, fetchLimit)
 		if err != nil {
 			h.logger.Debug("structural edges: session neighbors fetch failed",
 				slog.String("session_id", fac.sessionID), slog.Any("error", err))

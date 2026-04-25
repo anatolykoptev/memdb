@@ -60,3 +60,10 @@ Captured during the M7 sprint (2026-04-25). One-day-sprint discipline kept these
     - Per project rule "3rd near-duplicate of logic → extract".
     - Effort: 1h.
     - Surfaced by code review of PR #72.
+
+15. **`InvalidateEdgesByMemoryID` only handles `from_id`, not `to_id`.**
+    - Pre-existing bug: when a memory is deleted, edges WHERE `to_id = <deleted>` become orphans pointing nowhere.
+    - M8 PR #83 (structural edges) materially amplifies edge volume (~30× more edges per memory) so the orphan accumulation is now meaningful.
+    - Fix options: (a) extend `InvalidateEdgesByMemoryID` to handle both directions, (b) add periodic GC sweep.
+    - Effort: S.
+    - Surfaced by code review of PR #83.

@@ -11,20 +11,6 @@ package queries
 // directed relationships between memory nodes identified by their property UUID.
 // Created by migration 0005_memory_edges.sql at startup.
 
-// CreateEdgesTable is the reference DDL for the memory_edges table.
-// Actual table creation is done by migration 0005_memory_edges.sql.
-const CreateEdgesTable = `
-CREATE TABLE IF NOT EXISTS memory_edges (
-    from_id    TEXT NOT NULL,
-    to_id      TEXT NOT NULL,
-    relation   TEXT NOT NULL,
-    created_at TEXT,
-    valid_at   TEXT,
-    invalid_at TEXT,
-    PRIMARY KEY (from_id, to_id, relation)
-);
-CREATE INDEX IF NOT EXISTS memory_edges_to_idx ON memory_edges(to_id, relation)`
-
 // InsertMemoryEdge inserts a directed edge between two memory nodes (idempotent).
 // Args: $1 = from_id (text), $2 = to_id (text), $3 = relation (text),
 //
@@ -65,20 +51,41 @@ FROM UNNEST($1::text[], $2::text[], $3::text[], $5::float8[], $6::text[])
      AS u(f, t, r, c, rat)
 ON CONFLICT (from_id, to_id, relation) DO NOTHING`
 
-// SessionMemoryNeighbors returns activated LongTermMemory/UserMemory rows
-// belonging to (cube_id, session_id) — the seed pool for SAME_SESSION /
-// TIMELINE_NEXT structural edges at ingest. Sorted by created_at ASC so the
-// caller can build the timeline chain in one pass.
+// SessionMemoryNeighborsRecent returns the most-recent activated
+// LongTermMemory/UserMemory rows in (cube_id, session_id), sorted DESC so the
+// first row is the immediate predecessor of the memory being ingested.
+//
+// Use this for SAME_SESSION / TIMELINE_NEXT structural edges — recent context
+// is relevant context; fetching the OLDEST rows anchors TIMELINE_NEXT 160
+// turns in the past on a 200-message session (the failure mode SessionMemory
+// Neighbors ASC had).
 //
 // memory_type whitelist intentionally excludes WorkingMemory: WM rows are
 // transient (deleted by the WM→LTM transfer worker), so edges pointing at
-// them would dangle. EpisodicMemory/SemanticMemory are emitted by D3 later
-// and don't share a session_id with raw turns.
+// them would dangle.
 //
 // Embedding is returned as text for ParseVectorString — keeps this query
 // reusable for SIMILAR_COSINE_HIGH edge candidates without a second round-trip.
 //
 // Args: $1 = cube_id (user_name), $2 = session_id, $3 = limit (int)
+const SessionMemoryNeighborsRecent = `
+SELECT
+    properties->>(('id'::text))         AS memory_id,
+    COALESCE(properties->>(('created_at'::text)), '') AS created_at,
+    COALESCE(embedding::text, '')       AS embedding_text
+FROM %[1]s."Memory"
+WHERE properties->>(('user_name'::text))   = $1
+  AND properties->>(('session_id'::text))  = $2
+  AND properties->>(('status'::text))      = 'activated'
+  AND properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory')
+ORDER BY properties->>(('created_at'::text)) DESC
+LIMIT $3`
+
+// SessionMemoryNeighbors is retained for backwards compatibility only.
+// New code MUST use SessionMemoryNeighborsRecent (ORDER BY DESC) — see
+// the bug description above for why ASC breaks TIMELINE_NEXT on long sessions.
+//
+// Deprecated: use SessionMemoryNeighborsRecent.
 const SessionMemoryNeighbors = `
 SELECT
     properties->>(('id'::text))         AS memory_id,

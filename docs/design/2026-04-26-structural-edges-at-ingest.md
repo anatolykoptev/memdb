@@ -59,6 +59,12 @@ Measured on the livepg probe: 5-turn raw-mode session, total `nativeRawAddForCub
 
 **Query cost**: D2's recursive CTE now has 10–30× more candidate edges to traverse. The `memory_edges` PK already covers `(from_id, to_id, relation)` so traversal stays index-bound.
 
+## Cross-session bridging (SIMILAR_COSINE_HIGH)
+
+SIMILAR_COSINE_HIGH intentionally bridges sessions to surface topical anchors across the user's history. The `VectorSearch` call inside `buildSimilarCosineEdgesForBatch` is cube-wide (no `session_id` filter) — a memory added in session B can gain a cosine edge to a thematically related memory from session A. This is the correct semantic: "find topical neighbors anywhere in what the user has told me."
+
+SAME_SESSION and TIMELINE_NEXT remain session-scoped for temporal locality — they model conversational structure (same dialogue → connected; consecutive turns → chained), not cross-topic cohesion. The two designs are complementary: SIMILAR_COSINE_HIGH builds a topic graph, SAME_SESSION/TIMELINE_NEXT build a temporal spine within each conversation.
+
 ## What this fixes
 
 - D2 multi-hop traversal has dense connectivity from the moment a memory lands, instead of waiting for D3 (which may never fire on cubes that don't trigger reorganization).
@@ -75,8 +81,10 @@ Measured on the livepg probe: 5-turn raw-mode session, total `nativeRawAddForCub
 
 ## Validation
 
-- Unit tests (15 functions, hermetic): `add_structural_edges_test.go`.
-- Live Postgres probe: `add_structural_edges_livepg_test.go`. Five-turn session produces SAME_SESSION=10, TIMELINE_NEXT=4 (matching the math `n*(n-1)/2 = 10` partners and `n-1 = 4` chain links).
+- Unit tests (hermetic): `add_structural_edges_test.go`. Includes `TestEmitStructuralEdges_CapFiredPath` which simulates a 26-memory session and verifies that: (a) SAME_SESSION caps at 20 partners, (b) TIMELINE_NEXT links to the most-recent predecessor (not the oldest).
+- Live Postgres probe: `add_structural_edges_livepg_test.go`.
+  - `TestLivePG_StructuralEdges_RawSession` — five-turn session produces exactly SAME_SESSION=10 (`n*(n-1)/2`) and TIMELINE_NEXT=4 (`n-1`).
+  - `TestLivePG_StructuralEdges_CapFires` — 26-turn session: asserts SAME_SESSION cap fires (==20 for memory-26) and TIMELINE_NEXT links memory-26 → memory-25 (immediate predecessor, verifying ORDER BY DESC).
 - Existing add tests (`add_test.go`, `add_fast_batched_test.go`, `add_raw_test.go`, `add_async_test.go`) all green.
 
 ## Reference
