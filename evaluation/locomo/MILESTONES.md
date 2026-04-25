@@ -627,6 +627,26 @@ single-conv result. Whether it generalises requires re-running with a stable ing
 
 Filed as backlog item — this is a measurement-tooling failure, not a model regression.
 
+## Historical baseline note — single-speaker retrieval (pre-M9)
+
+**All milestones above (baseline-v1.1.0 through M8/Stage 3) were measured with
+single-speaker retrieval**: each question hit only `<conv>__speaker_a` (CLI
+default `--speaker=a`).  Memobase's reference benchmark queries BOTH
+`<conv>__speaker_a` and `<conv>__speaker_b` per question and merges the
+results — this is what M9 Stream 1 (HARNESS-DUAL) introduces in `query.py`.
+
+The new default is `LOCOMO_DUAL_SPEAKER=true`.  To reproduce historical
+single-speaker numbers verbatim, set `LOCOMO_DUAL_SPEAKER=false` (or `0`)
+before invoking `run.sh` / `query.py`.  Output schema for single-speaker
+runs is identical to M7/M8 except for an inert `dual_speaker: false`
+top-level field — comparison scripts continue to work unchanged.
+
+The cat-5 attribution-suppression analysis from M8 S7 (PR #85, ~32% of
+cat-5 errors traced to model rejecting cross-speaker evidence) is the
+direct motivation: dual-speaker retrieval surfaces both speakers' memories
+explicitly with `[speaker:A]` / `[speaker:B]` labels in the chat prompt,
+removing the attribution gap as a failure mode.
+
 ## How to record a new milestone
 
 ```bash
