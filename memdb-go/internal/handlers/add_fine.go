@@ -141,6 +141,11 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 		h.profiler.TriggerRefresh(cubeID)
 	}
 
+	// Step 10: structured user-profile extraction (M10 Stream 2).
+	// Fire-and-forget: never blocks the request and never returns errors.
+	// Gated on MEMDB_PROFILE_EXTRACT (default true).
+	h.triggerProfileExtract(conversation, *req.UserID)
+
 	return items, nil
 }
 
