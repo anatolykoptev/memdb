@@ -15,37 +15,39 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
-const testProfileUser = "test-profiles-user"
-
-func setupProfilesTest(t *testing.T) (*db.Postgres, func()) {
+// setupProfilesTest returns a Postgres handle and a per-test user ID derived
+// from t.Name(). Using t.Name() isolates each test's rows so that concurrent
+// runs (CI matrix, -count=2) never interfere with each other.
+func setupProfilesTest(t *testing.T) (*db.Postgres, string) {
 	t.Helper()
 	pg, cleanup0 := setupCubesTest(t) // reuses the existing livepg setup helper
 	ctx := context.Background()
 
+	userID := "test-profiles-" + t.Name()
+
 	// Remove any leftover rows from previous runs.
 	if _, err := pg.Pool().Exec(ctx,
-		`DELETE FROM memos_graph.user_profiles WHERE user_id = $1`, testProfileUser,
+		`DELETE FROM memos_graph.user_profiles WHERE user_id = $1`, userID,
 	); err != nil {
 		t.Fatalf("cleanup prior profile rows: %v", err)
 	}
 
-	cleanup := func() {
+	t.Cleanup(func() {
 		_, _ = pg.Pool().Exec(context.Background(),
-			`DELETE FROM memos_graph.user_profiles WHERE user_id = $1`, testProfileUser)
+			`DELETE FROM memos_graph.user_profiles WHERE user_id = $1`, userID)
 		cleanup0()
-	}
-	return pg, cleanup
+	})
+	return pg, userID
 }
 
 // --- Insert / GetByUser / GetByTopic ---
 
 func TestProfiles_InsertAndGet(t *testing.T) {
-	pg, cleanup := setupProfilesTest(t)
-	defer cleanup()
+	pg, userID := setupProfilesTest(t)
 	ctx := context.Background()
 
 	entry, err := pg.InsertProfile(ctx, db.InsertProfileParams{
-		UserID:   testProfileUser,
+		UserID:   userID,
 		Topic:    "personal",
 		SubTopic: "name",
 		Memo:     "Alex",
@@ -63,7 +65,7 @@ func TestProfiles_InsertAndGet(t *testing.T) {
 		t.Error("new row should not be expired")
 	}
 
-	profiles, err := pg.GetProfilesByUser(ctx, testProfileUser)
+	profiles, err := pg.GetProfilesByUser(ctx, userID)
 	if err != nil {
 		t.Fatalf("GetProfilesByUser: %v", err)
 	}
@@ -74,7 +76,7 @@ func TestProfiles_InsertAndGet(t *testing.T) {
 		t.Errorf("memo: got %q want Alex", profiles[0].Memo)
 	}
 
-	byTopic, err := pg.GetProfilesByTopic(ctx, testProfileUser, "personal")
+	byTopic, err := pg.GetProfilesByTopic(ctx, userID, "personal")
 	if err != nil {
 		t.Fatalf("GetProfilesByTopic: %v", err)
 	}
@@ -86,19 +88,18 @@ func TestProfiles_InsertAndGet(t *testing.T) {
 // --- Update ---
 
 func TestProfiles_Update(t *testing.T) {
-	pg, cleanup := setupProfilesTest(t)
-	defer cleanup()
+	pg, userID := setupProfilesTest(t)
 	ctx := context.Background()
 
 	_, err := pg.InsertProfile(ctx, db.InsertProfileParams{
-		UserID: testProfileUser, Topic: "personal", SubTopic: "age", Memo: "30",
+		UserID: userID, Topic: "personal", SubTopic: "age", Memo: "30",
 	})
 	if err != nil {
 		t.Fatalf("InsertProfile: %v", err)
 	}
 
 	updated, err := pg.UpdateProfile(ctx, db.UpdateProfileParams{
-		UserID: testProfileUser, Topic: "personal", SubTopic: "age",
+		UserID: userID, Topic: "personal", SubTopic: "age",
 		Memo: "31", Confidence: 0.9,
 	})
 	if err != nil {
@@ -113,12 +114,11 @@ func TestProfiles_Update(t *testing.T) {
 }
 
 func TestProfiles_UpdateNotFound(t *testing.T) {
-	pg, cleanup := setupProfilesTest(t)
-	defer cleanup()
+	pg, userID := setupProfilesTest(t)
 	ctx := context.Background()
 
 	_, err := pg.UpdateProfile(ctx, db.UpdateProfileParams{
-		UserID: testProfileUser, Topic: "nonexistent", SubTopic: "sub", Memo: "x",
+		UserID: userID, Topic: "nonexistent", SubTopic: "sub", Memo: "x",
 	})
 	if err == nil {
 		t.Fatal("expected ErrProfileNotFound, got nil")
@@ -131,23 +131,22 @@ func TestProfiles_UpdateNotFound(t *testing.T) {
 // --- SoftDelete ---
 
 func TestProfiles_SoftDelete(t *testing.T) {
-	pg, cleanup := setupProfilesTest(t)
-	defer cleanup()
+	pg, userID := setupProfilesTest(t)
 	ctx := context.Background()
 
 	_, err := pg.InsertProfile(ctx, db.InsertProfileParams{
-		UserID: testProfileUser, Topic: "work", SubTopic: "role", Memo: "engineer",
+		UserID: userID, Topic: "work", SubTopic: "role", Memo: "engineer",
 	})
 	if err != nil {
 		t.Fatalf("InsertProfile: %v", err)
 	}
 
-	if err := pg.SoftDeleteProfile(ctx, testProfileUser, "work", "role"); err != nil {
+	if err := pg.SoftDeleteProfile(ctx, userID, "work", "role"); err != nil {
 		t.Fatalf("SoftDeleteProfile: %v", err)
 	}
 
 	// Soft-deleted row must not appear in active queries.
-	profiles, err := pg.GetProfilesByUser(ctx, testProfileUser)
+	profiles, err := pg.GetProfilesByUser(ctx, userID)
 	if err != nil {
 		t.Fatalf("GetProfilesByUser after delete: %v", err)
 	}
@@ -158,7 +157,7 @@ func TestProfiles_SoftDelete(t *testing.T) {
 	}
 
 	// Soft-deleting an already-deleted row returns ErrProfileNotFound.
-	if err := pg.SoftDeleteProfile(ctx, testProfileUser, "work", "role"); err != db.ErrProfileNotFound {
+	if err := pg.SoftDeleteProfile(ctx, userID, "work", "role"); err != db.ErrProfileNotFound {
 		t.Errorf("second soft-delete: expected ErrProfileNotFound, got %v", err)
 	}
 }
@@ -166,14 +165,13 @@ func TestProfiles_SoftDelete(t *testing.T) {
 // --- BulkUpsert ---
 
 func TestProfiles_BulkUpsert_Insert(t *testing.T) {
-	pg, cleanup := setupProfilesTest(t)
-	defer cleanup()
+	pg, userID := setupProfilesTest(t)
 	ctx := context.Background()
 
 	entries := make([]db.InsertProfileParams, 50)
 	for i := range entries {
 		entries[i] = db.InsertProfileParams{
-			UserID:   testProfileUser,
+			UserID:   userID,
 			Topic:    fmt.Sprintf("topic%02d", i),
 			SubTopic: "sub",
 			Memo:     fmt.Sprintf("memo %d", i),
@@ -184,7 +182,7 @@ func TestProfiles_BulkUpsert_Insert(t *testing.T) {
 		t.Fatalf("BulkUpsert 50 entries: %v", err)
 	}
 
-	profiles, err := pg.GetProfilesByUser(ctx, testProfileUser)
+	profiles, err := pg.GetProfilesByUser(ctx, userID)
 	if err != nil {
 		t.Fatalf("GetProfilesByUser: %v", err)
 	}
@@ -194,25 +192,24 @@ func TestProfiles_BulkUpsert_Insert(t *testing.T) {
 }
 
 func TestProfiles_BulkUpsert_OverwritesMemo(t *testing.T) {
-	pg, cleanup := setupProfilesTest(t)
-	defer cleanup()
+	pg, userID := setupProfilesTest(t)
 	ctx := context.Background()
 
 	// Insert initial row.
 	if err := pg.BulkUpsert(ctx, []db.InsertProfileParams{
-		{UserID: testProfileUser, Topic: "pref", SubTopic: "language", Memo: "Russian"},
+		{UserID: userID, Topic: "pref", SubTopic: "language", Memo: "Russian"},
 	}); err != nil {
 		t.Fatalf("first BulkUpsert: %v", err)
 	}
 
 	// Upsert with different memo — should expire old + insert new.
 	if err := pg.BulkUpsert(ctx, []db.InsertProfileParams{
-		{UserID: testProfileUser, Topic: "pref", SubTopic: "language", Memo: "English"},
+		{UserID: userID, Topic: "pref", SubTopic: "language", Memo: "English"},
 	}); err != nil {
 		t.Fatalf("second BulkUpsert: %v", err)
 	}
 
-	profiles, err := pg.GetProfilesByTopic(ctx, testProfileUser, "pref")
+	profiles, err := pg.GetProfilesByTopic(ctx, userID, "pref")
 	if err != nil {
 		t.Fatalf("GetProfilesByTopic: %v", err)
 	}
@@ -225,12 +222,11 @@ func TestProfiles_BulkUpsert_OverwritesMemo(t *testing.T) {
 }
 
 func TestProfiles_BulkUpsert_IdempotentSameMemo(t *testing.T) {
-	pg, cleanup := setupProfilesTest(t)
-	defer cleanup()
+	pg, userID := setupProfilesTest(t)
 	ctx := context.Background()
 
 	params := db.InsertProfileParams{
-		UserID: testProfileUser, Topic: "food", SubTopic: "fav", Memo: "pizza",
+		UserID: userID, Topic: "food", SubTopic: "fav", Memo: "pizza",
 	}
 
 	if err := pg.BulkUpsert(ctx, []db.InsertProfileParams{params}); err != nil {
@@ -240,7 +236,7 @@ func TestProfiles_BulkUpsert_IdempotentSameMemo(t *testing.T) {
 		t.Fatalf("second BulkUpsert (same memo): %v", err)
 	}
 
-	profiles, err := pg.GetProfilesByTopic(ctx, testProfileUser, "food")
+	profiles, err := pg.GetProfilesByTopic(ctx, userID, "food")
 	if err != nil {
 		t.Fatalf("GetProfilesByTopic: %v", err)
 	}
@@ -249,16 +245,40 @@ func TestProfiles_BulkUpsert_IdempotentSameMemo(t *testing.T) {
 	}
 }
 
+// TestProfiles_BulkUpsert_DuplicateKeysLastWins verifies that when two entries
+// with the same (topic, sub_topic) appear in a single batch, the last one wins.
+func TestProfiles_BulkUpsert_DuplicateKeysLastWins(t *testing.T) {
+	pg, userID := setupProfilesTest(t)
+	ctx := context.Background()
+
+	if err := pg.BulkUpsert(ctx, []db.InsertProfileParams{
+		{UserID: userID, Topic: "pref", SubTopic: "color", Memo: "blue"},
+		{UserID: userID, Topic: "pref", SubTopic: "color", Memo: "red"},
+	}); err != nil {
+		t.Fatalf("BulkUpsert with duplicate keys: %v", err)
+	}
+
+	profiles, err := pg.GetProfilesByTopic(ctx, userID, "pref")
+	if err != nil {
+		t.Fatalf("GetProfilesByTopic: %v", err)
+	}
+	if len(profiles) != 1 {
+		t.Fatalf("expected 1 active profile after in-batch dedup, got %d", len(profiles))
+	}
+	if profiles[0].Memo != "red" {
+		t.Errorf("last entry should win: got %q want red", profiles[0].Memo)
+	}
+}
+
 // --- valid_at field ---
 
 func TestProfiles_ValidAt(t *testing.T) {
-	pg, cleanup := setupProfilesTest(t)
-	defer cleanup()
+	pg, userID := setupProfilesTest(t)
 	ctx := context.Background()
 
 	future := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
 	entry, err := pg.InsertProfile(ctx, db.InsertProfileParams{
-		UserID: testProfileUser, Topic: "event", SubTopic: "meeting", Memo: "board review",
+		UserID: userID, Topic: "event", SubTopic: "meeting", Memo: "board review",
 		ValidAt: &future,
 	})
 	if err != nil {

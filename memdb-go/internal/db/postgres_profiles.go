@@ -80,9 +80,13 @@ RETURNING `+profileColumns,
 // UpdateProfile updates memo, confidence, valid_at, and updated_at on the
 // single active row for (user_id, topic, sub_topic).
 // Returns ErrProfileNotFound when no active row matches.
+// Confidence == 0 is promoted to 1.0, consistent with InsertProfile behaviour.
 func (p *Postgres) UpdateProfile(ctx context.Context, params UpdateProfileParams) (ProfileEntry, error) {
 	if err := validateProfileKey(params.UserID, params.Topic, params.SubTopic); err != nil {
 		return ProfileEntry{}, fmt.Errorf("UpdateProfile: %w", err)
+	}
+	if params.Confidence == 0 {
+		params.Confidence = 1.0
 	}
 
 	row := p.pool.QueryRow(ctx, `
@@ -176,11 +180,35 @@ WHERE user_id   = $1
 	return nil
 }
 
+// profileDedupKey is the composite key used to deduplicate BulkUpsert entries.
+type profileDedupKey struct{ topic, subTopic string }
+
+// dedupProfileEntries collapses duplicate (topic, sub_topic) entries within a
+// batch, keeping the last occurrence per key (last-wins semantics). Order of
+// surviving entries matches their first appearance in the input slice.
+func dedupProfileEntries(entries []InsertProfileParams) []InsertProfileParams {
+	seen := make(map[profileDedupKey]int, len(entries))
+	out := make([]InsertProfileParams, 0, len(entries))
+	for _, e := range entries {
+		k := profileDedupKey{e.Topic, e.SubTopic}
+		if idx, ok := seen[k]; ok {
+			out[idx] = e // overwrite with later entry
+		} else {
+			seen[k] = len(out)
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // BulkUpsert inserts or updates a slice of profile entries in a single
 // transaction. Conflict resolution per row:
 //   - No active row exists → INSERT.
 //   - Active row exists with identical memo → no-op (DO NOTHING).
 //   - Active row exists with different memo → expire old row, INSERT new row.
+//
+// Duplicate (topic, sub_topic) pairs within a single batch are deduplicated
+// before the transaction: the last occurrence per key wins.
 func (p *Postgres) BulkUpsert(ctx context.Context, entries []InsertProfileParams) error {
 	if len(entries) == 0 {
 		return nil
@@ -192,6 +220,8 @@ func (p *Postgres) BulkUpsert(ctx context.Context, entries []InsertProfileParams
 			return fmt.Errorf("BulkUpsert entry[%d]: %w", i, err)
 		}
 	}
+
+	entries = dedupProfileEntries(entries)
 
 	tx, err := p.pool.Begin(ctx)
 	if err != nil {

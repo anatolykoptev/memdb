@@ -153,17 +153,38 @@ func TestBulkUpsert_ValidationError(t *testing.T) {
 	}
 }
 
-// --- ProfileEntry zero-value sanity ---
+// TestDedupProfileEntries_LastWins verifies that duplicate (topic, sub_topic)
+// keys within a batch are collapsed to the last occurrence (last-wins).
+func TestDedupProfileEntries_LastWins(t *testing.T) {
+	input := []InsertProfileParams{
+		{UserID: "u", Topic: "pref", SubTopic: "color", Memo: "blue"},
+		{UserID: "u", Topic: "pref", SubTopic: "size", Memo: "L"},
+		{UserID: "u", Topic: "pref", SubTopic: "color", Memo: "red"}, // duplicate → should win
+	}
+	got := dedupProfileEntries(input)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 entries after dedup, got %d", len(got))
+	}
+	// color entry should be "red" (last occurrence)
+	var colorMemo string
+	for _, e := range got {
+		if e.SubTopic == "color" {
+			colorMemo = e.Memo
+		}
+	}
+	if colorMemo != "red" {
+		t.Errorf("last entry should win: got %q want red", colorMemo)
+	}
+}
 
-func TestProfileEntry_ZeroValue(t *testing.T) {
-	var e ProfileEntry
-	if e.ID != 0 {
-		t.Error("zero ID")
+// TestDedupProfileEntries_NoDups verifies no-op behaviour when all keys are unique.
+func TestDedupProfileEntries_NoDups(t *testing.T) {
+	input := []InsertProfileParams{
+		{UserID: "u", Topic: "a", SubTopic: "1", Memo: "x"},
+		{UserID: "u", Topic: "a", SubTopic: "2", Memo: "y"},
 	}
-	if e.ExpiredAt != nil {
-		t.Error("expired_at should be nil for zero value")
-	}
-	if e.Confidence != 0 {
-		t.Error("confidence zero value should be 0")
+	got := dedupProfileEntries(input)
+	if len(got) != 2 {
+		t.Fatalf("no-dup slice should be unchanged, got %d entries", len(got))
 	}
 }
