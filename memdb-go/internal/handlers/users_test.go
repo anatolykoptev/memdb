@@ -92,10 +92,7 @@ func TestNativeExistMemCube_NoPostgres_NilBody(t *testing.T) {
 	}
 }
 
-// --- NativeGetUserNamesByMemoryIDs tests (falls back to ProxyToProduct on nil postgres) ---
-// These need postgres=nil which triggers ProxyToProduct (nil python = panic).
-// We test the validation path by providing valid input that reaches the native path.
-// Since postgres is nil, we can only test that the function compiles and exists.
+// --- NativeGetUserNamesByMemoryIDs tests (returns 503 on nil postgres after Phase 5) ---
 
 func TestNativeGetUserNamesByMemoryIDs_NoPostgres_InvalidJSON(t *testing.T) {
 	h := testValidateHandler()
@@ -103,10 +100,12 @@ func TestNativeGetUserNamesByMemoryIDs_NoPostgres_InvalidJSON(t *testing.T) {
 		strings.NewReader(`{not json`))
 	w := httptest.NewRecorder()
 
-	// With postgres==nil, this goes to ProxyToProduct which panics.
-	// But it doesn't read body first — it calls ProxyToProduct immediately.
-	defer func() { _ = recover() }()
+	// With postgres==nil, returns 503 before reading body (Phase 5: proxy removed).
 	h.NativeGetUserNamesByMemoryIDs(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 on nil postgres, got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 // --- NativeListUsers cache tests (redis=nil graceful degradation) ---
@@ -117,9 +116,12 @@ func TestNativeListUsers_NoRedis_NoPostgres(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/product/users", nil)
 	w := httptest.NewRecorder()
 
-	// postgres=nil → ProxyToProduct → panics (nil python)
-	defer func() { _ = recover() }()
+	// postgres=nil → 503 (Phase 5: proxy removed, no fallback to python).
 	h.NativeListUsers(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 on nil postgres, got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 // --- NativeUpdateUserConfig tests ---

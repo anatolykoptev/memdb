@@ -196,15 +196,14 @@ func TestNativeDelete_NoPostgres_InvalidJSON(t *testing.T) {
 // --- NativePostGetMemory tests ---
 
 // TestNativePostGetMemory_NoPostgres_NilBody verifies that a nil body returns 400.
-// When postgres is nil, NativePostGetMemory falls through to ValidatedGetMemory
-// which proxies. But readBody runs first, so nil body is caught.
+// With nil postgres NativePostGetMemory falls through to ValidatedGetMemory which
+// calls readBody first — nil body is caught before the 503 path is reached.
 func TestNativePostGetMemory_NoPostgres_NilBody(t *testing.T) {
 	h := testValidateHandler()
 	req := httptest.NewRequest(http.MethodPost, "/product/get_memory", nil)
 	w := httptest.NewRecorder()
 
-	// With nil postgres, it tries ValidatedGetMemory which calls readBody first.
-	// readBody catches nil body and returns 400.
+	// readBody catches nil body and returns 400 before the 503 safety-net.
 	h.NativePostGetMemory(w, req)
 
 	// ValidatedGetMemory also calls readBody which returns 400 for nil.
@@ -216,34 +215,28 @@ func TestNativePostGetMemory_NoPostgres_NilBody(t *testing.T) {
 	}
 }
 
-// TestNativePostGetMemory_NoPostgres_InvalidJSON verifies invalid JSON returns 400.
-func TestNativePostGetMemory_NoPostgres_InvalidJSON(t *testing.T) {
+// TestNativePostGetMemory_NoPostgres_Returns503 verifies that with nil postgres
+// NativePostGetMemory falls through to ValidatedGetMemory which returns 503.
+// After Phase 5 there is no python proxy fallback.
+func TestNativePostGetMemory_NoPostgres_Returns503(t *testing.T) {
 	h := testValidateHandler()
 	req := httptest.NewRequest(http.MethodPost, "/product/get_memory",
-		strings.NewReader(`{not json`))
+		strings.NewReader(`{"mem_cube_id":"u1"}`))
 	w := httptest.NewRecorder()
 
+	// NativePostGetMemory → ValidatedGetMemory → 503 (Phase 5: proxy removed).
 	h.NativePostGetMemory(w, req)
 
-	// ValidatedGetMemory proxies the body, so with nil python it may fail differently.
-	// But our NativePostGetMemory (postgres=nil) calls ValidatedGetMemory which calls
-	// readBody + decodeJSON. Since python is nil, it will fail on proxy.
-	// Actually: with nil postgres, NativePostGetMemory calls ValidatedGetMemory
-	// which does readBody, decodeJSON (both pass), then proxyWithBody.
-	// With nil python, that panics. So this test only works with postgres != nil path.
-	// Let's skip this test and test the native path validation instead.
-	t.Skip("cannot test proxy fallback without python client")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 on nil postgres, got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 // TestNativePostGetMemory_MissingMemCubeID verifies that missing mem_cube_id returns 400.
-// Uses a handler with a non-nil postgres mock that won't be called.
+// Uses a stub postgres (non-nil) to reach the native validation path before any DB call.
 func TestNativePostGetMemory_MissingMemCubeID(t *testing.T) {
-	// We need postgres non-nil to reach the native validation path.
-	// Use a simple trick: create a handler and set a non-nil postgres.
-	// Since we expect validation to fail before any DB call, this is safe.
 	h := testValidateHandler()
-	// Hack: set postgres to a non-nil value so NativePostGetMemory doesn't proxy.
-	// We use setPostgresNonNil helper (defined below).
+	// Stub postgres so NativePostGetMemory enters the native path; validation fires before any DB call.
 	setPostgresNonNil(h)
 
 	req := httptest.NewRequest(http.MethodPost, "/product/get_memory",
