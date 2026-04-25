@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-04-25
+
+### Features
+
+<details>
+<summary>12 changes</summary>
+
+- feat(handlers): date-aware extract prompt with [mention date] tags for temporal lift (#90) @anatolykoptev
+- feat(locomo): dual-speaker retrieval in harness for cat-5 attribution closure (#92) @anatolykoptev
+- feat(locomo): cat-5 exclusion flag + dual-track aggregate reporting (#88) @anatolykoptev
+- feat(locomo): llm judge metric for memobase/mem0-comparable scoring (#91) @anatolykoptev
+- feat(search): cot query decomposition (d11) for multi-hop and temporal questions (#82) @anatolykoptev
+- feat(handlers): structural edges at ingest (same\_session + timeline\_next + similar\_cosine) (#83) @anatolykoptev
+- feat(search): instrument d2 multi-hop + targeted fix for cat-2 f1 lift (#81) @anatolykoptev
+- feat(handlers): factual answer-style canary with sticky-per-user 10% split (#80) @anatolykoptev
+- feat(add): configurable window\_chars per request (M7 Stream C, Option A) (#65) @anatolykoptev
+- feat(chat): server-side answer\_style=factual (M7 Stream A) (#64) @anatolykoptev
+- feat(d3): wire relation detector + surface silent edge-write errors (M5 follow-ups) (#58) @anatolykoptev
+- feat(telemetry): M1 per-D-feature Prometheus counters (#53) @anatolykoptev
+</details>
+
+### Bug Fixes
+
+- fix(search): keep all D2 seeds, cap only expansions (#84) @anatolykoptev
+- fix(d3): unblock memory\_edges on small cubes — wire admin reorg + include WorkingMemory (#57) @anatolykoptev
+
+### Performance
+
+- perf(handlers): batch embed calls in fast-add to remove window=512 latency cliff (#71) @anatolykoptev
+
+### Tests
+
+- test(d3): livepg integration test for runRelationPhase (#59) @anatolykoptev
+
+### Documentation
+
+- docs(roadmap): mark go migration complete after phase 5 shutdown (#94) @anatolykoptev
+- docs(plan): m9 memobase port + honest measurement sprint (#87) @anatolykoptev
+- docs(eval): m8 cat-5 adversarial diagnosis + recommendation (#85) @anatolykoptev
+- docs(competitive): m8 memory frameworks survey + top-3 port-target specs (#79) @anatolykoptev
+- docs(plan): m8 multi-hop and competitive lift sprint (cat-2 + cot + competitor survey) (#76) @anatolykoptev
+- docs: m7 + follow-ups changelog and roadmap sync (#73) @anatolykoptev
+- docs(process): compound-sprint orchestration pattern (M7 retro) (#70) @anatolykoptev
+- docs(handlers): document window\_chars latency cliff in WindowChars godoc (#69) @anatolykoptev
+- docs(plan): M7 compound lift sprint — multi-agent execution plan (#62) @anatolykoptev
+- docs(roadmap): M7 next-session plan — compound lift (prompt + ingest) (#61) @anatolykoptev
+- docs(locomo): M6 prompt ablation — +51% F1 via QA-specific system\_prompt (#60) @anatolykoptev
+- docs(locomo): M4 combo tuning +8× F1 (#56) @anatolykoptev
+- docs(locomo): M1+M2 closure + 5-category breakdown (#54) @anatolykoptev
+- docs(locomo): M3 chat-mode F1 lift (+14×) (#52) @anatolykoptev
+- docs(roadmap): Phase D closed + M3 chat-mode F1 jump documented (#51) @anatolykoptev
+- docs: actualize roadmaps after v2.0.0 Phase D shipping (#50) @anatolykoptev
+
+### Internal
+
+- chore: phase 5 python shutdown — convert safety-net proxies to http 503/422 and remove memdb-api from compose (#93) @anatolykoptev
+- chore(server): extract x-service-secret helper + wire default answer style (#78) @anatolykoptev
+- chore(infra): gomemlimit auto-detect + recovery script template with heartbeat (#77) @anatolykoptev
+- chore(locomo): m7 stage 3 attempt — measurement invalid (oom) (#75) @anatolykoptev
+- chore(ci): add changelog auto-sync workflow from release notes (#74) @anatolykoptev
+- chore(server): register pprof routes behind internal-auth (#72) @anatolykoptev
+- chore(locomo): m7 compound run stages 1+2 — F1 0.238 (+349% vs baseline, MemOS-tier) (#67) @anatolykoptev
+- perf(handlers): m7 latency + pprof report (answer\_style=factual −52% p95) (#68) @anatolykoptev
+- chore(testing): m7 regression report — no regressions across A/B/C (#66) @anatolykoptev
+- chore(locomo): switch ingest to mode=raw for per-message granularity (M7 Stream B) (#63) @anatolykoptev
+
 ## [2.1.0] — 2026-04-25
 
 ### Highlights
@@ -271,7 +337,8 @@ Initial public release. Baseline for changelog. See
 [ROADMAP-GO-MIGRATION.md](ROADMAP-GO-MIGRATION.md) for the detailed history
 of Python → Go migration phases 1–4.5 that preceded this tag.
 
-[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/anatolykoptev/memdb/releases/tag/v2.2.0
 [2.1.0]: https://github.com/anatolykoptev/memdb/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/anatolykoptev/memdb/compare/v1.1.0...v2.0.0
 [1.1.0]: https://github.com/anatolykoptev/memdb/compare/v1.0.4...v1.1.0
