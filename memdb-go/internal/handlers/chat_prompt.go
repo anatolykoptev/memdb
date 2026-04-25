@@ -3,6 +3,7 @@ package handlers
 // chat_prompt.go — prompt templates and memory formatting for chat endpoints.
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -18,9 +19,26 @@ import (
 // answerStyle values are validated upstream by validateChatRequest; this function
 // treats any unknown value as the default branch (defensive — should never hit).
 func buildSystemPrompt(query string, memories []map[string]any, prefString, basePrompt, answerStyle string) string {
+	return buildSystemPromptWithProfile(nil, query, memories, prefString, basePrompt, answerStyle, "")
+}
+
+// buildSystemPromptWithProfile is the M10 Stream 3 variant that optionally
+// prepends a "## User Profile" section to the rendered system prompt.
+//
+// profileSection — pre-rendered output of formatProfileSection (empty string
+// means: do not prepend, e.g. when the env gate is disabled or the caller
+// chose not to fetch profiles). When non-empty, the section is prepended with
+// a blank line separator, BEFORE the existing memory section. The existing
+// memory templates are not modified — this is strictly additive.
+//
+// The profile section is also prepended to custom basePrompt branches so the
+// two-section ordering contract holds regardless of which template wins.
+func buildSystemPromptWithProfile(_ context.Context, query string, memories []map[string]any, prefString, basePrompt, answerStyle, profileSection string) string {
 	memCtx := formatMemories(memories, prefString)
 
-	if basePrompt == "" {
+	var rendered string
+	switch {
+	case basePrompt == "":
 		lang := detectLang(query)
 		tpl := cloudChatPromptEN
 		if answerStyle == answerStyleFactual {
@@ -32,16 +50,19 @@ func buildSystemPrompt(query string, memories []map[string]any, prefString, base
 			tpl = cloudChatPromptZH
 		}
 		now := time.Now().Format("2006-01-02 15:04 (Monday)")
-		return fmt.Sprintf(tpl, now, memCtx)
+		rendered = fmt.Sprintf(tpl, now, memCtx)
+	case strings.Contains(basePrompt, "{memories}"):
+		rendered = strings.Replace(basePrompt, "{memories}", memCtx, 1)
+	case len(memories) > 0:
+		rendered = basePrompt + "\n\n## Fact Memories:\n" + memCtx
+	default:
+		rendered = basePrompt
 	}
 
-	if strings.Contains(basePrompt, "{memories}") {
-		return strings.Replace(basePrompt, "{memories}", memCtx, 1)
+	if profileSection == "" {
+		return rendered
 	}
-	if len(memories) > 0 {
-		return basePrompt + "\n\n## Fact Memories:\n" + memCtx
-	}
-	return basePrompt
+	return profileSection + "\n" + rendered
 }
 
 // formatMemories converts search result memories into numbered text for prompt injection.

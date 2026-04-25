@@ -52,6 +52,31 @@ func (h *Handler) chatCanNative() bool {
 	return h.searchService != nil && h.searchService.CanSearch() && h.llmChat != nil
 }
 
+// chatProfileSection fetches the user's profile rows (M10 Stream 3) and
+// renders them as the "## User Profile" prompt section.
+//
+// Returns "" when the env gate MEMDB_PROFILE_INJECT is disabled or when the
+// postgres client is unavailable — in both cases buildSystemPromptWithProfile
+// will skip the section, preserving M9 baseline behaviour.
+//
+// Errors from GetProfilesByUser are logged and swallowed: profile injection is
+// best-effort and must never block chat. Empty rows render as "(none)" per
+// the Memobase contract (absence is signal).
+func (h *Handler) chatProfileSection(ctx context.Context, userID string) string {
+	if !profileInjectEnabled() {
+		return ""
+	}
+	if h.postgres == nil || userID == "" {
+		return ""
+	}
+	entries, err := h.postgres.GetProfilesByUser(ctx, userID)
+	if err != nil {
+		h.logger.Warn("chat profile fetch failed", slog.String("user_id", userID), slog.Any("error", err))
+		return ""
+	}
+	return formatProfileSection(ctx, entries)
+}
+
 // resolveAnswerStyle returns the effective answer_style for a request.
 // Precedence (highest to lowest):
 //  1. Per-request answer_style field (non-empty) — always wins.
@@ -133,7 +158,8 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 
 	basePrompt := stringOrEmpty(req.SystemPrompt)
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
-	prompt := buildSystemPrompt(*req.Query, memories, prefString, basePrompt, answerStyle)
+	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID))
+	prompt := buildSystemPromptWithProfile(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
 	recordChatPromptUsed(ctx, basePrompt, answerStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
 
@@ -196,7 +222,8 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 
 	basePrompt := stringOrEmpty(req.SystemPrompt)
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
-	prompt := buildSystemPrompt(*req.Query, memories, prefString, basePrompt, answerStyle)
+	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID))
+	prompt := buildSystemPromptWithProfile(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
 	recordChatPromptUsed(ctx, basePrompt, answerStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
 
