@@ -7,7 +7,7 @@
 > add pipeline, and features. Detailed plans live in:
 > - [docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md) — closed
 > - [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md) — active
-> - [ROADMAP-ADD-PIPELINE.md](ROADMAP-ADD-PIPELINE.md) — active
+> - [docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md) — active
 > - [ROADMAP-FEATURES.md](ROADMAP-FEATURES.md) — active
 >
 > Competitive analysis: [docs/competitive/2026-04-26-memobase-deep-dive.md](docs/competitive/2026-04-26-memobase-deep-dive.md)
@@ -58,7 +58,7 @@ Stage 3 full-corpus run (1986 QA, 10 conversations) is queued — see
   multi-part queries; VEC_COT is a separate "embed each sub-Q as a vector
   probe" pattern.
 
-### Add pipeline quality — [ROADMAP-ADD-PIPELINE.md](ROADMAP-ADD-PIPELINE.md)
+### Add pipeline quality — [docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md)
 
 - **Soft-delete / `expired_at`** (Graphiti-derived) — replace hard-delete in
   `applyDeleteAction` / `applyUpdateAction` with `expired_at` timestamp +
