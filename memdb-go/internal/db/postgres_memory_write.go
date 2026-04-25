@@ -1,18 +1,29 @@
 package db
 
 // postgres_memory_write.go — memory node write operations.
-// Covers: delete, update content, update full (props+embedding), delete-all.
+// Covers: delete, update content, update full (props+embedding), delete-all,
+//         PageRank edge fetch + bulk score persist (M10 Stream 7).
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
 )
+
+// PageRankEdge is a directed edge record returned by FetchEdgesForPageRank.
+// Weight is the edge confidence (0..1); 0 means uniform (treated as 1.0 in PageRank).
+type PageRankEdge struct {
+	FromID string
+	ToID   string
+	Weight float64
+}
 
 // ErrMemoryNotFound is returned by UpdateMemoryByID when the target row does not exist.
 // This is a normal condition when the Reorganizer hard-deleted a contradicted memory
@@ -114,6 +125,95 @@ func (p *Postgres) ClearCEScoresTopKForNeighbor(ctx context.Context, neighborID 
 	}
 	if _, err := p.pool.Exec(ctx, fmt.Sprintf(queries.ClearCEScoresTopKForNeighbor, graphName), neighborID); err != nil {
 		return fmt.Errorf("clear ce_score_topk for neighbor: %w", err)
+	}
+	return nil
+}
+
+// FetchEdgesForPageRank returns all currently-valid memory_edges for the given
+// cube (identified by user_name stored in Memory.properties).
+// Both the from_id and to_id endpoints must belong to the same cube — edges
+// that cross cube boundaries are excluded to prevent score inflation and
+// graph topology leakage between tenants.
+// Weight is taken from the confidence column; NULL confidence maps to 0
+// (the PageRank engine treats 0 as uniform weight 1.0).
+func (p *Postgres) FetchEdgesForPageRank(ctx context.Context, cubeID string) ([]PageRankEdge, error) {
+	const q = `
+SELECT e.from_id, e.to_id, COALESCE(e.confidence, 0)
+FROM memory_edges e
+WHERE e.invalid_at IS NULL
+  AND EXISTS (
+      SELECT 1 FROM %[1]s."Memory" m
+      WHERE m.properties->>(('id'::text)) = e.from_id
+        AND m.properties->>(('user_name'::text)) = $1
+        AND m.properties->>(('status'::text)) = 'activated'
+  )
+  AND EXISTS (
+      SELECT 1 FROM %[1]s."Memory" m
+      WHERE m.properties->>(('id'::text)) = e.to_id
+        AND m.properties->>(('user_name'::text)) = $1
+        AND m.properties->>(('status'::text)) = 'activated'
+  )`
+	rows, err := p.pool.Query(ctx, fmt.Sprintf(q, graphName), cubeID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch edges for pagerank cube=%s: %w", cubeID, err)
+	}
+	defer rows.Close()
+
+	var out []PageRankEdge
+	for rows.Next() {
+		var e PageRankEdge
+		if err := rows.Scan(&e.FromID, &e.ToID, &e.Weight); err != nil {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// BulkSetPageRank persists PageRank scores into Memory.properties->>'pagerank'
+// for all nodes of a cube. Single bulk UPDATE round-trip using UNNEST.
+// Scores outside [0, 1] are clamped silently. Memory rows not in the scores
+// map are left unchanged (they keep whatever pagerank they had or none).
+func (p *Postgres) BulkSetPageRank(ctx context.Context, cubeID string, scores map[string]float64) error {
+	if len(scores) == 0 {
+		return nil
+	}
+
+	ids := make([]string, 0, len(scores))
+	vals := make([]string, 0, len(scores))
+	now := time.Now().UTC().Format(time.RFC3339)
+	for id, s := range scores {
+		if id == "" {
+			continue
+		}
+		if s < 0 {
+			s = 0
+		} else if s > 1 {
+			s = 1
+		}
+		ids = append(ids, id)
+		vals = append(vals, strconv.FormatFloat(s, 'f', 8, 64))
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	const q = `
+UPDATE %[1]s."Memory"
+SET properties = (
+        (properties::text::jsonb || jsonb_build_object(
+            'pagerank',  u.score::text,
+            'updated_at', $3::text
+        ))::text
+    )::agtype
+FROM UNNEST($1::text[], $2::text[]) AS u(mem_id, score)
+WHERE properties->>(('id'::text)) = u.mem_id
+  AND properties->>(('user_name'::text)) = $4
+  AND properties->>(('status'::text)) = 'activated'`
+
+	_, err := p.pool.Exec(ctx, fmt.Sprintf(q, graphName), ids, vals, now, cubeID)
+	if err != nil {
+		return fmt.Errorf("bulk set pagerank cube=%s: %w", cubeID, err)
 	}
 	return nil
 }
