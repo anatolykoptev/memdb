@@ -170,3 +170,63 @@ func TestLoad_FactualCanaryPct_ClampBelow0(t *testing.T) {
 		t.Errorf("value < 0 should clamp to 0, got %d", cfg.FactualCanaryPct)
 	}
 }
+
+// ── D11 CoT decomposer env vars ──────────────────────────────────────────────
+
+func TestLoad_CoTDecompose_DefaultsOff(t *testing.T) {
+	unsetEnv(t, "MEMDB_COT_DECOMPOSE")
+	unsetEnv(t, "MEMDB_COT_MAX_SUBQUERIES")
+	unsetEnv(t, "MEMDB_COT_TIMEOUT_MS")
+	cfg := Load()
+	if cfg.CoTDecompose {
+		t.Errorf("expected default false, got %v", cfg.CoTDecompose)
+	}
+	if cfg.CoTMaxSubqueries != 3 {
+		t.Errorf("expected default 3, got %d", cfg.CoTMaxSubqueries)
+	}
+	if cfg.CoTTimeoutMS != 2000 {
+		t.Errorf("expected default 2000, got %d", cfg.CoTTimeoutMS)
+	}
+}
+
+func TestLoad_CoTDecompose_Override(t *testing.T) {
+	setEnv(t, "MEMDB_COT_DECOMPOSE", "true")
+	setEnv(t, "MEMDB_COT_MAX_SUBQUERIES", "4")
+	setEnv(t, "MEMDB_COT_TIMEOUT_MS", "5000")
+	cfg := Load()
+	if !cfg.CoTDecompose {
+		t.Errorf("expected true")
+	}
+	if cfg.CoTMaxSubqueries != 4 {
+		t.Errorf("got %d, want 4", cfg.CoTMaxSubqueries)
+	}
+	if cfg.CoTTimeoutMS != 5000 {
+		t.Errorf("got %d, want 5000", cfg.CoTTimeoutMS)
+	}
+}
+
+func TestLoad_CoTDecompose_ClampMaxSubqueries(t *testing.T) {
+	setEnv(t, "MEMDB_COT_MAX_SUBQUERIES", "99")
+	cfg := Load()
+	if cfg.CoTMaxSubqueries != 5 {
+		t.Errorf("expected clamp to 5, got %d", cfg.CoTMaxSubqueries)
+	}
+	setEnv(t, "MEMDB_COT_MAX_SUBQUERIES", "0")
+	cfg = Load()
+	if cfg.CoTMaxSubqueries != 1 {
+		t.Errorf("expected clamp to 1, got %d", cfg.CoTMaxSubqueries)
+	}
+}
+
+func TestLoad_CoTDecompose_ClampTimeout(t *testing.T) {
+	setEnv(t, "MEMDB_COT_TIMEOUT_MS", "100")
+	cfg := Load()
+	if cfg.CoTTimeoutMS != 500 {
+		t.Errorf("expected clamp to 500, got %d", cfg.CoTTimeoutMS)
+	}
+	setEnv(t, "MEMDB_COT_TIMEOUT_MS", "60000")
+	cfg = Load()
+	if cfg.CoTTimeoutMS != 10000 {
+		t.Errorf("expected clamp to 10000, got %d", cfg.CoTTimeoutMS)
+	}
+}

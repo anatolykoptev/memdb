@@ -41,6 +41,12 @@ type SearchService struct {
 	// Profiler generates and serves Memobase-style user profile summaries.
 	// When non-nil, profile_mem is populated in every search response.
 	Profiler *scheduler.Profiler
+	// CoTDecomposer is the D11 multi-hop / temporal query decomposer. nil =
+	// disabled (the default and the zero-regression path). When non-nil,
+	// applyCoTDecomposition fans sub-queries through extra text-scope vector
+	// probes BEFORE the D2 expandViaGraph step so the graph walk sees a
+	// richer seed set.
+	CoTDecomposer *CoTDecomposer
 }
 
 // NewSearchService creates a SearchService. Any dependency may be nil (caller
@@ -131,6 +137,18 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	s.augmentWithSubqueries(ctx, psr, subqueries, p, budget)
 	cotDur := time.Since(cotStart)
 
+	// Step 3.5: D11 — Chain-of-Thought query decomposition for multi-hop /
+	// temporal questions. Sibling of D7 with a stricter heuristic gate
+	// (length + temporal connectors + multi-entity) and a temporal-aware
+	// prompt. Each sub-query[1:] runs an extra text-scope VectorSearch and
+	// the results are unioned into psr.textVec so the downstream D2
+	// expandViaGraph step walks edges from a richer seed set. No-op when
+	// CoTDecomposer is nil (default) or the gate skips. Best-effort: any
+	// error → silent fallback to the original-query-only path.
+	d11Start := time.Now()
+	d11Subs := s.applyCoTDecomposition(ctx, psr, p.Query, p, budget)
+	d11Dur := time.Since(d11Start)
+
 	// BFS multi-hop expansion (serially after parallel phase)
 	t0 = time.Now()
 	bfsResults := s.runBFSExpansion(ctx, psr.textVec, p)
@@ -187,6 +205,8 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 		slog.Duration("embed", embedDur),
 		slog.Duration("parallel_db", parallelDur),
 		slog.Duration("cot_augment", cotDur),
+		slog.Duration("d11_decompose", d11Dur),
+		slog.Int("d11_subqueries", len(d11Subs)),
 		slog.Duration("bfs", bfsDur),
 		slog.Duration("multihop", multihopDur),
 		slog.Duration("contradicts", contradictsDur),
