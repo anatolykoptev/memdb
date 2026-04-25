@@ -245,6 +245,38 @@ class TestJudgeFunction(unittest.TestCase):
             mock_post.assert_not_called()
             self.assertEqual(result["score"], 0)
 
+    def test_nested_json_response_without_label_returns_judge_error(self) -> None:
+        """When LLM returns nested JSON and _extract_json grabs the inner dict (no 'label'),
+        _call_judge must escalate to judge_error instead of silently scoring 0."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = _make_cache(Path(tmp))
+            # Simulate response where inner {} is matched first by \{[^{}]+\} regex
+            nested_content = json.dumps({
+                "explanation": "The answer matches perfectly",
+                "details": {"confidence": 0.9},
+            })
+            nested_resp = MagicMock()
+            nested_resp.raise_for_status = MagicMock()
+            nested_resp.json.return_value = {
+                "choices": [{"message": {"content": nested_content}}]
+            }
+            with patch("requests.post", return_value=nested_resp):
+                result = lj.judge("q", "gold", "pred", cache=cache)
+        self.assertEqual(result["score"], 0)
+        self.assertTrue(
+            result["reason"].startswith("judge_error:"),
+            f"Expected reason to start with 'judge_error:', got: {result['reason']!r}",
+        )
+
+    def test_extract_json_handles_nested_object(self) -> None:
+        """_extract_json with text + nested JSON: direct json.loads of the full string
+        succeeds and returns the outer dict containing 'label'."""
+        content = json.dumps({"label": "CORRECT", "meta": {"x": 1}})
+        result = lj._extract_json(content)
+        # The outer dict (with 'label') must be returned when direct parse succeeds
+        self.assertIn("label", result)
+        self.assertEqual(result["label"], "CORRECT")
+
 
 # ---------------------------------------------------------------------------
 # Live smoke test (skipped if proxy unreachable)

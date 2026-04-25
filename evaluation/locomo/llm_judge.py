@@ -254,6 +254,8 @@ def _call_judge(
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"]
         parsed = _extract_json(content)
+        if not isinstance(parsed, dict) or "label" not in parsed:
+            return {"score": 0, "reason": f"judge_error: missing label key in response: {content[:200]}"}
         label: str = parsed.get("label", "").strip().upper()
         score = 1 if label == "CORRECT" else 0
         # Use reason key if present, else the reasoning text before the JSON
