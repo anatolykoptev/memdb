@@ -8,9 +8,13 @@ package scheduler
 //   3. Self-loops are skipped — computePageRank ignores fromID == toID.
 //   4. Disconnected sink — dangling-node correction keeps scores > 0 everywhere.
 //   5. runPageRankLoop smoke test — goroutine emits a metric within 1 s.
+//   6. All-invalid edges returns nil (precondition for compute_error metric).
+//   7. errComputePageRank sentinel is correctly wrapped/detected via errors.Is.
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
@@ -158,6 +162,34 @@ func TestPageRankInterval_Default(t *testing.T) {
 	t.Setenv("MEMDB_PAGERANK_INTERVAL", "")
 	if pageRankInterval() != defaultPageRankInterval {
 		t.Errorf("expected default interval %v, got %v", defaultPageRankInterval, pageRankInterval())
+	}
+}
+
+// TestComputePageRank_AllInvalidEdgesReturnsNil verifies that computePageRank
+// returns nil when every edge has empty node IDs (degenerate input that would
+// otherwise silently swallow compute_error).
+func TestComputePageRank_AllInvalidEdgesReturnsNil(t *testing.T) {
+	edges := []db.PageRankEdge{
+		{FromID: "", ToID: "B", Weight: 1},  // empty FromID — skipped
+		{FromID: "A", ToID: "", Weight: 1},  // empty ToID — skipped
+		{FromID: "X", ToID: "X", Weight: 1}, // self-loop — skipped
+	}
+	scores := computePageRank(edges)
+	if scores != nil {
+		t.Errorf("expected nil scores for all-invalid edges, got %v", scores)
+	}
+}
+
+// TestErrComputePageRank_SentinelIsDistinct verifies that errComputePageRank
+// is distinct from a generic error so errors.Is works as expected in
+// runPageRankForAllCubes to route the correct metric label.
+func TestErrComputePageRank_SentinelIsDistinct(t *testing.T) {
+	wrapped := fmt.Errorf("outer: %w", errComputePageRank)
+	if !errors.Is(wrapped, errComputePageRank) {
+		t.Error("expected errors.Is to match errComputePageRank through wrapping")
+	}
+	if errors.Is(fmt.Errorf("some db error"), errComputePageRank) {
+		t.Error("unrelated error should not match errComputePageRank")
 	}
 }
 

@@ -19,6 +19,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -27,6 +28,12 @@ import (
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
+
+// errComputePageRank is returned by runPageRankForCube when computePageRank
+// produces no scores despite a non-empty edge list (e.g. all edges had
+// invalid node IDs or a degenerate graph). Callers use errors.Is to
+// distinguish this from a database error.
+var errComputePageRank = errors.New("pagerank compute produced no scores")
 
 const (
 	defaultPageRankInterval    = 6 * time.Hour
@@ -129,7 +136,11 @@ func (w *Worker) runPageRankForAllCubes(ctx context.Context, pg *db.Postgres) {
 				slog.String("cube_id", cubeID),
 				slog.Any("error", err),
 			)
-			mx.PageRankRuns.Add(ctx, 1, labelPageRankOutcome("db_error"))
+			outcome := "db_error"
+			if errors.Is(err, errComputePageRank) {
+				outcome = "compute_error"
+			}
+			mx.PageRankRuns.Add(ctx, 1, labelPageRankOutcome(outcome))
 		} else {
 			success++
 		}
@@ -157,7 +168,10 @@ func (w *Worker) runPageRankForCube(ctx context.Context, pg *db.Postgres, cubeID
 
 	scores := computePageRank(edges)
 	if len(scores) == 0 {
-		return nil
+		// Non-empty edge list produced no scores — degenerate graph (e.g. all
+		// edges had empty node IDs). This is a math/input failure, not a DB
+		// failure; emit compute_error so PromQL alerts fire.
+		return fmt.Errorf("%w: cube=%s edges=%d", errComputePageRank, cubeID, len(edges))
 	}
 
 	if err := pg.BulkSetPageRank(ctx, cubeID, scores); err != nil {

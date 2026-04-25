@@ -130,8 +130,10 @@ func (p *Postgres) ClearCEScoresTopKForNeighbor(ctx context.Context, neighborID 
 }
 
 // FetchEdgesForPageRank returns all currently-valid memory_edges for the given
-// cube (identified by cube_id / user_name stored in Memory.properties).
-// Only edges whose both endpoints belong to the cube are returned.
+// cube (identified by user_name stored in Memory.properties).
+// Both the from_id and to_id endpoints must belong to the same cube — edges
+// that cross cube boundaries are excluded to prevent score inflation and
+// graph topology leakage between tenants.
 // Weight is taken from the confidence column; NULL confidence maps to 0
 // (the PageRank engine treats 0 as uniform weight 1.0).
 func (p *Postgres) FetchEdgesForPageRank(ctx context.Context, cubeID string) ([]PageRankEdge, error) {
@@ -142,6 +144,12 @@ WHERE e.invalid_at IS NULL
   AND EXISTS (
       SELECT 1 FROM %[1]s."Memory" m
       WHERE m.properties->>(('id'::text)) = e.from_id
+        AND m.properties->>(('user_name'::text)) = $1
+        AND m.properties->>(('status'::text)) = 'activated'
+  )
+  AND EXISTS (
+      SELECT 1 FROM %[1]s."Memory" m
+      WHERE m.properties->>(('id'::text)) = e.to_id
         AND m.properties->>(('user_name'::text)) = $1
         AND m.properties->>(('status'::text)) = 'activated'
   )`
