@@ -2,15 +2,15 @@
 
 ## Architecture
 
-Two Go binaries + one Python legacy service, all in Docker:
+Pure-Go stack, all in Docker (Python container removed 2026-04-26, Phase 5 ✅):
 
-| Container | Role | Port | Status |
-|-----------|------|------|--------|
-| `memdb-go` | Go API gateway: auth, ONNX embedder, search, REST API | 8080 | ✅ Go |
-| `memdb-mcp` | Go MCP server (stdio + streamable-http) | 8001 | ✅ Go |
-| `memdb-api` | Python FastAPI: add pipeline, LLM extraction, scheduler | 8000 | ⚠️ Legacy |
+| Container | Role | Port |
+|-----------|------|------|
+| `memdb-go` | Go API gateway: auth, ONNX embedder, search, REST API | 8080 |
+| `memdb-mcp` | Go MCP server (stdio + streamable-http) | 8001 |
+| `embed-server` | Rust ONNX embed sidecar (multilingual-e5-large + jina-code-v2) | 8082 |
 
-Supporting: `postgres+AGE` (5432), `qdrant` (6333), `redis` (6379), `cliproxyapi` (8317), `go-search` (8890). _RabbitMQ удалён в Фазе 3.3 — Redis Streams теперь используется для scheduler queue._
+Supporting: `postgres+AGE` (5432), `qdrant` (6333), `redis` (6379), `cliproxyapi` (8317), `go-search` (8890). _RabbitMQ removed in Phase 3.3 — Redis Streams used for scheduler queue._
 
 Postgres is **not exposed** to host — only accessible inside Docker network.
 
@@ -44,9 +44,10 @@ For Claude Code integration, use **stdio proxy** (avoids Postgres dependency on 
 /home/krolik/bin/mcp-stdio-proxy --url http://127.0.0.1:8001/mcp
 ```
 
-MCP tools split:
-- **Native Go** (Postgres direct): `search_memories`, `get_memory`, `update_memory`, `delete_memory`, `delete_all_memories`, `get_user_info`, `create_user`
-- **Proxied → Python**: `add_memory`, `chat`, `create_cube`, `register_cube`, `unregister_cube`, `share_cube`, `dump_cube`, `control_memory_scheduler`
+MCP tools (all native Go after Phase 5):
+`search_memories`, `get_memory`, `update_memory`, `delete_memory`, `delete_all_memories`,
+`get_user_info`, `create_user`, `add_memory`, `chat`, `create_cube`, `register_cube`,
+`unregister_cube`, `share_cube`, `dump_cube`, `control_memory_scheduler`
 
 ## Build
 
@@ -86,7 +87,6 @@ cd ~/deploy/krolik-server && docker compose build memdb-go memdb-mcp && \
 |-----|-------------|
 | `MEMDB_POSTGRES_URL` | `postgresql://user:pass@host:5432/db` |
 | `MEMDB_GO_URL` | URL of memdb-go (used by mcp-server for search proxy) |
-| `MEMDB_PYTHON_URL` | URL of memdb-api Python backend |
 | `INTERNAL_SERVICE_SECRET` | Service-to-service auth header value |
 | `MEMDB_EMBEDDER_TYPE` | `onnx` (default) or `voyage` |
 | `MEMDB_ONNX_MODEL_DIR` | Path to multilingual-e5-large ONNX files |
@@ -113,11 +113,9 @@ Without optimization, inference takes ~47s/request instead of ~0.15s on ARM (no 
 
 ## Go Migration Status
 
-See `ROADMAP-GO-MIGRATION.md` for full plan. Summary (апрель 2026):
-- **Done**: auth, ONNX embedder, full search pipeline (fast + fine + internet/SearXNG), REST CRUD, MCP server, stdio transport, Go-native `add` pipeline (unified LLM extractor v2, classifier, hallucination filter, confidence/dedup, valid_at), WorkingMemory VSET hot cache, Redis Streams scheduler worker, Memory Reorganizer, skill extraction, tool trajectory extraction, chat complete/stream
-- **Phase 4 blockers remaining**: (1) native feedback handler — `mem_feedback/feedback.py` 47K still proxied; (2) `delete_memory` with `file_ids` / complex filter; (3) `get_memory` with complex filter
-- **MCP proxy still → Python**: `add_memory` + `chat` (trivial fix, internal REST already native), cube tools (`create/share/dump/register/unregister_cube`), `llm/complete` thin proxy
-- **Python-only modules without Go counterpart**: multi-modal parsers (10 files, ~150K), `markitdown` (PDF/Word/Excel), chunkers, BGE HTTP reranker strategies, `deepsearch_agent`, full tree_text_memory retrieve/organize — these are **feature gaps**, not Phase 5 blockers
+Phase 5 ✅ complete 2026-04-26 — Python container removed. See `docs/ROADMAP-GO-MIGRATION.md` for full history.
+
+All endpoints and MCP tools are native Go. Python code in `src/` is retained for reference only (multi-modal parsers, markitdown, deepsearch_agent) — not executed in production.
 
 ## Module
 
