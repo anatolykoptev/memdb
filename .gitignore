@@ -230,3 +230,7 @@ OVERVIEW*.md
 
 # Allow example dependency files
 !examples/**/requirements.txt
+
+# go-code MCP local SQLite cache (gc-pr / gc-graph)
+.code-review-graph/
+.ruff_cache/
