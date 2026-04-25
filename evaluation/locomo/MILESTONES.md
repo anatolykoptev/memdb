@@ -665,6 +665,92 @@ which they cite as a driver of their public-best 85.05% temporal F1
 with the new hint. Reproducing even a fraction of Memobase's +5pp cited delta
 on the temporal slice would push cat-3 F1 from 0.201 toward 0.25+.
 
+## Historical baseline note — single-speaker retrieval (pre-M9)
+
+**All milestones above (baseline-v1.1.0 through M8/Stage 3) were measured with
+single-speaker retrieval**: each question hit only `<conv>__speaker_a` (CLI
+default `--speaker=a`).  Memobase's reference benchmark queries BOTH
+`<conv>__speaker_a` and `<conv>__speaker_b` per question and merges the
+results — this is what M9 Stream 1 (HARNESS-DUAL) introduces in `query.py`.
+
+The new default is `LOCOMO_DUAL_SPEAKER=true`.  To reproduce historical
+single-speaker numbers verbatim, set `LOCOMO_DUAL_SPEAKER=false` (or `0`)
+before invoking `run.sh` / `query.py`.  Output schema for single-speaker
+runs is identical to M7/M8 except for an inert `dual_speaker: false`
+top-level field — comparison scripts continue to work unchanged.
+
+The cat-5 attribution-suppression analysis from M8 S7 (PR #85, ~32% of
+cat-5 errors traced to model rejecting cross-speaker evidence) is the
+direct motivation: dual-speaker retrieval surfaces both speakers' memories
+explicitly with `[speaker:A]` / `[speaker:B]` labels in the chat prompt,
+removing the attribution gap as a failure mode.
+
+## Two-track reporting convention (M9 Stream 3)
+
+Every `score.py` run now emits **two aggregate keys** in the output JSON regardless of flags:
+
+| Key | Categories included | Notes |
+|-----|---------------------|-------|
+| `aggregate_with_excl_none` | 1, 2, 3, 4, 5 (all) | Full MemDB score |
+| `aggregate_with_excl_5` | 1, 2, 3, 4 (adversarial excluded) | Comparable to Memobase published score |
+
+**Why this matters — citation**: Memobase's published 75.78% was computed with
+`exclude_category={5}` hardcoded in
+`docs/experiments/locomo-benchmark/src/memobase_client/memobase_search.py:147`:
+
+```python
+def process_data_file(self, file_path, exclude_category={5}):
+    ...
+    qa_filtered = [i for i in qa if i.get("category", -1) not in exclude_category]
+```
+
+Their leaderboard number has zero weight from category 5 (adversarial). Comparing
+our full-inclusive aggregate directly to their excl-5 number penalises us unfairly —
+we include the harder adversarial questions in our denominator.
+
+Two-track reporting resolves this: `aggregate_with_excl_5` is the apples-to-apples
+comparison point against Memobase and other systems that exclude category 5.
+`aggregate_with_excl_none` is our honest full-benchmark score.
+
+**M7 Stage 2 example** (199 QAs, conv-26 full):
+
+| Track | n | F1 | EM | hit@k |
+|-------|---|----|----|-------|
+| excl_none (all cats) | 199 | 0.238 | 0.101 | 0.769 |
+| excl_5 (no adversarial) | 152 | 0.283 | 0.112 | 0.750 |
+
+Excluding cat-5 (F1=0.092, below average) raises the aggregate F1 from 0.238 → 0.283 (+19%).
+
+**Additional tracks**: pass `--exclude-categories=4,5` to also emit `aggregate_with_excl_4_5`,
+useful for ablation studies. Both canonical tracks are always emitted regardless.
+
+**compare.py** auto-detects `aggregate_with_excl_*` keys in both files and prints a
+side-by-side table per track automatically.
+
+## M9 S2 — LLM Judge metric (--llm-judge flag)
+
+Added `--llm-judge` flag to `score.py`. Calls Gemini Flash via CLIProxyAPI (:8317)
+to judge each prediction CORRECT/WRONG against gold. Prompt taken verbatim from
+Memobase evaluation harness (`metrics/llm_judge.py`). Results cached in
+`results/.llm_judge_cache.json` (gitignored); second pass takes <1s.
+
+**Why this matters**: pre-M9 numbers (EM/F1/semsim) cannot be directly compared to
+public leaderboard figures. Memobase publishes **75.78% LLM Judge**; Mem0, Zep,
+LangMem all use the same binary judge metric. With `--llm-judge` we publish a number
+on the same scale.
+
+Usage:
+```bash
+export CLI_PROXY_API_KEY=<key>
+python3 evaluation/locomo/score.py \
+  --predictions evaluation/locomo/results/m7-stage2.json \
+  --out evaluation/locomo/results/m7-stage2-llm-judge-score.json \
+  --no-embed --llm-judge
+```
+
+Output adds `llm_judge` key in each aggregate track, `llm_judge` per category inside
+`by_category`, and `llm_score`/`llm_reason` per `per_qa` entry.
+
 ## How to record a new milestone
 
 ```bash
