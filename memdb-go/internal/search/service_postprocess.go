@@ -33,7 +33,10 @@ func (s *SearchService) postProcessResults(
 	// the extra HTTP round-trip. Zero-value config.URL disables.
 	if s.RerankClient.Available() && len(text) > 1 {
 		t0 := time.Now()
-		text = rerankMemoryItems(ctx, s.RerankClient, p.Query, text)
+		// M10 Stream 6: lookup-first via precomputed pairwise scores,
+		// with fallback to live CE on any miss. Disabled (skip lookup)
+		// when MEMDB_CE_PRECOMPUTE=false.
+		text = rerankMemoryItemsPrecomputed(ctx, s.RerankClient, p.Query, text)
 		ceRerankDur = time.Since(t0)
 	}
 

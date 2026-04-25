@@ -155,3 +155,43 @@ SET properties = $3::text::agtype,
 WHERE properties->>(('id'::text)) = $1
   AND properties->>(('user_name'::text)) = $2
 RETURNING properties->>(('id'::text))`
+
+// --- CE pre-compute (M10 Stream 6) ---
+
+// SetCEScoresTopK persists pre-computed cross-encoder top-K neighbour scores
+// for a single memory under properties->>'ce_score_topk' as a JSON array
+// [{"neighbor_id": "<uuid>", "score": 0.85}, ...] sorted by score DESC.
+// Stored via jsonb_set inside the existing properties blob to keep the
+// round-trip to a single statement and avoid a schema migration.
+//
+// Args: $1 = memory_id (text, UUID), $2 = user_name (cube id),
+//       $3 = ce_score_topk JSON array as text
+const SetCEScoresTopK = `
+UPDATE %[1]s."Memory"
+SET properties = (jsonb_set(properties::text::jsonb, '{ce_score_topk}', $3::jsonb)::text)::agtype
+WHERE properties->>(('id'::text)) = $1
+  AND properties->>(('user_name'::text)) = $2
+  AND properties->>(('status'::text)) = 'activated'`
+
+// ClearCEScoresTopK removes the ce_score_topk key for a single memory by
+// UUID alone (UUIDs are globally unique — no need to scope by user_name).
+// Called from applyUpdateAction when memory text changes — cached pairwise
+// scores no longer reflect the new content.
+//
+// Args: $1 = memory_id (text, UUID)
+const ClearCEScoresTopK = `
+UPDATE %[1]s."Memory"
+SET properties = ((properties::text::jsonb - 'ce_score_topk')::text)::agtype
+WHERE properties->>(('id'::text)) = $1`
+
+// ClearCEScoresTopKForNeighbor cascades cache invalidation: any memory
+// whose ce_score_topk JSON array contains the given neighbor_id has its
+// cache cleared (because the neighbour was updated or deleted, so the
+// cached pairwise score against it is now stale or dangling). Single SQL
+// UPDATE — no per-row loop in Go.
+//
+// Args: $1 = neighbor_id (text, UUID)
+const ClearCEScoresTopKForNeighbor = `
+UPDATE %[1]s."Memory"
+SET properties = ((properties::text::jsonb - 'ce_score_topk')::text)::agtype
+WHERE properties::text::jsonb -> 'ce_score_topk' @> jsonb_build_array(jsonb_build_object('neighbor_id', $1::text))`

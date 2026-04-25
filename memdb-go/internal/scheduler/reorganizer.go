@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/anatolykoptev/go-kit/rerank"
+
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
@@ -122,6 +124,7 @@ type Reorganizer struct {
 	profiler         *Profiler         // for TriggerRefresh after mem_read
 	cacheInvalidator CacheInvalidator  // nil = cache invalidation disabled
 	useHNSW          bool              // route FindNearDuplicates through HNSW index
+	rerankClient     *rerank.Client    // M10 Stream 6: nil = CE precompute pass disabled
 }
 
 // SetLLMExtractor injects the LLM extractor for fine-level mem_read processing.
@@ -157,6 +160,10 @@ func NewReorganizer(
 // SetUseHNSW enables the HNSW-indexed FindNearDuplicates path.
 // Default false (legacy O(N²) self-join). Set via cfg.ReorgUseHNSW.
 func (r *Reorganizer) SetUseHNSW(v bool) { r.useHNSW = v }
+
+// SetRerankClient injects the cross-encoder rerank client used by the
+// M10 Stream 6 CE precompute pass. nil = pass disabled (no-op).
+func (r *Reorganizer) SetRerankClient(c *rerank.Client) { r.rerankClient = c }
 
 // DecayAndArchive runs the two-phase importance lifecycle for a cube:
 //  1. Multiply importance_score * importanceDecayFactor for all LTM/UserMemory

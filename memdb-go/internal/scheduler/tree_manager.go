@@ -188,6 +188,12 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 	// ---- tier 3: cross-parent relation detection (opt-in) --------------
 	r.runRelationPhase(ctx, cubeID, parents)
 
+	// ---- M10 Stream 6: cross-encoder precompute pass (default on) ----
+	// Reuses rawMems already loaded above; no extra DB read for neighbour
+	// discovery. Persists Memory.properties->>'ce_score_topk' so search-
+	// time CE rerank can short-circuit the live HTTP call.
+	r.runCEPrecomputePass(ctx, cubeID, rawMems)
+
 	log.Info("tree reorg: cycle complete",
 		slog.Int("episodic_created", episodicCreated),
 		slog.Int("semantic_created", semanticCreated),

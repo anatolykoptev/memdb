@@ -5,6 +5,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -54,6 +55,65 @@ func (p *Postgres) UpdateMemoryByID(ctx context.Context, memoryID, cubeID string
 			return fmt.Errorf("%w: id=%s cube=%s", ErrMemoryNotFound, memoryID, cubeID)
 		}
 		return fmt.Errorf("update memory: %w", err)
+	}
+	return nil
+}
+
+// CEScoreEntry is a single pre-computed cross-encoder pair score persisted
+// inside Memory.properties->>'ce_score_topk'. NeighborID is the partner
+// memory's UUID; Score is the BGE-reranker-v2-m3 relevance score in
+// roughly [0, 1] (higher = more semantically related).
+type CEScoreEntry struct {
+	NeighborID string  `json:"neighbor_id"`
+	Score      float32 `json:"score"`
+}
+
+// SetCEScoresTopK persists pre-computed top-K cross-encoder scores for a
+// single memory under properties->>'ce_score_topk'. Caller is responsible
+// for sorting entries by Score DESC. Single round-trip — no read-modify-
+// write race. Returns nil even when no row matches (the memory may have
+// been deleted between the D3 pass starting and this UPDATE landing).
+func (p *Postgres) SetCEScoresTopK(ctx context.Context, memoryID, cubeID string, entries []CEScoreEntry) error {
+	if memoryID == "" || cubeID == "" {
+		return nil
+	}
+	if entries == nil {
+		entries = []CEScoreEntry{}
+	}
+	body, err := json.Marshal(entries)
+	if err != nil {
+		return fmt.Errorf("marshal ce_score_topk: %w", err)
+	}
+	if _, err := p.pool.Exec(ctx, fmt.Sprintf(queries.SetCEScoresTopK, graphName), memoryID, cubeID, string(body)); err != nil {
+		return fmt.Errorf("set ce_score_topk: %w", err)
+	}
+	return nil
+}
+
+// ClearCEScoresTopK removes the ce_score_topk key on a single memory by
+// UUID alone. Called from applyUpdateAction when the memory's text
+// changes (cached pairwise scores no longer reflect the new content).
+func (p *Postgres) ClearCEScoresTopK(ctx context.Context, memoryID string) error {
+	if memoryID == "" {
+		return nil
+	}
+	if _, err := p.pool.Exec(ctx, fmt.Sprintf(queries.ClearCEScoresTopK, graphName), memoryID); err != nil {
+		return fmt.Errorf("clear ce_score_topk: %w", err)
+	}
+	return nil
+}
+
+// ClearCEScoresTopKForNeighbor cascades cache invalidation: clears
+// ce_score_topk on any memory that listed neighborID inside its top-K
+// array. Run after applyUpdateAction / applyDeleteAction so dangling
+// cached scores against the affected memory disappear in a single SQL
+// statement.
+func (p *Postgres) ClearCEScoresTopKForNeighbor(ctx context.Context, neighborID string) error {
+	if neighborID == "" {
+		return nil
+	}
+	if _, err := p.pool.Exec(ctx, fmt.Sprintf(queries.ClearCEScoresTopKForNeighbor, graphName), neighborID); err != nil {
+		return fmt.Errorf("clear ce_score_topk for neighbor: %w", err)
 	}
 	return nil
 }
