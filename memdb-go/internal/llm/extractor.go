@@ -197,6 +197,11 @@ func NewLLMExtractorWithClient(c *Client) *LLMExtractor {
 // Model returns the configured LLM model name.
 func (e *LLMExtractor) Model() string { return e.client.Model() }
 
+// Client returns the underlying chat client. Exposed so adjacent extractors
+// (e.g. ProfileExtractor) can reuse the same retry + model-fallback config
+// without duplicating credentials. Do NOT mutate the returned client.
+func (e *LLMExtractor) Client() *Client { return e.client }
+
 // --- Unified extraction+dedup prompt (v2) ---
 //
 // Design principles from competitive analysis:
