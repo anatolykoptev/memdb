@@ -23,7 +23,6 @@ const filterGetMemoryMaxLimit = 1000
 func (h *Handler) handlePostGetMemoryWithFilter(
 	w http.ResponseWriter,
 	r *http.Request,
-	body []byte,
 	req getMemoryRequest,
 ) {
 	memCubeID := *req.MemCubeID
@@ -70,8 +69,11 @@ func (h *Handler) handlePostGetMemoryWithFilter(
 			slog.String("mem_cube_id", memCubeID),
 			slog.Any("error", err),
 		)
-		// Fall back to proxy on DB error so callers don't see 500s during rollout.
-		h.proxyWithBody(w, r, body)
+		h.writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"code":    422,
+			"message": "complex filter not supported by Go parser; use simple key=value filters",
+			"data":    nil,
+		})
 		return
 	}
 

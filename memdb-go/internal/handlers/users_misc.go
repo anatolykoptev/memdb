@@ -26,7 +26,11 @@ func (h *Handler) NativeInstancesStatus(w http.ResponseWriter, r *http.Request) 
 // NativeInstancesCount handles GET /product/instances/count natively via PostgreSQL.
 func (h *Handler) NativeInstancesCount(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -42,8 +46,12 @@ func (h *Handler) NativeInstancesCount(w http.ResponseWriter, r *http.Request) {
 
 	count, err := h.postgres.CountDistinctUsers(ctx)
 	if err != nil {
-		h.logger.Debug("native instances_count failed, falling back to proxy", slog.Any("error", err))
-		h.ProxyToProduct(w, r)
+		h.logger.Debug("native instances_count failed", slog.Any("error", err))
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -81,8 +89,12 @@ func (h *Handler) NativeExistMemCube(w http.ResponseWriter, r *http.Request) {
 
 	exists, err := h.postgres.ExistUser(r.Context(), *req.MemCubeID)
 	if err != nil {
-		h.logger.Debug("native exist_mem_cube_id failed, falling back to proxy", slog.Any("error", err))
-		h.proxyWithBody(w, r, body)
+		h.logger.Debug("native exist_mem_cube_id failed", slog.Any("error", err))
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -97,7 +109,11 @@ type getUserNamesByMemoryIDsRequest struct {
 // NativeGetUserNamesByMemoryIDs handles POST /product/get_user_names_by_memory_ids natively.
 func (h *Handler) NativeGetUserNamesByMemoryIDs(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -118,8 +134,12 @@ func (h *Handler) NativeGetUserNamesByMemoryIDs(w http.ResponseWriter, r *http.R
 
 	result, err := h.postgres.GetUserNamesByMemoryIDs(r.Context(), *req.MemoryIDs)
 	if err != nil {
-		h.logger.Debug("native get_user_names_by_memory_ids failed, falling back to proxy", slog.Any("error", err))
-		h.proxyWithBody(w, r, body)
+		h.logger.Debug("native get_user_names_by_memory_ids failed", slog.Any("error", err))
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 

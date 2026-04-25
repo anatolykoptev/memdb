@@ -88,7 +88,11 @@ type schedulerUpdatePayload struct {
 // Request body: {"user_name": "<id>", "timeout_seconds": 120}
 func (h *Handler) NativeSchedulerWait(w http.ResponseWriter, r *http.Request) {
 	if h.redis == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: redis unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -169,7 +173,11 @@ func (h *Handler) NativeSchedulerWait(w http.ResponseWriter, r *http.Request) {
 //	instance_id — forwarded to payload (matches Python)
 func (h *Handler) NativeSchedulerWaitStream(w http.ResponseWriter, r *http.Request) {
 	if h.redis == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: redis unavailable",
+			"data":    nil,
+		})
 		return
 	}
 

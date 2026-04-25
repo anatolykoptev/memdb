@@ -57,7 +57,11 @@ func (h *Handler) NativeListUsers(w http.ResponseWriter, r *http.Request) {
 // NativeGetUser handles GET /product/users/{user_id} natively via PostgreSQL.
 func (h *Handler) NativeGetUser(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -71,9 +75,13 @@ func (h *Handler) NativeGetUser(w http.ResponseWriter, r *http.Request) {
 
 	exists, err := h.postgres.ExistUser(r.Context(), userID)
 	if err != nil {
-		h.logger.Debug("native get_user failed, falling back to proxy",
+		h.logger.Debug("native get_user failed",
 			slog.String("user_id", userID), slog.Any("error", err))
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -137,7 +145,11 @@ type registerRequest struct {
 // Stub: echoes back user_id. No DB write — MemDB auto-creates users on first add.
 func (h *Handler) NativeRegisterUser(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 

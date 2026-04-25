@@ -71,10 +71,14 @@ func (h *Handler) NativeGetAll(w http.ResponseWriter, r *http.Request) {
 
 	results, total, err := h.postgres.GetAllMemories(ctx, *req.UserID, dbType, page, pageSize)
 	if err != nil {
-		h.logger.Debug("native get_all failed, falling back to proxy",
+		h.logger.Debug("native get_all failed",
 			slog.Any("error", err),
 		)
-		h.proxyWithBody(w, r, body)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 

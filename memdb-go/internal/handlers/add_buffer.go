@@ -198,11 +198,17 @@ func (h *Handler) runFinePipeline(ctx context.Context, conversation, cubeID stri
 		sig.Hints = append(sig.Hints, "High-similarity existing memory found — prefer UPDATE over ADD if semantically equivalent")
 	}
 
-	// Step 2: unified LLM extraction + dedup (with content hints)
-	facts, err := h.llmExtractor.ExtractAndDedup(ctx, conversation, candidates, sig.Hints...)
+	// Step 2: unified LLM extraction + dedup (with content hints).
+	// Prepend date-aware hint when MEMDB_DATE_AWARE_EXTRACT is enabled (default true)
+	// so the LLM emits `[mention YYYY-MM-DD]` tags on time-anchored facts — same as
+	// the sync fine path in add_fine.go:nativeFineAddForCube.
+	hints := append(dateAwareExtractHints(), sig.Hints...)
+	facts, err := h.llmExtractor.ExtractAndDedup(ctx, conversation, candidates, hints...)
 	if err != nil {
+		recordDateAwareExtractOutcome(ctx, dateAwareExtractOutcomeError)
 		return nil, fmt.Errorf("buffer flush: extract and dedup: %w", err)
 	}
+	recordDateAwareExtractOutcome(ctx, "")
 	if len(facts) == 0 {
 		h.logger.Debug("buffer flush: no facts extracted", slog.String("cube_id", cubeID))
 		return nil, nil
