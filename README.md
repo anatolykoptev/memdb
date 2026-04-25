@@ -48,7 +48,7 @@ Honest comparison with comparable open-source memory systems. `?` marks unverifi
 |---|---|---|---|---|---|
 | Self-hostable | **✅ Yes** (pure Go binary) | ✅ Yes (Python) <!-- TODO verify --> | ✅ Yes (Python) <!-- TODO verify --> | ✅ Yes <!-- TODO verify --> | ✅ Yes <!-- TODO verify --> |
 | Single static binary | **✅ Yes** | ❌ No | ❌ No | ❌ No | ❌ No |
-| LoCoMo LLM-Judge | **⚠️ TBD** (M9 measurement in flight) | ~62% `?` | ~58% `?` | ~70% `?` | 75.78% (excl. cat-5) |
+| LoCoMo LLM-Judge | **70.0% (excl cat-5)** | ~62% `?` | ~58% `?` | ~70% `?` | 75.78% (excl. cat-5) |
 | pgvector + AGE graph | **✅ Yes** | ⚠️ Partial `?` | ❌ No | ⚠️ Yes (Neo4j) `?` | ⚠️ Partial `?` |
 | MCP server included | **✅ Yes** | ❌ No `?` | ❌ No `?` | ❌ No `?` | ❌ No `?` |
 | Local embeddings | **✅ ONNX sidecar** | ❌ No `?` | ❌ No `?` | ❌ No `?` | ❌ No `?` |

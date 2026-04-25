@@ -13,6 +13,13 @@ This is MemDB's first public release. Earlier v1.x and v2.x tags were internal
 pre-public iterations — see [docs/versioning.md](docs/versioning.md) for the
 re-versioning rationale.
 
+### Headline result — first published Memobase-comparable measurement
+
+MemDB v0.22.0 scores **70.0% LLM Judge** on LoCoMo chat-50 stratified
+(excl cat-5, Memobase convention). Position: between Mem0 (66.88%) and
+MemOS (73.31%), -5.78pp below Memobase leader (75.78%). Full numbers
+in `evaluation/locomo/MILESTONES.md`.
+
 ### Why now
 
 After M9 sprint (this week), MemDB has:
