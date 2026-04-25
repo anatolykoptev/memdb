@@ -42,7 +42,7 @@ func TestProfileExtractEnabled_TruthyEnables(t *testing.T) {
 func TestTriggerProfileExtract_MissingDeps(t *testing.T) {
 	// No postgres / extractor → must short-circuit and never panic.
 	h := &Handler{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
-	if h.triggerProfileExtract("hello world", "user1") {
+	if h.triggerProfileExtract("hello world", "user1", "cube1") {
 		t.Errorf("expected false when handler has no postgres/llmExtractor")
 	}
 }
@@ -50,7 +50,7 @@ func TestTriggerProfileExtract_MissingDeps(t *testing.T) {
 func TestTriggerProfileExtract_DisabledByEnv(t *testing.T) {
 	t.Setenv(profileExtractEnvVar, "false")
 	h := &Handler{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
-	if h.triggerProfileExtract("hello world", "user1") {
+	if h.triggerProfileExtract("hello world", "user1", "cube1") {
 		t.Errorf("expected false when MEMDB_PROFILE_EXTRACT=false")
 	}
 }
@@ -58,7 +58,18 @@ func TestTriggerProfileExtract_DisabledByEnv(t *testing.T) {
 func TestTriggerProfileExtract_EmptyUserID(t *testing.T) {
 	t.Setenv(profileExtractEnvVar, "true")
 	h := &Handler{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
-	if h.triggerProfileExtract("hello world", "") {
+	if h.triggerProfileExtract("hello world", "", "cube1") {
 		t.Errorf("expected false when user_id is empty")
+	}
+}
+
+// TestTriggerProfileExtract_EmptyCubeID guards the security-audit C1 fix:
+// without a cube_id we cannot persist a tenant-isolated row, so the goroutine
+// must never run.
+func TestTriggerProfileExtract_EmptyCubeID(t *testing.T) {
+	t.Setenv(profileExtractEnvVar, "true")
+	h := &Handler{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
+	if h.triggerProfileExtract("hello world", "user1", "") {
+		t.Errorf("expected false when cube_id is empty (security audit C1)")
 	}
 }

@@ -113,12 +113,17 @@ func recordProfileExtractOutcome(ctx context.Context, outcome string, dur time.D
 // --- entry point ---
 
 // triggerProfileExtract launches a fire-and-forget profile extraction for
-// the given user. The conversation is captured by value into the goroutine
-// so the caller can return immediately. Safe to call when the env gate is
-// off (records "disabled" and returns).
+// the given user, scoped to a single cube. The conversation is captured by
+// value into the goroutine so the caller can return immediately. Safe to
+// call when the env gate is off (records "disabled" and returns).
+//
+// cubeID is required (security audit C1, migration 0017): every persisted
+// row carries cube_id so that profile rows extracted in cube=A never leak
+// into a chat scoped to cube=B. An empty cubeID short-circuits as
+// "disabled" — same as missing user_id.
 //
 // Returns true when a goroutine was scheduled (useful for tests / metrics).
-func (h *Handler) triggerProfileExtract(conversation, userID string) bool {
+func (h *Handler) triggerProfileExtract(conversation, userID, cubeID string) bool {
 	if h == nil || h.postgres == nil || h.llmExtractor == nil {
 		// Required dependencies missing — silently skip. The fine-add path
 		// itself would have been a proxy fallback in this state.
@@ -128,20 +133,21 @@ func (h *Handler) triggerProfileExtract(conversation, userID string) bool {
 		recordProfileExtractOutcome(context.Background(), profileOutcomeDisabled, 0)
 		return false
 	}
-	if userID == "" {
-		// No user_id → cannot persist; treat as disabled rather than error.
+	if userID == "" || cubeID == "" {
+		// No user_id / cube_id → cannot persist with tenant isolation; treat
+		// as disabled rather than error so the add path stays silent.
 		recordProfileExtractOutcome(context.Background(), profileOutcomeDisabled, 0)
 		return false
 	}
 
-	go h.runProfileExtract(conversation, userID)
+	go h.runProfileExtract(conversation, userID, cubeID)
 	return true
 }
 
 // runProfileExtract is the goroutine body. Acquires the semaphore (with the
 // goroutine's own timeout budget — drops on contention to protect the add
-// path), runs ExtractProfile, then BulkUpserts the result.
-func (h *Handler) runProfileExtract(conversation, userID string) {
+// path), runs ExtractProfile (cube-scoped), then BulkUpserts the result.
+func (h *Handler) runProfileExtract(conversation, userID, cubeID string) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), profileExtractTimeout)
 	defer cancel()
@@ -151,7 +157,7 @@ func (h *Handler) runProfileExtract(conversation, userID string) {
 		// Context cancelled while waiting — record "busy" and bail.
 		recordProfileExtractOutcome(ctx, profileOutcomeBusy, time.Since(start))
 		h.logger.Debug("profile extract: semaphore acquire failed",
-			slog.String("user_id", userID), slog.Any("error", err))
+			slog.String("user_id", userID), slog.String("cube_id", cubeID), slog.Any("error", err))
 		return
 	}
 	defer sem.Release(1)
@@ -160,7 +166,7 @@ func (h *Handler) runProfileExtract(conversation, userID string) {
 	// model fallback, and metrics namespace. Avoids duplicating credentials.
 	pe := llm.NewProfileExtractor(h.llmExtractor.Client())
 
-	entries, err := pe.ExtractProfile(ctx, conversation, userID)
+	entries, err := pe.ExtractProfile(ctx, conversation, userID, cubeID)
 	if err != nil {
 		if errors.Is(err, llm.ErrEmptyConversation) {
 			recordProfileExtractOutcome(ctx, profileOutcomeEmpty, time.Since(start))
@@ -168,7 +174,7 @@ func (h *Handler) runProfileExtract(conversation, userID string) {
 		}
 		recordProfileExtractOutcome(ctx, profileOutcomeLLMError, time.Since(start))
 		h.logger.Debug("profile extract: LLM call failed",
-			slog.String("user_id", userID), slog.Any("error", err))
+			slog.String("user_id", userID), slog.String("cube_id", cubeID), slog.Any("error", err))
 		return
 	}
 	if len(entries) == 0 {
@@ -180,6 +186,7 @@ func (h *Handler) runProfileExtract(conversation, userID string) {
 		recordProfileExtractOutcome(ctx, profileOutcomeDBError, time.Since(start))
 		h.logger.Debug("profile extract: BulkUpsert failed",
 			slog.String("user_id", userID),
+			slog.String("cube_id", cubeID),
 			slog.Int("entries", len(entries)),
 			slog.Any("error", err))
 		return
@@ -188,5 +195,6 @@ func (h *Handler) runProfileExtract(conversation, userID string) {
 	recordProfileExtractOutcome(ctx, profileOutcomeSuccess, time.Since(start))
 	h.logger.Debug("profile extract: persisted",
 		slog.String("user_id", userID),
+		slog.String("cube_id", cubeID),
 		slog.Int("entries", len(entries)))
 }
