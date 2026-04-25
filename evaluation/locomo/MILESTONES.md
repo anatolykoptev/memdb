@@ -654,8 +654,10 @@ which they cite as a driver of their public-best 85.05% temporal F1
 **What did NOT ship in this stream**:
 - Re-ingest of existing memories (FUTURE-only — old memories don't get
   re-tagged).
-- Buffer-flush path (`add_buffer.go` — `runFinePipeline`) was deliberately
-  left untouched per spec scope; same hint can be added there in a follow-up.
+- Buffer-flush path (`add_buffer.go` — `runFinePipeline`) ALSO shipped
+  after spec-review caught the gap (commit `2cd3bcfb`). Sync AND async
+  ingest both inject `[mention YYYY-MM-DD]` instruction when env enabled.
+  Stream 5 measurement covers both paths.
 - LoCoMo measurement vs M7 cat-3 temporal baseline (0.201). Stream 5
   (Stage 3 v3) re-ingest is the proper measurement vehicle.
 
