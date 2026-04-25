@@ -200,6 +200,27 @@ v2 fix (single function, ~20 lines in `service_multihop.go`):
   (cap=10, expBudget=5) so both expansions fit; new assertion verifies
   every seed is preserved.
 
+### Re-measurement (2026-04-24, conv-26 cat-2 n=37)
+
+| metric  | M7 stage 2 baseline | v1 fix (PR #81) | v2 fix (this commit) |
+|---------|---------------------|-----------------|----------------------|
+| F1      | 0.091               | **0.015** ⬇️    | **0.097** ✓ (+6%)    |
+| EM      | 0.027               | 0.000           | 0.027                |
+| hit@k   | 0.43                | 0.27 ⬇️         | 0.41                 |
+| semsim  | 0.096               | 0.017           | 0.104                |
+| q33 ans | (varies)            | "no answer"     | **"4 years"** ✓      |
+
+v2 recovers parity with M7 baseline (+6% F1) and unlocks LLM answer
+generation: instead of "no answer" everywhere, v2 produces concrete
+answers like "4 years", "last Friday", "last weekend" for cat-2
+temporal questions. The remaining gap from M8 stretch goal (F1 ≥ 0.18)
+is gated by topology (hub-and-spoke conv-26) and downstream temporal
+formatting (gold uses absolute dates "21 October 2023", LLM produces
+relative "last week") — both out of D2 scope.
+
+Result files: `evaluation/locomo/results/m8-cat2-v{1,2}-score.json`,
+`m8-cat2-v2-preds.json`.
+
 ## Topology caveat — what this fix does NOT solve
 
 The hub-and-spoke topology means hop-1 produces just one neighbour (the
