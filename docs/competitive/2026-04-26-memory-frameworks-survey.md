@@ -6,7 +6,7 @@
 - Phase 2b structural analysis: go-code MCP (`explore`) on cloned repos + Bash file reads for key techniques
 - Repos cloned to `/home/krolik/src/compete-research/<name>/` (depth 1)
 - Bias: ranked by F1 lift potential per engineering effort, not by buzz/stars
-- Benchmark numbers sourced from: Memobase LoCoMo README (`docs/experiments/locomo-benchmark/README.md`), mem0 paper arXiv:2504.19413, ROADMAP-SEARCH.md
+- Benchmark numbers sourced from: Memobase LoCoMo README (`docs/experiments/locomo-benchmark/README.md`), mem0 paper arXiv:2504.19413, docs/competitive/2026-04-search-pipeline-vs-rivals.md
 
 ---
 
@@ -16,7 +16,7 @@
 
 **Architecture:** Chinese-origin Python framework (MemTensor). Three-tier memory model: working memory (KV cache), textual tree memory (raw → episodic → semantic), parametric memory (fine-tuned weights). Core search is via `Searcher` class (`src/memos/memories/textual/tree_text_memory/retrieve/searcher.py`) which orchestrates: TaskGoalParser → GraphMemoryRetriever → (optional COT expansion) → reranker. Deployment uses Neo4j + Qdrant + Ollama/Azure LLM stack.
 
-**Published F1 numbers (LoCoMo):** 73.31 aggregate (our ROADMAP-SEARCH.md cites this; primary source MemOS paper/repo, no newer number found in cloned depth-1 repo). Memobase v0.0.37 claims 75.78 (via LLM Judge, arXiv:2504.19413 comparison table).
+**Published F1 numbers (LoCoMo):** 73.31 aggregate (our docs/competitive/2026-04-search-pipeline-vs-rivals.md cites this; primary source MemOS paper/repo, no newer number found in cloned depth-1 repo). Memobase v0.0.37 claims 75.78 (via LLM Judge, arXiv:2504.19413 comparison table).
 
 **Key techniques relevant to MemDB:**
 - **VEC_COT search** (`searcher.py:68`, `mem_search_prompts.py:SIMPLE_COT_PROMPT`): when `search_strategy={"cot": True}`, LLM decomposes query into sub-questions, each embedded separately, union of embeddings passed to retriever. Gate: `if self.vec_cot: queries = self._cot_query(query)` → `cot_embeddings = self.embedder.embed(queries)`.
@@ -34,7 +34,7 @@
 
 **Port effort:** M (2-3 days). VEC_COT requires extending `SearchService` to embed multiple vectors and merge results before MMR.
 
-**Expected MemDB F1 impact:** high (+5-7 points on complex multi-hop questions per ROADMAP-SEARCH.md Phase 1 estimate). Already validated as the #1 remaining lift.
+**Expected MemDB F1 impact:** high (+5-7 points on complex multi-hop questions per docs/competitive/2026-04-search-pipeline-vs-rivals.md Phase 1 estimate). Already validated as the #1 remaining lift.
 
 ---
 
@@ -118,7 +118,7 @@
 
 **Architecture:** LangChain ecosystem library (2k stars). Provides functional primitives for memory: `create_memory_store_manager`, `ReflectionExecutor`. Core tech: `trustcall` library for JSON-PATCH memory updates (instead of full rewrite), background `ReflectionExecutor` that dispatches memory consolidation to a separate LangGraph thread.
 
-**Published F1 numbers (LoCoMo LLM Judge):** 58.10% overall (confirmed in both ROADMAP-SEARCH.md and Memobase README: single-hop 62.23%, multi-hop 47.92%, open 71.12%, temporal 23.43%). Weakest on temporal (23.43% — catastrophic).
+**Published F1 numbers (LoCoMo LLM Judge):** 58.10% overall (confirmed in both docs/competitive/2026-04-search-pipeline-vs-rivals.md and Memobase README: single-hop 62.23%, multi-hop 47.92%, open 71.12%, temporal 23.43%). Weakest on temporal (23.43% — catastrophic).
 
 **Key techniques relevant to MemDB:**
 - **trustcall PATCH** (`knowledge/extraction.py:161`, `from trustcall import create_extractor`): instead of extracting full new memory text, generates JSON-PATCH operations against existing memory document. Enables surgical updates to structured memory objects. Used with `extractor = create_extractor(model, tools=[schema], tool_choice="any")`.
@@ -234,7 +234,7 @@ Port priorities map to M7 weak spots, not raw F1 numbers from competitors:
 
 ## Where MemDB Already Wins (don't break)
 
-From ROADMAP-SEARCH.md comparison table:
+From docs/competitive/2026-04-search-pipeline-vs-rivals.md comparison table:
 
 - **Go latency** — 15-30ms vs Python ~200-300ms. Unique in class.
 - **Real MMR** with exponential penalty, phase-1 prefill, text similarity guard, bucket-aware quota — no competitor has this.

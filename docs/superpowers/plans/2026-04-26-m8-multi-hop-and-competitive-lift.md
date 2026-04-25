@@ -194,7 +194,7 @@ Phase 2b — clone + analyze via `go-code`:
 - `docs/competitive/2026-04-26-port-target-spec/<name>.md` (1 file per top-3 port targets) — full implementation brief, ready to hand to next M9 implementer
 
 ### Hot candidates to investigate (don't limit to these)
-1. **MemOS CoT query decomposition** — known gap in our ROADMAP-SEARCH comparison table; likely biggest cat-2 lift
+1. **MemOS CoT query decomposition** — known gap in our docs/competitive/2026-04-search-pipeline-vs-rivals.md comparison table; likely biggest cat-2 lift
 2. **Graphiti `expired_at` temporal invalidation** — listed as Брать → п.1 in ROADMAP-ADD-PIPELINE; we have `valid_at` only
 3. **MemOS `search_priority` dict** — listed as MemOS-only in our comparison; may inform multi-hop ordering
 4. **LangMem trustcall PATCH** — listed as п.8 in ROADMAP, deferred for years; revisit value now
@@ -266,7 +266,7 @@ cat-2 multi-hop F1 = 0.091 in Stage 2 — the lowest of all categories. Even wit
 ## 7. Stream 4 — COT: port CoT query decomposition
 
 ### Context
-Our ROADMAP-SEARCH comparison table flags **CoT query decomposition** as a MemOS-only feature we lack. Multi-hop and complex temporal questions benefit massively when LLM splits the question into sub-queries before retrieval.
+Our docs/competitive/2026-04-search-pipeline-vs-rivals.md comparison table flags **CoT query decomposition** as a MemOS-only feature we lack. Multi-hop and complex temporal questions benefit massively when LLM splits the question into sub-queries before retrieval.
 
 Example: "What did Caroline do in Boston after she met Emma?" → decomposed to:
 1. "When did Caroline meet Emma?"
