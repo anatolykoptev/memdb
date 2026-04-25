@@ -13,7 +13,7 @@
 >
 > **Связанные roadmap (продолжают развиваться, не migration)**:
 > - [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md) — качество поиска, D1-D11 retrieval features, LoCoMo benchmarks
-> - [ROADMAP-ADD-PIPELINE.md](ROADMAP-ADD-PIPELINE.md) — качество add pipeline, soft-delete, OTel
+> - [docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md) — качество add pipeline, soft-delete, OTel
 > - [ROADMAP-FEATURES.md](ROADMAP-FEATURES.md) — новые фичи (Image Memory, MemCube sharing)
 > - [docs/competitive/2026-04-26-memobase-deep-dive.md](docs/competitive/2026-04-26-memobase-deep-dive.md) — M9 Memobase port (dual-speaker, [mention DATE], LLM Judge)
 

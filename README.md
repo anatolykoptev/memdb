@@ -1,63 +1,63 @@
-# MemDB — Memory Database for AI Agents
+# MemDB
+
+> Self-hosted long-term memory database for AI agents. One docker-compose. Pure Go.
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg?logo=apache)](https://opensource.org/license/apache-2-0/)
+[![Version](https://img.shields.io/badge/version-0.22.0-blue.svg)](https://github.com/anatolykoptev/memdb/releases)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8.svg?logo=go)](https://go.dev/)
-[![arXiv](https://img.shields.io/badge/arXiv-2507.03724-b31b1b.svg)](https://arxiv.org/abs/2507.03724)
+[![GitHub stars](https://img.shields.io/github/stars/anatolykoptev/memdb?style=social)](https://github.com/anatolykoptev/memdb/stargazers)
 [![Discord](https://img.shields.io/badge/Discord-join%20chat-7289DA.svg?logo=discord)](https://discord.gg/8vhbTZgf)
-[![GitHub Discussions](https://img.shields.io/badge/GitHub-Discussions-181717.svg?logo=github)](https://github.com/anatolykoptev/memdb/discussions)
 
-MemDB is a self-hosted memory database for AI agents. It stores, retrieves, and manages long-term memory — structured as a graph, searchable by vector similarity — and exposes it through a REST API and an MCP server for Claude-style agents.
+MemDB stores, retrieves, and manages long-term memory for AI agents. It runs as a single
+`docker compose up` and exposes a REST API plus a built-in MCP server, so Claude-style
+agents (Telegram bots, IDE copilots, support agents, personal assistants) can recall facts,
+preferences, and prior conversations across sessions.
 
-It runs as a single `docker compose up`: Go API service + Postgres (pgvector + Apache AGE). No external graph database, no proprietary cloud, no Python runtime required in production.
+<!-- TODO: demo.gif — 30-second screencast of an agent using MemDB across two chats -->
 
-> **MemDB is a hard fork of [MemOS](https://github.com/MemTensor/MemOS).**
-> Research and original architecture: © MemTensor. This fork (Apache 2.0) repackages and rebuilds MemOS for independent self-hosting — primarily as a Go service. Full credits and license notes in [Acknowledgments](#acknowledgments).
+```
+   your agent ── REST / MCP ──▶ memdb-go ──▶ Postgres (pgvector + Apache AGE)
+                                    │
+                                    └──▶ embed-server (optional, ONNX sidecar)
+```
 
 ---
 
 ## Why MemDB
 
-- **Go-primary**: the core service (`memdb-go`) is written in Go — single static binary, low memory footprint, straightforward deployment.
-- **Single compose stack**: Postgres 17 with pgvector + Apache AGE covers both vector similarity search and graph traversal. No Qdrant, no Neo4j, no Redis required by default.
-- **OpenAI-compatible LLM layer**: any provider that speaks `/v1/chat/completions` works — OpenAI, Ollama, LiteLLM, OpenRouter, or a custom proxy. See [docs/llm-providers.md](docs/llm-providers.md).
-- **MCP native**: ships `memdb-mcp` + `mcp-stdio-proxy` for zero-config Claude Desktop / Claude Code integration.
-- **Local embeddings**: ONNX-based embedder (`multilingual-e5-large`, 1024 dim) runs in-process or as an optional `embed-server` sidecar — no third-party embedding API required.
-- **Apache 2.0**: fully open, no usage-based licensing.
+Honest comparison with comparable open-source memory systems. Numbers marked `?` are
+unverified — please open a PR with a citation if you have current data.
+
+| | **MemDB** | Mem0 | Letta | Zep | Memobase |
+|---|---|---|---|---|---|
+| Self-hostable | Yes (pure Go binary) | Yes (Python) <!-- TODO verify --> | Yes (Python) <!-- TODO verify --> | Yes <!-- TODO verify --> | Yes <!-- TODO verify --> |
+| Single static binary | Yes | No | No | No | No |
+| LoCoMo LLM-Judge | TBD (M9 measurement in flight) | ~62% `?` | ~58% `?` | ~70% `?` | 75.78% (excl. cat-5) |
+| pgvector + AGE graph | Yes | Partial `?` | No | Yes (Neo4j) `?` | Partial `?` |
+| MCP server included | Yes | No `?` | No `?` | No `?` | No `?` |
+| Local embeddings | ONNX sidecar | No `?` | No `?` | No `?` | No `?` |
+| License | Apache 2.0 | Apache 2.0 `?` | Apache 2.0 `?` | Apache 2.0 `?` | Apache 2.0 `?` |
+
+The `?` marks honest uncertainty rather than disparagement. The Memobase 75.78% is published
+in their LoCoMo evaluation harness and excludes adversarial category 5 (see
+[evaluation/locomo/MILESTONES.md](evaluation/locomo/MILESTONES.md#two-track-reporting-convention-m9-stream-3)
+for why we report two tracks).
 
 ---
 
-## Quick Start
+## Quick Start (5 minutes)
 
 ```bash
-git clone https://github.com/anatolykoptev/memdb
-cd memdb
+git clone https://github.com/anatolykoptev/memdb && cd memdb
 cp .env.example .env
-# edit .env: set MEMDB_LLM_API_KEY (OpenAI key or any OpenAI-compatible)
+# edit .env: set MEMDB_LLM_API_KEY (any OpenAI-compatible endpoint works)
+#            set POSTGRES_PASSWORD (no default — required)
 docker compose -f docker/docker-compose.yml up -d
 curl http://localhost:8080/health
+# {"status":"ok"}
 ```
 
-Optional: enable the local embed-server sidecar for ONNX embeddings (no external API):
-
-```bash
-docker compose -f docker/docker-compose.yml --profile embed up -d
-```
-
-Then set `MEMDB_EMBEDDER_TYPE=http` and `MEMDB_EMBED_URL=http://embed-server:8080` in your `.env`.
-
----
-
-## Core Concepts
-
-- **Memory** — a single item stored about a user: a fact, preference, episode, tool trace, or skill.
-- **Cube** — a namespace for memories. Each cube is isolated; cubes can be scoped per agent, project, or team.
-- **User** — an identity within a cube. Memories are stored and retrieved per user.
-
----
-
-## API Usage
-
-**Add a memory:**
+Add a memory:
 
 ```bash
 curl -s -X POST http://localhost:8080/product/add \
@@ -66,14 +66,14 @@ curl -s -X POST http://localhost:8080/product/add \
     "user_id": "alice",
     "writable_cube_ids": ["my-cube"],
     "messages": [
-      {"role": "user", "content": "I prefer concise answers."},
+      {"role": "user", "content": "I love hiking and prefer concise answers."},
       {"role": "assistant", "content": "Noted."}
     ],
     "async_mode": "sync"
   }'
 ```
 
-**Search memories:**
+Search it back:
 
 ```bash
 curl -s -X POST http://localhost:8080/product/search \
@@ -81,34 +81,169 @@ curl -s -X POST http://localhost:8080/product/search \
   -d '{
     "user_id": "alice",
     "readable_cube_ids": ["my-cube"],
-    "query": "communication preferences",
+    "query": "outdoor activities",
     "top_k": 5,
     "mode": "fast"
   }'
 ```
 
-Full API reference: [docs/openapi.json](docs/openapi.json). Go and Python quickstart examples: [examples/](examples/).
+Expected response shape (truncated):
+
+```json
+{
+  "memories": [
+    {
+      "id": "...",
+      "memory": "Alice loves hiking and prefers concise answers.",
+      "score": 0.78,
+      "metadata": {"cube_id": "my-cube", "created_at": "2026-04-25T..."}
+    }
+  ]
+}
+```
+
+Optional: enable the local ONNX embed-server sidecar (no third-party embedding API):
+
+```bash
+docker compose -f docker/docker-compose.yml --profile embed up -d
+```
+
+Then in `.env`: `MEMDB_EMBEDDER_TYPE=http` and `MEMDB_EMBED_URL=http://embed-server:8080`.
+
+Full API reference: [docs/openapi.json](docs/openapi.json). Runnable examples:
+[examples/go/quickstart](examples/go/quickstart), [examples/python/quickstart](examples/python/quickstart),
+[examples/mcp/claude-desktop](examples/mcp/claude-desktop).
 
 ---
 
-## Claude Desktop Integration (MCP)
+## Architecture
 
-MemDB ships a Go MCP server. Claude Desktop connects to it over stdio using `mcp-stdio-proxy`.
+```
+   ┌──────────────────────────────────────┐
+   │  your agent / IDE / Claude Desktop   │
+   └─────────────┬────────────────────────┘
+                 │  REST  /  MCP (stdio)
+                 ▼
+        ┌────────────────────┐
+        │   memdb-go :8080   │   Go service: handlers, search, scheduler,
+        │                    │   MCP server, embedder, async pipeline
+        └─────────┬──────────┘
+                  │
+        ┌─────────▼──────────┐         ┌──────────────────────┐
+        │   Postgres 17      │         │   embed-server :8081 │
+        │   pgvector (1024)  │         │   (optional, ONNX)   │
+        │   Apache AGE graph │         │   multilingual-e5,   │
+        └────────────────────┘         │   jina-code-v2       │
+                                       └──────────────────────┘
+```
 
-1. Build the proxy binary once:
-   ```bash
-   cd memdb-go
-   CGO_ENABLED=0 go build -o ~/bin/mcp-stdio-proxy ./cmd/mcp-stdio-proxy
-   ```
+A default deployment is **two containers** (Postgres + memdb-go); enable the embed sidecar
+to make it three. There is no Python in the production hot path — `memdb-go` is the sole
+service. Postgres covers both vector similarity and graph traversal, eliminating Neo4j /
+Qdrant from the dependency list. See [ROADMAP-GO-MIGRATION.md](ROADMAP-GO-MIGRATION.md)
+for the migration history (Phase 5 Python shutdown completed).
 
-2. Copy the example config into Claude Desktop's `claude_desktop_config.json`:
-   ```
-   examples/mcp/claude-desktop/claude_desktop_config.json.example
-   ```
+---
 
-3. Restart Claude Desktop. Ask Claude: _"Search my memories for programming preferences."_
+## Use Cases
 
-See [examples/mcp/claude-desktop/README.md](examples/mcp/claude-desktop/README.md) for the full walkthrough and available MCP tools.
+**Telegram / Discord bots.** Your bot remembers each user's preferences, past requests,
+and ongoing context across sessions instead of starting cold every conversation. Wire
+`/product/add` into your message handler and `/product/search` into your prompt builder.
+Reference: [examples/go/quickstart](examples/go/quickstart).
+
+**IDE copilot.** A coding assistant that remembers the user's stack, naming conventions,
+and recurring bug patterns. Store tool-call traces and project notes per user; retrieve
+them when the user opens a related file.
+Reference: [examples/python/quickstart](examples/python/quickstart).
+
+**Customer support agent.** The agent recalls a customer's prior issues, account
+context, and preferred contact style without forcing them to re-explain. Use `cube_id`
+to scope memory per organisation; use `user_id` for the end customer.
+
+**Personal AI assistant.** "What did I order on Amazon last March?" — long-horizon recall
+across email, chat, and tool history. The async pipeline lets you fire-and-forget ingest
+while keeping search latency low.
+
+**Agentic workflows.** Persistent skill / trajectory memory for multi-step agents — the
+agent remembers which tools succeeded for which task category and uses that history to
+plan future runs.
+
+---
+
+## Features
+
+**Storage**
+- Postgres 17 with [pgvector](https://github.com/pgvector/pgvector) for 1024-dim semantic
+  search and [Apache AGE](https://age.apache.org/) for graph traversal — single primary
+  store, no separate vector or graph DB to operate.
+- Optional Redis hot cache for working memory; optional Qdrant for sparse + dense hybrid
+  retrieval at scale.
+- Versioned SQL migrations with checksum drift detection (`memdb.migration.checksum_drift`
+  metric).
+
+**Retrieval — D1 through D11**
+- D1: temporal decay + access-frequency rerank
+- D2: multi-hop graph expansion via AGE / `memory_edges` recursive CTE
+- D3: hierarchical cluster reorganizer
+- D4: query rewriting
+- D5: staged retrieval (shortlist → rerank → expand)
+- D10: post-retrieval enhancement
+- D11: chain-of-thought query decomposition
+- Plus structural-edge ingest, dual-speaker harness, factual answer-style mode
+
+**Operations**
+- Single Go binary — no interpreter, no compile chain in production
+- Built-in MCP server + stdio proxy for Claude Desktop / Claude Code
+- OpenAPI 3 spec ([docs/openapi.json](docs/openapi.json))
+- Prometheus metrics on `/metrics`
+- Fail-closed safety nets — write failures surface as HTTP errors, never silent drops
+- Cohere-compatible reranker plug-in (works with Cohere, Jina, Voyage, Mixedbread,
+  HuggingFace TEI, or your own embed-server)
+
+---
+
+## Benchmarks
+
+MemDB tracks LoCoMo (Long Conversation Memory) scores per release; full per-milestone
+deltas live in [evaluation/locomo/MILESTONES.md](evaluation/locomo/MILESTONES.md).
+
+Highlights:
+- **M7 Stage 2 (conv-26 full, 199 QAs):** F1 **0.238**, hit@k 0.769 — first MemOS-tier
+  result on a full single conversation.
+- **M9 (current):** ports the Memobase LLM-Judge metric so MemDB scores are directly
+  comparable to public leaderboards (Mem0, Zep, LangMem all use the same binary judge).
+  *Headline LLM-Judge number on the full 10-conversation corpus: **measurement in
+  progress, coming soon**.* Stage 3 measurement is being re-run after an OOM during the
+  initial sweep — see MILESTONES.md for full transparency on the failed run.
+
+Run the harness yourself:
+
+```bash
+export MEMDB_SERVICE_SECRET=$(docker exec memdb-go env | grep INTERNAL_SERVICE_SECRET | cut -d= -f2)
+LOCOMO_SKIP_CHAT=1 OUT_SUFFIX=local bash evaluation/locomo/run.sh
+```
+
+---
+
+## Roadmap
+
+Active roadmaps (the closed `ROADMAP-GO-MIGRATION.md` is kept as a historical record):
+
+- [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md) — retrieval quality (target: LoCoMo > 75)
+- [docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md) — ingest pipeline excellence
+- [ROADMAP-FEATURES.md](ROADMAP-FEATURES.md) — features beyond the upstream Python codebase
+  (image memory, MemCube cross-sharing, etc.)
+
+---
+
+## Versioning
+
+MemDB is `0.x.y` until we commit to API stability. Expect minor breaking changes between
+`0.y` releases — they will be called out in [CHANGELOG.md](CHANGELOG.md) and tagged with
+migration notes. The `0.22.0` release is the first public launch tag and resets the
+version line from the pre-public `2.x` internal sequence to a `0.x` series that signals
+the API contract is not yet frozen.
 
 ---
 
@@ -125,105 +260,53 @@ Key environment variables (full list in `.env.example`):
 | `MEMDB_EMBED_URL` | — | Base URL for embed-server (when type=http) |
 | `POSTGRES_PASSWORD` | — | Required; no default |
 | `MEMDB_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
-| `CROSS_ENCODER_URL` | — | Cohere-compatible reranker base URL (e.g. `https://api.cohere.com`, `https://api.jina.ai`, or your self-hosted TEI / embed-server). Empty disables rerank. |
-| `CROSS_ENCODER_MODEL` | `gte-multi-rerank` | Model name passed in request body. For Cohere: `rerank-multilingual-v3.0`. For Jina: `jina-reranker-v2-base-multilingual`. For self-hosted: whatever name your server registered. |
-| `CROSS_ENCODER_API_KEY` | — | Bearer token. Required for hosted providers (Cohere/Jina/Voyage/Mixedbread); leave empty for self-hosted TEI/embed-server. |
-| `CROSS_ENCODER_TIMEOUT_MS` | `2000` | Per-request HTTP timeout. Hosted ~500ms, self-hosted CPU ~3-8s. |
-| `CROSS_ENCODER_MAX_DOCS` | `50` | Cap candidates sent to reranker. Lower if rerank latency dominates. |
-| `CROSS_ENCODER_MAX_CHARS_PER_DOC` | `0` (off) | Pre-truncate each document to N runes before sending. Saves O(seq²) attention compute. Recommend `200` for self-hosted CPU rerankers. |
+| `CROSS_ENCODER_URL` | — | Cohere-compatible reranker base URL. Empty disables rerank. |
+| `CROSS_ENCODER_MODEL` | `gte-multi-rerank` | Model name passed to the reranker. |
+| `CROSS_ENCODER_API_KEY` | — | Bearer token for hosted rerankers (Cohere/Jina/Voyage). |
 
-### Reranker compatibility
-
-`memdb-go` speaks the **Cohere `/v1/rerank` de-facto standard**:
-- Request: `{model, query, documents: [string], top_n?}`
-- Response: `{results: [{index, relevance_score}], ...}` (extra fields like `id`/`meta` ignored)
-- Auth: `Authorization: Bearer <CROSS_ENCODER_API_KEY>` when key set
-
-Tested against: Cohere hosted, Jina AI, Voyage AI, Mixedbread, HuggingFace text-embeddings-inference (TEI), and our own [embed-server](#embed-server).
-
-See [docs/llm-providers.md](docs/llm-providers.md) for provider-specific configuration (Ollama, OpenRouter, Gemini, LiteLLM).
+See [docs/llm-providers.md](docs/llm-providers.md) for provider-specific configuration
+(Ollama, OpenRouter, Gemini, LiteLLM) and reranker setup.
 
 ---
 
-## Architecture
+## Claude Desktop Integration (MCP)
 
-```
-Claude Desktop / Claude Code / your app
-        │  REST or MCP (stdio)
-        ▼
-   memdb-go :8080
-   ┌─────────────────────────────────────┐
-   │  handlers  │  search  │  scheduler  │
-   │  embedder  │  graph   │  MCP server │
-   └─────────────────────────────────────┘
-        │
-        ▼
-   Postgres 17
-   ├── pgvector  (1024-dim semantic search)
-   └── Apache AGE (graph traversal)
-
-   (optional)
-   embed-server :8081
-   └── ONNX multilingual-e5-large + jina-code-v2
+```bash
+cd memdb-go
+CGO_ENABLED=0 go build -o ~/bin/mcp-stdio-proxy ./cmd/mcp-stdio-proxy
 ```
 
-`memdb-go` is the primary service: REST handlers, MCP server, semantic search, async memory scheduler, and an internal ONNX embedder that can be swapped for an HTTP sidecar or Ollama. Postgres covers both vector and graph storage, eliminating the need for separate databases.
-
-**Python layer:** `src/` contains the original Python pipeline from the upstream fork. It remains for legacy compatibility during transition. New features target the Go service. See [docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md) for migration status.
-
----
-
-## Comparison
-
-Feature comparison based on publicly available information. Performance numbers are not included — run your own benchmarks.
-
-| | MemDB | Mem0 | Zep | MemGPT |
-|---|---|---|---|---|
-| Self-hosted | Yes (Go + Postgres) | OSS server + paid cloud | Yes (Python) | Yes (Python) |
-| License | Apache 2.0 | Apache 2.0 | Apache 2.0 | Apache 2.0 |
-| Primary language | Go | Python | Python | Python |
-| Vector search | pgvector | — | pgvector | vector store |
-| Graph memory | Apache AGE | No | Neo4j | No |
-| MCP native | Yes | No | No | No |
-| Local embeddings | ONNX sidecar | No | No | No |
-| OpenAI-compatible LLM | Yes | Yes | Yes | Yes |
-
----
-
-## Roadmap
-
-**v2.1.0 (2026-04-25)** — M7 Compound Lift Sprint. LoCoMo aggregate F1 0.053 → 0.238 (+349%, first MemOS-tier result). New: `answer_style` field on `/product/chat/complete` (`factual` mode is 2.1× faster at p95), `window_chars` per-request override on `/product/add`, pprof endpoint, embed batching (13× speedup at small windows). Full details in [CHANGELOG.md](CHANGELOG.md#210--2026-04-25).
-
-**v2.0.0 (апрель 2026)** shipped the full Phase D LoCoMo intelligence stack (10 features — hierarchical tree reorganizer, multi-hop AGE retrieval, query rewriting, staged retrieval, CoT decomposition, post-retrieval enhancement, and more). LoCoMo hit@20 = **0.700** on the reproducible harness — above published Mem0 / MemOS numbers. Full details in [CHANGELOG.md](CHANGELOG.md#200--2026-04-24) and [evaluation/locomo/MILESTONES.md](evaluation/locomo/MILESTONES.md).
-
-Near-term priorities:
-
-- **Phase 5 Python deprecation** — ~4 real proxy call sites remain (`users_config` CRUD + 3 edge cases); ~11 safety-net fallbacks to convert to HTTP errors. See [docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md#что-нужно-до-полного-phase-5-shutdown-memdb-api).
-- **LoCoMo full-eval** — run harness in `LOCOMO_SKIP_CHAT=0` chat/complete mode on full 10-conv × 200-QA dataset for statistically-sound F1/EM measurement; expected +0.30-0.45 F1 from D10 synthetic dominating LLM context.
-- **VEC_COT search** — vector chain-of-thought retrieval, separate from Phase D prompt gaps (see [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md#фаза-1--vec_cot-search--не-начато)).
-- **Image memory support** — ONNX CLIP embeddings, image + text co-retrieval (see [ROADMAP-FEATURES.md](ROADMAP-FEATURES.md)).
-- **MemCube cross-sharing** — access control between cubes.
+Then copy `examples/mcp/claude-desktop/claude_desktop_config.json.example` into your
+Claude Desktop config and restart. Walkthrough:
+[examples/mcp/claude-desktop/README.md](examples/mcp/claude-desktop/README.md).
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Issues and pull requests are welcome on [GitHub](https://github.com/anatolykoptev/memdb).
+Pull requests, issues, and design discussion are welcome.
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, branch naming, PR checklist
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+- [SECURITY.md](SECURITY.md) — vulnerability disclosure
+- [GitHub Discussions](https://github.com/anatolykoptev/memdb/discussions) — questions and design ideas
+- [Discord](https://discord.gg/8vhbTZgf) — chat with maintainers and other users
 
 ---
 
 ## Acknowledgments
 
-MemDB is a hard fork of [MemOS](https://github.com/MemTensor/MemOS) by MemTensor.
-
-The original research paper — "MemOS: A Memory OS for AI System" ([arXiv:2507.03724](https://arxiv.org/abs/2507.03724)) — describes the architecture, Memory-Augmented Generation (MAG) concept, and cube-based memory design that this codebase is built on. The MemOS team's work is the foundation of this project.
+MemDB is a hard fork of [MemOS](https://github.com/MemTensor/MemOS) by MemTensor. The
+original research paper — *MemOS: A Memory OS for AI System*
+([arXiv:2507.03724](https://arxiv.org/abs/2507.03724)) — describes the cube-based memory
+design and Memory-Augmented Generation (MAG) concept this codebase is built on.
 
 If you use MemDB in research, please cite the original MemOS papers:
 
 ```bibtex
 @article{li2025memos_long,
   title={MemOS: A Memory OS for AI System},
-  author={Li, Zhiyu and Song, Shichao and Xi, Chenyang and Wang, Hanyu and Tang, Chen and Niu, Simin and Chen, Ding and Yang, Jiawei and Li, Chunyu and Yu, Qingchen and Zhao, Jihao and Wang, Yezhaohui and Liu, Peng and Lin, Zehao and Wang, Pengyuan and Huo, Jiahao and Chen, Tianyi and Chen, Kai and Li, Kehang and Tao, Zhen and Ren, Junpeng and Lai, Huayi and Wu, Hao and Tang, Bo and Wang, Zhenren and Fan, Zhaoxin and Zhang, Ningyu and Zhang, Linfeng and Yan, Junchi and Yang, Mingchuan and Xu, Tong and Xu, Wei and Chen, Huajun and Wang, Haofeng and Yang, Hongkang and Zhang, Wentao and Xu, Zhi-Qin John and Chen, Siheng and Xiong, Feiyu},
+  author={Li, Zhiyu and Song, Shichao and Xi, Chenyang and Wang, Hanyu and others},
   journal={arXiv preprint arXiv:2507.03724},
   year={2025},
   url={https://arxiv.org/abs/2507.03724}
@@ -231,7 +314,7 @@ If you use MemDB in research, please cite the original MemOS papers:
 
 @article{li2025memos_short,
   title={MemOS: An Operating System for Memory-Augmented Generation (MAG) in Large Language Models},
-  author={Li, Zhiyu and Song, Shichao and Wang, Hanyu and Niu, Simin and Chen, Ding and Yang, Jiawei and Xi, Chenyang and Lai, Huayi and Zhao, Jihao and Wang, Yezhaohui and others},
+  author={Li, Zhiyu and Song, Shichao and Wang, Hanyu and others},
   journal={arXiv preprint arXiv:2505.22101},
   year={2025},
   url={https://arxiv.org/abs/2505.22101}
@@ -242,4 +325,4 @@ If you use MemDB in research, please cite the original MemOS papers:
 
 ## License
 
-Apache 2.0. See [LICENSE](LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE).
