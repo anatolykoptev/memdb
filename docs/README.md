@@ -5,8 +5,6 @@ Documentation is maintained alongside the code in this repository.
 | File | Description |
 |------|-------------|
 | [llm-providers.md](llm-providers.md) | LLM provider configuration (OpenAI, Ollama, Gemini, LiteLLM) |
-| [internal-dev.md](internal-dev.md) | Internal development notes |
-| [product-api-tests.md](product-api-tests.md) | Product API test scenarios |
 | [d3-gate-audit.md](d3-gate-audit.md) | D3 hierarchical reorganizer gate audit |
 | [design/2026-04-25-sliding-window-decision.md](design/2026-04-25-sliding-window-decision.md) | Sliding window `window_chars` design decision (Option A: additive opt-in) |
 | [perf/2026-04-25-m7-latency-report.md](perf/2026-04-25-m7-latency-report.md) | M7 latency report: embed batching 13× speedup, factual chat 2.1× |
