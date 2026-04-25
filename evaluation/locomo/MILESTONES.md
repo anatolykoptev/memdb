@@ -820,6 +820,45 @@ LLM-Judge comparable number is pending Stage 3 re-run (OOM deferred, see above).
 
 ---
 
+## 2026-04-26 — M9 Stage 3 v3 (full LoCoMo, all features)
+
+**Stack**: Phase D (D1-D11) + M7 (factual prompt + raw ingest) + M8 (D11 CoT, structural edges) + M9 (date-aware extract, dual-speaker, LLM Judge, cat-5 exclusion).
+
+### Chat-50 (stratified 5 cats × 10 convs, end-to-end with generation)
+
+| Metric | All cats (n=50) | Excl cat-5 (Memobase convention) |
+|--------|-----------------|----------------------------------|
+| F1 | 0.147 | 0.156 |
+| **LLM Judge (headline)** | **62.0%** | **70.0%** |
+
+### Retrieval-only (full 1986 QAs)
+
+| Metric | All cats | Excl cat-5 |
+|--------|----------|------------|
+| F1 | 0.029 | 0.031 |
+| LLM Judge | 26.7% | 30.5% |
+| hit@k | 0.520 | 0.518 |
+
+### vs public leaderboard
+
+| System | LLM Judge | Notes |
+|--------|-----------|-------|
+| Memobase | 75.78% | Public leaderboard |
+| MemOS | 73.31% | Public leaderboard |
+| **MemDB v0.22.0** | **70.0%** | M9 stack, chat-50 stratified, excl cat-5 |
+| Mem0 | 66.88% | Public leaderboard |
+
+Position: between Mem0 and MemOS, -5.78pp below Memobase leader. M10 `user_profiles` layer is the path to closing the gap.
+
+### Files
+- `evaluation/locomo/results/m9-stage3-v3-summary.md`
+- `evaluation/locomo/results/m9-stage3-v3-retrieval.json` (1986 predictions)
+- `evaluation/locomo/results/m9-stage3-v3-retrieval-score.json`
+- `evaluation/locomo/results/m9-stage3-v3-chat50-preds.json`
+- `evaluation/locomo/results/m9-stage3-v3-chat50-score.json`
+
+---
+
 ## How to record a new milestone
 
 ```bash
