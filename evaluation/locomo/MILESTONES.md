@@ -627,6 +627,44 @@ single-conv result. Whether it generalises requires re-running with a stable ing
 
 Filed as backlog item — this is a measurement-tooling failure, not a model regression.
 
+### 2026-04-24 — M9 Stream 4 (date-aware extract prompt) — **prompt change, no measurement yet**
+
+Wires `[mention YYYY-MM-DD]` time-anchoring into the fine-mode extraction call,
+gated behind `MEMDB_DATE_AWARE_EXTRACT` (default true). Hint follows Memobase's
+`extract_profile.py:97-98` recipe (relative-date ban + explicit ISO tag),
+which they cite as a driver of their public-best 85.05% temporal F1
+(+5pp over runner-up).
+
+**What shipped**:
+- `internal/handlers/add_fine_prompt.go` — `dateAwareExtractEnabled()`
+  (env-gate, default-true; only `false`/`0` disable, case-insensitive),
+  `dateAwareExtractHints()` (returns hint slice or nil), and the
+  `memdb.add.date_aware_extract_total{outcome=enabled|disabled|error}`
+  OTel counter.
+- `internal/handlers/add_fine.go` — prepends date-aware hint to
+  `sig.Hints` before the unified `ExtractAndDedup` call. Counter emitted
+  exactly once per call.
+- `internal/handlers/add_fine_test.go` — 12 unit tests covering env
+  parsing, hint composition, and load-bearing tokens in the hint string.
+- `internal/handlers/add_fine_livepg_test.go` — 2 `//go:build livepg`
+  tests using a stub LLM server: positive case asserts `[mention 2024-05-12]`
+  survives extraction → embedding → Postgres insert; negative case asserts
+  non-temporal facts get NO spurious tag.
+
+**What did NOT ship in this stream**:
+- Re-ingest of existing memories (FUTURE-only — old memories don't get
+  re-tagged).
+- Buffer-flush path (`add_buffer.go` — `runFinePipeline`) ALSO shipped
+  after spec-review caught the gap (commit `2cd3bcfb`). Sync AND async
+  ingest both inject `[mention YYYY-MM-DD]` instruction when env enabled.
+  Stream 5 measurement covers both paths.
+- LoCoMo measurement vs M7 cat-3 temporal baseline (0.201). Stream 5
+  (Stage 3 v3) re-ingest is the proper measurement vehicle.
+
+**Expected (unmeasured)**: lift on cat-3 temporal QAs once Stream 5 re-ingests
+with the new hint. Reproducing even a fraction of Memobase's +5pp cited delta
+on the temporal slice would push cat-3 F1 from 0.201 toward 0.25+.
+
 ## Historical baseline note — single-speaker retrieval (pre-M9)
 
 **All milestones above (baseline-v1.1.0 through M8/Stage 3) were measured with

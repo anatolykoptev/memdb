@@ -852,6 +852,82 @@ func TestSetBufferConfig(t *testing.T) {
 	}
 }
 
+// --- Date-aware hints in buffer-flush path ---
+
+// newCaptureLLMServer returns a test HTTP server that records the full request
+// body of the first LLM call and immediately returns an empty fact list so the
+// pipeline can complete without postgres.
+func newCaptureLLMServer(t *testing.T, captured *string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		*captured = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		resp := map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"content": "[]"}},
+			},
+		}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+}
+
+// TestRunFinePipeline_DateAwareHintsPrepended verifies that when
+// MEMDB_DATE_AWARE_EXTRACT=true (default), runFinePipeline forwards the
+// date-aware hint ([mention YYYY-MM-DD]) to the LLM call.
+func TestRunFinePipeline_DateAwareHintsPrepended(t *testing.T) {
+	t.Setenv("MEMDB_DATE_AWARE_EXTRACT", "true")
+
+	var captured string
+	llmServer := newCaptureLLMServer(t, &captured)
+	defer llmServer.Close()
+
+	extractor := llm.NewLLMExtractor(llmServer.URL, "test-key", "test-model", nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	h := &Handler{
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		llmExtractor: extractor,
+		embedder:     &failEmbedder{}, // skip postgres vector search
+	}
+
+	ctx := context.Background()
+	conversation := "user: [2026-02-21T10:00:00]: I have a dentist appointment on 2026-03-15"
+	_, _ = h.runFinePipeline(ctx, conversation, "test-cube")
+
+	if !strings.Contains(captured, "[mention YYYY-MM-DD]") {
+		t.Errorf("expected LLM request to contain [mention YYYY-MM-DD] date-aware hint when enabled; captured body:\n%s", captured)
+	}
+}
+
+// TestRunFinePipeline_DateAwareDisabled_NoHintInjected verifies that when
+// MEMDB_DATE_AWARE_EXTRACT=false the date-aware hint is NOT forwarded to the
+// LLM — only the content-router hints (if any) pass through.
+func TestRunFinePipeline_DateAwareDisabled_NoHintInjected(t *testing.T) {
+	t.Setenv("MEMDB_DATE_AWARE_EXTRACT", "false")
+
+	var captured string
+	llmServer := newCaptureLLMServer(t, &captured)
+	defer llmServer.Close()
+
+	extractor := llm.NewLLMExtractor(llmServer.URL, "test-key", "test-model", nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	h := &Handler{
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		llmExtractor: extractor,
+		embedder:     &failEmbedder{}, // skip postgres vector search
+	}
+
+	ctx := context.Background()
+	conversation := "user: [2026-02-21T10:00:00]: I have a dentist appointment on 2026-03-15"
+	_, _ = h.runFinePipeline(ctx, conversation, "test-cube")
+
+	if strings.Contains(captured, "[mention YYYY-MM-DD]") {
+		t.Errorf("expected LLM request to NOT contain [mention YYYY-MM-DD] hint when disabled; captured body:\n%s", captured)
+	}
+}
+
 // --- Config test ---
 
 func TestBufferConfig_Defaults(t *testing.T) {
