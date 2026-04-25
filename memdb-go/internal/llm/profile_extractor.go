@@ -18,7 +18,12 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
@@ -31,7 +36,95 @@ const (
 	// profileMinMemoChars is the minimum conversation length before we even
 	// attempt extraction. Avoids hitting the LLM for trivial 2-token replies.
 	profileMinMemoChars = 32
+
+	// Audit C2 — sanitisation caps. Topic/SubTopic are short canonical labels;
+	// memos are observable facts ("software engineer"), not paragraphs. These
+	// caps cut off attacker-crafted prose smuggled through the TSV columns
+	// without truncating any legitimate Memobase example.
+	profileTopicMaxLen    = 64
+	profileSubTopicMaxLen = 64
+	profileMemoMaxLen     = 512
 )
+
+// profileBlocklist is the case-insensitive substring deny-list applied to
+// extracted memos. These markers are LLM role / control sequences that have
+// no business surfacing in an "observed fact" memo and are the building
+// blocks of jailbreak attempts (audit C2).
+var profileBlocklist = []string{
+	"system:",
+	"assistant:",
+	"user:",
+	"</output>",
+	"<system>",
+	"<|im_start|>",
+	"<|im_end|>",
+	"###system",
+	"###assistant",
+	"ignore prior",
+	"ignore previous",
+	"you are now",
+	"previous instructions",
+}
+
+// profileControlCharsRE collapses control characters (NUL..0x1F) into a
+// single space so attackers cannot smuggle line-breaks, tabs or CR-injection
+// through memo bodies.
+var profileControlCharsRE = regexp.MustCompile(`[\x00-\x1f]+`)
+
+// profileTopicAlphaRE asserts the topic contains at least one Latin alpha
+// letter. Numeric-only or punctuation-only topics are sentinel garbage from
+// hostile parses and never appear in the Memobase taxonomy.
+var profileTopicAlphaRE = regexp.MustCompile(`[A-Za-z]`)
+
+// ── Sanitisation metrics (audit C2) ─────────────────────────────────────────
+
+var (
+	profileSanitiseMxOnce sync.Once
+	profileSanitiseMxInst metric.Int64Counter
+)
+
+func profileSanitiseMx() metric.Int64Counter {
+	profileSanitiseMxOnce.Do(func() {
+		meter := otel.Meter("memdb-go/llm")
+		c, _ := meter.Int64Counter("memdb.add.profile_extract_total",
+			metric.WithDescription("Profile extraction outcomes (sanitisation rejects, truncations)."),
+		)
+		profileSanitiseMxInst = c
+	})
+	return profileSanitiseMxInst
+}
+
+func recordProfileSanitiseOutcome(outcome string) {
+	c := profileSanitiseMx()
+	if c == nil {
+		return
+	}
+	c.Add(context.Background(), 1, metric.WithAttributes(attribute.String("outcome", outcome)))
+}
+
+// truncateRune cuts s to at most maxRunes Unicode code points. If truncated,
+// it appends "…" so downstream readers can spot the boundary.
+func truncateRune(s string, maxRunes int) (string, bool) {
+	if maxRunes <= 0 {
+		return s, false
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s, false
+	}
+	return string(runes[:maxRunes]) + "…", true
+}
+
+// containsBlocklisted returns the first blocklist substring present in
+// memoLower (already lower-cased), or "" if none match.
+func containsBlocklisted(memoLower string) string {
+	for _, needle := range profileBlocklist {
+		if strings.Contains(memoLower, needle) {
+			return needle
+		}
+	}
+	return ""
+}
 
 // ErrEmptyConversation is returned by ExtractProfile when the memo is below
 // profileMinMemoChars after trimming. Callers should treat as a no-op.
@@ -211,16 +304,58 @@ func parseProfileTSV(raw, userID, cubeID string, now time.Time) []db.InsertProfi
 	return out
 }
 
-// buildProfileEntry normalises whitespace, lower-cases topic/sub_topic
 // (Memobase canonical form), and rejects empty memos. The cubeID is stamped
 // verbatim — callers must validate it (ExtractProfile rejects empty values).
+//
+// Audit C2 — sanitisation: collapses control characters (a memo is a
+// single-line observation), enforces length caps so attackers cannot
+// smuggle paragraphs of injected prose through the TSV columns, and
+// rejects memos that contain LLM role markers / known jailbreak primers.
+// Topics must contain at least one Latin alpha character; numeric-only
+// or punctuation-only topics never appear in the Memobase taxonomy and
+// are a strong attacker-output signal.
 func buildProfileEntry(topic, subTopic, memo, userID, cubeID string, now time.Time) (db.InsertProfileParams, bool) {
 	topic = strings.ToLower(strings.TrimSpace(topic))
 	subTopic = strings.ToLower(strings.TrimSpace(subTopic))
+
+	// Single-line memo enforcement — strip control chars (incl. \r, \n, \t,
+	// NUL etc.) before any length / blocklist test so attackers cannot hide
+	// markers behind \r\n splits.
+	memo = profileControlCharsRE.ReplaceAllString(memo, " ")
 	memo = strings.TrimSpace(memo)
+
 	if topic == "" || subTopic == "" || memo == "" {
 		return db.InsertProfileParams{}, false
 	}
+
+	// Topic must include at least one alphabetic character.
+	if !profileTopicAlphaRE.MatchString(topic) {
+		recordProfileSanitiseOutcome("topic_non_alpha")
+		return db.InsertProfileParams{}, false
+	}
+
+	// Length caps. Topics/subtopics are short canonical labels; memos are
+	// observations. Truncate (not reject) so a single overlong fact is still
+	// surfaced — but with an explicit ellipsis marker.
+	if t, truncated := truncateRune(topic, profileTopicMaxLen); truncated {
+		topic = t
+		recordProfileSanitiseOutcome("topic_truncated")
+	}
+	if s, truncated := truncateRune(subTopic, profileSubTopicMaxLen); truncated {
+		subTopic = s
+		recordProfileSanitiseOutcome("sub_topic_truncated")
+	}
+	if m, truncated := truncateRune(memo, profileMemoMaxLen); truncated {
+		memo = m
+		recordProfileSanitiseOutcome("memo_truncated")
+	}
+
+	// Role-marker / jailbreak-primer block.
+	if hit := containsBlocklisted(strings.ToLower(memo)); hit != "" {
+		recordProfileSanitiseOutcome("injection_rejected")
+		return db.InsertProfileParams{}, false
+	}
+
 	validAt := now
 	return db.InsertProfileParams{
 		UserID:     userID,
