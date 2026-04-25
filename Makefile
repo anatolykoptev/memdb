@@ -1,39 +1,39 @@
-.PHONY: test test-migrations-fresh-db eval-locomo eval-locomo-full
+.PHONY: help build test lint vet eval-locomo eval-locomo-full test-migrations-fresh-db clean
 
-install:
-	poetry install --extras all --with dev --with test
-	poetry run pre-commit install --install-hooks
+GO := GOWORK=off go
+MEMDB_GO := memdb-go
 
-clean:
-	rm -rf .memdb
-	rm -rf .pytest_cache
-	rm -rf .ruff_cache
-	rm -rf tmp
+help:
+	@echo "MemDB make targets:"
+	@echo "  build                       — go build ./... in memdb-go"
+	@echo "  test                        — go test ./... in memdb-go"
+	@echo "  lint                        — golangci-lint run in memdb-go"
+	@echo "  vet                         — go vet ./... in memdb-go"
+	@echo "  test-migrations-fresh-db    — fresh-DB integration test"
+	@echo "  eval-locomo                 — LoCoMo retrieval benchmark (sample)"
+	@echo "  eval-locomo-full            — LoCoMo retrieval benchmark (full)"
+	@echo "  clean                       — remove tmp + caches"
+
+build:
+	cd $(MEMDB_GO) && $(GO) build ./...
 
 test:
-	poetry run pytest tests
+	cd $(MEMDB_GO) && $(GO) test ./...
 
-format:
-	poetry run ruff check --fix
-	poetry run ruff format
+lint:
+	cd $(MEMDB_GO) && golangci-lint run
 
-pre_commit:
-	poetry run pre-commit run -a
-
-serve:
-	poetry run uvicorn memdb.api.start_api:app
-
-openapi:
-	poetry run memdb export_openapi --output docs/openapi.json
+vet:
+	cd $(MEMDB_GO) && $(GO) vet ./...
 
 test-migrations-fresh-db:
-	bash memdb-go/scripts/test-migrations-fresh-db.sh
+	bash $(MEMDB_GO)/scripts/test-migrations-fresh-db.sh
 
-# LoCoMo evaluation harness — retrieval quality measurement for memdb-go.
-# Requires memdb-go stack to be running (MEMDB_URL, default localhost:8080).
-# See evaluation/locomo/README.md.
 eval-locomo:
 	bash evaluation/locomo/run.sh
 
 eval-locomo-full:
 	LOCOMO_FULL=1 bash evaluation/locomo/run.sh
+
+clean:
+	rm -rf .memdb tmp
