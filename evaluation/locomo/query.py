@@ -98,6 +98,10 @@ def _parse_dual_speaker_env(raw: str | None) -> bool:
 
 LOCOMO_DUAL_SPEAKER = _parse_dual_speaker_env(os.getenv("LOCOMO_DUAL_SPEAKER"))
 
+# Suppresses server-side retrieval in chat: above this cosine score, server
+# returns nothing extra so we rely on our pre-fetched dual-speaker context.
+_CHAT_RETRIEVAL_SUPPRESS_THRESHOLD = 0.99
+
 
 def build_headers() -> dict:
     """Auth headers from env: MEMDB_API_KEY (Bearer) or MEMDB_SERVICE_SECRET."""
@@ -482,7 +486,6 @@ def query_search_dual(
 def _build_dual_speaker_system_prompt(
     speaker_a_items: list[dict],
     speaker_b_items: list[dict],
-    query: str,
 ) -> str:
     """Assemble a system prompt that exposes both speakers' memories.
 
@@ -549,7 +552,7 @@ def query_chat_dual(
         )
 
     system_prompt = _build_dual_speaker_system_prompt(
-        speaker_a_items, speaker_b_items, query
+        speaker_a_items, speaker_b_items
     )
 
     # The chat endpoint requires a user_id; pick speaker_a deterministically.
@@ -562,7 +565,7 @@ def query_chat_dual(
         "top_k": 1,
         "mode": "fast",
         "include_preference": False,
-        "threshold": 0.99,
+        "threshold": _CHAT_RETRIEVAL_SUPPRESS_THRESHOLD,
         "system_prompt": system_prompt,
     }
     start = time.time()
