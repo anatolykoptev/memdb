@@ -18,13 +18,14 @@ var (
 )
 
 type searchMetricsInstruments struct {
-	D4Rewrite   metric.Int64Counter
-	D7CoT       metric.Int64Counter
-	D5Staged    metric.Int64Counter
-	D5Justified metric.Int64Counter
-	D10Enhance  metric.Int64Counter
-	D10Conf     metric.Float64Histogram
-	Multihop    metric.Int64Counter
+	D4Rewrite    metric.Int64Counter
+	D7CoT        metric.Int64Counter
+	D5Staged     metric.Int64Counter
+	D5Justified  metric.Int64Counter
+	D10Enhance   metric.Int64Counter
+	D10Conf      metric.Float64Histogram
+	Multihop     metric.Int64Counter
+	HopsPerQuery metric.Int64Histogram // M8: max hop reached per D2 expansion call
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -45,14 +46,22 @@ func searchMx() *searchMetricsInstruments {
 			metric.WithExplicitBucketBoundaries(0.1, 0.3, 0.5, 0.7, 0.9, 1.0))
 		mh, _ := m.Int64Counter("memdb.search.multihop",
 			metric.WithDescription("D2 multi-hop graph expansion outcomes (expanded/empty_seeds/error/disabled)"))
+		// HopsPerQuery (M8): max hop reached per call to expandViaGraph. Lets
+		// ops tell at a glance whether D2 is actually walking past hop-1
+		// (signal that the graph topology is dense enough for multi-hop to
+		// matter). Buckets cover the full [0, MEMDB_D2_MAX_HOP] range up to 5.
+		hpq, _ := m.Int64Histogram("memdb.search.d2_hops_per_query",
+			metric.WithDescription("D2 multi-hop expansion: max hop reached per query (0 = no neighbors, n = walked n hops)"),
+			metric.WithExplicitBucketBoundaries(0, 1, 2, 3, 4, 5))
 		searchMetrics = &searchMetricsInstruments{
-			D4Rewrite:   d4,
-			D7CoT:       d7,
-			D5Staged:    d5,
-			D5Justified: d5j,
-			D10Enhance:  d10,
-			D10Conf:     d10c,
-			Multihop:    mh,
+			D4Rewrite:    d4,
+			D7CoT:        d7,
+			D5Staged:     d5,
+			D5Justified:  d5j,
+			D10Enhance:   d10,
+			D10Conf:      d10c,
+			Multihop:     mh,
+			HopsPerQuery: hpq,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a

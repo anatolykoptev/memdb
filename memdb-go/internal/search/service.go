@@ -149,7 +149,7 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	// CONTRADICTS so expanded neighbors also get the penalty if they are
 	// contradicted by a seed. No-op when disabled or on DB error.
 	t0 = time.Now()
-	textMerged = expandViaGraph(ctx, s.postgres, s.logger, textMerged, p.CubeID, p.UserName, p.AgentID)
+	textMerged = expandViaGraph(ctx, s.postgres, s.logger, textMerged, queryVec, p.CubeID, p.UserName, p.AgentID)
 	multihopDur := time.Since(t0)
 
 	// Step 4.5: CONTRADICTS penalty
