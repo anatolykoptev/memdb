@@ -45,6 +45,53 @@ INSERT INTO memory_edges (from_id, to_id, relation, created_at, valid_at, confid
 VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, NULLIF($7, ''))
 ON CONFLICT (from_id, to_id, relation) DO NOTHING`
 
+// BulkInsertMemoryEdges inserts many edges in a single round-trip via
+// UNNEST. Idempotent: duplicate (from_id, to_id, relation) rows skip.
+// Used by the M8 structural-edge emitter at ingest (SAME_SESSION,
+// TIMELINE_NEXT, SIMILAR_COSINE_HIGH) — three round-trips per /add otherwise.
+//
+// Args (all parallel arrays of equal length):
+//
+//	$1 = from_ids   (text[])
+//	$2 = to_ids     (text[])
+//	$3 = relations  (text[])
+//	$4 = created_at (text)        — single timestamp shared across the batch
+//	$5 = confidence (float8[])    — weight in [0,1]
+//	$6 = rationales (text[])      — opaque payload (e.g. {"dt_seconds":42})
+const BulkInsertMemoryEdges = `
+INSERT INTO memory_edges (from_id, to_id, relation, created_at, confidence, rationale)
+SELECT f, t, r, $4, c, NULLIF(rat, '')
+FROM UNNEST($1::text[], $2::text[], $3::text[], $5::float8[], $6::text[])
+     AS u(f, t, r, c, rat)
+ON CONFLICT (from_id, to_id, relation) DO NOTHING`
+
+// SessionMemoryNeighbors returns activated LongTermMemory/UserMemory rows
+// belonging to (cube_id, session_id) — the seed pool for SAME_SESSION /
+// TIMELINE_NEXT structural edges at ingest. Sorted by created_at ASC so the
+// caller can build the timeline chain in one pass.
+//
+// memory_type whitelist intentionally excludes WorkingMemory: WM rows are
+// transient (deleted by the WM→LTM transfer worker), so edges pointing at
+// them would dangle. EpisodicMemory/SemanticMemory are emitted by D3 later
+// and don't share a session_id with raw turns.
+//
+// Embedding is returned as text for ParseVectorString — keeps this query
+// reusable for SIMILAR_COSINE_HIGH edge candidates without a second round-trip.
+//
+// Args: $1 = cube_id (user_name), $2 = session_id, $3 = limit (int)
+const SessionMemoryNeighbors = `
+SELECT
+    properties->>(('id'::text))         AS memory_id,
+    COALESCE(properties->>(('created_at'::text)), '') AS created_at,
+    COALESCE(embedding::text, '')       AS embedding_text
+FROM %[1]s."Memory"
+WHERE properties->>(('user_name'::text))   = $1
+  AND properties->>(('session_id'::text))  = $2
+  AND properties->>(('status'::text))      = 'activated'
+  AND properties->>(('memory_type'::text)) IN ('LongTermMemory', 'UserMemory')
+ORDER BY properties->>(('created_at'::text)) ASC
+LIMIT $3`
+
 // GraphRecallByEdge returns memory nodes reachable from seed_ids via edges of a given relation.
 // Used to traverse EXTRACTED_FROM, MERGED_INTO, and CONTRADICTS relationships in graph recall.
 // Bi-temporal filter: only follows edges where invalid_at IS NULL (currently valid edges).
