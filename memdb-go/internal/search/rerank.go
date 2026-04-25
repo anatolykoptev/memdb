@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -13,6 +14,11 @@ import (
 // access_count (e.g. 10k+) cannot dominate the final score. 1 + ln(1+148) ≈ 5,
 // so 148 hits already saturate — beyond that the multiplier is flat.
 const d1ImportanceCap = 5.0
+
+// defaultPageRankBoostWeight is the default boost weight for the PageRank
+// multiplier applied in the D1 rerank formula. Must stay in sync with
+// scheduler.defaultPageRankBoostWeight (0.1).
+const defaultPageRankBoostWeight = 0.1
 
 // d1ImportanceEnabled reports whether the D1 combined-formula branch is
 // active. Read on every call (not at init) so tests can flip the env var
@@ -23,6 +29,55 @@ const d1ImportanceCap = 5.0
 // rollout.
 func d1ImportanceEnabled() bool {
 	return os.Getenv("MEMDB_D1_IMPORTANCE") == "true"
+}
+
+// pageRankBoostEnabled reports whether the PageRank boost is applied in D1 rerank.
+// Gated by MEMDB_PAGERANK_ENABLED (same env as the background goroutine).
+// Default TRUE — matching the scheduler side default.
+func pageRankBoostEnabled() bool {
+	v := os.Getenv("MEMDB_PAGERANK_ENABLED")
+	return v == "" || v == "true"
+}
+
+// pageRankBoostWeight returns the weight for the PageRank boost multiplier.
+// Env: MEMDB_PAGERANK_BOOST_WEIGHT in [0, 1]. Default 0.1.
+func pageRankBoostWeight() float64 {
+	raw := os.Getenv("MEMDB_PAGERANK_BOOST_WEIGHT")
+	if raw == "" {
+		return defaultPageRankBoostWeight
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v < 0 || v > 1 {
+		return defaultPageRankBoostWeight
+	}
+	return v
+}
+
+// pageRankMultiplier returns (1 + pagerank * boostWeight) for a memory item.
+// Reads pagerank from metadata as a float string (stored by BulkSetPageRank).
+// Returns 1.0 (identity) when pagerank is absent, zero, or the gate is off.
+func pageRankMultiplier(meta map[string]any) float64 {
+	if !pageRankBoostEnabled() {
+		return 1.0
+	}
+	// pagerank may be stored as string (agtype TEXT) or float64 (JSON decode).
+	var pr float64
+	switch v := meta["pagerank"].(type) {
+	case float64:
+		pr = v
+	case string:
+		parsed, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return 1.0
+		}
+		pr = parsed
+	default:
+		return 1.0
+	}
+	if pr <= 0 {
+		return 1.0
+	}
+	return 1.0 + pr*pageRankBoostWeight()
 }
 
 // hierarchyBoostEnabled reports whether the D3 hierarchy-tier boost is active.
@@ -192,17 +247,21 @@ func applyDecayToItem(item map[string]any, now time.Time, alpha float64) {
 	}
 
 	if d1ImportanceEnabled() {
-		// D1 combined formula: cosine * decay * importance * hierarchy, capped at 1.0.
+		// D1 combined formula: cosine * decay * importance * hierarchy * pagerank, capped at 1.0.
 		// The hierarchy factor (D3) is 1.0 unless MEMDB_REORG_HIERARCHY=true AND
 		// the item carries an episodic/semantic hierarchy_level. Applied inside
 		// the D1 branch because D3 builds on D1's infrastructure — enabling D3
 		// without D1 would mean the boost never runs, which is fine.
+		// The PageRank factor (M10 S7) is (1 + pr * weight), default weight 0.1.
+		// Missing pagerank → multiplier 1.0 (identity), so existing memories rank
+		// correctly before the first PageRank cycle completes.
 		imp := importanceMultiplier(meta)
 		hier := 1.0
 		if hierarchyBoostEnabled() {
 			hier = hierarchyBoost(meta)
 		}
-		combined := cosine * recency * imp * hier
+		pr := pageRankMultiplier(meta)
+		combined := cosine * recency * imp * hier * pr
 		if combined > 1.0 {
 			combined = 1.0
 		}
