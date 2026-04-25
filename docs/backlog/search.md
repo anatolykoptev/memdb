@@ -150,3 +150,106 @@ S10 structural edges).
 this reduces ingest bottleneck.
 
 **Effort:** M. M10 candidate (also listed in ROADMAP.md M10 table).
+
+---
+
+## LLM Cost Optimization (long-term)
+
+> Moved from `docs/memdb-go/roadmap.md` (deleted 2026-04-26, was stale on v2.0.0 era).
+> Items below are long-term tracks — not overlapping with current sprint priorities.
+
+### Phase 7 — LLM Cost Quick Wins (1-2 weeks, -57% target)
+
+**7.1 Classifier gate before ExtractAndDedup**
+
+60-70% of messages ("ok", "thanks", pure code, logs) contain no memorable facts.
+A small ONNX BERT or rule-based classifier runs before `ExtractAndDedup` to decide
+whether LLM extraction is worth calling.
+
+- Rule-based: length < 50 chars, regex on casual patterns, code/prose ratio → skip
+- TF-IDF classifier: trained on our data (has_facts / no_facts)
+- Small ONNX model: distilbert-base fine-tuned, ~5ms inference
+
+Files: `internal/handlers/add_classifier.go` (NEW), `add_fine.go` (gate before LLM).
+Expected: ~60% reduction in ExtractAndDedup LLM calls.
+
+**7.2 Embedding-only dedup (three-zone routing)**
+
+Three-zone dedup routing to avoid LLM in obvious cases:
+- cosine > 0.95 → auto-skip (duplicate), no LLM
+- cosine < 0.80 → auto-add (new), no LLM
+- 0.80-0.95 → LLM decides (current behavior)
+
+Files: `internal/llm/extractor.go` (pre-filter), `handlers/add_fine.go` (routing).
+Expected: 80-90% of dedup decisions without LLM.
+
+**7.3 Conditional LLM rerank**
+
+Skip rerank when: results ≤ 3, all results > 0.92 cosine, or profile = "inject".
+Files: `internal/search/service.go` (conditional gate).
+Expected: ~40% reduction in LLMRerank calls.
+
+**7.4 Buffer zone (from Memobase)**
+
+Accumulate messages in buffer; flush through LLM only at threshold (N messages / T seconds).
+Reduces LLM calls for frequent short adds.
+Files: integrate into Phase 7 gate before `ExtractAndDedup`.
+Priority: high.
+
+**7.5 Episodic summarization sampling**
+
+Skip episodic summary when: session < 3 turns, content < 200 chars, > 80% code blocks.
+Files: `internal/handlers/add_episodic.go` (gate).
+Expected: ~30% reduction in episodic LLM calls.
+
+---
+
+### Phase 8 — ColBERT Reranking: Zero-Cost Quality (2-3 weeks)
+
+Replace LLM rerank with a local ONNX model. Quality ≈ LLM at zero token cost.
+
+**8.1 ColBERT/Cross-encoder reranker (ONNX)**
+
+Jina-ColBERT-v2 or BGE-reranker-v2-m3 as ONNX. Late interaction scoring: ~5ms inference,
+multilingual, quality on par with GPT-3.5 reranking.
+
+Integration:
+- `SearchParams.LLMRerank` → `SearchParams.Reranker` (enum: "none", "colbert", "llm")
+- Default: "colbert" (free), "llm" only for deep profile
+- Fallback: ColBERT unavailable → LLM → cosine
+
+Files: `internal/search/rerank_colbert.go` (NEW), `internal/search/service.go` (switch reranker),
+`internal/embedder/colbert.go` (NEW — ONNX session management).
+
+**8.2 Query complexity classifier**
+
+Embedding-based classifier to skip multi-stage `IterativeExpand` for simple queries
+(single-entity lookup). Complex queries (multi-hop, temporal, comparative) still expand.
+Files: `internal/search/query_classifier.go` (NEW).
+Expected: ~50% reduction in IterativeExpand LLM calls.
+
+---
+
+### Phase 9 — Distilled Extraction Model (1-2 months)
+
+Fine-tune Gemma-3n (2B) or Phi-4-mini (3.8B) on our extraction task. Quantize to GGUF Q4/Q8.
+Deploy as ONNX or llama.cpp sidecar. Confidence < 0.7 → fallback to Gemini API.
+
+Alternatives evaluated:
+- **Schema-guided extraction** (from Memobase) — YAML config with topics/subtopics; LLM
+  extracts only on schema → fewer hallucinations. Good alternative to fine-tune for domain-specific use.
+- **Custom extraction prompts** (from mem0) — user-provided system prompt for extraction.
+  Parameter: `extraction_prompt` in configure API.
+
+---
+
+### Phase 10 — Procedural Memory (2-3 months)
+
+Pattern detection from corrections: if user corrects the same thing 3+ times → create
+`ProceduralMemory` node ("User prefers snake_case naming convention").
+
+Types: naming conventions, code style, communication preferences, tool preferences, workflow patterns.
+Files: `internal/scheduler/pattern_detector.go` (NEW).
+
+Related: **Proactive memory** (arxiv 2601.04463) — iterative self-questioning for completeness
+of extraction. Enable only for deep profile / sessions > 10 turns.
