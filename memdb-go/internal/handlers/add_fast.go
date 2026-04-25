@@ -83,8 +83,34 @@ func (h *Handler) nativeFastAddForCube(ctx context.Context, req *fullAddRequest,
 		return nil, fmt.Errorf("insert nodes: %w", err)
 	}
 	h.writeWMCache(ctx, cubeID, allNodes, items, wmEmbeddings)
+	// M8 Stream 10 — emit structural edges (SAME_SESSION / TIMELINE_NEXT /
+	// SIMILAR_COSINE_HIGH) for the LTM rows we just inserted. allNodes is
+	// laid out as [WM0, LTM0, WM1, LTM1, ...] so odd indices are LTM IDs.
+	h.emitStructuralEdges(ctx, fac, fastBatchLTMRefs(allNodes, wmEmbeddings, fac.now))
 	h.cleanupWorkingMemory(ctx, cubeID)
 	return items, nil
+}
+
+// fastBatchLTMRefs extracts (LTM ID, embedding) pairs from the WM/LTM
+// interleaved insert batch. Index layout matches buildFastBatch: WM at even
+// indices, LTM at odd; wmEmbeddings is parallel to the (WM, LTM) PAIRS, so
+// pair index = i/2. createdAt is fac.now — every node in this batch shares
+// the ingest timestamp.
+func fastBatchLTMRefs(allNodes []db.MemoryInsertNode, wmEmbeddings [][]float32, createdAt string) []newMemoryRef {
+	pairs := len(allNodes) / 2
+	if pairs == 0 {
+		return nil
+	}
+	refs := make([]newMemoryRef, 0, pairs)
+	for i := 0; i+1 < len(allNodes); i += 2 {
+		ltm := allNodes[i+1]
+		var emb []float32
+		if pairIdx := i / 2; pairIdx < len(wmEmbeddings) {
+			emb = wmEmbeddings[pairIdx]
+		}
+		refs = append(refs, newMemoryRef{ID: ltm.ID, CreatedAt: createdAt, Embedding: emb})
+	}
+	return refs
 }
 
 // selectPendingFastMemories filters out memories whose content_hash already exists in the DB.

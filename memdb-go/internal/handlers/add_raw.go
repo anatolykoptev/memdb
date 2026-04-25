@@ -65,7 +65,31 @@ func (h *Handler) nativeRawAddForCube(ctx context.Context, req *fullAddRequest, 
 		return nil, fmt.Errorf("insert nodes: %w", err)
 	}
 	h.writeRawCache(ctx, cubeID, nodes, items, embeddings)
+	// M8 Stream 10 — emit structural edges for the LTM rows just inserted.
+	// Raw mode is 1 node per /add item (no WM pair), so refs map 1:1 to nodes.
+	h.emitStructuralEdges(ctx, fac, rawBatchRefs(nodes, embeddings, fac.now))
 	return items, nil
+}
+
+// rawBatchRefs zips raw-mode insert nodes with their embeddings into
+// newMemoryRef slices for the structural-edge emitter. Skips entries with
+// empty IDs (defence; raw pipeline always sets them).
+func rawBatchRefs(nodes []db.MemoryInsertNode, embeddings [][]float32, createdAt string) []newMemoryRef {
+	if len(nodes) == 0 {
+		return nil
+	}
+	refs := make([]newMemoryRef, 0, len(nodes))
+	for i, n := range nodes {
+		if n.ID == "" {
+			continue
+		}
+		var emb []float32
+		if i < len(embeddings) {
+			emb = embeddings[i]
+		}
+		refs = append(refs, newMemoryRef{ID: n.ID, CreatedAt: createdAt, Embedding: emb})
+	}
+	return refs
 }
 
 // extractRawTexts returns non-empty Content from each message without any processing.
