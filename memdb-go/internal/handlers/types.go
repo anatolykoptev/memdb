@@ -35,6 +35,10 @@ type searchRequest struct {
 	IncludeSkillMemory *bool `json:"include_skill_memory,omitempty"`
 	IncludePreference  *bool `json:"include_preference,omitempty"`
 	SearchToolMemory   *bool `json:"search_tool_memory,omitempty"`
+
+	// Level restricts search to a MemOS memory tier: l1, l2, or l3.
+	// Omit (nil) for full search (backward compat).
+	Level *string `json:"level,omitempty"`
 }
 
 // addRequest validates POST /product/add (basic fields only, used by ValidatedAdd).
@@ -196,4 +200,8 @@ type nativeChatRequest struct {
 	// A non-empty SystemPrompt always wins over AnswerStyle (basePrompt path is preserved
 	// for backward compatibility). Unknown values yield 400.
 	AnswerStyle *string `json:"answer_style,omitempty"`
+
+	// Level restricts memory search to a MemOS tier: l1, l2, or l3.
+	// Omit (nil) for full search (backward compat).
+	Level *string `json:"level,omitempty"`
 }

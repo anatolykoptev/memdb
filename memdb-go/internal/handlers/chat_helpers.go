@@ -16,6 +16,15 @@ const (
 	chatMinPersonalMem = 3             // minimum personal memories to keep after threshold filtering
 )
 
+// parseChatLevel parses the level field from a chat request.
+// Returns LevelAll + nil for omitted/empty; error for invalid values.
+func parseChatLevel(req *nativeChatRequest) (search.Level, error) {
+	if req.Level == nil || *req.Level == "" {
+		return search.LevelAll, nil
+	}
+	return search.ParseLevel(*req.Level)
+}
+
 // chatSearchMemories runs the search pipeline for chat and returns filtered memories + pref string.
 // Searches all readable cubes in parallel and merges results.
 func (h *Handler) chatSearchMemories(ctx context.Context, req *nativeChatRequest) ([]map[string]any, string, error) {
@@ -32,6 +41,11 @@ func (h *Handler) chatSearchMemories(ctx context.Context, req *nativeChatRequest
 
 	dedup := chatResolveDedup(req.Mode)
 
+	level, err := parseChatLevel(req)
+	if err != nil {
+		return nil, "", err
+	}
+
 	baseParams := search.SearchParams{
 		Query:       *req.Query,
 		UserName:    *req.UserID,
@@ -40,6 +54,7 @@ func (h *Handler) chatSearchMemories(ctx context.Context, req *nativeChatRequest
 		PrefTopK:    prefTopK,
 		IncludePref: derefBoolOr(req.IncludePreference, true),
 		Dedup:       dedup,
+		Level:       level,
 	}
 
 	memories, prefString, err := h.searchAcrossCubes(ctx, cubeIDs, baseParams)
@@ -160,7 +175,7 @@ func (h *Handler) searchSingleCube(ctx context.Context, cubeID string, base sear
 	params := base
 	params.CubeID = cubeID
 
-	output, err := h.searchService.Search(ctx, params)
+	output, err := h.searchService.SearchByLevel(ctx, params)
 	if err != nil {
 		return nil, "", err
 	}

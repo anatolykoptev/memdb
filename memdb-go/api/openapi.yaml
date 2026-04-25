@@ -833,6 +833,17 @@ components:
           title: Moscube
           description: (Deprecated) Whether to use legacy MemOSCube pipeline
           default: false
+        level:
+          anyOf:
+          - type: string
+            enum:
+            - l1
+            - l2
+            - l3
+          - type: 'null'
+          title: Level
+          description: "Restrict memory search to a MemOS tier. Omit for full search.\n\
+            \  l1 = working memory, l2 = episodic, l3 = full LTM graph."
       type: object
       required:
       - user_id
@@ -1091,6 +1102,19 @@ components:
           - type: 'null'
           title: Source
           description: Source of the search query [plugin will router diff search]
+        level:
+          anyOf:
+          - type: string
+            enum:
+            - l1
+            - l2
+            - l3
+          - type: 'null'
+          title: Level
+          description: "Restrict search to a memory layer (MemOS L1/L2/L3 nomenclature). Omit for full search.\n\
+            \  l1 = working memory only (recent context, postgres WorkingMemory rows).\n\
+            \  l2 = episodic memory only (Postgres EpisodicMemory rows).\n\
+            \  l3 = full LTM graph (LongTermMemory + UserMemory + EpisodicMemory + graph traversal)."
       type: object
       required:
       - query

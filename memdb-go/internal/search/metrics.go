@@ -25,11 +25,13 @@ type searchMetricsInstruments struct {
 	D10Enhance       metric.Int64Counter
 	D10Conf          metric.Float64Histogram
 	Multihop         metric.Int64Counter
-	HopsPerQuery     metric.Int64Histogram    // M8: max hop reached per D2 expansion call
+	HopsPerQuery     metric.Int64Histogram // M8: max hop reached per D2 expansion call
 	D11CoTDecompose  metric.Int64Counter
 	D11CoTSubqueries metric.Int64Histogram
 	D11CoTDuration   metric.Int64Histogram
 	D11CoTCacheHit   metric.Int64Counter
+	// LevelTotal counts requests per memory-tier scope (l1/l2/l3/all).
+	LevelTotal metric.Int64Counter
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -67,6 +69,8 @@ func searchMx() *searchMetricsInstruments {
 			metric.WithExplicitBucketBoundaries(100, 250, 500, 1000, 2000, 5000, 10000))
 		d11c, _ := m.Int64Counter("memdb.search.cot.cache_hit_total",
 			metric.WithDescription("D11 CoT decomposer cache hits"))
+		lvl, _ := m.Int64Counter("memdb.search.level_total",
+			metric.WithDescription("Search requests by memory tier (level=l1|l2|l3|all)"))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -80,6 +84,7 @@ func searchMx() *searchMetricsInstruments {
 			D11CoTSubqueries: d11n,
 			D11CoTDuration:   d11d,
 			D11CoTCacheHit:   d11c,
+			LevelTotal:       lvl,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -94,6 +99,9 @@ func searchMx() *searchMetricsInstruments {
 		))
 		d5j.Add(ctx, 0, metric.WithAttributes(attribute.String("relevance", "")))
 		d11c.Add(ctx, 0)
+		for _, lv := range []string{"l1", "l2", "l3", "all"} {
+			lvl.Add(ctx, 0, metric.WithAttributes(attribute.String("level", lv)))
+		}
 	})
 	return searchMetrics
 }
