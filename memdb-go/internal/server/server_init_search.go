@@ -5,6 +5,7 @@ package server
 
 import (
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/anatolykoptev/go-kit/rerank"
@@ -147,6 +148,12 @@ func initSearchService(
 				slog.Int("max_subqueries", cfg.CoTMaxSubqueries),
 				slog.Int("timeout_ms", cfg.CoTTimeoutMS),
 			)
+		}
+		// D7 (MEMDB_SEARCH_COT) + D11 (MEMDB_COT_DECOMPOSE) both enabled:
+		// each query may trigger 2 LLM round-trips + up to 6 extra VectorSearch
+		// calls. Fine for ablation; not recommended for production.
+		if os.Getenv("MEMDB_SEARCH_COT") == "true" && cfg.CoTDecompose {
+			logger.Warn("both D7 (search_cot) and D11 (cot_decompose) enabled — expect 2 LLM round-trips + up to 6 extra VectorSearch calls per query; intended for ablation, not prod")
 		}
 	}
 

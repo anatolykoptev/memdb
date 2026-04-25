@@ -67,3 +67,12 @@ Captured during the M7 sprint (2026-04-25). One-day-sprint discipline kept these
     - Fix options: (a) extend `InvalidateEdgesByMemoryID` to handle both directions, (b) add periodic GC sweep.
     - Effort: S.
     - Surfaced by code review of PR #83.
+
+## From M8 Stream 4 COT (PR #82)
+
+16. **D7 + D11 share fanout pattern (`fanoutSubqueryToText` ≈ `augmentWithSubqueries`).**
+    - 2 copies now per project rule "3rd → extract".
+    - When D12/D13 ships → extract `fanoutSubqueryToScope(ctx, psr, subQuery, scopes, p, budget)` helper into `query_decompose.go` next to `unionVectorResults`.
+    - Bonus: D7's multi-cube path is a latent bug (only handles single-cube via `VectorSearch`, not `VectorSearchMultiCube`) — fix during the extract.
+    - Effort: M.
+    - Surfaced by code review of PR #82.

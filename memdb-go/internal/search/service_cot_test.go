@@ -80,8 +80,9 @@ func TestApplyCoTDecomposition_FansOutSubqueries(t *testing.T) {
 	// 3 sub-queries from LLM + original prepended = 4 total → fanout runs
 	// for indices 1..3 = 3 extra VectorSearch calls. (The decomposer
 	// always prepends the original even if the LLM omitted it.)
-	if pg.vectorCalls.Load() < 2 {
-		t.Errorf("expected ≥2 fanout VectorSearch calls, got %d", pg.vectorCalls.Load())
+	// Stub is deterministic so we can assert the exact count.
+	if pg.vectorCalls.Load() != 3 {
+		t.Errorf("expected exactly 3 fanout VectorSearch calls, got %d", pg.vectorCalls.Load())
 	}
 	// psr.textVec must have been augmented (seed + extra1 from each fanout).
 	foundExtra := false
