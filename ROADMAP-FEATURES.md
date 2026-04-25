@@ -1,22 +1,14 @@
 # New Features Roadmap
 
-> Новые фичи, которых нет в Python codebase. Не зависят от миграции.
+> Backlog новых фич, которых нет в текущем codebase. Не migration work — see `docs/ROADMAP-GO-MIGRATION.md` (closed) for past Python→Go work, `CHANGELOG.md` for shipped features per version.
 >
-> _Составлен: март 2026._
-
----
-
-## Recent Milestones
-
-- **2026-04-25 — M7 Compound Lift Sprint**: F1 0.053 → 0.238 (+349%); first MemOS-tier result. answer_style + raw ingest + threshold + embed batching. See `CHANGELOG.md [2.1.0]`.
-- **2026-04-24 — v2.0.0**: Full Phase D LoCoMo intelligence stack (10 features). hit@20 = 0.700 (above Mem0/MemOS). See `CHANGELOG.md [2.0.0]`.
+> _Составлен: март 2026. Обновлён: 2026-04-26 (post-M9 cleanup — playground/suggestions удалены как deleted endpoints, dependency на Phase 5 снята: Phase 5 ✅ done)._
 
 ---
 
 ## 1. Image Memory + Multimodal ❌ НЕ НАЧАТО
 
 **Источник:** MemOS v2.0
-**Зависимость:** после Python Deprecation (Фаза 5 в docs/ROADMAP-GO-MIGRATION.md)
 
 **Суть:** Нативная поддержка изображений — caption, CLIP embedding, image+text co-retrieval.
 
@@ -55,25 +47,7 @@ type ImageMemory struct {
 
 ---
 
-## 3. Playground Chat ❌ НЕ НАЧАТО
-
-**Суть:** Enhanced two-stage search + references для playground UI.
-Сейчас проксируется в Python (`/product/chat/stream/playground`).
-
-**Effort:** S (порт из Python, один endpoint)
-
----
-
-## 4. Suggestions ❌ НЕ НАЧАТО
-
-**Суть:** Генерация предложений на основе контекста разговора.
-Сейчас проксируется в Python (`/product/suggestions`).
-
-**Effort:** S (порт из Python)
-
----
-
-## 5. RawFileMemory + evolve_to Provenance ❌ НЕ НАЧАТО
+## 3. RawFileMemory + evolve_to Provenance ❌ НЕ НАЧАТО
 
 **Источник:** MemOS v2.0.7
 
@@ -96,18 +70,18 @@ type ImageMemory struct {
 
 ---
 
-## 6. Memory Recovery Endpoint ❌ НЕ НАЧАТО
+## 4. Memory Recovery Endpoint ❌ НЕ НАЧАТО
 
 **Источник:** MemOS v2.0.7 (`RecoverMemoryByRecordIdRequest`)
 
 **Суть:** Explicit endpoint для восстановления soft-deleted memories.
 
-**Зависимость:** Soft-delete (ROADMAP-ADD-PIPELINE.md п.1)
+**Зависимость:** Soft-delete ([docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md) item 1)
 **Effort:** S (status flip + API endpoint)
 
 ---
 
-## 7. On-demand Reorganize by IDs ❌ НЕ НАЧАТО
+## 5. On-demand Reorganize by IDs ❌ НЕ НАЧАТО
 
 **Источник:** MemOS v2.0.7 (`MEM_ORGANIZE_TASK_LABEL`)
 
@@ -117,19 +91,19 @@ type ImageMemory struct {
 
 ---
 
-## 8. Memory Lifecycle (5 states) ❌ НЕ НАЧАТО
+## 6. Memory Lifecycle (5 states) ❌ НЕ НАЧАТО
 
 **Источник:** MemOS v2.0.7
 
 **Суть:** Полный lifecycle: Generated → Activated → Merged → Archived → Frozen.
 Сейчас в Go только 2-3 статуса (activated, merged, expired).
 
-**Зависимость:** Soft-delete (ROADMAP-ADD-PIPELINE.md п.1)
+**Зависимость:** Soft-delete ([docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md) item 1)
 **Effort:** M (DB migration + status machine)
 
 ---
 
-## 9. Memory Versioning ❌ НЕ НАЧАТО
+## 7. Memory Versioning ❌ НЕ НАЧАТО
 
 **Источник:** MemOS v2.0.7 (`ArchivedTextualMemory`, `version` field)
 
@@ -137,12 +111,3 @@ type ImageMemory struct {
 
 **Effort:** M (new table + version tracking)
 **Зависимость:** нет
-
----
-
-## Что НЕ делаем
-
-- ❌ **Параметрическая память (LoRA)** — требует GPU и fine-tuning инфра, ROI низкий
-- ❌ **Активационная память (KV-cache)** — требует специфичного LLM deployment
-- ❌ **Миграция на Neo4j** — AGE лучше интегрирован с Postgres ecosystem
-- ❌ **Milvus** — Qdrant лучше для self-hosted
