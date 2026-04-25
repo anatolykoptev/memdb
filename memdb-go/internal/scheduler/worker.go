@@ -18,6 +18,8 @@ import (
 "time"
 
 "github.com/redis/go-redis/v9"
+
+"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
 const (
@@ -75,6 +77,9 @@ type streamMsg struct {
 //   - retryLoop:   polls ZSet for due retry tasks → highMsgCh or lowMsgCh
 //   - processLoop: priority-aware dispatch — drains highMsgCh first, then lowMsgCh
 //
+// Optional goroutine (when pg is non-nil and MEMDB_PAGERANK_ENABLED=true):
+//   - pageRankLoop: computes per-cube PageRank on memory_edges every 6h (M10 S7).
+//
 // Priority classification (see isHighPriority in message.go):
 //   HIGH: mem_update, query, mem_feedback  — user-triggered, latency-sensitive
 //   LOW:  mem_organize, mem_read, pref_add, add, answer — background work
@@ -88,6 +93,7 @@ type streamMsg struct {
 type Worker struct {
 	redis      *redis.Client
 	reorg      *Reorganizer
+	pg         *db.Postgres // optional; required for PageRank goroutine
 	logger     *slog.Logger
 	highMsgCh  chan streamMsg // high-priority: mem_update, query, mem_feedback
 	lowMsgCh   chan streamMsg // low-priority:  mem_organize, mem_read, pref_add, add, answer
@@ -109,6 +115,12 @@ func NewWorker(rdb *redis.Client, reorg *Reorganizer, logger *slog.Logger) *Work
 	}
 }
 
+// SetPostgres wires a Postgres client into the Worker.
+// Must be called before Run(). Enables the PageRank background goroutine.
+func (w *Worker) SetPostgres(pg *db.Postgres) {
+	w.pg = pg
+}
+
 // Run starts the worker goroutines and blocks until ctx is cancelled.
 func (w *Worker) Run(ctx context.Context) {
 w.logger.Info("scheduler worker: starting",
@@ -121,6 +133,13 @@ go w.reclaimLoop(ctx)
 go w.retryLoop(ctx)
 if w.reorg != nil {
 go w.periodicReorgLoop(ctx)
+}
+// M10 Stream 7: PageRank background goroutine — requires Postgres + feature gate.
+if w.pg != nil && pageRankEnabled() {
+	go w.runPageRankLoop(ctx, w.pg)
+	w.logger.Info("pagerank: background goroutine started",
+		slog.Duration("interval", pageRankInterval()),
+	)
 }
 w.processLoop(ctx) // blocks until ctx cancelled
 }

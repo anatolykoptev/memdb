@@ -76,7 +76,11 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	// Start scheduler Worker (after embedder is initialized).
 	if rd != nil {
 		reorg := initReorganizer(ctx, cfg, pg, rd, emb, wmCache, extractor, profiler, logger)
-		go scheduler.NewWorker(rd.Client(), reorg, logger).Run(ctx)
+		w := scheduler.NewWorker(rd.Client(), reorg, logger)
+		// M10 Stream 7: wire Postgres for PageRank background goroutine.
+		// SetPostgres is a no-op when pg is nil, so no extra nil guard needed.
+		w.SetPostgres(pg)
+		go w.Run(ctx)
 		if reorg != nil {
 			h.SetReorganizer(reorg)
 		}
