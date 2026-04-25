@@ -669,6 +669,30 @@ useful for ablation studies. Both canonical tracks are always emitted regardless
 **compare.py** auto-detects `aggregate_with_excl_*` keys in both files and prints a
 side-by-side table per track automatically.
 
+## M9 S2 — LLM Judge metric (--llm-judge flag)
+
+Added `--llm-judge` flag to `score.py`. Calls Gemini Flash via CLIProxyAPI (:8317)
+to judge each prediction CORRECT/WRONG against gold. Prompt taken verbatim from
+Memobase evaluation harness (`metrics/llm_judge.py`). Results cached in
+`results/.llm_judge_cache.json` (gitignored); second pass takes <1s.
+
+**Why this matters**: pre-M9 numbers (EM/F1/semsim) cannot be directly compared to
+public leaderboard figures. Memobase publishes **75.78% LLM Judge**; Mem0, Zep,
+LangMem all use the same binary judge metric. With `--llm-judge` we publish a number
+on the same scale.
+
+Usage:
+```bash
+export CLI_PROXY_API_KEY=<key>
+python3 evaluation/locomo/score.py \
+  --predictions evaluation/locomo/results/m7-stage2.json \
+  --out evaluation/locomo/results/m7-stage2-llm-judge-score.json \
+  --no-embed --llm-judge
+```
+
+Output adds `llm_judge` key in each aggregate track, `llm_judge` per category inside
+`by_category`, and `llm_score`/`llm_reason` per `per_qa` entry.
+
 ## How to record a new milestone
 
 ```bash
