@@ -154,6 +154,41 @@ def test_empty_after_exclusion():
     assert agg["f1"] == 0.0
 
 
+# ── union-with-5 emission (spec gap fix PR #88) ───────────────────────────────
+
+def test_exclude_4_emits_both_4_and_4_5_tracks():
+    """Passing extra_excl_sets=[{4}] must emit BOTH aggregate_with_excl_4 AND
+    aggregate_with_excl_4_5 (union with Memobase cat-5 convention)."""
+    per_qa = _make_per_qa()
+    tracks = build_aggregate_tracks(per_qa, [frozenset({4})])
+    assert "aggregate_with_excl_4" in tracks, "custom track missing"
+    assert "aggregate_with_excl_4_5" in tracks, "union track missing"
+    # {4} excludes 2 rows (cat-4), {4,5} excludes 4 rows (cat-4 + cat-5)
+    assert tracks["aggregate_with_excl_4"]["n"] == 8
+    assert tracks["aggregate_with_excl_4_5"]["n"] == 6
+
+
+def test_exclude_5_does_not_double_emit():
+    """Passing extra_excl_sets=[{5}] should NOT produce aggregate_with_excl_5_5."""
+    per_qa = _make_per_qa()
+    tracks = build_aggregate_tracks(per_qa, [frozenset({5})])
+    assert "aggregate_with_excl_5" in tracks
+    assert "aggregate_with_excl_5_5" not in tracks, "spurious double-5 track emitted"
+
+
+def test_exclude_4_5_does_not_double_emit():
+    """Passing extra_excl_sets=[{4,5}] should NOT produce a second aggregate_with_excl_4_5."""
+    per_qa = _make_per_qa()
+    tracks = build_aggregate_tracks(per_qa, [frozenset({4, 5})])
+    assert "aggregate_with_excl_4_5" in tracks
+    # Verify only one track with that key (dict uniqueness guarantees this,
+    # but also assert no spurious extra tracks were created).
+    union_keys = [k for k in tracks if "4_5" in k]
+    assert union_keys == ["aggregate_with_excl_4_5"], (
+        f"Expected exactly one 4_5 track, got: {union_keys}"
+    )
+
+
 # ── smoke test against existing results file ─────────────────────────────────
 
 RESULTS_DIR = Path(__file__).resolve().parents[1] / "results"
