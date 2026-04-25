@@ -53,13 +53,28 @@ func cePrecomputeEnabled() bool {
 // covers both the in-process map[string]any path and the JSON-decoded
 // path from properties::text::jsonb.
 func extractCEScoreTopK(item map[string]any) map[string]float32 {
+	scores, _ := extractCEScoreTopKWithStale(item)
+	return scores
+}
+
+// extractCEScoreTopKWithStale is like extractCEScoreTopK but also reports
+// whether any entry in the cached array was malformed (empty neighbor_id or
+// unparseable score). A partial-parse is the proxy for a stale cache entry:
+// it means the stored JSON was written for a neighbour that no longer carries
+// a valid ID — spec § 9 "stale pre-computed (neighbor expired)" path.
+//
+// Returns (nil, false) when the key is absent or the array is empty.
+// Returns (nil, true) when the array was present but every entry was malformed.
+// Returns (scores, true) when the array was partially valid (some entries ok, some not).
+// Returns (scores, false) when all entries parsed cleanly.
+func extractCEScoreTopKWithStale(item map[string]any) (map[string]float32, bool) {
 	meta, ok := item["metadata"].(map[string]any)
 	if !ok {
-		return nil
+		return nil, false
 	}
 	raw, present := meta["ce_score_topk"]
 	if !present || raw == nil {
-		return nil
+		return nil, false
 	}
 
 	var entries []map[string]any
@@ -77,20 +92,22 @@ func extractCEScoreTopK(item map[string]any) map[string]float32 {
 		// Some legacy paths leave the array as a JSON string nested
 		// inside agtype text — decode lazily.
 		if v == "" {
-			return nil
+			return nil, false
 		}
 		_ = json.Unmarshal([]byte(v), &entries)
 	default:
-		return nil
+		return nil, false
 	}
 
 	if len(entries) == 0 {
-		return nil
+		return nil, false
 	}
 	out := make(map[string]float32, len(entries))
+	hasInvalid := false
 	for _, e := range entries {
 		nid, _ := e["neighbor_id"].(string)
 		if nid == "" {
+			hasInvalid = true
 			continue
 		}
 		switch s := e["score"].(type) {
@@ -102,13 +119,17 @@ func extractCEScoreTopK(item map[string]any) map[string]float32 {
 			f, err := s.Float64()
 			if err == nil {
 				out[nid] = float32(f)
+			} else {
+				hasInvalid = true
 			}
+		default:
+			hasInvalid = true
 		}
 	}
 	if len(out) == 0 {
-		return nil
+		return nil, hasInvalid
 	}
-	return out
+	return out, hasInvalid
 }
 
 // rerankMemoryItemsPrecomputed is the lookup-first wrapper around
@@ -136,9 +157,21 @@ func rerankMemoryItemsPrecomputed(
 		return rerankMemoryItems(ctx, client, query, items)
 	}
 
-	scoreByID := extractCEScoreTopK(items[0])
+	scoreByID, hasStale := extractCEScoreTopKWithStale(items[0])
 	if scoreByID == nil {
-		recordCEPrecompute(ctx, "miss")
+		if hasStale {
+			// Cache was present but every entry was malformed — expired/stale
+			// neighbours whose IDs are no longer valid. Emit stale and fall back.
+			recordCEPrecompute(ctx, "stale")
+		} else {
+			recordCEPrecompute(ctx, "miss")
+		}
+		return rerankMemoryItems(ctx, client, query, items)
+	}
+	if hasStale {
+		// Some entries parsed but others were malformed — partial stale cache.
+		// Fall back to live CE to avoid a corrupted ranking from mixed scores.
+		recordCEPrecompute(ctx, "stale")
 		return rerankMemoryItems(ctx, client, query, items)
 	}
 

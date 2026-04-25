@@ -240,6 +240,81 @@ func TestRerankMemoryItemsPrecomputed_TooFewItemsDefersToLive(t *testing.T) {
 	}
 }
 
+// TestRerankMemoryItemsPrecomputed_StaleNeighbour asserts that a cached
+// ce_score_topk containing malformed entries (empty neighbor_id — proxy for
+// an expired/soft-deleted neighbour) emits the "stale" metric outcome and
+// falls back to live CE rather than serving a corrupted ranking.
+//
+// Note: stale detection is a partial-parse heuristic: we flag entries whose
+// neighbor_id is the empty string or whose score is not a numeric type as
+// stale. A full per-search DB lookup to confirm deletion would be too costly;
+// this approach catches the most common production case (BGE rewrite replaced
+// the stored IDs) without adding a read per search call.
+func TestRerankMemoryItemsPrecomputed_StaleNeighbour(t *testing.T) {
+	t.Setenv("MEMDB_CE_PRECOMPUTE", "true")
+	ts, calls := newCountingRerankServer(t)
+	defer ts.Close()
+	client := rerank.New(rerank.Config{URL: ts.URL, Model: "test", Timeout: 2 * time.Second}, nil)
+
+	// Anchor whose ce_score_topk has one valid entry and one with an empty
+	// neighbor_id (simulating a neighbour that was soft-deleted and whose
+	// stored ID was subsequently cleared or never set).
+	items := []map[string]any{
+		{
+			"id":     "anchor",
+			"memory": "anchor text",
+			"metadata": map[string]any{
+				"relativity": 0.9,
+				"ce_score_topk": []any{
+					map[string]any{"neighbor_id": "valid-neighbour", "score": float64(0.85)},
+					map[string]any{"neighbor_id": "", "score": float64(0.70)}, // stale / expired
+				},
+			},
+		},
+		{"id": "valid-neighbour", "memory": "valid", "metadata": map[string]any{"relativity": 0.7}},
+	}
+
+	_ = rerankMemoryItemsPrecomputed(context.Background(), client, "q", items)
+
+	// Must fall back to live CE exactly once (stale path, not clean miss).
+	if got := atomic.LoadInt32(calls); got != 1 {
+		t.Fatalf("expected 1 live CE call (stale path), got %d", got)
+	}
+	// Verify extractCEScoreTopKWithStale directly: partial parse returns scores
+	// for the valid entry but sets hasStale=true.
+	scores, hasStale := extractCEScoreTopKWithStale(items[0])
+	if !hasStale {
+		t.Error("expected hasStale=true for cache with empty neighbor_id entry")
+	}
+	if scores == nil {
+		t.Error("expected non-nil scores map (valid entry should parse)")
+	}
+	if _, ok := scores["valid-neighbour"]; !ok {
+		t.Error("expected valid-neighbour in scores map")
+	}
+}
+
+// TestExtractCEScoreTopKWithStale_AllMalformed checks that a cache where
+// every entry has an empty neighbor_id returns (nil, true).
+func TestExtractCEScoreTopKWithStale_AllMalformed(t *testing.T) {
+	item := map[string]any{
+		"id": "anchor",
+		"metadata": map[string]any{
+			"ce_score_topk": []any{
+				map[string]any{"neighbor_id": "", "score": float64(0.9)},
+				map[string]any{"neighbor_id": "", "score": float64(0.8)},
+			},
+		},
+	}
+	scores, hasStale := extractCEScoreTopKWithStale(item)
+	if scores != nil {
+		t.Errorf("expected nil scores for all-malformed cache, got %v", scores)
+	}
+	if !hasStale {
+		t.Error("expected hasStale=true for all-malformed cache")
+	}
+}
+
 // BenchmarkRerankMemoryItemsPrecomputed_Hit measures the lookup path
 // cost. Lets reviewers spot a regression in the anchor-cache walk
 // (target: << 1ms p95 for a 10-item batch).
