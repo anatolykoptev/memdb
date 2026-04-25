@@ -1,6 +1,12 @@
 # Contributing to MemDB
 
-Thank you for your interest in contributing! This guide covers everything you need to get started.
+Thank you for your interest in contributing!
+
+## How to ask questions
+
+- **Usage questions** — open a [GitHub Discussion](https://github.com/anatolykoptev/memdb/discussions).
+- **Bug reports** — open a [GitHub Issue](https://github.com/anatolykoptev/memdb/issues).
+- **Feature proposals** — open a Discussion first, get buy-in from a maintainer, then open a PR.
 
 ## Development Setup
 
@@ -36,14 +42,26 @@ cd docker && docker compose up
 
 ## Running Tests
 
-```bash
-# Go service
-cd memdb-go
-make test
-# or: go test ./...
+Before opening a PR, ensure these all pass:
 
-# Python layer
-pytest tests/
+```bash
+cd memdb-go
+go build ./...
+go vet ./...
+go test ./...
+```
+
+### Integration tests (require Postgres + Apache AGE)
+
+Tests tagged `//go:build livepg` need a real database instance:
+
+```bash
+# Start the stack
+docker compose up -d postgres
+
+# Run with live DB
+cd memdb-go
+go test -tags livepg ./...
 ```
 
 ## Code Style
@@ -104,6 +122,24 @@ PRs that mix unrelated concerns will be asked to split.
 | `docs` | Documentation gap |
 | `question` | Needs clarification |
 
+## Reporting bugs
+
+Include a minimal reproducer:
+1. `docker compose` snippet or exact image tag
+2. The `curl` command (or MCP call) that triggered the issue
+3. Relevant log output (`docker compose logs memdb-go`)
+4. What you expected vs. what actually happened
+
+## Sign-off
+
+If your contribution was AI-assisted, add a `Co-Authored-By:` footer to the commit message:
+
+```
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+DCO sign-off is not required.
+
 ## Questions?
 
-Open a [GitHub Discussion](https://github.com/anatolykoptev/memdb/discussions) or join Discord (link in README).
+Open a [GitHub Discussion](https://github.com/anatolykoptev/memdb/discussions).
