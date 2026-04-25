@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>MemDB Architecture</title>
+  <desc>Six-container architecture: agent calls memdb-go (Go service) which uses Postgres (pgvector + Apache AGE), Redis cache, optional Qdrant for hybrid retrieval, and embed-server (ONNX) sidecar. Built-in MCP server is exposed on a separate port.</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5a6472"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="400" fill="#fbfbfd"/>
+
+  <!-- Client layer -->
+  <g>
+    <rect x="40" y="30" width="720" height="60" rx="8" fill="#eef2f7" stroke="#c9d2dc" stroke-width="1"/>
+    <text x="400" y="55" text-anchor="middle" font-size="13" fill="#5a6472" font-weight="600">YOUR AGENT</text>
+    <text x="400" y="75" text-anchor="middle" font-size="12" fill="#5a6472">Telegram bot · IDE copilot · Claude Desktop · custom client</text>
+  </g>
+
+  <!-- Arrow agent → memdb-go -->
+  <line x1="400" y1="90" x2="400" y2="125" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="408" y="112" font-size="11" fill="#5a6472">REST · MCP</text>
+
+  <!-- memdb-go (green) -->
+  <g>
+    <rect x="240" y="130" width="200" height="70" rx="8" fill="#e6f4ea" stroke="#34a853" stroke-width="1.5"/>
+    <text x="340" y="155" text-anchor="middle" font-size="14" fill="#137333" font-weight="700">memdb-go :8080</text>
+    <text x="340" y="175" text-anchor="middle" font-size="11" fill="#137333">handlers · search · scheduler</text>
+    <text x="340" y="190" text-anchor="middle" font-size="11" fill="#137333">embedder · async pipeline</text>
+  </g>
+
+  <!-- memdb-mcp (purple) -->
+  <g>
+    <rect x="470" y="130" width="170" height="70" rx="8" fill="#f3e8fd" stroke="#9334e6" stroke-width="1.5"/>
+    <text x="555" y="155" text-anchor="middle" font-size="14" fill="#681da8" font-weight="700">memdb-mcp :8081</text>
+    <text x="555" y="175" text-anchor="middle" font-size="11" fill="#681da8">stdio + http MCP</text>
+    <text x="555" y="190" text-anchor="middle" font-size="11" fill="#681da8">Claude Desktop / Code</text>
+  </g>
+
+  <!-- Arrow mcp → memdb-go -->
+  <line x1="470" y1="165" x2="442" y2="165" stroke="#5a6472" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Storage tier divider -->
+  <line x1="40" y1="230" x2="760" y2="230" stroke="#dde3eb" stroke-dasharray="3,3" stroke-width="1"/>
+  <text x="46" y="225" font-size="10" fill="#9aa4b1" font-weight="600">STORAGE TIER</text>
+
+  <!-- Postgres + AGE + pgvector (cyan) -->
+  <g>
+    <rect x="40" y="250" width="200" height="110" rx="8" fill="#e1f5fe" stroke="#0288d1" stroke-width="1.5"/>
+    <text x="140" y="275" text-anchor="middle" font-size="14" fill="#01579b" font-weight="700">Postgres 17</text>
+    <text x="140" y="295" text-anchor="middle" font-size="11" fill="#01579b">pgvector — 1024-dim search</text>
+    <text x="140" y="312" text-anchor="middle" font-size="11" fill="#01579b">Apache AGE — graph traversal</text>
+    <text x="140" y="335" text-anchor="middle" font-size="10" fill="#0288d1">primary store</text>
+  </g>
+
+  <!-- Redis (red) -->
+  <g>
+    <rect x="260" y="250" width="140" height="110" rx="8" fill="#fde8e8" stroke="#dc2626" stroke-width="1.5"/>
+    <text x="330" y="275" text-anchor="middle" font-size="14" fill="#991b1b" font-weight="700">Redis</text>
+    <text x="330" y="295" text-anchor="middle" font-size="11" fill="#991b1b">hot cache</text>
+    <text x="330" y="312" text-anchor="middle" font-size="11" fill="#991b1b">working memory</text>
+    <text x="330" y="335" text-anchor="middle" font-size="10" fill="#dc2626">optional</text>
+  </g>
+
+  <!-- Qdrant (blue) -->
+  <g>
+    <rect x="420" y="250" width="140" height="110" rx="8" fill="#e3edfd" stroke="#1d4ed8" stroke-width="1.5"/>
+    <text x="490" y="275" text-anchor="middle" font-size="14" fill="#1e3a8a" font-weight="700">Qdrant</text>
+    <text x="490" y="295" text-anchor="middle" font-size="11" fill="#1e3a8a">sparse + dense</text>
+    <text x="490" y="312" text-anchor="middle" font-size="11" fill="#1e3a8a">hybrid retrieval</text>
+    <text x="490" y="335" text-anchor="middle" font-size="10" fill="#1d4ed8">optional, scale</text>
+  </g>
+
+  <!-- embed-server (orange) -->
+  <g>
+    <rect x="580" y="250" width="180" height="110" rx="8" fill="#fff1e0" stroke="#ea580c" stroke-width="1.5"/>
+    <text x="670" y="275" text-anchor="middle" font-size="14" fill="#9a3412" font-weight="700">embed-server :8082</text>
+    <text x="670" y="295" text-anchor="middle" font-size="11" fill="#9a3412">ONNX sidecar</text>
+    <text x="670" y="312" text-anchor="middle" font-size="11" fill="#9a3412">multilingual-e5-large</text>
+    <text x="670" y="328" text-anchor="middle" font-size="11" fill="#9a3412">jina-code-v2</text>
+    <text x="670" y="350" text-anchor="middle" font-size="10" fill="#ea580c">optional, local embeddings</text>
+  </g>
+
+  <!-- Arrows memdb-go → storage -->
+  <line x1="300" y1="200" x2="170" y2="250" stroke="#5a6472" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="340" y1="200" x2="330" y2="250" stroke="#5a6472" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+  <line x1="370" y1="200" x2="480" y2="250" stroke="#5a6472" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+  <line x1="410" y1="200" x2="640" y2="250" stroke="#5a6472" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+
+  <!-- Footer note -->
+  <text x="400" y="385" text-anchor="middle" font-size="11" fill="#9aa4b1">solid = required · dashed = optional · single docker-compose ships all six</text>
+</svg>
