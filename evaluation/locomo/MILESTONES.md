@@ -796,6 +796,30 @@ Output adds `llm_judge` key in each aggregate track, `llm_judge` per category in
 - **release-drafter draft named `v2.1.0` instead of `v2.2.0`**: release-drafter auto-increments minor version based on the previous tag (v2.0.0 → v2.1.0). Since we skipped v2.1.0, the draft needed a manual tag rename to v2.2.0. This is expected behavior — document for future releases.
 - **auto-changelog cycle is end-to-end functional**: this is the first real test of the M7 F10 machinery (release-drafter + goreleaser + changelog-sync.yml). All three components fired correctly and in sequence on the `release: [published]` event.
 
+## Search benchmark snapshot — competitor baseline (Feb–Apr 2026)
+
+> These are the public competitor numbers MemDB is targeting.
+> Metric: LLM Judge Score (gpt-4o binary judge, 1=correct).
+> Sources: arXiv:2504.19413 (mem0 paper), Memobase LoCoMo README, MemOS repo.
+> Full competitive analysis: [docs/competitive/2026-04-search-pipeline-vs-rivals.md](../../docs/competitive/2026-04-search-pipeline-vs-rivals.md)
+
+| System | LLM Judge | Single-Hop | Multi-Hop | Open Domain | Temporal | Notes |
+|--------|-----------|------------|-----------|-------------|----------|-------|
+| Memobase v0.0.37 | **75.78** | 70.92 | 46.88 | 77.17 | **85.05** | excl. cat-5 adversarial |
+| Zep* | 75.14 | 74.11 | 66.04 | 67.71 | 79.79 | self-reported; not independently verified |
+| MemOS | 73.31 | — | — | — | — | VEC_COT search |
+| mem0-Graph | 68.44 | 65.71 | 47.19 | 75.71 | 58.13 | vector+graph |
+| mem0 | 66.88 | 67.13 | 51.15 | 72.93 | 55.51 | basic vector |
+| LangMem | 58.10 | 62.23 | 47.92 | 71.12 | 23.43 | — |
+| OpenAI Memory | 52.75 | 63.79 | 42.92 | 62.29 | 21.71 | — |
+| **MemDB (target)** | **> 76** | — | — | — | — | +VEC_COT+profile (planned) |
+
+Note: MemDB M7 Stage 2 measurement (F1 0.238, hit@k 0.769) uses a different metric
+(token-level F1, not LLM Judge) and a different scope (conv-26 only, 199 QAs).
+LLM-Judge comparable number is pending Stage 3 re-run (OOM deferred, see above).
+
+---
+
 ## How to record a new milestone
 
 ```bash

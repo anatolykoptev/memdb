@@ -6,9 +6,9 @@
 > This is the **master roadmap** — a single-page view across migration, search quality,
 > add pipeline, and features. Detailed plans live in:
 > - [docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md) — closed
-> - [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md) — active
+> - [docs/backlog/search.md](docs/backlog/search.md) — active
 > - [docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md) — active
-> - [ROADMAP-FEATURES.md](ROADMAP-FEATURES.md) — active
+> - [docs/backlog/features.md](docs/backlog/features.md) — active
 >
 > Competitive analysis: [docs/competitive/2026-04-26-memobase-deep-dive.md](docs/competitive/2026-04-26-memobase-deep-dive.md)
 
@@ -46,7 +46,7 @@ Stage 3 full-corpus run (1986 QA, 10 conversations) is queued — see
 
 ## Active workstreams
 
-### Search quality — [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md)
+### Search quality — [docs/backlog/search.md](docs/backlog/search.md)
 
 - **Deep search agent** (Python `mem_agent/deepsearch_agent.py` port) —
   QueryRewriter + Reflection loop. Currently no Go equivalent.
@@ -73,7 +73,7 @@ Stage 3 full-corpus run (1986 QA, 10 conversations) is queued — see
 - **Source attribution + structured preference taxonomy refinements** —
   builds on D8 22-category extraction shipped in v2.0.0.
 
-### Features — [ROADMAP-FEATURES.md](ROADMAP-FEATURES.md)
+### Features — [docs/backlog/features.md](docs/backlog/features.md)
 
 - **Image Memory + multimodal** (CLIP embeddings, image+text co-retrieval).
 - **MemCube cross-sharing** (read/write permissions between cubes).

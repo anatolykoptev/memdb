@@ -230,9 +230,9 @@ LOCOMO_SKIP_CHAT=1 OUT_SUFFIX=local bash evaluation/locomo/run.sh
 
 Active roadmaps (the closed `ROADMAP-GO-MIGRATION.md` is kept as a historical record):
 
-- [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md) — retrieval quality (target: LoCoMo > 75)
+- [docs/backlog/search.md](docs/backlog/search.md) — retrieval quality (target: LoCoMo > 75)
 - [docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md) — ingest pipeline excellence
-- [ROADMAP-FEATURES.md](ROADMAP-FEATURES.md) — features beyond the upstream Python codebase
+- [docs/backlog/features.md](docs/backlog/features.md) — features beyond the upstream Python codebase
   (image memory, MemCube cross-sharing, etc.)
 
 ---

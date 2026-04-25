@@ -1,8 +1,11 @@
-# New Features Roadmap
+# Features Backlog
 
-> Backlog новых фич, которых нет в текущем codebase. Не migration work — see `docs/ROADMAP-GO-MIGRATION.md` (closed) for past Python→Go work, `CHANGELOG.md` for shipped features per version.
+> Pending feature work. For shipped features see CHANGELOG.md.
 >
-> _Составлен: март 2026. Обновлён: 2026-04-26 (post-M9 cleanup — playground/suggestions удалены как deleted endpoints, dependency на Phase 5 снята: Phase 5 ✅ done)._
+> Derived from MemOS v2.0.x competitive analysis (March 2026).
+> Not migration work — see `docs/ROADMAP-GO-MIGRATION.md` (closed) for past Python→Go work.
+>
+> Master roadmap: [ROADMAP.md](../../ROADMAP.md)
 
 ---
 
@@ -76,7 +79,7 @@ type ImageMemory struct {
 
 **Суть:** Explicit endpoint для восстановления soft-deleted memories.
 
-**Зависимость:** Soft-delete ([docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md) item 1)
+**Зависимость:** Soft-delete ([docs/backlog/add-pipeline.md](add-pipeline.md) item 1)
 **Effort:** S (status flip + API endpoint)
 
 ---
@@ -98,7 +101,7 @@ type ImageMemory struct {
 **Суть:** Полный lifecycle: Generated → Activated → Merged → Archived → Frozen.
 Сейчас в Go только 2-3 статуса (activated, merged, expired).
 
-**Зависимость:** Soft-delete ([docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md) item 1)
+**Зависимость:** Soft-delete ([docs/backlog/add-pipeline.md](add-pipeline.md) item 1)
 **Effort:** M (DB migration + status machine)
 
 ---
