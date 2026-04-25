@@ -143,7 +143,7 @@ opt in by setting `MEMDB_COT_DECOMPOSE=true` after observing the metrics.
 
 > **Caveat (per spec):** The +5-7 lift estimate from
 > `docs/competitive/2026-04-26-port-target-vec-cot.md` is an internal
-> pre-M8 planning assumption (ROADMAP-SEARCH §Phase 1), NOT an
+> pre-M8 planning assumption (docs/backlog/search.md §Phase 1), NOT an
 > independently measured delta from a MemOS ablation. We rank this
 > technique #1 because it directly addresses MemDB's lowest-scoring
 > categories (cat-2 multi-hop F1=0.091, cat-3 temporal F1=0.201), not

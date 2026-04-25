@@ -3,10 +3,10 @@
 **Source:** MemOS `src/memos/memories/textual/tree_text_memory/retrieve/searcher.py`
 **Technique:** Embed each CoT sub-question independently; union of embedding vectors used for HNSW probe
 **Effort:** M (3-5 days)
-**Expected F1 lift:** +5-7 points on complex multi-hop LoCoMo questions (per ROADMAP-SEARCH.md Phase 1 estimate)
+**Expected F1 lift:** +5-7 points on complex multi-hop LoCoMo questions (per docs/backlog/search.md Phase 1 estimate)
 
 > **Caveat on the +5-7 lift estimate**: This number is an internal pre-M8 planning
-> assumption (ROADMAP-SEARCH §Phase 1), NOT an independently measured delta from a
+> assumption (docs/backlog/search.md §Phase 1), NOT an independently measured delta from a
 > MemOS ablation. MemOS does not publish per-feature LoCoMo ablation results that
 > isolate VEC_COT's contribution to their 73.31 score. The Memobase finding (75.78
 > with NO vector search at all) suggests VEC_COT may not be the load-bearing
