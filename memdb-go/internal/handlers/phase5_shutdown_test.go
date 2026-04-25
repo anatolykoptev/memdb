@@ -137,19 +137,32 @@ func TestNativeSchedulerStatus_Returns503OnNilRedis(t *testing.T) {
 
 // --- 422 complex-filter edge cases ---
 
-func TestHandlePostGetMemoryWithFilter_Returns422OnDBError(t *testing.T) {
-	h := testShutdownHandler() // postgres == nil; filter path hits DB and gets 422
+// TestHandlePostGetMemoryWithFilter_Returns503BeforeDBOnNilPostgres documents a known
+// coverage gap: the 422 branch inside handlePostGetMemoryWithFilter fires only when
+// h.postgres.GetMemoriesByFilter returns a non-nil error. Exercising that path requires
+// a live (or mocked) pgx pool that returns an error, which is not available in unit tests
+// because db.Postgres uses a concrete struct with an unexported pool field (no interface to stub).
+//
+// The DB-error fallback is covered by integration / live-PG tests. This note replaces the previous
+// misleading test that only asserted != 502 while never actually reaching the filter DB path
+// (nil postgres → 503 was returned before the filter path was entered).
+//
+// To add a real unit test here: extract a postgresFilterer interface from db.Postgres
+// (GetMemoriesByFilter method), inject it into Handler, and provide a failFilterStore stub.
+func TestHandlePostGetMemoryWithFilter_Returns503BeforeDBOnNilPostgres(t *testing.T) {
+	h := testShutdownHandler() // postgres == nil
 
+	// With postgres==nil NativePostGetMemory falls through to ValidatedGetMemory
+	// which returns 503 — the filter DB path is never reached.
 	req := httptest.NewRequest(http.MethodPost, "/product/get_memory",
-		strings.NewReader(`{"mem_cube_id":"u1","filter":{"key":"value"}}`))
+		strings.NewReader(`{"mem_cube_id":"u1","filter":{"type":{"=":"LongTermMemory"}}}`))
 	w := httptest.NewRecorder()
-	// NativePostGetMemory calls handlePostGetMemoryWithFilter when filter is set and postgres != nil.
-	// With postgres==nil the handler returns 503 before filter; call directly via ValidatedGetMemory.
-	h.ValidatedGetMemory(w, req)
+	h.NativePostGetMemory(w, req)
 
-	// With nil postgres the path returns 503 (not 422) — 422 fires only when DB errors at filter eval.
-	// This test verifies the handler does NOT return 502.
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 on nil postgres, got %d: %s", w.Code, w.Body.String())
+	}
 	if w.Code == http.StatusBadGateway {
-		t.Errorf("got 502 (proxy called) — should never reach Python after Phase 5 shutdown")
+		t.Errorf("got 502 — python proxy must never be called after Phase 5 shutdown")
 	}
 }
