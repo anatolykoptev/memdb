@@ -26,13 +26,20 @@ func TestExpandViaGraph_CosineScoring_QueryAlignedWins(t *testing.T) {
 	t.Setenv("MEMDB_SEARCH_MULTIHOP", "true")
 	queryVec := orthogonalEmbedding(0)
 
+	// 5 seeds → cap2x=10, expBudget=10-5=5. Both n1 and n2 fit.
 	// n1 (hop 1) is identical to query → cos=1 → score=1.0 * 0.8 = 0.8.
 	// n2 (hop 1) is orthogonal      → cos=0 → score=0.5 * 0.8 = 0.4.
 	pg := &mockExpansionPG{returnExpansions: []db.GraphExpansion{
 		{ID: "n1", Hop: 1, SeedID: "seed-0", Properties: `{"id":"n1"}`, Embedding: orthogonalEmbedding(0)},
 		{ID: "n2", Hop: 1, SeedID: "seed-0", Properties: `{"id":"n2"}`, Embedding: orthogonalEmbedding(1)},
 	}}
-	seeds := []MergedResult{{ID: "seed-0", Score: 0.01}} // Tiny RRF score
+	seeds := []MergedResult{
+		{ID: "seed-0", Score: 0.01}, // Tiny RRF score
+		{ID: "seed-1", Score: 0.02},
+		{ID: "seed-2", Score: 0.03},
+		{ID: "seed-3", Score: 0.04},
+		{ID: "seed-4", Score: 0.05},
+	}
 	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, queryVec, "cube", "user", "")
 
 	var n1, n2 *MergedResult
@@ -57,22 +64,39 @@ func TestExpandViaGraph_CosineScoring_QueryAlignedWins(t *testing.T) {
 	if n1.Score <= n2.Score {
 		t.Fatalf("query-aligned n1 must outrank orthogonal n2: n1=%v n2=%v", n1.Score, n2.Score)
 	}
-	// And both must outrank the tiny seed (0.01) — pre-fix behaviour was the inverse.
-	if !(n1.Score > seeds[0].Score && n2.Score > seeds[0].Score) {
-		t.Fatalf("expansion items must beat tiny RRF seed: seed=%v n1=%v n2=%v",
-			seeds[0].Score, n1.Score, n2.Score)
+	// All seeds must survive — they hold tiny RRF Score here but ReRankByCosine
+	// downstream rescues them. M8 v1 fix regression: cosine-scored expansions
+	// would push seeds out of the cap, leaving them with no chance to be re-scored.
+	for _, s := range seeds {
+		found := false
+		for _, m := range got {
+			if m.ID == s.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("seed %s evicted by expansion cap; want all seeds preserved", s.ID)
+		}
 	}
 }
 
 func TestExpandViaGraph_CosineScoring_HopDecayApplied(t *testing.T) {
 	t.Setenv("MEMDB_SEARCH_MULTIHOP", "true")
 	queryVec := orthogonalEmbedding(0)
+	// 5 seeds → cap2x=10, expBudget=5. Both h1 and h2 fit.
 	// Same neighbor embedding (cos=1.0) at hop 1 vs hop 2 → score 0.8 vs 0.64.
 	pg := &mockExpansionPG{returnExpansions: []db.GraphExpansion{
 		{ID: "h1", Hop: 1, SeedID: "seed-0", Properties: `{"id":"h1"}`, Embedding: orthogonalEmbedding(0)},
 		{ID: "h2", Hop: 2, SeedID: "seed-0", Properties: `{"id":"h2"}`, Embedding: orthogonalEmbedding(0)},
 	}}
-	seeds := []MergedResult{{ID: "seed-0", Score: 0.01}}
+	seeds := []MergedResult{
+		{ID: "seed-0", Score: 0.01},
+		{ID: "seed-1", Score: 0.02},
+		{ID: "seed-2", Score: 0.03},
+		{ID: "seed-3", Score: 0.04},
+		{ID: "seed-4", Score: 0.05},
+	}
 	got := expandViaGraph(context.Background(), pg, discardTestLogger(), seeds, queryVec, "cube", "user", "")
 	var h1, h2 *MergedResult
 	for i := range got {
@@ -83,16 +107,14 @@ func TestExpandViaGraph_CosineScoring_HopDecayApplied(t *testing.T) {
 			h2 = &got[i]
 		}
 	}
-	if h1 == nil {
-		t.Fatalf("h1 missing (cap evicted higher-scoring): %+v", got)
+	if h1 == nil || h2 == nil {
+		t.Fatalf("h1/h2 missing from result: %+v", got)
 	}
 	const eps = 1e-6
 	if math.Abs(h1.Score-0.8) > eps {
 		t.Fatalf("h1 hop-1 score: want 0.8, got %v", h1.Score)
 	}
-	// h2 may be capped out at cap2x=2 (1 seed + 1 expansion), but if present
-	// its score must be 0.64.
-	if h2 != nil && math.Abs(h2.Score-0.64) > eps {
+	if math.Abs(h2.Score-0.64) > eps {
 		t.Fatalf("h2 hop-2 score: want 0.64, got %v", h2.Score)
 	}
 }

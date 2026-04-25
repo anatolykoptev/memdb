@@ -176,6 +176,30 @@ GOWORK=off go test -tags=livepg ./memdb-go/internal/search/... \
 
 Result (verified): `D2 fix verified: seed=0.0100 B(hop1,orth)=0.4000 C(hop2,aligned)=0.6400`.
 
+## Follow-up: v2 fix (independent cap, 2026-04-26)
+
+Live re-measurement on conv-26 cat-2 (37 QAs) after the v1 fix uncovered a
+**second bug introduced by the v1 score change**: cosine-rescored expansions
+got Score in `[0.4, 0.8]`, but seeds at the `expandViaGraph` exit point still
+carry RRF Score (~0.016) because `ReRankByCosine` runs DOWNSTREAM. The
+joint sort + 2× cap then pushed every seed to the bottom and evicted
+those that didn't fit, including the gold leaf for q33
+("How long has Caroline had her current group of friends for? — 4 years").
+
+Symptom: M7 stage 2 cat-2 hit@k = 0.43 → M8 v1 dropped to 0.27, F1
+collapsed to 0.0 (every chat answered "no answer" because the
+gold-bearing leaves were evicted from the top-20).
+
+v2 fix (single function, ~20 lines in `service_multihop.go`):
+
+- Cap expansions independently: keep ALL seeds, trim only expansions to
+  `(2 × origSize − origSize)` slots.
+- Seeds always survive to `ReRankByCosine`, which rescues their score.
+- Expansions still compete for the remaining budget by cosine × decay.
+- `multihop_cosine_test.go` updated to exercise 5 seeds + 2 expansions
+  (cap=10, expBudget=5) so both expansions fit; new assertion verifies
+  every seed is preserved.
+
 ## Topology caveat — what this fix does NOT solve
 
 The hub-and-spoke topology means hop-1 produces just one neighbour (the
