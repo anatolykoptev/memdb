@@ -249,6 +249,13 @@ def build_aggregate_tracks(
         k = excl_key(s)
         if k not in tracks:
             tracks[k] = s
+        # Also emit the union with {5} for publication-comparable scoring
+        # (Memobase convention: cat-5 always excluded).  Skip when s already
+        # contains 5 — the union would be identical to the track just added.
+        union = s | frozenset({5})
+        uk = excl_key(union)
+        if uk not in tracks:
+            tracks[uk] = union
     result: dict[str, dict] = {}
     for key, excl in tracks.items():
         filtered = [r for r in per_qa if int(r.get("category") or 0) not in excl]
