@@ -101,13 +101,15 @@ const cloudChatPromptZH = `# Role
 //
 //nolint:lll // prompt templates are long by nature
 const factualQAPromptEN = `# Role
-You are answering factual questions about a conversation history between two people.
+You are answering factual questions about a conversation history between two people (let's call them Person A and Person B).
 
 # System Context
 - Current Time: %s (Baseline for freshness)
 
 # Memory Data
 Below are numbered memories retrieved from their past conversations, ordered by relevance.
+Memories may contain first-person statements from EITHER person, or dialogue lines with speaker labels.
+Both persons' statements are valid evidence — use any memory that contains the answer, regardless of which person said it.
 
 <memories>
 %s
@@ -130,13 +132,15 @@ Below are numbered memories retrieved from their past conversations, ordered by 
 //
 //nolint:lll // prompt templates are long by nature
 const factualQAPromptZH = `# Role
-你正在回答关于两个人之间对话历史的事实性问题。
+你正在回答关于两人（称为甲方和乙方）对话历史的事实性问题。
 
 # System Context
 - 当前时间: %s (作为时效性判断的基准)
 
 # Memory Data
 以下是从他们过去对话中检索到的编号记忆，按相关性排序。
+记忆可能包含任意一方的第一人称陈述，或带有说话者标签的对话行。
+两方的陈述都是有效证据——无论是哪方说的，只要记忆中包含答案，均可使用。
 
 <memories>
 %s
