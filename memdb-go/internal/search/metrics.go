@@ -18,14 +18,18 @@ var (
 )
 
 type searchMetricsInstruments struct {
-	D4Rewrite    metric.Int64Counter
-	D7CoT        metric.Int64Counter
-	D5Staged     metric.Int64Counter
-	D5Justified  metric.Int64Counter
-	D10Enhance   metric.Int64Counter
-	D10Conf      metric.Float64Histogram
-	Multihop     metric.Int64Counter
-	HopsPerQuery metric.Int64Histogram // M8: max hop reached per D2 expansion call
+	D4Rewrite        metric.Int64Counter
+	D7CoT            metric.Int64Counter
+	D5Staged         metric.Int64Counter
+	D5Justified      metric.Int64Counter
+	D10Enhance       metric.Int64Counter
+	D10Conf          metric.Float64Histogram
+	Multihop         metric.Int64Counter
+	HopsPerQuery     metric.Int64Histogram    // M8: max hop reached per D2 expansion call
+	D11CoTDecompose  metric.Int64Counter
+	D11CoTSubqueries metric.Int64Histogram
+	D11CoTDuration   metric.Int64Histogram
+	D11CoTCacheHit   metric.Int64Counter
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -53,21 +57,35 @@ func searchMx() *searchMetricsInstruments {
 		hpq, _ := m.Int64Histogram("memdb.search.d2_hops_per_query",
 			metric.WithDescription("D2 multi-hop expansion: max hop reached per query (0 = no neighbors, n = walked n hops)"),
 			metric.WithExplicitBucketBoundaries(0, 1, 2, 3, 4, 5))
+		d11, _ := m.Int64Counter("memdb.search.cot.decomposed_total",
+			metric.WithDescription("D11 CoT decomposer invocations by outcome (success/skip/error)"))
+		d11n, _ := m.Int64Histogram("memdb.search.cot.subqueries",
+			metric.WithDescription("D11 number of sub-queries returned (including original at index 0)"),
+			metric.WithExplicitBucketBoundaries(1, 2, 3, 4, 5))
+		d11d, _ := m.Int64Histogram("memdb.search.cot.duration_ms",
+			metric.WithDescription("D11 CoT decomposer LLM call duration in milliseconds"),
+			metric.WithExplicitBucketBoundaries(100, 250, 500, 1000, 2000, 5000, 10000))
+		d11c, _ := m.Int64Counter("memdb.search.cot.cache_hit_total",
+			metric.WithDescription("D11 CoT decomposer cache hits"))
 		searchMetrics = &searchMetricsInstruments{
-			D4Rewrite:    d4,
-			D7CoT:        d7,
-			D5Staged:     d5,
-			D5Justified:  d5j,
-			D10Enhance:   d10,
-			D10Conf:      d10c,
-			Multihop:     mh,
-			HopsPerQuery: hpq,
+			D4Rewrite:        d4,
+			D7CoT:            d7,
+			D5Staged:         d5,
+			D5Justified:      d5j,
+			D10Enhance:       d10,
+			D10Conf:          d10c,
+			Multihop:         mh,
+			HopsPerQuery:     hpq,
+			D11CoTDecompose:  d11,
+			D11CoTSubqueries: d11n,
+			D11CoTDuration:   d11d,
+			D11CoTCacheHit:   d11c,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
 		// "metric not found" gap in dashboards / alert rules.
 		ctx := context.Background()
-		for _, c := range []metric.Int64Counter{d4, d7, d10, mh} {
+		for _, c := range []metric.Int64Counter{d4, d7, d10, mh, d11} {
 			c.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", "")))
 		}
 		d5.Add(ctx, 0, metric.WithAttributes(
@@ -75,6 +93,7 @@ func searchMx() *searchMetricsInstruments {
 			attribute.String("outcome", ""),
 		))
 		d5j.Add(ctx, 0, metric.WithAttributes(attribute.String("relevance", "")))
+		d11c.Add(ctx, 0)
 	})
 	return searchMetrics
 }
