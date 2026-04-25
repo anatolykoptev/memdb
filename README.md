@@ -43,6 +43,10 @@ in their LoCoMo evaluation harness and excludes adversarial category 5 (see
 [evaluation/locomo/MILESTONES.md](evaluation/locomo/MILESTONES.md#two-track-reporting-convention-m9-stream-3)
 for why we report two tracks).
 
+For the long version — origin story (hard fork from MemOS), academic foundation, MemOS-vs-MemDB
+architectural divergence, full feature comparison — see [docs/overview.md](docs/overview.md)
+(English) or [docs/overview-ru.md](docs/overview-ru.md) (Russian).
+
 ---
 
 ## Quick Start (5 minutes)
