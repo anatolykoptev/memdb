@@ -228,8 +228,5 @@ memdb-go/memdb-go
 # Local overviews / notes
 OVERVIEW*.md
 
-# Archived source
-src/memdb/graph_dbs/_archive/
-
 # Allow example dependency files
 !examples/**/requirements.txt
