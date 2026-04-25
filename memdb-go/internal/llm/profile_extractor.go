@@ -91,7 +91,7 @@ func (e *ProfileExtractor) ExtractProfile(ctx context.Context, conversation, use
 
 	// One retry with a stronger format reminder. LLMs occasionally drop the
 	// `---` divider or wrap the list in prose; the suffix nudges them back.
-	retryMsgs := append(msgs, map[string]string{
+	retryMsgs := append(msgs[:len(msgs):len(msgs)], map[string]string{
 		"role":    "user",
 		"content": "Please STRICTLY follow the output format: a `---` divider followed by lines starting with `- TOPIC\tSUB_TOPIC\tMEMO`. No prose around the list.",
 	})

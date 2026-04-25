@@ -19,7 +19,7 @@ func TestProfileFactRetrievalPrompt_VerbatimMemobaseFragments(t *testing.T) {
 	wants := []string{
 		"You are a professional psychologist.",
 		"#### Topics Guidelines",
-		"You'll be given some user-relatedtopics and subtopics", // typo intentional in upstream
+		"You'll be given some user-relatedtopics and subtopics", // Memobase upstream contains the typo "user-relatedtopics" (no space). We preserve it verbatim per port contract — changing it would diverge from the source prompt.
 		"#### Profile",
 		"- TOPIC\tSUB_TOPIC\tMEMO",
 		"- basic_info\tname\tmelinda",
