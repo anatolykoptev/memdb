@@ -627,6 +627,48 @@ single-conv result. Whether it generalises requires re-running with a stable ing
 
 Filed as backlog item — this is a measurement-tooling failure, not a model regression.
 
+## Two-track reporting convention (M9 Stream 3)
+
+Every `score.py` run now emits **two aggregate keys** in the output JSON regardless of flags:
+
+| Key | Categories included | Notes |
+|-----|---------------------|-------|
+| `aggregate_with_excl_none` | 1, 2, 3, 4, 5 (all) | Full MemDB score |
+| `aggregate_with_excl_5` | 1, 2, 3, 4 (adversarial excluded) | Comparable to Memobase published score |
+
+**Why this matters — citation**: Memobase's published 75.78% was computed with
+`exclude_category={5}` hardcoded in
+`docs/experiments/locomo-benchmark/src/memobase_client/memobase_search.py:147`:
+
+```python
+def process_data_file(self, file_path, exclude_category={5}):
+    ...
+    qa_filtered = [i for i in qa if i.get("category", -1) not in exclude_category]
+```
+
+Their leaderboard number has zero weight from category 5 (adversarial). Comparing
+our full-inclusive aggregate directly to their excl-5 number penalises us unfairly —
+we include the harder adversarial questions in our denominator.
+
+Two-track reporting resolves this: `aggregate_with_excl_5` is the apples-to-apples
+comparison point against Memobase and other systems that exclude category 5.
+`aggregate_with_excl_none` is our honest full-benchmark score.
+
+**M7 Stage 2 example** (199 QAs, conv-26 full):
+
+| Track | n | F1 | EM | hit@k |
+|-------|---|----|----|-------|
+| excl_none (all cats) | 199 | 0.238 | 0.101 | 0.769 |
+| excl_5 (no adversarial) | 152 | 0.283 | 0.112 | 0.750 |
+
+Excluding cat-5 (F1=0.092, below average) raises the aggregate F1 from 0.238 → 0.283 (+19%).
+
+**Additional tracks**: pass `--exclude-categories=4,5` to also emit `aggregate_with_excl_4_5`,
+useful for ablation studies. Both canonical tracks are always emitted regardless.
+
+**compare.py** auto-detects `aggregate_with_excl_*` keys in both files and prints a
+side-by-side table per track automatically.
+
 ## How to record a new milestone
 
 ```bash
