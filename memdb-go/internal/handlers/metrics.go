@@ -3,9 +3,11 @@
 package handlers
 
 import (
+	"context"
 	"sync"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -91,6 +93,38 @@ func chatPromptMx() *chatPromptMetricsInstruments {
 		chatPromptMetrics = &chatPromptMetricsInstruments{TemplateUsed: used}
 	})
 	return chatPromptMetrics
+}
+
+// ── Feedback events counter (reward scaffold) ─────────────────────────────────
+
+var (
+	feedbackEventsOnce    sync.Once
+	feedbackEventsMetrics *feedbackEventsInstruments
+)
+
+type feedbackEventsInstruments struct {
+	// EventsTotal counts persisted feedback_events rows by label.
+	// label ∈ {positive, negative, neutral, correction}.
+	// Pre-registered at zero so Prometheus sees the series before the first write.
+	EventsTotal metric.Int64Counter
+}
+
+// feedbackEventsMx returns the singleton reward-scaffold instruments, lazy-initialised.
+// Counter memdb.feedback.events_total{label=positive|negative|neutral|correction}.
+func feedbackEventsMx() *feedbackEventsInstruments {
+	feedbackEventsOnce.Do(func() {
+		meter := otel.Meter("memdb-go/feedback")
+		total, _ := meter.Int64Counter("memdb.feedback.events_total",
+			metric.WithDescription("Count of feedback_events rows persisted to Postgres, labelled by label (positive/negative/neutral/correction). Powers M11 reward loop."),
+		)
+		// Pre-register all label values at 0 so dashboards see the series immediately.
+		ctx := context.Background()
+		for _, label := range []string{"positive", "negative", "neutral", "correction"} {
+			total.Add(ctx, 0, metric.WithAttributes(attribute.String("label", label)))
+		}
+		feedbackEventsMetrics = &feedbackEventsInstruments{EventsTotal: total}
+	})
+	return feedbackEventsMetrics
 }
 
 // ── Canary acceptance counter ─────────────────────────────────────────────────
