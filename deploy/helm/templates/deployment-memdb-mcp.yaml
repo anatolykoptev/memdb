@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "memdb.fullname" . }}-memdb-mcp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: memdb-mcp
+spec:
+  replicas: {{ .Values.memdbMcp.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "memdb.componentSelectorLabels" (dict "root" . "component" "memdb-mcp") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "memdb.componentSelectorLabels" (dict "root" . "component" "memdb-mcp") | nindent 8 }}
+    spec:
+      containers:
+        - name: memdb-mcp
+          image: "{{ .Values.memdbMcp.image.repository }}:{{ .Values.memdbMcp.image.tag }}"
+          imagePullPolicy: {{ .Values.memdbMcp.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.memdbMcp.port }}
+              protocol: TCP
+          env:
+            - name: MEMDB_MCP_PORT
+              value: {{ .Values.memdbMcp.port | quote }}
+            - name: MEMDB_POSTGRES_URL
+              value: "postgresql://{{ .Values.postgres.user }}:$(MEMDB_POSTGRES_PASSWORD)@{{ include "memdb.fullname" . }}-postgres:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}?sslmode=disable"
+            - name: MEMDB_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "memdb.secretName" . }}
+                  key: postgresPassword
+            - name: MEMDB_GO_URL
+              value: "http://{{ include "memdb.fullname" . }}-memdb-go:{{ .Values.memdbGo.service.port }}"
+            - name: MASTER_KEY_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "memdb.secretName" . }}
+                  key: masterKeyHash
+                  optional: true
+            - name: INTERNAL_SERVICE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "memdb.secretName" . }}
+                  key: internalServiceSecret
+                  optional: true
+            {{- range $k, $v := .Values.memdbMcp.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.memdbMcp.resources | nindent 12 }}

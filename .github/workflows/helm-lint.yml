@@ -1,0 +1,72 @@
+name: Helm Lint & Dry-Run
+
+on:
+  pull_request:
+    paths:
+      - "deploy/helm/**"
+  push:
+    branches: [main]
+    paths:
+      - "deploy/helm/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  helm-lint:
+    name: Helm Lint + Template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.17.0"
+
+      - name: helm lint
+        run: helm lint deploy/helm
+
+      - name: helm template (render check)
+        run: |
+          helm template memdb deploy/helm \
+            --set existingSecret=memdb-secrets \
+            --namespace memdb \
+            --debug \
+            > /tmp/memdb-rendered.yaml
+          echo "--- Rendered manifest line count ---"
+          wc -l /tmp/memdb-rendered.yaml
+
+  helm-dry-run:
+    name: Helm Install Dry-Run (kind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "3.17.0"
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: memdb-ci
+
+      - name: Create stub secret (dry-run values only)
+        run: |
+          kubectl create namespace memdb
+          kubectl create secret generic memdb-secrets \
+            --namespace memdb \
+            --from-literal=postgresPassword=ci-test-password \
+            --from-literal=llmApiKey=ci-test-key \
+            --from-literal=masterKeyHash="" \
+            --from-literal=internalServiceSecret=""
+
+      - name: helm install --dry-run
+        run: |
+          helm install memdb deploy/helm \
+            --namespace memdb \
+            --dry-run \
+            --debug

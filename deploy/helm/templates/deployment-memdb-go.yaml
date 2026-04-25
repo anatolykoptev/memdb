@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "memdb.fullname" . }}-memdb-go
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "memdb.labels" . | nindent 4 }}
+    app.kubernetes.io/component: memdb-go
+spec:
+  replicas: {{ .Values.memdbGo.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "memdb.componentSelectorLabels" (dict "root" . "component" "memdb-go") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "memdb.componentSelectorLabels" (dict "root" . "component" "memdb-go") | nindent 8 }}
+    spec:
+      containers:
+        - name: memdb-go
+          image: "{{ .Values.memdbGo.image.repository }}:{{ .Values.memdbGo.image.tag }}"
+          imagePullPolicy: {{ .Values.memdbGo.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.memdbGo.port }}
+              protocol: TCP
+          env:
+            - name: MEMDB_GO_PORT
+              value: {{ .Values.memdbGo.port | quote }}
+            - name: MEMDB_POSTGRES_URL
+              value: {{ include "memdb.postgresURL" . | quote }}
+              # Append password via envFrom-based substitution is not available in vanilla K8s;
+              # we inline the DSN but inject the password via a separate env variable reference.
+              # Full DSN construction happens in a wrapper or via init container if needed.
+              # For simplicity, we pass the password as a separate env and the app reads:
+              # postgresql://$(MEMDB_POSTGRES_USER):$(MEMDB_POSTGRES_PASSWORD)@...
+            - name: MEMDB_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "memdb.secretName" . }}
+                  key: postgresPassword
+            - name: MEMDB_POSTGRES_DSN
+              value: "postgresql://{{ .Values.postgres.user }}:$(MEMDB_POSTGRES_PASSWORD)@{{ include "memdb.fullname" . }}-postgres:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}?sslmode=disable"
+            - name: MEMDB_REDIS_URL
+              value: {{ include "memdb.redisURL" . | quote }}
+            - name: MEMDB_QDRANT_ADDR
+              value: {{ include "memdb.qdrantAddr" . | quote }}
+            {{- if .Values.embedServer.enabled }}
+            - name: MEMDB_EMBED_URL
+              value: {{ include "memdb.embedURL" . | quote }}
+            {{- end }}
+            - name: CLI_PROXY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "memdb.secretName" . }}
+                  key: llmApiKey
+            - name: MASTER_KEY_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "memdb.secretName" . }}
+                  key: masterKeyHash
+                  optional: true
+            - name: INTERNAL_SERVICE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "memdb.secretName" . }}
+                  key: internalServiceSecret
+                  optional: true
+            {{- range $k, $v := .Values.memdbGo.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.memdbGo.resources | nindent 12 }}
