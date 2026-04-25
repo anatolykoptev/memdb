@@ -55,7 +55,7 @@ func TestParseProfileResponse_TSVHappyPath(t *testing.T) {
 - work	company	acme
 - interest	movie	Inception, Interstellar
 `
-	got := parseProfileResponse(raw, "u1", time.Now())
+	got := parseProfileResponse(raw, "u1", "cube-u1", time.Now())
 	if len(got) != 3 {
 		t.Fatalf("want 3 entries, got %d (%+v)", len(got), got)
 	}
@@ -75,7 +75,7 @@ func TestParseProfileResponse_TSVHappyPath(t *testing.T) {
 func TestParseProfileResponse_NoDivider(t *testing.T) {
 	// LLM occasionally drops the `---` line. We still parse `- TOPIC\tSUB\tMEMO`.
 	raw := "- basic_info\tname\tbob\n- work\ttitle\tengineer\n"
-	got := parseProfileResponse(raw, "u2", time.Now())
+	got := parseProfileResponse(raw, "u2", "cube-u2", time.Now())
 	if len(got) != 2 {
 		t.Fatalf("want 2 entries, got %d", len(got))
 	}
@@ -90,7 +90,7 @@ func TestParseProfileResponse_PrePostText(t *testing.T) {
 - work	company	acme
 
 Hope that helps!`
-	got := parseProfileResponse(raw, "u3", time.Now())
+	got := parseProfileResponse(raw, "u3", "cube-u3", time.Now())
 	if len(got) != 2 {
 		t.Fatalf("want 2 entries, got %d", len(got))
 	}
@@ -103,7 +103,7 @@ func TestParseProfileResponse_EmptyOutput(t *testing.T) {
 		"[POSSIBLE TOPICS THINKING...]\n---\n",
 		"No relevant facts.",
 	} {
-		got := parseProfileResponse(raw, "u4", time.Now())
+		got := parseProfileResponse(raw, "u4", "cube-u4", time.Now())
 		if len(got) != 0 {
 			t.Errorf("want 0 entries for %q, got %d", raw, len(got))
 		}
@@ -119,7 +119,7 @@ this line is prose with no leading dash
 - 	empty_topic	value
 - only-two-fields	value
 `
-	got := parseProfileResponse(raw, "u5", time.Now())
+	got := parseProfileResponse(raw, "u5", "cube-u5", time.Now())
 	// Only the two well-formed lines (alice, Inception) should survive.
 	if len(got) != 2 {
 		t.Fatalf("want 2 entries, got %d (%+v)", len(got), got)
@@ -131,7 +131,7 @@ func TestParseProfileResponse_JSONEnvelope(t *testing.T) {
 		{"topic":"basic_info","sub_topic":"name","memo":"alice"},
 		{"topic":"work","sub_topic":"company","memo":"acme"}
 	]}`
-	got := parseProfileResponse(raw, "u6", time.Now())
+	got := parseProfileResponse(raw, "u6", "cube-u6", time.Now())
 	if len(got) != 2 {
 		t.Fatalf("want 2 entries from JSON envelope, got %d", len(got))
 	}
@@ -142,7 +142,7 @@ func TestParseProfileResponse_JSONEnvelope(t *testing.T) {
 
 func TestParseProfileResponse_JSONBareArray(t *testing.T) {
 	raw := "```json\n[{\"topic\":\"interest\",\"sub_topic\":\"movie\",\"memo\":\"Tenet\"}]\n```"
-	got := parseProfileResponse(raw, "u7", time.Now())
+	got := parseProfileResponse(raw, "u7", "cube-u7", time.Now())
 	if len(got) != 1 {
 		t.Fatalf("want 1 entry from bare JSON array, got %d", len(got))
 	}
@@ -150,7 +150,7 @@ func TestParseProfileResponse_JSONBareArray(t *testing.T) {
 
 func TestParseProfileResponse_TopicLowerCased(t *testing.T) {
 	raw := "---\n- BASIC_INFO\tName\tCarol\n"
-	got := parseProfileResponse(raw, "u8", time.Now())
+	got := parseProfileResponse(raw, "u8", "cube-u8", time.Now())
 	if len(got) != 1 {
 		t.Fatalf("want 1 entry, got %d", len(got))
 	}
@@ -166,7 +166,7 @@ func TestParseProfileResponse_TopicLowerCased(t *testing.T) {
 func TestParseProfileResponse_ValidAtStamped(t *testing.T) {
 	now := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
 	raw := "---\n- work\tcompany\tacme\n"
-	got := parseProfileResponse(raw, "u9", now)
+	got := parseProfileResponse(raw, "u9", "cube-u9", now)
 	if len(got) != 1 {
 		t.Fatalf("want 1 entry, got %d", len(got))
 	}

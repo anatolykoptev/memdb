@@ -56,7 +56,7 @@ func profileInjectEnabled() bool {
 //	- {topic} / {sub_topic}: {memo} [mention YYYY-MM-DD]
 //
 // Order of bullets follows the input slice (callers rely on
-// db.GetProfilesByUser's stable ORDER BY topic, sub_topic, updated_at DESC).
+// db.GetProfilesByUserCube's stable ORDER BY topic, sub_topic, updated_at DESC).
 //
 // If the rendered block exceeds profileMaxApproxToken tokens (heuristic:
 // len/profileTokenPerChar) it is truncated by dropping rows with the lowest

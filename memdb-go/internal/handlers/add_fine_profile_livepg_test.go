@@ -119,7 +119,7 @@ func runProfileExtractScenario(t *testing.T, cubePrefix, profileBody string, mes
 	t.Cleanup(func() { pg.Close() })
 
 	cube = fmt.Sprintf("%s-%d", cubePrefix, time.Now().UnixNano())
-	// Cleanup runs at test end (not scenario end) so test-level GetProfilesByUser
+	// Cleanup runs at test end (not scenario end) so test-level GetProfilesByUserCube
 	// can still observe the rows the goroutine inserted.
 	t.Cleanup(func() {
 		cctx := context.Background()
@@ -156,7 +156,7 @@ func runProfileExtractScenario(t *testing.T, cubePrefix, profileBody string, mes
 	// Poll the user_profiles table directly so we don't race the post-LLM commit.
 	pollDeadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(pollDeadline) {
-		rows, err := pg.GetProfilesByUser(ctx, cube)
+		rows, err := pg.GetProfilesByUserCube(ctx, cube, cube)
 		if err == nil && len(rows) > 0 {
 			break
 		}
@@ -190,9 +190,9 @@ func TestLivePG_FineAdd_ProfileExtract_BiographyPositive(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	rows, err := pg.GetProfilesByUser(ctx, userID)
+	rows, err := pg.GetProfilesByUserCube(ctx, userID, userID)
 	if err != nil {
-		t.Fatalf("GetProfilesByUser: %v", err)
+		t.Fatalf("GetProfilesByUserCube: %v", err)
 	}
 	if len(rows) < 3 {
 		t.Fatalf("want ≥3 profile rows, got %d (rows=%+v)", len(rows), rows)
@@ -233,9 +233,9 @@ func TestLivePG_FineAdd_ProfileExtract_PureCodeNegative(t *testing.T) {
 	)
 
 	ctx := context.Background()
-	rows, err := pg.GetProfilesByUser(ctx, userID)
+	rows, err := pg.GetProfilesByUserCube(ctx, userID, userID)
 	if err != nil {
-		t.Fatalf("GetProfilesByUser: %v", err)
+		t.Fatalf("GetProfilesByUserCube: %v", err)
 	}
 	if len(rows) > 1 {
 		t.Errorf("pure-code conversation should yield ≤1 profile row, got %d (rows=%+v)", len(rows), rows)

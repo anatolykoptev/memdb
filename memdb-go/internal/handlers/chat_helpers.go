@@ -204,6 +204,34 @@ func resolveCubeIDs(readableCubeIDs []string, memCubeID, userID *string) []strin
 	return []string{*userID}
 }
 
+// profileCubeIDForRequest picks the single cube_id used to scope user-profile
+// injection (security audit C1). Profile rows are tenant-isolated: chat search
+// can fan out across multiple readable cubes, but the prompt's
+// "## User Profile" section is built from a single cube only — the system
+// prompt budget is small and cross-cube identity merging is deferred to a
+// future stream. Precedence mirrors resolveCubeIDs:
+//  1. first entry in ReadableCubeIDs (explicit caller intent)
+//  2. MemCubeID
+//  3. UserID (matches the legacy "cube_id == user_id" single-tenant default)
+//
+// Returns "" when the request carries no usable identifier; callers MUST treat
+// "" as "skip profile injection" (chatProfileSection enforces this).
+func profileCubeIDForRequest(req *nativeChatRequest) string {
+	if req == nil {
+		return ""
+	}
+	if len(req.ReadableCubeIDs) > 0 && req.ReadableCubeIDs[0] != "" {
+		return req.ReadableCubeIDs[0]
+	}
+	if req.MemCubeID != nil && *req.MemCubeID != "" {
+		return *req.MemCubeID
+	}
+	if req.UserID != nil {
+		return *req.UserID
+	}
+	return ""
+}
+
 // filterOuterMemory removes OuterMemory type entries from the slice.
 func filterOuterMemory(memories []map[string]any) []map[string]any {
 	if len(memories) == 0 {

@@ -223,3 +223,54 @@ func truncate(s string, n int) string {
 func unsetenvForTest() error {
 	return os.Unsetenv("MEMDB_PROFILE_INJECT")
 }
+
+// --- cube isolation (security audit C1) ---
+
+// TestProfileCubeIDForRequest_PrecedenceReadable verifies that the first
+// readable cube wins when present.
+func TestProfileCubeIDForRequest_PrecedenceReadable(t *testing.T) {
+	mem := "mem-cube"
+	user := "user-fallback"
+	req := &nativeChatRequest{
+		UserID:          &user,
+		MemCubeID:       &mem,
+		ReadableCubeIDs: []string{"acme", "contoso"},
+	}
+	if got := profileCubeIDForRequest(req); got != "acme" {
+		t.Errorf("ReadableCubeIDs[0] should win, got %q want acme", got)
+	}
+}
+
+// TestProfileCubeIDForRequest_PrecedenceMemCube verifies fallback to MemCubeID.
+func TestProfileCubeIDForRequest_PrecedenceMemCube(t *testing.T) {
+	mem := "mem-cube"
+	user := "user-fallback"
+	req := &nativeChatRequest{
+		UserID:    &user,
+		MemCubeID: &mem,
+	}
+	if got := profileCubeIDForRequest(req); got != "mem-cube" {
+		t.Errorf("MemCubeID should win when ReadableCubeIDs empty, got %q want mem-cube", got)
+	}
+}
+
+// TestProfileCubeIDForRequest_PrecedenceUserID verifies the legacy single-tenant
+// fallback (cube_id == user_id) when neither readable cubes nor MemCubeID set.
+func TestProfileCubeIDForRequest_PrecedenceUserID(t *testing.T) {
+	user := "krolik"
+	req := &nativeChatRequest{UserID: &user}
+	if got := profileCubeIDForRequest(req); got != "krolik" {
+		t.Errorf("UserID fallback should win, got %q want krolik", got)
+	}
+}
+
+// TestProfileCubeIDForRequest_NilSafe ensures we never panic on a nil request.
+func TestProfileCubeIDForRequest_NilSafe(t *testing.T) {
+	if got := profileCubeIDForRequest(nil); got != "" {
+		t.Errorf("nil request should yield empty cube_id, got %q", got)
+	}
+	empty := ""
+	if got := profileCubeIDForRequest(&nativeChatRequest{MemCubeID: &empty}); got != "" {
+		t.Errorf("all-empty inputs should yield empty cube_id, got %q", got)
+	}
+}
