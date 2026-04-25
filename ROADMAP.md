@@ -94,6 +94,20 @@ and [docs/competitive/2026-04-26-memobase-deep-dive.md](docs/competitive/2026-04
 | **PageRank on `memory_edges`** | S | Background goroutine computes PageRank, boosts D1 rerank. cat-1 + cat-3 recall lift. |
 | **`BulkCopyInsert` / `CypherWriter` for AGE writes** | M | Direct text-format COPY into AGE bypassing Cypher parser; 2-5x speedup on Stage 3 ingest, D3 batch, structural edges. |
 
+### From upstream MemOS (selective takeaways, see [docs/competitive/2026-04-26-memos-upstream-analysis.md](docs/competitive/2026-04-26-memos-upstream-analysis.md))
+
+| Item | Size | Rationale |
+|------|------|-----------|
+| **L1 / L2 / L3 memory layer API contract** | S (1-2 days) | Surface our existing instant/working/long-term split as `level: l1\|l2\|l3` query parameter. Matches academic MemOS paper terminology — eases migration for users coming from upstream. No internal restructuring; API skin only. |
+| **Helm chart for Kubernetes** | S (1-2 days) | Standard `deploy/helm/` chart for postgres + memdb-go + embed-server. Required for enterprise self-host evaluation. Easy win, no code changes. |
+| **Reward / feedback closed loop** | M (1-2 weeks) | Our `mem_feedback` handler exists but doesn't close the RL-style learning loop. MemOS `core/reward/` shows the pattern: capture user corrections → adjust importance / retrieval weights / extract-prompt examples. M11 candidate. |
+
+What we explicitly do **not** take from MemOS upstream: Electron desktop app
+(`apps/memos-local-plugin/`), OpenClaw browser plugin
+(`apps/memos-local-openclaw/`), 1394-file kitchen-sink monorepo. Their direction is
+end-user productivity suite; ours is backend infrastructure component. Different
+audiences, different SKUs.
+
 ## Where we're going (6-12 months)
 
 **Public adoption.** v0.22.0 is the public foundation. Next: HN / Reddit /
