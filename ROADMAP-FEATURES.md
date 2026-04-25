@@ -16,7 +16,7 @@
 ## 1. Image Memory + Multimodal ❌ НЕ НАЧАТО
 
 **Источник:** MemOS v2.0
-**Зависимость:** после Python Deprecation (Фаза 5 в ROADMAP-GO-MIGRATION.md)
+**Зависимость:** после Python Deprecation (Фаза 5 в docs/ROADMAP-GO-MIGRATION.md)
 
 **Суть:** Нативная поддержка изображений — caption, CLIP embedding, image+text co-retrieval.
 
