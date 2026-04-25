@@ -447,6 +447,13 @@ func (h *Handler) applyDeleteAction(ctx context.Context, targetID, cubeID string
 	} else {
 		h.logger.Debug("fine add: deleted contradicted memory", slog.String("id", targetID))
 	}
+	// M10 Stream 6: cascade-clear ce_score_topk on every memory that
+	// listed this one as a neighbour (single SQL UPDATE, no per-row loop).
+	// The deleted memory itself is gone, so no need to clear its own key.
+	if err := h.postgres.ClearCEScoresTopKForNeighbor(ctx, targetID); err != nil {
+		h.logger.Debug("fine add: clear ce_score_topk cascade on delete failed (non-fatal)",
+			slog.String("id", targetID), slog.Any("error", err))
+	}
 }
 
 // applyUpdateAction merges a fact into an existing memory and re-embeds it.
@@ -471,6 +478,17 @@ func (h *Handler) applyUpdateAction(ctx context.Context, targetID, memory, embVe
 			slog.String("id", targetID), slog.Any("error", err))
 	} else {
 		h.logger.Debug("fine add: merged update", slog.String("target_id", targetID))
+	}
+	// M10 Stream 6: the memory text changed, so its own cached pairwise
+	// scores no longer reflect the new content. Clear the local key AND
+	// cascade-clear neighbours that pointed at us.
+	if err := h.postgres.ClearCEScoresTopK(ctx, targetID); err != nil {
+		h.logger.Debug("fine add: clear ce_score_topk on update failed (non-fatal)",
+			slog.String("id", targetID), slog.Any("error", err))
+	}
+	if err := h.postgres.ClearCEScoresTopKForNeighbor(ctx, targetID); err != nil {
+		h.logger.Debug("fine add: clear ce_score_topk cascade on update failed (non-fatal)",
+			slog.String("id", targetID), slog.Any("error", err))
 	}
 }
 

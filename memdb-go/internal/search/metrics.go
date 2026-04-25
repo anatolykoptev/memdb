@@ -32,6 +32,13 @@ type searchMetricsInstruments struct {
 	D11CoTCacheHit   metric.Int64Counter
 	// LevelTotal counts requests per memory-tier scope (l1/l2/l3/all).
 	LevelTotal metric.Int64Counter
+	// CEPrecomputeHit (M10 Stream 6) — outcome of CE precompute lookup
+	// (hit | miss | stale).
+	CEPrecomputeHit metric.Int64Counter
+	// CELiveCall (M10 Stream 6) — fired every time the live cross-encoder
+	// HTTP path executed (regardless of whether it was reached after a
+	// lookup miss or because the precompute feature was disabled).
+	CELiveCall metric.Int64Counter
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -71,6 +78,10 @@ func searchMx() *searchMetricsInstruments {
 			metric.WithDescription("D11 CoT decomposer cache hits"))
 		lvl, _ := m.Int64Counter("memdb.search.level_total",
 			metric.WithDescription("Search requests by memory tier (level=l1|l2|l3|all)"))
+		ceph, _ := m.Int64Counter("memdb.search.ce_precompute_hit_total",
+			metric.WithDescription("M10 Stream 6: CE precompute lookup outcome (outcome in hit|miss|stale)"))
+		celive, _ := m.Int64Counter("memdb.search.ce_live_call_total",
+			metric.WithDescription("M10 Stream 6: live cross-encoder HTTP rerank invocations (after precompute miss or when feature disabled)"))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -85,6 +96,8 @@ func searchMx() *searchMetricsInstruments {
 			D11CoTDuration:   d11d,
 			D11CoTCacheHit:   d11c,
 			LevelTotal:       lvl,
+			CEPrecomputeHit:  ceph,
+			CELiveCall:       celive,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -102,6 +115,12 @@ func searchMx() *searchMetricsInstruments {
 		for _, lv := range []string{"l1", "l2", "l3", "all"} {
 			lvl.Add(ctx, 0, metric.WithAttributes(attribute.String("level", lv)))
 		}
+		// Pre-register CE precompute outcomes so dashboards see all three
+		// series from container start, even before any search has fired.
+		for _, oc := range []string{"hit", "miss", "stale"} {
+			ceph.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
+		}
+		celive.Add(ctx, 0)
 	})
 	return searchMetrics
 }
