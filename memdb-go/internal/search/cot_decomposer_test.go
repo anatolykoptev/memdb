@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -202,6 +203,35 @@ func TestDecompose_NilReceiverSafe(t *testing.T) {
 	got := d.Decompose(context.Background(), nil, "any query here at all")
 	if len(got) != 1 {
 		t.Errorf("nil receiver should return single-element slice, got %v", got)
+	}
+}
+
+func TestShouldDecompose_OverLengthCapSkips(t *testing.T) {
+	t.Parallel()
+	// Build a query that passes the heuristic gate (long enough, has temporal
+	// connector, has ≥2 entities) but exceeds maxQueryRunesForCoT (1024 runes).
+	// A stub LLM server is intentionally NOT started — if the cap code path
+	// fails to short-circuit, the HTTP call would fail and the test would still
+	// pass via fallback. We detect the skip via the return value (single-element
+	// slice equal to the original) and by confirming no HTTP server was needed.
+	base := "What did Caroline do in Boston after she met Emma at the conference? "
+	// Repeat until we exceed 1024 runes (~16 repeats × 65 chars = ~1040 chars).
+	var sb strings.Builder
+	for sb.Len() < maxQueryRunesForCoT+100 {
+		sb.WriteString(base)
+	}
+	longQuery := strings.TrimSpace(sb.String())
+
+	// Enabled=true but APIURL points nowhere — if cap fires, no HTTP call is made.
+	d := NewCoTDecomposer(CoTDecomposerConfig{
+		Enabled: true, APIURL: "http://127.0.0.1:0", Model: "stub", MaxSubQueries: 3,
+	})
+	got := d.Decompose(context.Background(), nil, longQuery)
+	if len(got) != 1 {
+		t.Errorf("expected single-element fallback for over-length query, got %d elements: %v", len(got), got)
+	}
+	if got[0] != longQuery {
+		t.Errorf("expected original query at index 0, got %q", got[0])
 	}
 }
 

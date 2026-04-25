@@ -37,6 +37,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"go.opentelemetry.io/otel/attribute"
@@ -49,6 +50,12 @@ const (
 	cotDecomposerMinWords    = 8
 	cotDecomposerMinEntities = 2
 	cotDecomposerMaxTokens   = 256
+	// maxQueryRunesForCoT caps the query length before calling the LLM.
+	// ~1024 runes ≈ 256 tokens — comfortably below typical model context
+	// budgets while still covering all realistic conversational queries.
+	// Longer inputs are usually log dumps or pasted content, not the kind of
+	// multi-hop temporal questions CoT helps with.
+	maxQueryRunesForCoT = 1024
 )
 
 // cotTemporalConnectors are the surface tokens that strongly correlate with
@@ -106,6 +113,14 @@ func (d *CoTDecomposer) Decompose(ctx context.Context, logger *slog.Logger, quer
 	}
 	if !shouldDecompose(query) {
 		searchMx().D11CoTDecompose.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skip")))
+		return original
+	}
+	// Guard against oversized queries: log dumps, pasted content, etc. are
+	// unlikely to benefit from CoT and would inflate the LLM prompt + bill.
+	if utf8.RuneCountInString(query) > maxQueryRunesForCoT {
+		searchMx().D11CoTDecompose.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("outcome", "skip_too_long"),
+		))
 		return original
 	}
 	cacheKey := cotCacheKey(query)
