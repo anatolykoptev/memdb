@@ -144,7 +144,7 @@ func parseProfileResponse(raw, userID string, now time.Time) []db.InsertProfileP
 
 func tryParseProfileJSON(raw, userID string, now time.Time) ([]db.InsertProfileParams, bool) {
 	trimmed := strings.TrimSpace(raw)
-	if !(strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) {
+	if !strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[") {
 		return nil, false
 	}
 
@@ -185,8 +185,8 @@ func parseProfileTSV(raw, userID string, now time.Time) []db.InsertProfileParams
 	body := raw
 	if idx := strings.Index(body, "\n---"); idx >= 0 {
 		body = body[idx+len("\n---"):]
-	} else if strings.HasPrefix(body, "---") {
-		body = body[len("---"):]
+	} else {
+		body = strings.TrimPrefix(body, "---")
 	}
 
 	var out []db.InsertProfileParams
