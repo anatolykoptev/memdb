@@ -3,7 +3,7 @@
 > Цель: уделать конкурентов по качеству при меньших затратах LLM-токенов.
 > Составлен: февраль 2026. Обновлён: апрель 2026 (v2.0.0).
 >
-> **Статус на v2.0.0 (апрель 2026)**: LoCoMo hit@20 = **0.700** — выше Mem0 (0.65) и MemOS (0.60), на уровне Claude-3-Opus+RAG (0.72). Полный Phase D quality-stack shipped — см. [ROADMAP-SEARCH.md](../../ROADMAP-SEARCH.md), [ROADMAP-GO-MIGRATION.md](../../ROADMAP-GO-MIGRATION.md), [evaluation/locomo/MILESTONES.md](../../evaluation/locomo/MILESTONES.md). LLM cost optimization часть ниже — отдельный long-term трек, не перекрывается с v2.0.0.
+> **Статус на v2.0.0 (апрель 2026)**: LoCoMo hit@20 = **0.700** — выше Mem0 (0.65) и MemOS (0.60), на уровне Claude-3-Opus+RAG (0.72). Полный Phase D quality-stack shipped — см. [ROADMAP-SEARCH.md](../../ROADMAP-SEARCH.md), [ROADMAP-GO-MIGRATION.md](../ROADMAP-GO-MIGRATION.md), [evaluation/locomo/MILESTONES.md](../../evaluation/locomo/MILESTONES.md). LLM cost optimization часть ниже — отдельный long-term трек, не перекрывается с v2.0.0.
 
 ---
 
