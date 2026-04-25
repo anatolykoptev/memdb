@@ -5,6 +5,8 @@ package server
 
 import (
 	"log/slog"
+	"os"
+	"time"
 
 	"github.com/anatolykoptev/go-kit/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
@@ -128,6 +130,31 @@ func initSearchService(
 			APIURL: cfg.LLMProxyURL, APIKey: cfg.LLMProxyAPIKey, Model: cfg.LLMSearchModel,
 		}
 		logger.Info("fine search mode enabled")
+
+		// D11 CoT decomposer — env-gated (MEMDB_COT_DECOMPOSE), default OFF.
+		// Constructed unconditionally when the LLM proxy is configured so the
+		// gate can flip at runtime without a rebuild; Decompose() short-
+		// circuits when cfg.Enabled is false.
+		svc.CoTDecomposer = search.NewCoTDecomposer(search.CoTDecomposerConfig{
+			APIURL:        cfg.LLMProxyURL,
+			APIKey:        cfg.LLMProxyAPIKey,
+			Model:         cfg.LLMSearchModel,
+			Enabled:       cfg.CoTDecompose,
+			MaxSubQueries: cfg.CoTMaxSubqueries,
+			Timeout:       time.Duration(cfg.CoTTimeoutMS) * time.Millisecond,
+		})
+		if cfg.CoTDecompose {
+			logger.Info("d11 cot decomposer enabled",
+				slog.Int("max_subqueries", cfg.CoTMaxSubqueries),
+				slog.Int("timeout_ms", cfg.CoTTimeoutMS),
+			)
+		}
+		// D7 (MEMDB_SEARCH_COT) + D11 (MEMDB_COT_DECOMPOSE) both enabled:
+		// each query may trigger 2 LLM round-trips + up to 6 extra VectorSearch
+		// calls. Fine for ablation; not recommended for production.
+		if os.Getenv("MEMDB_SEARCH_COT") == "true" && cfg.CoTDecompose {
+			logger.Warn("both D7 (search_cot) and D11 (cot_decompose) enabled — expect 2 LLM round-trips + up to 6 extra VectorSearch calls per query; intended for ablation, not prod")
+		}
 	}
 
 	if cfg.SearXNGURL != "" {

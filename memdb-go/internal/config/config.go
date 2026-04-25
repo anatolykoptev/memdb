@@ -109,6 +109,13 @@ type Config struct {
 	CrossEncoderTimeout        time.Duration `json:"cross_encoder_timeout"`
 	CrossEncoderMaxDocs        int           `json:"cross_encoder_max_docs"`
 	CrossEncoderMaxCharsPerDoc int           `json:"cross_encoder_max_chars_per_doc"`
+
+	// D11 CoT decomposer (multi-hop / temporal query decomposition).
+	// Default OFF for zero regression. Sibling of MEMDB_SEARCH_COT (D7) —
+	// they can be enabled independently for ablation.
+	CoTDecompose      bool `json:"cot_decompose"`       // env: MEMDB_COT_DECOMPOSE
+	CoTMaxSubqueries  int  `json:"cot_max_subqueries"`  // env: MEMDB_COT_MAX_SUBQUERIES, default 3, clamp [1,5]
+	CoTTimeoutMS      int  `json:"cot_timeout_ms"`      // env: MEMDB_COT_TIMEOUT_MS, default 2000, clamp [500,10000]
 }
 
 const (
@@ -128,7 +135,37 @@ const (
 	defaultCrossEncoderTimeoutMS      = 2000
 	defaultCrossEncoderMaxDocs        = 50
 	defaultCrossEncoderMaxCharsPerDoc = 0 // 0 = no truncation; recommend 200 for ARM CPU rerankers
+
+	// D11 CoT decomposer defaults.
+	defaultCoTMaxSubqueries = 3
+	defaultCoTTimeoutMS     = 2000
+	cotMaxSubqueriesMin     = 1
+	cotMaxSubqueriesMax     = 5
+	cotTimeoutMSMin         = 500
+	cotTimeoutMSMax         = 10000
 )
+
+// clampCoTMaxSubqueries enforces [cotMaxSubqueriesMin, cotMaxSubqueriesMax].
+func clampCoTMaxSubqueries(v int) int {
+	if v < cotMaxSubqueriesMin {
+		return cotMaxSubqueriesMin
+	}
+	if v > cotMaxSubqueriesMax {
+		return cotMaxSubqueriesMax
+	}
+	return v
+}
+
+// clampCoTTimeoutMS enforces [cotTimeoutMSMin, cotTimeoutMSMax].
+func clampCoTTimeoutMS(v int) int {
+	if v < cotTimeoutMSMin {
+		return cotTimeoutMSMin
+	}
+	if v > cotTimeoutMSMax {
+		return cotTimeoutMSMax
+	}
+	return v
+}
 
 // Load reads configuration from environment variables with sensible defaults.
 func Load() *Config {
@@ -204,6 +241,10 @@ func Load() *Config {
 		CrossEncoderTimeout:        time.Duration(envInt("CROSS_ENCODER_TIMEOUT_MS", defaultCrossEncoderTimeoutMS)) * time.Millisecond,
 		CrossEncoderMaxDocs:        envInt("CROSS_ENCODER_MAX_DOCS", defaultCrossEncoderMaxDocs),
 		CrossEncoderMaxCharsPerDoc: envInt("CROSS_ENCODER_MAX_CHARS_PER_DOC", defaultCrossEncoderMaxCharsPerDoc),
+
+		CoTDecompose:     envBool("MEMDB_COT_DECOMPOSE", false),
+		CoTMaxSubqueries: clampCoTMaxSubqueries(envInt("MEMDB_COT_MAX_SUBQUERIES", defaultCoTMaxSubqueries)),
+		CoTTimeoutMS:     clampCoTTimeoutMS(envInt("MEMDB_COT_TIMEOUT_MS", defaultCoTTimeoutMS)),
 	}
 }
 
