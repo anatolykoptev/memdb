@@ -236,11 +236,45 @@ LOCOMO_SKIP_CHAT=1 OUT_SUFFIX=local bash evaluation/locomo/run.sh
 
 ## Roadmap
 
-Active backlogs (closed `ROADMAP-GO-MIGRATION.md` kept as historical record):
+> Full plan: **[ROADMAP.md](ROADMAP.md)**. Below is the executive summary.
 
-- [docs/backlog/search.md](docs/backlog/search.md) — retrieval quality (target: LoCoMo > 75)
-- [docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md) — ingest pipeline excellence
-- [docs/backlog/features.md](docs/backlog/features.md) — features beyond upstream Python (image memory, MemCube cross-sharing, …)
+### Shipped recently
+
+| Sprint | Theme | Highlights |
+|---|---|---|
+| **v0.22.0** (2026-04-26) | First public release | Pure-Go runtime, README + CONTRIBUTING + SECURITY, auto-release infra |
+| **M9** Memobase port + Phase 5 (2026-04-26) | Honest measurement + Python killcut | Dual-speaker retrieval, LLM Judge metric, `[mention DATE]` tags, cat-5 dual-track. `memdb-api` Python container removed. |
+| **M8** Multi-hop + infra (2026-04-26) | Retrieval + ops | D2 multi-hop fix, CoT D11, structural edges, GOMEMLIMIT, pprof behind auth |
+| **M7** Compound Lift v2.1.0 (2026-04-25) | Quality + speed | F1 0.053 → 0.238 (+349%), -52% p95 chat, embed batching 13s → 1.0s |
+| **Phase D** v2.0.0 (Apr 2026) | Retrieval intelligence | D1-D11: temporal decay, multi-hop AGE, hierarchical reorganizer, query rewriting, staged retrieval, post-retrieval enhancement |
+
+### Active workstreams
+
+| Area | Detail | Status |
+|---|---|---|
+| Retrieval quality | [docs/backlog/search.md](docs/backlog/search.md) | Deep search agent, BGE rerank strategies, VEC_COT |
+| Add pipeline | [docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md) | Soft-delete (`expired_at`), OTel tracing, LLM call semaphore |
+| Features | [docs/backlog/features.md](docs/backlog/features.md) | Image Memory, MemCube cross-sharing, RawFileMemory + `evolve_to`, lifecycle states |
+
+### Next milestones (M10 / M11)
+
+| Item | Size | Why |
+|---|---|---|
+| **Structured `user_profiles` layer** (Memobase moat) | XL (~3-4 weeks) | Closes Memobase advantage on cat-1 + cat-4. First-class `topic / sub_topic / memo` table replaces cosine search for entity facts. |
+| **L1 / L2 / L3 memory layer API** (MemOS-derived) | S (~1-2 days) | Surface our existing instant/working/long-term split as `level=l1\|l2\|l3` query parameter. Eases migration from MemOS docs. |
+| **Helm chart for Kubernetes** | S (~1-2 days) | Standard `deploy/helm/` for enterprise self-host evaluation. |
+| **Pre-compute CE rerank scores at ingest** | M | Persist pair-wise CE scores in graph, query-time graph lookup vs LLM call. -50-300ms p95. |
+| **PageRank on `memory_edges`** | S | Background goroutine boosts D1 rerank for cat-1 + cat-3 recall. |
+| **Reward / feedback closed loop** (MemOS-derived) | M (~1-2 weeks, M11) | Capture user corrections → adjust importance / retrieval weights / extract examples. |
+
+### Direction (6-12 months)
+
+- Public adoption — HN/Reddit/Discord launch, hosted demo cube, SDK clients (Go/Python/TS), per-use-case cookbooks.
+- Match Memobase 75.78% LLM Judge headline via M10 `user_profiles` layer.
+- v1.0.0 stability commitment after 60+ days of no breaking changes + external user soak.
+- Multimodal + LangChain / LlamaIndex / Vercel AI SDK adapters.
+
+See [ROADMAP.md](ROADMAP.md) for rationale, "what we're not doing", and competitive analysis links.
 
 ---
 
