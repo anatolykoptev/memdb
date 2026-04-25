@@ -114,3 +114,27 @@ type ImageMemory struct {
 
 **Effort:** M (new table + version tracking)
 **Зависимость:** нет
+
+---
+
+## 8. Structured user profile layer (Memobase-derived BIG) ❌ НЕ НАЧАТО
+
+**Source:** Memobase competitive analysis (`docs/competitive/2026-04-26-memobase-deep-dive.md`
+Part 4 #4). M8 follow-up. M10 candidate (also listed in ROADMAP.md M10 table).
+
+**What:** New first-class `user_profiles` table with `topic / sub_topic / memo` schema.
+LLM-extracted at ingest, queryable separately from raw memories. Port three Memobase
+reference prompts: `extract_profile.py`, `merge_profile.py`, `pick_related_profiles.py`.
+
+**Why:** Memobase's structural advantage on cat-1 (single-hop, 70.92%) and cat-4
+(open-domain, 77.17%) comes from this profile layer. When a user asks "what's Alice's
+job?", structured lookup `WHERE topic='work' AND sub_topic='title'` beats cosine search
+over raw memory text every time. Closing the cat-1/cat-4 gap is necessary to exceed
+Memobase's published 75.78% LLM Judge headline.
+
+For roadmap positioning, M10 candidate rationale, and planned sprint shape see
+[ROADMAP.md](../../ROADMAP.md) M10 candidates section.
+
+**Effort:** XL (~3-4 weeks — design doc, schema migration, pipeline rewrite, query API
+extension). Warrants its own M-sprint (M10 or M11), not a follow-up item. Start with
+a design issue + GitHub Discussion before coding.
