@@ -1,0 +1,190 @@
+# MemDB Helm Chart — values.yaml
+#
+# IMPORTANT: Do NOT put secrets here.
+# Use: kubectl create secret generic memdb-secrets \
+#   --namespace memdb \
+#   --from-literal=postgresPassword=changeme \
+#   --from-literal=llmApiKey=sk-... \
+#   --from-literal=masterKeyHash="" \
+#   --from-literal=internalServiceSecret=""
+#
+# Then set existingSecret below.
+
+# -- Name of an existing Secret that holds all sensitive values.
+# Required keys: postgresPassword, llmApiKey.
+# Optional keys: masterKeyHash, internalServiceSecret.
+existingSecret: "memdb-secrets"
+
+# -- Override the chart name.
+nameOverride: ""
+# -- Override the full name prefix.
+fullnameOverride: ""
+
+# ── memdb-go API ──────────────────────────────────────────────────────────────
+memdbGo:
+  image:
+    repository: ghcr.io/anatolykoptev/memdb-go
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  # Port the container listens on.
+  port: 8080
+  env:
+    MEMDB_LOG_LEVEL: "info"
+    MEMDB_LOG_FORMAT: "json"
+    MEMDB_EMBEDDER_TYPE: "http"
+    MEMDB_LLM_PROXY_URL: "https://api.openai.com/v1"
+    MEMDB_LLM_MODEL: "gpt-4o-mini"
+    # Resolved automatically from cluster-internal service names:
+    # MEMDB_POSTGRES_URL, MEMDB_REDIS_URL, MEMDB_QDRANT_ADDR, MEMDB_EMBED_URL
+    AUTH_ENABLED: "false"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  service:
+    type: ClusterIP
+    port: 8080
+
+# ── memdb-mcp server ──────────────────────────────────────────────────────────
+memdbMcp:
+  image:
+    repository: ghcr.io/anatolykoptev/memdb-mcp
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  port: 8001
+  env:
+    MEMDB_LOG_LEVEL: "info"
+    MEMDB_LOG_FORMAT: "json"
+    MEMDB_MCP_PORT: "8001"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  service:
+    type: ClusterIP
+    port: 8001
+
+# ── embed-server sidecar ──────────────────────────────────────────────────────
+embedServer:
+  enabled: true
+  image:
+    repository: ghcr.io/anatolykoptev/embed-server
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  port: 8080         # container listening port
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  service:
+    type: ClusterIP
+    port: 8082         # cluster-internal service port (mapped to container port 8080)
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: "5Gi"
+
+# ── PostgreSQL ─────────────────────────────────────────────────────────────────
+postgres:
+  image:
+    repository: pgvector/pgvector
+    tag: "pg17"
+    pullPolicy: IfNotPresent
+  port: 5432
+  database: "memdb"
+  user: "memdb"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  service:
+    type: ClusterIP
+    port: 5432
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: "10Gi"
+
+# ── Redis ──────────────────────────────────────────────────────────────────────
+redis:
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+  port: 6379
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  service:
+    type: ClusterIP
+    port: 6379
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: "2Gi"
+
+# ── Qdrant ─────────────────────────────────────────────────────────────────────
+qdrant:
+  image:
+    repository: qdrant/qdrant
+    tag: "v1.15.3"
+    pullPolicy: IfNotPresent
+  port: 6333
+  grpcPort: 6334
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  service:
+    type: ClusterIP
+    port: 6333
+    grpcPort: 6334
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: "10Gi"
+
+# ── Ingress ────────────────────────────────────────────────────────────────────
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: memdb.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          # service: memdb-go (api), memdb-mcp (mcp endpoint)
+          service: memdb-go
+  tls: []
+  # - secretName: memdb-tls
+  #   hosts:
+  #     - memdb.example.com

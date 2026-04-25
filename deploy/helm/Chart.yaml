@@ -1,0 +1,20 @@
+apiVersion: v2
+name: memdb
+description: Self-hosted long-term memory database for AI agents (Pure Go, single-namespace)
+type: application
+version: 0.1.0
+appVersion: "0.22.0"
+home: https://github.com/anatolykoptev/memdb
+sources:
+  - https://github.com/anatolykoptev/memdb
+maintainers:
+  - name: Anatoly Koptev
+    email: piteronlinetv@gmail.com
+keywords:
+  - memory
+  - ai
+  - agents
+  - llm
+  - mcp
+  - postgres
+  - qdrant
