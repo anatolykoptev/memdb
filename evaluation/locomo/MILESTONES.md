@@ -751,6 +751,51 @@ python3 evaluation/locomo/score.py \
 Output adds `llm_judge` key in each aggregate track, `llm_judge` per category inside
 `by_category`, and `llm_score`/`llm_reason` per `per_qa` entry.
 
+## v2.2.0 release validated 2026-04-25 — auto-changelog cycle end-to-end
+
+### What shipped in v2.2.0 (M9 sprint + Phase 5 shutdown)
+
+**M9 Memobase Port streams** (PRs #80–#92):
+- Stream A (S1): HARNESS-DUAL — dual-speaker retrieval in `query.py` (`LOCOMO_DUAL_SPEAKER`, PR #92)
+- Stream B (S2): LLM Judge metric in `score.py` (`--llm-judge`, Gemini Flash via CLIProxyAPI, PR #91)
+- Stream C (S3): two-track reporting (`aggregate_with_excl_none` + `aggregate_with_excl_5`, PR #88)
+- Stream D (S4): date-aware extract prompt (`[mention YYYY-MM-DD]` hint, `MEMDB_DATE_AWARE_EXTRACT`, PR #90)
+- Stream E (S5): dual-speaker harness polish — drop walrus, unused param, magic constant (PR #95)
+
+**M8 carry-ins** (PRs #80–#84):
+- feat(handlers): factual answer-style canary with sticky-per-user 10% split (PR #80)
+- feat(search): instrument D2 multi-hop + targeted fix for cat-2 F1 lift (PR #81)
+- feat(handlers): structural edges at ingest (PR #83)
+- feat(search): CoT query decomposition D11 (PR #82)
+- fix(search): keep all D2 seeds, cap only expansions (PR #84)
+
+**Phase 5 Python shutdown** (PR #93):
+- Converted memdb-api safety-net proxy endpoints to HTTP 503/422 stubs
+- Removed `memdb-api` service from docker-compose — Python layer fully retired
+- Go service (`memdb-go`) is now the sole implementation
+
+**Docs** (PRs #85, #87, #94):
+- M8 cat-5 adversarial diagnosis (PR #85)
+- M9 memobase port sprint plan (PR #87)
+- Roadmap: go migration marked complete (PR #94)
+
+### Auto-changelog cycle validation
+
+| Step | Status | Details |
+|------|--------|---------|
+| release-drafter draft | ✅ existed | Draft `v2.1.0` auto-created by release-drafter, contained all 44 PRs since v2.0.0 |
+| Tag rename to v2.2.0 | ✅ done | `gh release edit v2.1.0 --tag v2.2.0 --title "v2.2.0 — M9 Memobase Port + Phase 5 Python Shutdown"` |
+| Publish | ✅ published | `gh release edit v2.2.0 --draft=false --latest` → https://github.com/anatolykoptev/memdb/releases/tag/v2.2.0 |
+| goreleaser (go-release.yml) | ✅ success | Run 24922757201, completed in 1m58s. Attached 5 binaries: linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 + checksums.txt |
+| changelog-sync.yml | ✅ success | Run 24922757204, completed in 15s. Opened PR #96 adding 68 lines to CHANGELOG.md |
+| Changelog PR #96 merged | ✅ merged | `docs(changelog): sync v2.2.0 from release notes` merged 2026-04-25T04:42:01Z |
+
+### Concerns / observations
+
+- **goreleaser Node.js deprecation warning**: workflows run on Node.js 20 (deprecated, forced to Node.js 24 by 2026-06-02). Non-blocking for now; update `actions/checkout@v4`, `actions/setup-go@v5`, `goreleaser/goreleaser-action@v6` to Node.js 24 compatible versions before June 2026.
+- **release-drafter draft named `v2.1.0` instead of `v2.2.0`**: release-drafter auto-increments minor version based on the previous tag (v2.0.0 → v2.1.0). Since we skipped v2.1.0, the draft needed a manual tag rename to v2.2.0. This is expected behavior — document for future releases.
+- **auto-changelog cycle is end-to-end functional**: this is the first real test of the M7 F10 machinery (release-drafter + goreleaser + changelog-sync.yml). All three components fired correctly and in sequence on the `release: [published]` event.
+
 ## How to record a new milestone
 
 ```bash
