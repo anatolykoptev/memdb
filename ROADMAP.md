@@ -5,7 +5,7 @@
 >
 > This is the **master roadmap** — a single-page view across migration, search quality,
 > add pipeline, and features. Detailed plans live in:
-> - [ROADMAP-GO-MIGRATION.md](ROADMAP-GO-MIGRATION.md) — closed
+> - [docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md) — closed
 > - [ROADMAP-SEARCH.md](ROADMAP-SEARCH.md) — active
 > - [ROADMAP-ADD-PIPELINE.md](ROADMAP-ADD-PIPELINE.md) — active
 > - [ROADMAP-FEATURES.md](ROADMAP-FEATURES.md) — active

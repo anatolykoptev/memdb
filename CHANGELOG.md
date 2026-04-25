@@ -381,7 +381,7 @@ schema-management angle.
 ## [1.0.0] — 2026-03-02
 
 Initial public release. Baseline for changelog. See
-[ROADMAP-GO-MIGRATION.md](ROADMAP-GO-MIGRATION.md) for the detailed history
+[docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md) for the detailed history
 of Python → Go migration phases 1–4.5 that preceded this tag.
 
 [Unreleased]: https://github.com/anatolykoptev/memdb/compare/v2.2.0...HEAD
