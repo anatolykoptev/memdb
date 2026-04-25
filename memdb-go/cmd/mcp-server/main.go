@@ -76,7 +76,7 @@ func main() {
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "memdb-mcp",
-		Version: "1.0.0",
+		Version: "0.22.0",
 	}, nil)
 
 	// Search is proxied to memdb-go (which has the ONNX embedder).
