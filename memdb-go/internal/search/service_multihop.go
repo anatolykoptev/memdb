@@ -61,8 +61,14 @@ func multihopEnabled() bool {
 // surface (no embedding ≈ no semantic placement) and we explicitly
 // log them at Debug for ops visibility.
 //
-// Seeds are preserved as-is. The merged pool is capped at
-// multihopExpandFactor × origSize ordered by score.
+// Seeds are preserved as-is and ALWAYS kept (never evicted by the cap).
+// Expansions are sorted by their cosine-decayed score and trimmed to
+// (multihopExpandFactor × origSize − origSize) so the resulting pool
+// matches the configured 2× budget. The independent-cap design exists
+// because seeds carry RRF Score (~0.016) at this point — only after
+// FormatMergedItems + ReRankByCosine do they get cosine-rescored. A
+// joint sort would push every seed below cosine-scored expansions and
+// the downstream TopK trim would lose them. (M8 v2 fix, 2026-04-26.)
 //
 // Degrades gracefully on any DB error: logs debug and returns the
 // original candidates unchanged. Safe to call when pg == nil and
@@ -119,16 +125,24 @@ func expandViaGraph(
 	}
 	searchMx().Multihop.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "expanded")))
 
-	// Build merged pool keyed by ID, starting from the seeds so their
-	// scores always win vs. a hop-decayed inherited score if a duplicate
-	// somehow appears.
-	merged := make(map[string]MergedResult, origSize+len(expansions))
+	// Build expansion pool first — we will cap it independently of seeds
+	// so that injected hop-1/hop-2 candidates can never push out an existing
+	// vector-search seed at the post-expansion sort+trim stage downstream.
+	// (Pre-M8 the bug was inverse — expansions had RRF×decay scores so they
+	// ALWAYS lost to cosine-rescored seeds. Cosine×decay scoring fixed that
+	// but introduced the opposite failure: seeds carry RRF Score (~0.016)
+	// at this point and would be pushed out by expansions whose Score is on
+	// the cosine [0, 1] scale. ReRankByCosine downstream rescues seeds, but
+	// only if they survive the cap here. Solution: keep all seeds, cap only
+	// expansions to (cap2x - origSize).)
+	seedSet := make(map[string]struct{}, origSize)
 	for _, c := range origCandidates {
-		merged[c.ID] = c
+		seedSet[c.ID] = struct{}{}
 	}
+	expansionItems := make([]MergedResult, 0, len(expansions))
 	maxHop, withEmb, withoutEmb := 0, 0, 0
 	for _, e := range expansions {
-		if _, already := merged[e.ID]; already {
+		if _, already := seedSet[e.ID]; already {
 			continue
 		}
 		parent, ok := seedScore[e.SeedID]
@@ -158,7 +172,7 @@ func expandViaGraph(
 			score = parent * decay
 			withoutEmb++
 		}
-		merged[e.ID] = MergedResult{
+		expansionItems = append(expansionItems, MergedResult{
 			ID:         e.ID,
 			Properties: e.Properties,
 			Score:      score,
@@ -168,17 +182,24 @@ func expandViaGraph(
 			// the decay. FormatMergedItems writes meta["relativity"] = Score
 			// regardless, and ReRankByCosine only updates entries it finds
 			// in embeddingsByID (which we are deliberately not in).
-		}
+		})
+	}
+	// Sort expansions by score desc, take top-(cap2x - origSize) so we never
+	// exceed the configured pool budget but always preserve every seed.
+	sort.SliceStable(expansionItems, func(i, j int) bool {
+		return expansionItems[i].Score > expansionItems[j].Score
+	})
+	expBudget := cap2x - origSize
+	if expBudget < 0 {
+		expBudget = 0
+	}
+	if len(expansionItems) > expBudget {
+		expansionItems = expansionItems[:expBudget]
 	}
 
-	out := make([]MergedResult, 0, len(merged))
-	for _, v := range merged {
-		out = append(out, v)
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Score > out[j].Score })
-	if len(out) > cap2x {
-		out = out[:cap2x]
-	}
+	out := make([]MergedResult, 0, origSize+len(expansionItems))
+	out = append(out, origCandidates...)
+	out = append(out, expansionItems...)
 	searchMx().HopsPerQuery.Record(ctx, int64(maxHop),
 		metric.WithAttributes(attribute.String("outcome", "expanded")))
 	if logger != nil {
