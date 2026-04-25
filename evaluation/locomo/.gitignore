@@ -9,3 +9,8 @@
 # intermediate prediction files are transient and stay local.
 results/*.json
 !results/baseline-*.json
+
+# LLM Judge cache — contains question/gold/prediction hashes + LLM responses.
+# Large, ephemeral, never committed.
+results/.llm_judge_cache.json
+results/.llm_judge_cache.json.tmp
