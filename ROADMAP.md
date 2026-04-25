@@ -83,7 +83,8 @@ Stage 3 full-corpus run (1986 QA, 10 conversations) is queued — see
 
 ### M10 candidates (post-M9 backlog)
 
-From [docs/backlog/2026-04-26-followups.md](docs/backlog/2026-04-26-followups.md)
+From [docs/backlog/features.md](docs/backlog/features.md) (item 8),
+[docs/backlog/search.md](docs/backlog/search.md) (Tier 3 section),
 and [docs/competitive/2026-04-26-memobase-deep-dive.md](docs/competitive/2026-04-26-memobase-deep-dive.md):
 
 | Item | Size | Rationale |

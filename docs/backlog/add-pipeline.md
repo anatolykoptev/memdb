@@ -293,3 +293,34 @@ Deferred:
 Note: Phase 0 from the original plan (item 9, "extraction prompt quality") was
 partially closed by M9 `[mention DATE]` time-anchoring. The remaining prompt
 gaps (third-person enforcement, pronoun resolution) are folded into Phase 1 above.
+
+---
+
+## M8/M9 follow-ups (added 2026-04-26)
+
+### 12. A/B test `answer_style=factual` as default for QA workloads — 🟡 Medium priority
+
+**Source:** M8 PR #80 (S8 PRODUCT).
+
+**Status:** Canary live at sticky-per-user 10% split (M8). Needs 24h prod observation.
+
+**Action:** Expand cohort to 100%, capture p50/p95 + acceptance signal, GO/HOLD/ROLLBACK.
+
+**Why:** M7 confirmed 2.1× chat speedup (p95 14.7s → 7.0s). Canary promotion makes this
+the default for all QA workloads, not just 10%.
+
+**Effort:** S (1-2 days observation; no code change unless canary graduates).
+
+---
+
+### 13. `InvalidateEdgesByMemoryID` only handles `from_id`, not `to_id` — 🟡 Medium priority
+
+**Source:** M8 S10 STRUCTURAL-EDGES (PR #83).
+
+**Problem:** Clears outgoing edges (`from_id`) but not incoming (`to_id`). M8 S10
+amplified edge volume ~30× per memory — orphan accumulation is now meaningful.
+
+**Action:** Handle both directions, OR add periodic GC sweep for edges where either
+endpoint memory no longer exists.
+
+**Effort:** S (~1h).
