@@ -19,7 +19,7 @@ import (
 // answerStyle values are validated upstream by validateChatRequest; this function
 // treats any unknown value as the default branch (defensive — should never hit).
 func buildSystemPrompt(query string, memories []map[string]any, prefString, basePrompt, answerStyle string) string {
-	return buildSystemPromptWithProfile(nil, query, memories, prefString, basePrompt, answerStyle, "")
+	return buildSystemPromptWithProfile(context.TODO(), query, memories, prefString, basePrompt, answerStyle, "")
 }
 
 // buildSystemPromptWithProfile is the M10 Stream 3 variant that optionally
