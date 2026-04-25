@@ -81,7 +81,7 @@ class DualSpeakerEnvTests(unittest.TestCase):
     def test_explicit_false(self):
         for raw in ("false", "False", "FALSE", "0", "no", "off", ""):
             with self.subTest(raw=raw):
-                self.assertFalse(q_helper := q_help_parser(raw))
+                self.assertFalse(q_help_parser(raw))
 
     def test_explicit_true(self):
         for raw in ("true", "True", "1", "yes", "on", "anything-truthy"):
