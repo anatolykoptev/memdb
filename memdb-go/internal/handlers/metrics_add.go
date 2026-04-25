@@ -18,6 +18,10 @@ type addMetricsStruct struct {
 	Duration       metric.Float64Histogram // labels: mode
 	Memories       metric.Int64Counter     // labels: mode (records len(items))
 	EmbedBatchSize metric.Float64Histogram // labels: mode (texts per batched Embed call in fast-add)
+	// M8 Stream 10 — structural edges emitted at ingest. Type label is one of
+	// SAME_SESSION | TIMELINE_NEXT | SIMILAR_COSINE_HIGH (matches relation column).
+	StructuralEdges    metric.Int64Counter // labels: type
+	SameSessionCapped  metric.Int64Counter // unlabeled — fires when N=20 cap trims SAME_SESSION fan-out
 }
 
 func addMx() *addMetricsStruct {
@@ -36,7 +40,16 @@ func addMx() *addMetricsStruct {
 		batch, _ := meter.Float64Histogram("memdb.add.embed_batch_size",
 			metric.WithDescription("Number of texts per batched Embed call in fast-add pipeline"),
 		)
-		addInstruments = &addMetricsStruct{Requests: reqs, Duration: dur, Memories: mems, EmbedBatchSize: batch}
+		structEdges, _ := meter.Int64Counter("memdb.add.structural_edges_total",
+			metric.WithDescription("Structural memory_edges emitted at ingest, labelled by relation type"),
+		)
+		capCounter, _ := meter.Int64Counter("memdb.add.same_session_capped_total",
+			metric.WithDescription("Times the SAME_SESSION fan-out cap (N=20) trimmed candidate edges"),
+		)
+		addInstruments = &addMetricsStruct{
+			Requests: reqs, Duration: dur, Memories: mems, EmbedBatchSize: batch,
+			StructuralEdges: structEdges, SameSessionCapped: capCounter,
+		}
 	})
 	return addInstruments
 }
