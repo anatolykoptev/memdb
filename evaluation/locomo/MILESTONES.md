@@ -350,8 +350,8 @@ M4 starts when M1 + M2 land — needs per-feature firing rates (from M1) + per-c
 ### Next measurement (not blocking v2.0.0 cut)
 
 1. ~~Run harness with `LOCOMO_SKIP_CHAT=0`~~ — ✅ done (M3 above)
-2. Expand sample to 5 LoCoMo categories × 10 QAs — M2 in flight
-3. Full-dataset run (10 convs × 200 QAs ≈ 2000) — hours of runtime; after M1-M4 for statistically-sound Phase-D verdict
+2. ~~Expand sample to 5 LoCoMo categories × 10 QAs~~ — ✅ done (M2, 2026-04-24)
+3. ~~Full-dataset run (10 convs × 200 QAs ≈ 2000)~~ — ✅ done (M9 Stage 3 v3, 2026-04-26; LLM Judge 70.0% excl cat-5)
 
 Each D task re-runs the harness after deploy and adds a `### YYYY-MM-DD — D<N> <name>` row showing delta vs `baseline-v1.1.0-post-p1.json`. Expected impact ballpark per Phase D plan:
 - D1 (temporal decay): +0.02 F1 on longitudinal queries

@@ -1,9 +1,10 @@
 # LoCoMo Evaluation Harness (memdb-go)
 
 Reproducible retrieval-quality measurement for **memdb-go** against the
-LoCoMo long-conversation benchmark. This is the measurement gate for
-Phase D (D1–D8, D10) — every Phase D improvement must be **falsifiable**
-against the baseline captured here.
+LoCoMo long-conversation benchmark. This harness produced the headline
+**70.0% LLM Judge** (M9 Stage 3 v3, chat-50 stratified, excl cat-5) and
+remains the standard measurement framework for Phase D (D1–D8, D10) — every
+Phase D improvement must be **falsifiable** against the baseline captured here.
 
 This harness is **separate** from the legacy Python eval at
 `evaluation/scripts/locomo/` (that one targets `memdb-api` / Python

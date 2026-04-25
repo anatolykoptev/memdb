@@ -41,8 +41,8 @@ Judge methodology, which lets us publish numbers directly against the public bar
 
 Phase D measured delta on `chat/complete` end-to-end (1 conv, 10 cat-1 QAs):
 F1 0.143 (+14x vs retrieval-only baseline), semsim 0.150 (+3.3x), hit@20 0.700.
-Stage 3 full-corpus run (1986 QA, 10 conversations) is queued — see
-"Open measurement gate" below.
+M9 Stage 3 v3 completed the full-corpus run (1986 QA, 10 conversations) — see
+"Latest measurement" below for results.
 
 ## Active workstreams
 
@@ -144,14 +144,21 @@ self-hosted memory layer rather than another competitor to evaluate.
   real-time on the 200ms p95 budget; we use graph recall as a re-rank boost,
   not the main retrieval path.
 
-## Open measurement gate
+## Latest measurement (2026-04-26)
 
-Stage 3 full LoCoMo run (1986 QA across 10 conversations, ~3-5h) is queued but
-needs a dedicated session. Infrastructure is ready: `GOMEMLIMIT=4915MiB`,
-recovery script at `/tmp/m8-stage3-runner.sh`. The headline LLM Judge number
-for v0.22.0 will land once that run completes. Until then, comparable public
-numbers are scoped to the smaller cat-1 sample and the M7 single-conv reference
-(F1 0.238, hit@k 0.769 on conv-26).
+M9 Stage 3 v3 — full LoCoMo benchmark on the post-M9 stack:
+
+| Track | All cats | Excl cat-5 (Memobase convention) |
+|-------|----------|----------------------------------|
+| Chat-50 stratified, end-to-end | F1 0.147, **LLM Judge 62.0%** | F1 0.156, **LLM Judge 70.0%** |
+| Retrieval-only (1986 QAs) | F1 0.029, hit@k 0.520, LLM Judge 26.7% | F1 0.031, LLM Judge 30.5% |
+
+vs public leaderboard:
+- Memobase 75.78% · MemOS 73.31% · **MemDB 70.0%** · Mem0 66.88%
+
+Position: between Mem0 and MemOS, -5.78pp below Memobase leader. M10 `user_profiles`
+layer is the path to closing the gap. Full breakdown in
+[evaluation/locomo/MILESTONES.md](evaluation/locomo/MILESTONES.md).
 
 ## How to contribute
 
