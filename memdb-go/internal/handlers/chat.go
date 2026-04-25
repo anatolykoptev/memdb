@@ -109,18 +109,25 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	if !h.checkErrors(w, validateChatRequest(&req)) {
 		return
 	}
-	normalized := normalizeChatComplete(body)
 
 	if !h.chatCanNative() {
-		h.proxyWithBody(w, r, normalized)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
 	ctx := r.Context()
 	memories, prefString, err := h.chatSearchMemories(ctx, &req)
 	if err != nil {
-		h.logger.Warn("chat search failed, proxying", slog.Any("error", err))
-		h.proxyWithBody(w, r, normalized)
+		h.logger.Warn("chat search failed", slog.Any("error", err))
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -165,18 +172,25 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 	if !h.checkErrors(w, validateChatRequest(&req)) {
 		return
 	}
-	normalized := normalizeChatComplete(body)
 
 	if !h.chatCanNative() {
-		h.proxyWithBody(w, r, normalized)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
 	ctx := r.Context()
 	memories, prefString, err := h.chatSearchMemories(ctx, &req)
 	if err != nil {
-		h.logger.Warn("chat stream search failed, proxying", slog.Any("error", err))
-		h.proxyWithBody(w, r, normalized)
+		h.logger.Warn("chat stream search failed", slog.Any("error", err))
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 

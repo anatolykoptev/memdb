@@ -21,7 +21,11 @@ const goConsumerGroup = "memdb_go_scheduler"
 // Returns the Go scheduler's consumer group status across all watched streams.
 func (h *Handler) NativeSchedulerStatus(w http.ResponseWriter, r *http.Request) {
 	if h.redis == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: redis unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -36,7 +40,11 @@ func (h *Handler) NativeSchedulerStatus(w http.ResponseWriter, r *http.Request) 
 // Returns extended status including DLQ info.
 func (h *Handler) NativeSchedulerAllStatus(w http.ResponseWriter, r *http.Request) {
 	if h.redis == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: redis unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -57,7 +65,11 @@ func (h *Handler) NativeSchedulerAllStatus(w http.ResponseWriter, r *http.Reques
 // Returns simplified task queue stats.
 func (h *Handler) NativeSchedulerTaskQueueStatus(w http.ResponseWriter, r *http.Request) {
 	if h.redis == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: redis unavailable",
+			"data":    nil,
+		})
 		return
 	}
 

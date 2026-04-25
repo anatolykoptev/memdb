@@ -19,10 +19,14 @@ const (
 )
 
 // NativeGetMemory handles GET /product/get_memory/{memory_id} natively via PostgreSQL.
-// Falls back to Python proxy if the Postgres client is not initialized.
+// Returns 503 if the Postgres client is not initialized.
 func (h *Handler) NativeGetMemory(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -49,11 +53,15 @@ func (h *Handler) NativeGetMemory(w http.ResponseWriter, r *http.Request) {
 	// Clients send property UUIDs; use GetMemoryByPropertyID not GetMemoryByID (AGE graph ID).
 	result, err := h.postgres.GetMemoryByPropertyID(ctx, memoryID)
 	if err != nil {
-		h.logger.Debug("native get_memory failed, falling back to proxy",
+		h.logger.Debug("native get_memory failed",
 			slog.String("memory_id", memoryID),
 			slog.Any("error", err),
 		)
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -120,10 +128,14 @@ func (h *Handler) NativeGetMemoryByIDs(w http.ResponseWriter, r *http.Request) {
 		var err error
 		dbResults, err = h.postgres.GetMemoriesByPropertyIDs(ctx, missingIDs)
 		if err != nil {
-			h.logger.Debug("native get_memory_by_ids failed, falling back to proxy",
+			h.logger.Debug("native get_memory_by_ids failed",
 				slog.Any("error", err),
 			)
-			h.proxyWithBody(w, r, body)
+			h.writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+				"code":    422,
+				"message": "complex filter not supported by Go parser; use simple key=value filters",
+				"data":    nil,
+			})
 			return
 		}
 	}
@@ -233,7 +245,7 @@ func (h *Handler) NativePostGetMemory(w http.ResponseWriter, r *http.Request) {
 
 	if len(req.Filter) > 0 {
 		h.logger.Debug("native post_get_memory: filter specified, using native filter handler")
-		h.handlePostGetMemoryWithFilter(w, r, body, req)
+		h.handlePostGetMemoryWithFilter(w, r, req)
 		return
 	}
 
@@ -251,7 +263,7 @@ func (h *Handler) NativePostGetMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	textMem, ok := h.fetchTextMem(ctx, w, r, body, memCubeID, page, pageSize)
+	textMem, ok := h.fetchTextMem(ctx, w, r, memCubeID, page, pageSize)
 	if !ok {
 		return
 	}
@@ -315,11 +327,15 @@ func parseGetMemoryPagination(req getMemoryRequest) (page, pageSize int, include
 
 // fetchTextMem queries LongTermMemory+UserMemory and writes a proxy response on error.
 // Returns (bucket, true) on success; (zero, false) if the handler already responded.
-func (h *Handler) fetchTextMem(ctx context.Context, w http.ResponseWriter, r *http.Request, body []byte, cubeID string, page, pageSize int) (search.MemoryBucket, bool) {
+func (h *Handler) fetchTextMem(ctx context.Context, w http.ResponseWriter, r *http.Request, cubeID string, page, pageSize int) (search.MemoryBucket, bool) {
 	results, total, err := h.postgres.GetAllMemoriesByTypes(ctx, cubeID, []string{"LongTermMemory", "UserMemory"}, page, pageSize)
 	if err != nil {
-		h.logger.Debug("native post_get_memory: text_mem query failed, proxying", slog.Any("error", err))
-		h.proxyWithBody(w, r, body)
+		h.logger.Debug("native post_get_memory: text_mem query failed", slog.Any("error", err))
+		h.writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+			"code":    422,
+			"message": "complex filter not supported by Go parser; use simple key=value filters",
+			"data":    nil,
+		})
 		return search.MemoryBucket{}, false
 	}
 	return formatMemoryBucket(results, cubeID, total), true

@@ -242,13 +242,6 @@ func (h *Handler) ReadinessCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// --- Proxy endpoints (Phase 1: forward everything to Python) ---
-
-// ProxyToProduct proxies requests to the Python /product/* endpoints.
-func (h *Handler) ProxyToProduct(w http.ResponseWriter, r *http.Request) {
-	h.python.ProxyRequest(r.Context(), w, r)
-}
-
 // --- Helpers ---
 
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, data any) {

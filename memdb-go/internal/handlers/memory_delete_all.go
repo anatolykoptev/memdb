@@ -21,7 +21,11 @@ type deleteAllRequest struct {
 // Deletes all activated memories from Postgres AND purges Qdrant preference collections.
 func (h *Handler) NativeDeleteAll(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -46,7 +50,11 @@ func (h *Handler) NativeDeleteAll(w http.ResponseWriter, r *http.Request) {
 	deleted, err := h.postgres.DeleteAllByUser(ctx, userID)
 	if err != nil {
 		h.logger.Warn("native delete_all failed", slog.Any("error", err))
-		h.proxyWithBody(w, r, body)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 

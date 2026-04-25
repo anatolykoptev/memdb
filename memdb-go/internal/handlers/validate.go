@@ -1,10 +1,9 @@
 // Package handlers — request validation for typed endpoints.
 // Validates request bodies against OpenAPI-generated types. Some validators
-// dispatch natively (see ValidatedFeedback); others still proxy to Python.
+// dispatch natively (see ValidatedFeedback); safety-net paths return HTTP 503.
 package handlers
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -34,7 +33,11 @@ func (h *Handler) ValidatedSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.proxyWithBody(w, r, normalizeSearch(body))
+	h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+		"code":    503,
+		"message": "service degraded: postgres unavailable",
+		"data":    nil,
+	})
 }
 
 // ValidatedFeedback handles POST /product/feedback natively via the feedback
@@ -166,7 +169,11 @@ func (h *Handler) ValidatedDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.proxyWithBody(w, r, body)
+	h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+		"code":    503,
+		"message": "service degraded: postgres unavailable",
+		"data":    nil,
+	})
 }
 
 // ValidatedGetAll validates and proxies POST /product/get_all.
@@ -186,7 +193,11 @@ func (h *Handler) ValidatedGetAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.proxyWithBody(w, r, body)
+	h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+		"code":    503,
+		"message": "service degraded: postgres unavailable",
+		"data":    nil,
+	})
 }
 
 // ValidatedChatComplete validates and proxies POST /product/chat/complete.
@@ -216,7 +227,11 @@ func (h *Handler) ValidatedChatComplete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.proxyWithBody(w, r, normalizeChatComplete(body))
+	h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+		"code":    503,
+		"message": "service degraded: postgres unavailable",
+		"data":    nil,
+	})
 }
 
 // ValidatedChat validates and proxies POST /product/chat.
@@ -243,7 +258,11 @@ func (h *Handler) ValidatedChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.proxyWithBody(w, r, normalizeChatComplete(body))
+	h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+		"code":    503,
+		"message": "service degraded: postgres unavailable",
+		"data":    nil,
+	})
 }
 
 // ValidatedChatStream validates and proxies POST /product/chat/stream.
@@ -267,7 +286,11 @@ func (h *Handler) ValidatedGetMemory(w http.ResponseWriter, r *http.Request) {
 	// mem_cube_id is required per Python model
 	// but the endpoint also has a GET /product/get_memory/{memory_id} variant
 	// POST variant needs at least a body
-	h.proxyWithBody(w, r, body)
+	h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+		"code":    503,
+		"message": "service degraded: postgres unavailable",
+		"data":    nil,
+	})
 }
 
 // ValidatedGetMemoryByIDs validates and proxies POST /product/get_memory_by_ids.
@@ -287,7 +310,11 @@ func (h *Handler) ValidatedGetMemoryByIDs(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	h.proxyWithBody(w, r, body)
+	h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+		"code":    503,
+		"message": "service degraded: postgres unavailable",
+		"data":    nil,
+	})
 }
 
 // ValidatedExistMemCube validates and proxies POST /product/exist_mem_cube_id.
@@ -307,7 +334,11 @@ func (h *Handler) ValidatedExistMemCube(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.proxyWithBody(w, r, body)
+	h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+		"code":    503,
+		"message": "service degraded: postgres unavailable",
+		"data":    nil,
+	})
 }
 
 // --- Helpers ---
@@ -453,13 +484,6 @@ func validateGetAllRequest(userID, memoryType *string) []string {
 		}
 	}
 	return errs
-}
-
-// proxyWithBody resets r.Body from the buffered bytes and proxies to Python.
-func (h *Handler) proxyWithBody(w http.ResponseWriter, r *http.Request, body []byte) {
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	r.ContentLength = int64(len(body))
-	h.python.ProxyRequest(r.Context(), w, r)
 }
 
 // writeValidationError writes a 400 response matching the MemDB API error format.
