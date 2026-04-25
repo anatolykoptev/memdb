@@ -50,7 +50,7 @@ jobs:
           version: "3.17.0"
 
       - name: Create kind cluster
-        uses: helm/kind-action@v1
+        uses: helm/kind-action@v1.14.0
         with:
           cluster_name: memdb-ci
 

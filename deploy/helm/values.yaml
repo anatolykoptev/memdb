@@ -80,7 +80,7 @@ embedServer:
     tag: "latest"
     pullPolicy: IfNotPresent
   replicaCount: 1
-  port: 8080
+  port: 8080         # container listening port
   resources:
     requests:
       cpu: "100m"
@@ -90,7 +90,7 @@ embedServer:
       memory: "2Gi"
   service:
     type: ClusterIP
-    port: 8082
+    port: 8082         # cluster-internal service port (mapped to container port 8080)
   persistence:
     enabled: true
     storageClass: ""

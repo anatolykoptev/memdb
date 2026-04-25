@@ -27,13 +27,15 @@ spec:
           env:
             - name: MEMDB_MCP_PORT
               value: {{ .Values.memdbMcp.port | quote }}
-            - name: MEMDB_POSTGRES_URL
-              value: "postgresql://{{ .Values.postgres.user }}:$(MEMDB_POSTGRES_PASSWORD)@{{ include "memdb.fullname" . }}-postgres:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}?sslmode=disable"
+            # MEMDB_POSTGRES_PASSWORD must be defined before MEMDB_POSTGRES_URL because
+            # K8s $(VAR) substitution only resolves variables declared earlier in the env list.
             - name: MEMDB_POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "memdb.secretName" . }}
                   key: postgresPassword
+            - name: MEMDB_POSTGRES_URL
+              value: "postgresql://{{ .Values.postgres.user }}:$(MEMDB_POSTGRES_PASSWORD)@{{ include "memdb.fullname" . }}-postgres:{{ .Values.postgres.port }}/{{ .Values.postgres.database }}?sslmode=disable"
             - name: MEMDB_GO_URL
               value: "http://{{ include "memdb.fullname" . }}-memdb-go:{{ .Values.memdbGo.service.port }}"
             - name: MASTER_KEY_HASH
@@ -53,6 +55,7 @@ spec:
               value: {{ $v | quote }}
             {{- end }}
           livenessProbe:
+            # TODO: migrate to httpGet once memdb-mcp exposes an HTTP /health endpoint.
             tcpSocket:
               port: http
             initialDelaySeconds: 15
@@ -60,6 +63,7 @@ spec:
             timeoutSeconds: 5
             failureThreshold: 4
           readinessProbe:
+            # TODO: migrate to httpGet once memdb-mcp exposes an HTTP /health endpoint.
             tcpSocket:
               port: http
             initialDelaySeconds: 10

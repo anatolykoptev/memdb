@@ -34,6 +34,8 @@ spec:
               # Full DSN construction happens in a wrapper or via init container if needed.
               # For simplicity, we pass the password as a separate env and the app reads:
               # postgresql://$(MEMDB_POSTGRES_USER):$(MEMDB_POSTGRES_PASSWORD)@...
+            # MEMDB_POSTGRES_PASSWORD must be defined before MEMDB_POSTGRES_DSN because
+            # K8s $(VAR) substitution only resolves variables declared earlier in the env list.
             - name: MEMDB_POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
