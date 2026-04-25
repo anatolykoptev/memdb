@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/anatolykoptev/go-kit/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
@@ -105,6 +106,22 @@ func initReorganizer(
 	if cfg.ReorgUseHNSW {
 		reorg.SetUseHNSW(true)
 		logger.Info("scheduler reorganizer: HNSW near-duplicate path enabled")
+	}
+	// M10 Stream 6: wire the same cross-encoder client used by the search service
+	// so the CE precompute pass (runCEPrecomputePass) can populate ce_score_topk.
+	// Gate on non-empty URL — if the encoder is not configured the pass stays
+	// disabled (rerankClient remains nil → runCEPrecomputePass exits early).
+	if cfg.CrossEncoderURL != "" {
+		rerankCli := rerank.New(rerank.Config{
+			URL:            cfg.CrossEncoderURL,
+			Model:          cfg.CrossEncoderModel,
+			APIKey:         cfg.CrossEncoderAPIKey,
+			Timeout:        cfg.CrossEncoderTimeout,
+			MaxDocs:        cfg.CrossEncoderMaxDocs,
+			MaxCharsPerDoc: cfg.CrossEncoderMaxCharsPerDoc,
+		}, logger)
+		reorg.SetRerankClient(rerankCli)
+		logger.Debug("reorganizer: ce precompute wired", "rerank_url", cfg.CrossEncoderURL)
 	}
 	logger.Info("scheduler reorganizer initialized",
 		slog.String("model", cfg.LLMReorgModel),

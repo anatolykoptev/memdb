@@ -47,6 +47,12 @@ func rerankMemoryItems(
 		return items
 	}
 
+	// M10 Stream 6: bump live-call counter (regardless of why the live
+	// path was reached — precompute miss, anchor without cache, or
+	// MEMDB_CE_PRECOMPUTE=false).
+	if mx := searchMx(); mx != nil && mx.CELiveCall != nil {
+		mx.CELiveCall.Add(ctx, 1)
+	}
 	scored := client.Rerank(ctx, query, docs)
 
 	seen := make(map[int]bool, len(scored))
