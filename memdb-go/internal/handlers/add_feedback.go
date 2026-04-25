@@ -10,6 +10,10 @@ import (
 	"net/http"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
@@ -83,7 +87,48 @@ func validateFeedbackRequest(req feedbackRequest) []string {
 }
 
 // processFeedback is the stub filled in by Tasks 2-4.
+// It persists a feedback_events row (fire-and-forget) before returning.
 func (h *Handler) processFeedback(ctx context.Context, req feedbackRequest) (*feedbackResponse, error) {
 	_ = llm.KeywordReplaceResult{} // keep import used during skeleton phase
+
+	// Persist a feedback_events row for the M11 reward loop.
+	// This is intentionally fire-and-forget: errors are logged and metered,
+	// but never propagated to the caller.
+	h.persistFeedbackEvent(req)
+
 	return &feedbackResponse{}, nil
+}
+
+// persistFeedbackEvent writes a row to memos_graph.feedback_events in a detached
+// goroutine. Errors are logged and counted; the calling request is never blocked.
+// Label is always "neutral" at the scaffold stage — M11 will derive it from LLM judge.
+func (h *Handler) persistFeedbackEvent(req feedbackRequest) {
+	// Capture fields needed inside the goroutine (avoid req escape).
+	userID := *req.UserID
+	query := *req.FeedbackContent
+	// prediction is not yet computed (processFeedback is a stub).
+	// We store an empty prediction string until Tasks 2-4 fill the pipeline.
+	prediction := ""
+	label := "neutral"
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := h.postgres.InsertFeedbackEvent(ctx, db.InsertFeedbackEventParams{
+			UserID:     userID,
+			Query:      query,
+			Prediction: prediction,
+			Label:      label,
+		})
+		mx := feedbackEventsMx()
+		if err != nil {
+			h.logger.Warn("feedback: persist event failed", slog.Any("error", err))
+			// Count the failure via the metric using a synthetic label so dashboards
+			// can detect write failures without a separate error counter.
+			mx.EventsTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("label", "error")))
+			return
+		}
+		mx.EventsTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("label", label)))
+	}()
 }
