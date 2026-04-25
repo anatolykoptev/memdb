@@ -1,3 +1,5 @@
+# DEPRECATED 2026-04-26 — Python container shutdown via M9 S8 (chore/phase5-python-shutdown).
+# memdb-api service commented out in compose/memdb.yml. Delete after 2-week soak.
 # Base image
 FROM python:3.11-slim
 

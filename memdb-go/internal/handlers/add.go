@@ -94,14 +94,18 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 
 	// Check native eligibility
 	if !h.canHandleNativeAdd(&req) {
-		h.logger.Debug("add: proxying to python",
+		h.logger.Debug("add: cannot handle natively",
 			slog.String("reason", h.proxyReason(&req)),
 		)
 		addMx().Requests.Add(r.Context(), 1, metric.WithAttributes(
 			attribute.String("mode", mode),
-			attribute.String("outcome", "proxy"),
+			attribute.String("outcome", "503"),
 		))
-		h.proxyWithBody(w, r, body)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -159,8 +163,11 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 				attribute.String("outcome", "error"),
 			))
 			addMx().Duration.Record(ctx, float64(time.Since(start).Milliseconds()), modeAttr)
-			// Fall back to proxy on error
-			h.proxyWithBody(w, r, body)
+			h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"code":    503,
+				"message": "service degraded: postgres unavailable",
+				"data":    nil,
+			})
 			return
 		}
 		allItems = append(allItems, items...)

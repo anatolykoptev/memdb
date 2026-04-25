@@ -10,7 +10,11 @@ import (
 // Stub: configuration is managed by environment variables in Go gateway.
 func (h *Handler) NativeConfigure(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 	h.writeJSON(w, http.StatusOK, map[string]any{
@@ -24,7 +28,11 @@ func (h *Handler) NativeConfigure(w http.ResponseWriter, r *http.Request) {
 // Stub: returns empty config since Go gateway uses env vars.
 func (h *Handler) NativeGetConfig(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 	userID := r.PathValue("user_id")
@@ -37,14 +45,22 @@ func (h *Handler) NativeGetConfig(w http.ResponseWriter, r *http.Request) {
 // NativeGetUserConfig handles GET /product/users/{user_id}/config.
 func (h *Handler) NativeGetUserConfig(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 	userID := r.PathValue("user_id")
 	config, err := h.postgres.GetUserConfig(r.Context(), userID)
 	if err != nil {
 		h.logger.Debug("native get_user_config failed", slog.Any("error", err))
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 	if config == nil {
@@ -59,7 +75,11 @@ func (h *Handler) NativeGetUserConfig(w http.ResponseWriter, r *http.Request) {
 // NativeUpdateUserConfig handles PUT /product/users/{user_id}/config.
 func (h *Handler) NativeUpdateUserConfig(w http.ResponseWriter, r *http.Request) {
 	if h.postgres == nil {
-		h.ProxyToProduct(w, r)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
@@ -78,7 +98,11 @@ func (h *Handler) NativeUpdateUserConfig(w http.ResponseWriter, r *http.Request)
 
 	if err := h.postgres.UpdateUserConfig(r.Context(), userID, cfg); err != nil {
 		h.logger.Debug("native update_user_config failed", slog.Any("error", err))
-		h.proxyWithBody(w, r, body)
+		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"code":    503,
+			"message": "service degraded: postgres unavailable",
+			"data":    nil,
+		})
 		return
 	}
 
