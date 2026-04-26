@@ -48,7 +48,7 @@ Honest comparison with comparable open-source memory systems. `?` marks unverifi
 |---|---|---|---|---|---|
 | Self-hostable | **✅ Yes** (pure Go binary) | ✅ Yes (Python) <!-- TODO verify --> | ✅ Yes (Python) <!-- TODO verify --> | ✅ Yes <!-- TODO verify --> | ✅ Yes <!-- TODO verify --> |
 | Single static binary | **✅ Yes** | ❌ No | ❌ No | ❌ No | ❌ No |
-| LoCoMo LLM-Judge | **72.5% (excl cat-5, v0.23.0 / M10)** | 66.88% | ~58% `?` | ~70% `?` | 75.78% (excl. cat-5) |
+| LoCoMo LLM-Judge | **72.5% (excl cat-5, v0.23.0 / M10)** | 66.88% | ~58% `?` | **75.14%** (self-reported) | 75.78% (excl. cat-5) |
 | pgvector + AGE graph | **✅ Yes** | ⚠️ Partial `?` | ❌ No | ⚠️ Yes (Neo4j) `?` | ⚠️ Partial `?` |
 | MCP server included | **✅ Yes** | ❌ No `?` | ❌ No `?` | ❌ No `?` | ❌ No `?` |
 | Local embeddings | **✅ ONNX sidecar** | ❌ No `?` | ❌ No `?` | ❌ No `?` | ❌ No `?` |
@@ -251,7 +251,7 @@ MemDB tracks LoCoMo (Long Conversation Memory) scores per release; full per-mile
 deltas live in [evaluation/locomo/MILESTONES.md](evaluation/locomo/MILESTONES.md).
 
 Highlights:
-- **v0.23.0 / M10 (current):** **72.5% LLM Judge** on chat-50 stratified (excl cat-5, Memobase convention) — between MemOS (73.31%) and Memobase (75.78%), +5.62pp ahead of Mem0 (66.88%). Full corpus 1986 QAs: **50.9% LLM Judge** (excl cat-5). Ingest 7.5× faster than M9 (40 min vs 5 h).
+- **v0.23.0 / M10 (current):** **72.5% LLM Judge** on chat-50 stratified (excl cat-5, Memobase convention) — between MemOS (73.31%) and Zep (75.14%) — +5.62pp ahead of Mem0 (66.88%), -0.81pp short of MemOS, -2.64pp short of Zep, -3.28pp short of Memobase (75.78%) leader. Full corpus 1986 QAs: **50.9% LLM Judge** (excl cat-5). Ingest 7.5× faster than M9 (40 min vs 5 h).
 - **v0.22.0 / M9:** 70.0% LLM Judge on chat-50 (excl cat-5) — first published Memobase-comparable measurement.
 - **M7 Stage 2 (conv-26 full, 199 QAs):** F1 **0.238**, hit@k 0.769 — first MemOS-tier result on a full single conversation.
 

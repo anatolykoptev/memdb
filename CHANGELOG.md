@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Headline: **MemDB scores 72.5% LLM Judge** on LoCoMo chat-50 stratified
 (excl cat-5, Memobase convention) — up from 70.0% in v0.22.0 (+2.5pp).
-Position on the public leaderboard: between MemOS (73.31%) and Memobase
-(75.78%), +5.62pp ahead of Mem0 (66.88%). Full corpus 1986 QAs lands at
+Position on the public leaderboard: between MemOS (73.31%) and Zep (75.14%),
++5.62pp ahead of Mem0 (66.88%), -2.64pp short of Zep, -3.28pp short of Memobase (75.78%) leader. Full corpus 1986 QAs lands at
 50.9% LLM Judge (excl cat-5), up from M9 retrieval-only ~30% (+20pp).
 
 ### Added
@@ -94,7 +94,7 @@ Position on the public leaderboard: between MemOS (73.31%) and Memobase
 Per-cat chat-50: 1=60% 2=80% 3=70% 4=80% 5=20%.
 Per-cat full: 1=53.5% 2=29.0% 3=37.5% 4=59.9% 5=10.3%.
 
-vs leaderboard: Memobase 75.78% > MemOS 73.31% > **MemDB 72.5%** > Mem0 66.88%.
+vs leaderboard: Memobase 75.78% > Zep 75.14% > MemOS 73.31% > **MemDB 72.5%** > Mem0 66.88%.
 
 ## [0.22.0] — 2026-04-26 — First public release
 

@@ -31,7 +31,7 @@ correctness). The audit shipped in the same release.
 
 Headline: **72.5% LLM Judge** on chat-50 stratified (excl cat-5, Memobase
 convention) — up from 70.0% in v0.22.0 (+2.5pp). Position: between MemOS
-(73.31%) and Memobase (75.78%), +5.62pp ahead of Mem0 (66.88%).
+(73.31%) and Zep (75.14%), +5.62pp ahead of Mem0 (66.88%), -2.64pp short of Zep, -3.28pp short of Memobase (75.78%) leader.
 
 ## What we shipped
 
@@ -165,10 +165,10 @@ Per-category LLM Judge (full 1986): cat-1 53.5% · cat-2 29.0% · cat-3 37.5%
 · cat-4 59.9% · cat-5 10.3%.
 
 vs public leaderboard (excl cat-5):
-- Memobase 75.78% · MemOS 73.31% · **MemDB v0.23.0 72.5%** · Mem0 66.88%
+- Memobase 75.78% · **Zep 75.14%** · MemOS 73.31% · **MemDB v0.23.0 72.5%** · Mem0 66.88%
 
-Position: between MemOS and Memobase, **+5.62pp ahead of Mem0**, **-0.81pp
-short of MemOS**, **-3.28pp short of Memobase leader**. Up from M9 70.0%
+Position: between MemOS and Zep, **+5.62pp ahead of Mem0**, **-0.81pp
+short of MemOS**, **-2.64pp short of Zep**, **-3.28pp short of Memobase leader**. Up from M9 70.0%
 (+2.5pp). M11 cat-2 BFS work + deeper profile coverage are the path to closing
 the remaining gap. Wall-time: ingest 40min (7.5× faster than M9), query
 phase ~10h with 4 outer workers + `D2_MAX_HOP=2`. Full breakdown in

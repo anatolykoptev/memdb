@@ -939,12 +939,13 @@ exclusion) + **M10 (user_profiles + CE precompute + PageRank)**.
 | System | LLM Judge (excl cat-5) | Notes |
 |--------|-------------------------|-------|
 | Memobase | 75.78% | Public leaderboard |
+| **Zep** | **75.14%** | Self-reported (Memobase methodology) |
 | MemOS | 73.31% | Public leaderboard |
 | **MemDB v0.23.0 (M10)** | **72.5%** | chat-50 stratified |
 | Mem0 | 66.88% | Public leaderboard |
 
-Position: between MemOS and Memobase, **+5.62pp ahead of Mem0**, **-0.81pp
-short of MemOS**, **-3.28pp short of Memobase leader**. Up from M9 70.0%
+Position: between MemOS and Zep, **+5.62pp ahead of Mem0**, **-0.81pp
+short of MemOS**, **-2.64pp short of Zep**, **-3.28pp short of Memobase leader**. Up from M9 70.0%
 (+2.5pp).
 
 ### Wall-time
