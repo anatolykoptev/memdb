@@ -5,10 +5,19 @@
 !sample_conversations.json
 !sample_gold.json
 
-# Only commit baseline-*.json. Per-run scored results and
-# intermediate prediction files are transient and stay local.
+# Only commit baseline-*.json plus per-milestone scored snapshots and small
+# prediction files. Per-run scored results and large intermediate prediction
+# files are transient and stay local.
 results/*.json
 !results/baseline-*.json
+# M9 / M10 release-aligned snapshots (committed for audit trail)
+!results/m9-stage3-v3-*.json
+!results/m10-stage4-final.json
+!results/m10-chat50-final.json
+!results/predictions-m10-chat50-strat-*.json
+# Explicitly keep the 35MB full-corpus prediction file out of git.
+# Regenerate via: LOCOMO_WORKERS=4 D2_MAX_HOP=2 LOCOMO_FULL=1 bash run.sh
+results/predictions-m10-stage4-w4-hop2-*.json
 
 # LLM Judge cache — contains question/gold/prediction hashes + LLM responses.
 # Large, ephemeral, never committed.
