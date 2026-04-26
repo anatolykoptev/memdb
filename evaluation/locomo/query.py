@@ -623,6 +623,16 @@ def main() -> int:
             "5-category 50-QA sample. Env: LOCOMO_CATEGORIES."
         ),
     )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=int(os.getenv("LOCOMO_WORKERS", "1")),
+        help=(
+            "Outer parallelism: process N QAs concurrently via ThreadPoolExecutor. "
+            "Default 1 (sequential). Use 4-8 for benchmark speedup. "
+            "CLIProxyAPI :8317 handles 60+ concurrent. Env: LOCOMO_WORKERS."
+        ),
+    )
     args = p.parse_args()
 
     try:
@@ -665,10 +675,11 @@ def main() -> int:
 
     predictions: list[dict] = []
     errors: list[str] = []
-    for qi, qa in enumerate(gold, 1):
+
+    def process_one_qa(qi: int, qa: dict) -> dict:
         question = qa["question"]
         print(f"[{qi}/{len(gold)}] {qa['conv_id']} q={question[:70]!r}", flush=True)
-        rec = {
+        rec: dict = {
             "conv_id": qa["conv_id"],
             "question_idx": qa["question_idx"],
             "question": question,
@@ -701,7 +712,7 @@ def main() -> int:
                 rec["merged_top_k"] = len(merged)
             except requests.RequestException as exc:
                 rec["error"] = f"search: {exc}"
-                errors.append(rec["error"])
+                rec.setdefault("_errors", []).append(rec["error"])
                 print(f"  SEARCH ERROR: {exc}", file=sys.stderr, flush=True)
 
             if not args.skip_chat and rec["error"] is None:
@@ -718,7 +729,7 @@ def main() -> int:
                     rec["chat_ms"] = ms
                 except requests.RequestException as exc:
                     rec["error"] = f"chat: {exc}"
-                    errors.append(rec["error"])
+                    rec.setdefault("_errors", []).append(rec["error"])
                     print(f"  CHAT ERROR: {exc}", file=sys.stderr, flush=True)
         else:
             user_id = f"{qa['conv_id']}__speaker_{args.speaker}"
@@ -734,7 +745,7 @@ def main() -> int:
                 rec["search_ms"] = ms
             except requests.RequestException as exc:
                 rec["error"] = f"search: {exc}"
-                errors.append(rec["error"])
+                rec.setdefault("_errors", []).append(rec["error"])
                 print(f"  SEARCH ERROR: {exc}", file=sys.stderr, flush=True)
 
             if not args.skip_chat and rec["error"] is None:
@@ -744,10 +755,37 @@ def main() -> int:
                     rec["chat_ms"] = ms
                 except requests.RequestException as exc:
                     rec["error"] = f"chat: {exc}"
-                    errors.append(rec["error"])
+                    rec.setdefault("_errors", []).append(rec["error"])
                     print(f"  CHAT ERROR: {exc}", file=sys.stderr, flush=True)
 
-        predictions.append(rec)
+        return rec
+
+    if args.workers > 1:
+        print(f"[query] outer parallelism: {args.workers} workers", flush=True)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
+            futures = {pool.submit(process_one_qa, qi, qa): qi for qi, qa in enumerate(gold, 1)}
+            done_count = 0
+            for fut in concurrent.futures.as_completed(futures):
+                done_count += 1
+                try:
+                    rec = fut.result()
+                    if rec.get("_errors"):
+                        errors.extend(rec.pop("_errors"))
+                    predictions.append(rec)
+                    if done_count % 50 == 0 or done_count == len(gold):
+                        print(f"[parallel] progress {done_count}/{len(gold)}", flush=True)
+                except Exception as exc:
+                    print(f"  PARALLEL ERROR: {exc}", file=sys.stderr, flush=True)
+                    errors.append(str(exc))
+        # Sort predictions by original question_idx for deterministic output
+        predictions.sort(key=lambda r: (r["conv_id"], r["question_idx"]))
+    else:
+        # Sequential path (default, backward-compat)
+        for qi, qa in enumerate(gold, 1):
+            rec = process_one_qa(qi, qa)
+            if rec.get("_errors"):
+                errors.extend(rec.pop("_errors"))
+            predictions.append(rec)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w") as f:
