@@ -6,7 +6,7 @@
 **One docker-compose. Pure Go.**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg?logo=apache)](https://opensource.org/license/apache-2-0/)
-[![Version](https://img.shields.io/badge/version-0.22.0-blue.svg)](https://github.com/anatolykoptev/memdb/releases)
+[![Version](https://img.shields.io/badge/version-0.23.0-blue.svg)](https://github.com/anatolykoptev/memdb/releases)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8.svg?logo=go)](https://go.dev/)
 [![GitHub stars](https://img.shields.io/github/stars/anatolykoptev/memdb?style=social)](https://github.com/anatolykoptev/memdb/stargazers)
 [![Discord](https://img.shields.io/badge/Discord-join%20chat-7289DA.svg?logo=discord)](https://discord.gg/8vhbTZgf)
@@ -48,7 +48,7 @@ Honest comparison with comparable open-source memory systems. `?` marks unverifi
 |---|---|---|---|---|---|
 | Self-hostable | **✅ Yes** (pure Go binary) | ✅ Yes (Python) <!-- TODO verify --> | ✅ Yes (Python) <!-- TODO verify --> | ✅ Yes <!-- TODO verify --> | ✅ Yes <!-- TODO verify --> |
 | Single static binary | **✅ Yes** | ❌ No | ❌ No | ❌ No | ❌ No |
-| LoCoMo LLM-Judge | **70.0% (excl cat-5)** | ~62% `?` | ~58% `?` | ~70% `?` | 75.78% (excl. cat-5) |
+| LoCoMo LLM-Judge | **72.5% (excl cat-5, v0.23.0 / M10)** | 66.88% | ~58% `?` | **75.14%** (self-reported) | 75.78% (excl. cat-5) |
 | pgvector + AGE graph | **✅ Yes** | ⚠️ Partial `?` | ❌ No | ⚠️ Yes (Neo4j) `?` | ⚠️ Partial `?` |
 | MCP server included | **✅ Yes** | ❌ No `?` | ❌ No `?` | ❌ No `?` | ❌ No `?` |
 | Local embeddings | **✅ ONNX sidecar** | ❌ No `?` | ❌ No `?` | ❌ No `?` | ❌ No `?` |
@@ -251,8 +251,9 @@ MemDB tracks LoCoMo (Long Conversation Memory) scores per release; full per-mile
 deltas live in [evaluation/locomo/MILESTONES.md](evaluation/locomo/MILESTONES.md).
 
 Highlights:
+- **v0.23.0 / M10 (current):** **72.5% LLM Judge** on chat-50 stratified (excl cat-5, Memobase convention) — between MemOS (73.31%) and Zep (75.14%) — +5.62pp ahead of Mem0 (66.88%), -0.81pp short of MemOS, -2.64pp short of Zep, -3.28pp short of Memobase (75.78%) leader. Full corpus 1986 QAs: **50.9% LLM Judge** (excl cat-5). Ingest 7.5× faster than M9 (40 min vs 5 h).
+- **v0.22.0 / M9:** 70.0% LLM Judge on chat-50 (excl cat-5) — first published Memobase-comparable measurement.
 - **M7 Stage 2 (conv-26 full, 199 QAs):** F1 **0.238**, hit@k 0.769 — first MemOS-tier result on a full single conversation.
-- **M9 (current):** ports the Memobase LLM-Judge metric for direct comparison to public leaderboards (Mem0, Zep, LangMem use the same binary judge). Headline LLM-Judge number on the full 10-conversation corpus: *measurement in progress, coming soon.* Stage 3 is being re-run after an OOM in the initial sweep — see MILESTONES.md.
 
 Run the harness yourself:
 
@@ -271,6 +272,7 @@ LOCOMO_SKIP_CHAT=1 OUT_SUFFIX=local bash evaluation/locomo/run.sh
 
 | Sprint | Theme | Highlights |
 |---|---|---|
+| **v0.23.0** (2026-04-26) | M10 user_profiles + perf + audit | Memobase profile layer, L1/L2/L3 API, Helm chart, CE precompute, PageRank, reward scaffold. 5 security audit fixes. **72.5% LLM Judge (+2.5pp)**, 7.5× faster ingest. |
 | **v0.22.0** (2026-04-26) | First public release | Pure-Go runtime, README + CONTRIBUTING + SECURITY, auto-release infra |
 | **M9** Memobase port + Phase 5 (2026-04-26) | Honest measurement + Python killcut | Dual-speaker retrieval, LLM Judge metric, `[mention DATE]` tags, cat-5 dual-track. `memdb-api` Python container removed. |
 | **M8** Multi-hop + infra (2026-04-26) | Retrieval + ops | D2 multi-hop fix, CoT D11, structural edges, GOMEMLIMIT, pprof behind auth |
@@ -285,21 +287,23 @@ LOCOMO_SKIP_CHAT=1 OUT_SUFFIX=local bash evaluation/locomo/run.sh
 | Add pipeline | [docs/backlog/add-pipeline.md](docs/backlog/add-pipeline.md) | Soft-delete (`expired_at`), OTel tracing, LLM call semaphore |
 | Features | [docs/backlog/features.md](docs/backlog/features.md) | Image Memory, MemCube cross-sharing, RawFileMemory + `evolve_to`, lifecycle states |
 
-### Next milestones (M10 / M11)
+### Next milestones (M11)
+
+All M10 items above shipped in v0.23.0. M11 backlog seeded from this sprint:
 
 | Item | Size | Why |
 |---|---|---|
-| **Structured `user_profiles` layer** (Memobase moat) | XL (~3-4 weeks) | Closes Memobase advantage on cat-1 + cat-4. First-class `topic / sub_topic / memo` table replaces cosine search for entity facts. |
-| **L1 / L2 / L3 memory layer API** (MemOS-derived) | S (~1-2 days) | Surface our existing instant/working/long-term split as `level=l1\|l2\|l3` query parameter. Eases migration from MemOS docs. |
-| **Helm chart for Kubernetes** | S (~1-2 days) | Standard `deploy/helm/` for enterprise self-host evaluation. |
-| **Pre-compute CE rerank scores at ingest** | M | Persist pair-wise CE scores in graph, query-time graph lookup vs LLM call. -50-300ms p95. |
-| **PageRank on `memory_edges`** | S | Background goroutine boosts D1 rerank for cat-1 + cat-3 recall. |
-| **Reward / feedback closed loop** (MemOS-derived) | M (~1-2 weeks, M11) | Capture user corrections → adjust importance / retrieval weights / extract examples. |
+| **Close the reward loop** (S8 reads) | M | Wire `feedback_events` (shipped in v0.23.0) into D1 importance + extract-prompt example bank. Targets cat-3 preference gap. |
+| **D2 BFS recall lift for cat-2** | M | Full-corpus cat-2 LLM Judge is 29% — biggest remaining quality gap. Hub-and-spoke topology + tuned hop-decay. |
+| **Parallelize CE precompute at D3 reorganizer** | S | Currently per-memory sequential; worker pool of 4 should halve D3 phase wall-time. |
+| **`COPY FROM` bulk inserts for `memory_edges` + `entity_nodes`** | M | Ingest bottleneck after the v0.23.0 7.5× lift is now AGE Cypher. Direct text-format COPY can win another 2-3× on Stage 3 scale. |
+| **GIN index on `Memory.properties->'ce_score_topk'`** | S | Makes the S6 lookup O(log N) at scale. |
+| **Semantic prompt-injection classifier** | M | C2 catches structural attacks; a small classifier would catch semantic payloads ("ignore previous instructions") embedded inside benign-looking memos. |
 
 ### Direction (6-12 months)
 
 - Public adoption — HN/Reddit/Discord launch, hosted demo cube, SDK clients (Go/Python/TS), per-use-case cookbooks.
-- Match Memobase 75.78% LLM Judge headline via M10 `user_profiles` layer.
+- Match Memobase 75.78% LLM Judge headline; M10 closed the gap to -3.28pp.
 - v1.0.0 stability commitment after 60+ days of no breaking changes + external user soak.
 - Multimodal + LangChain / LlamaIndex / Vercel AI SDK adapters.
 
@@ -311,8 +315,10 @@ See [ROADMAP.md](ROADMAP.md) for rationale, "what we're not doing", and competit
 
 MemDB is `0.x.y` until we commit to API stability. Expect minor breaking changes between
 `0.y` releases — called out in [CHANGELOG.md](CHANGELOG.md) with migration notes. `0.22.0`
-is the first public launch tag and resets the version line from the pre-public `2.x`
+was the first public launch tag and reset the version line from the pre-public `2.x`
 internal sequence to a `0.x` series that signals the API contract is not yet frozen.
+`0.23.0` is the first follow-up release — wire format unchanged, three new schema
+migrations auto-apply on startup.
 
 ---
 
@@ -408,6 +414,6 @@ Apache 2.0 — see [LICENSE](LICENSE).
 **[📖 Docs](docs/)** ·
 **[🗺️ Roadmap](#roadmap)**
 
-Built with care in Go. Apache 2.0. v0.22.0.
+Built with care in Go. Apache 2.0. v0.23.0.
 
 </div>

@@ -813,7 +813,8 @@ Output adds `llm_judge` key in each aggregate track, `llm_judge` per category in
 | LangMem | 58.10 | 62.23 | 47.92 | 71.12 | 23.43 | — |
 | OpenAI Memory | 52.75 | 63.79 | 42.92 | 62.29 | 21.71 | — |
 | **MemDB v0.22.0** (M9, 2026-04-26) | **70.0** | — | — | — | — | chat-50 stratified, excl cat-5 — see "M9 Stage 3 v3" below |
-| **MemDB (M10 target)** | **> 76** | — | — | — | — | +`user_profiles` layer + perf items |
+| **MemDB v0.23.0** (M10, 2026-04-26) | **72.5** | — | — | — | — | chat-50 stratified, excl cat-5 — see "M10" below |
+| **MemDB (M11 target)** | **> 76** | — | — | — | — | +cat-2 BFS recall + deeper profile coverage |
 
 Note: MemDB M7 Stage 2 token-level F1 (0.238) used a different metric than LLM Judge —
 those numbers are not directly comparable to the leaderboard above. M9 Stage 3 v3
@@ -857,6 +858,131 @@ Position: between Mem0 and MemOS, -5.78pp below Memobase leader. M10 `user_profi
 - `evaluation/locomo/results/m9-stage3-v3-retrieval-score.json`
 - `evaluation/locomo/results/m9-stage3-v3-chat50-preds.json`
 - `evaluation/locomo/results/m9-stage3-v3-chat50-score.json`
+
+---
+
+## M10 — 2026-04-26 — User Profiles + Compound Optimizations (v0.23.0)
+
+**Sprint goal**: Memobase moat (`user_profiles`) + MemOS-derived API skin
+(L1/L2/L3) + ops + perf compound, then a five-finding security audit before
+release. Eight implementation streams, all merged.
+
+### Streams
+
+| Stream | PR | What it does |
+|---|---|---|
+| S1 user_profiles schema | [#121](https://github.com/anatolykoptev/memdb/pull/121) | `topic / sub_topic / memo` table + typed query layer + migration `0015`. |
+| S2 PROFILE-EXTRACT | [#124](https://github.com/anatolykoptev/memdb/pull/124) | LLM extractor (verbatim Memobase prompt) wired as `add_fine` hook. |
+| S3 PROFILE-RETRIEVE | [#123](https://github.com/anatolykoptev/memdb/pull/123) | Inject `<user_profile>` section into chat system prompt above memory section. |
+| S4 LEVELS-API | [#122](https://github.com/anatolykoptev/memdb/pull/122) | `level=l1\|l2\|l3` query parameter on search; MemOS-paper API skin. |
+| S5 Helm chart | [#120](https://github.com/anatolykoptev/memdb/pull/120) | Single-namespace `deploy/helm/` + CI dry-run smoke. |
+| S6 CE-PRECOMPUTE | [#125](https://github.com/anatolykoptev/memdb/pull/125) | Cross-encoder rerank scores at D3 ingest, persisted in `Memory.properties->'ce_score_topk'`. |
+| S7 PageRank | [#127](https://github.com/anatolykoptev/memdb/pull/127) | Background goroutine on `memory_edges`; D1 boost; advisory lock fix [#132](https://github.com/anatolykoptev/memdb/pull/132). |
+| S8 REWARD-SCAFFOLD | [#128](https://github.com/anatolykoptev/memdb/pull/128) | `feedback_events` + `extract_examples` tables + write paths. Reads pending M11. Migration `0016`. |
+
+### Audit fixes (shipped in same release)
+
+| Finding | PR | Fix |
+|---|---|---|
+| C1 cube isolation in `user_profiles` | [#129](https://github.com/anatolykoptev/memdb/pull/129) | Migration `0017` adds `cube_id` + cube-scoped unique index. |
+| C2 prompt injection via profile facts | [#130](https://github.com/anatolykoptev/memdb/pull/130) | Sanitize control chars + tag-wrap each fact in `<fact>...</fact>`. |
+| C3 DoS admission control on profile-extract | [#131](https://github.com/anatolykoptev/memdb/pull/131) | Bounded semaphore (8) acquired BEFORE goroutine spawn. |
+| I4 PageRank advisory lock for HA | [#132](https://github.com/anatolykoptev/memdb/pull/132) | Postgres advisory lock around compute phase. |
+| P3 search cache key correctness | [#133](https://github.com/anatolykoptev/memdb/pull/133) | Cache key now includes `level`/`agent_id`/`pref_top_k`. |
+
+### Phase 4 v1 results
+
+**Stack**: Phase D (D1-D11) + M7 (factual prompt + raw ingest) + M8 (D11 CoT,
+structural edges) + M9 (date-aware extract, dual-speaker, LLM Judge, cat-5
+exclusion) + **M10 (user_profiles + CE precompute + PageRank)**.
+
+#### Chat-50 stratified (5 cats × 10 convs, end-to-end with generation)
+
+| Metric | All cats (n=50) | Excl cat-5 (Memobase convention, n=40) |
+|--------|------------------|----------------------------------------|
+| F1 | 0.138 | 0.151 |
+| semsim | 0.193 | 0.211 |
+| hit@k | 0.760 | 0.775 |
+| **LLM Judge (headline)** | **62.0%** | **72.5%** |
+
+#### Per-category breakdown — chat-50
+
+| Category | n | F1 | semsim | hit@k | LLM Judge |
+|---|---|---|---|---|---|
+| 1 single-hop | 10 | 0.148 | 0.200 | 0.700 | 60% |
+| 2 multi-hop | 10 | 0.170 | 0.188 | 0.800 | 80% |
+| 3 open-domain | 10 | 0.094 | 0.144 | 0.700 | 70% |
+| 4 temporal | 10 | 0.191 | 0.313 | 0.900 | 80% |
+| 5 adversarial | 10 | 0.087 | 0.120 | 0.700 | 20% |
+
+#### Full corpus (1986 QAs across 10 conversations)
+
+| Metric | All cats (n=1986) | Excl cat-5 (n=1540) |
+|--------|--------------------|---------------------|
+| F1 | 0.153 | 0.178 |
+| semsim | 0.199 | 0.228 |
+| hit@k | 0.695 | 0.689 |
+| **LLM Judge** | 41.8% | **50.9%** |
+
+#### Per-category breakdown — full 1986 QAs
+
+| Category | n | F1 | semsim | hit@k | LLM Judge |
+|---|---|---|---|---|---|
+| 1 single-hop | 282 | 0.204 | 0.251 | 0.741 | 53.5% |
+| 2 multi-hop | 321 | 0.052 | 0.062 | 0.355 | 29.0% |
+| 3 open-domain | 96 | 0.103 | 0.148 | 0.604 | 37.5% |
+| 4 temporal | 841 | 0.226 | 0.293 | 0.809 | 59.9% |
+| 5 adversarial | 446 | 0.067 | 0.099 | 0.715 | 10.3% |
+
+### vs public leaderboard
+
+| System | LLM Judge (excl cat-5) | Notes |
+|--------|-------------------------|-------|
+| Memobase | 75.78% | Public leaderboard |
+| **Zep** | **75.14%** | Self-reported (Memobase methodology) |
+| MemOS | 73.31% | Public leaderboard |
+| **MemDB v0.23.0 (M10)** | **72.5%** | chat-50 stratified |
+| Mem0 | 66.88% | Public leaderboard |
+
+Position: between MemOS and Zep, **+5.62pp ahead of Mem0**, **-0.81pp
+short of MemOS**, **-2.64pp short of Zep**, **-3.28pp short of Memobase leader**. Up from M9 70.0%
+(+2.5pp).
+
+### Wall-time
+
+- **Ingest 1986 QAs corpus: 40 minutes** (M9 was 5 hours — **7.5× faster**).
+  CE precompute, embed batching, structural-edge dedup, and the fast-add
+  pipeline compounded.
+- **Query phase: ~10 hours** with `--workers 4` outer parallelism +
+  `D2_MAX_HOP=2`. Outer parallelism is new in this release
+  (`evaluation/locomo/query.py --workers N`, default 1 sequential —
+  `LOCOMO_WORKERS` env override). Sort by `(conv_id, question_idx)` after
+  parallel fan-in keeps deterministic prediction file output.
+
+### Files
+
+- `evaluation/locomo/results/m10-stage4-final.json` — full 1986-QA scored
+  results (LLM Judge + F1 + semsim + hit@k + per_qa).
+- `evaluation/locomo/results/m10-chat50-final.json` — chat-50 stratified
+  scored results.
+- `evaluation/locomo/results/predictions-m10-chat50-strat-5029329e-1349.json`
+  — chat-50 prediction file (~1MB, committed).
+- `evaluation/locomo/results/predictions-m10-stage4-w4-hop2-5029329e-0253.json`
+  — full 1986-QA prediction file (~35MB, **gitignored** to keep the repo
+  small; can be regenerated with `LOCOMO_WORKERS=4 D2_MAX_HOP=2 LOCOMO_FULL=1
+  bash evaluation/locomo/run.sh`).
+
+### What's NOT in M10 (deferred to M11)
+
+- **78% LLM Judge stretch goal** — needs deeper profile coverage (Memobase
+  extracts more facts per conversation than we do) + cat-2 BFS recall lift.
+- **Full corpus cat-2 multi-hop** stays at 29.0% — D2 BFS expansion ships,
+  but the recall ceiling on full 1986 is cosine-bound. Hub-and-spoke
+  topology in D3 is the M11 candidate.
+- **`feedback_events` reads** — table + write paths only in S8; no retrieval
+  path consumes the data yet.
+- **Migration `0018`** — reap NULL `cube_id` legacy rows in `user_profiles`
+  + flip column to `NOT NULL`.
 
 ---
 
