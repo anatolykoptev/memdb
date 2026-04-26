@@ -114,9 +114,27 @@ func (w *Worker) runPageRankLoop(ctx context.Context, pg *db.Postgres) {
 
 // runPageRankForAllCubes discovers active cubes (reusing the Worker's existing
 // scanVSetCubeIDs / scanStreamCubeIDs methods) and runs PageRank for each.
+//
+// HA gate: in multi-replica deployments only one replica executes the PageRank
+// pass per cycle. The session advisory lock is acquired non-blocking; replicas
+// that do not win skip with outcome=skipped_other_leader. The lock is released
+// at function exit (or auto-released on session close if the pod crashes).
 func (w *Worker) runPageRankForAllCubes(ctx context.Context, pg *db.Postgres) {
 	mx := schedMx()
 	start := time.Now()
+
+	locked, err := tryAcquirePagerankAdvisoryLock(ctx, pg)
+	if err != nil {
+		mx.PageRankRuns.Add(ctx, 1, labelPageRankOutcome("db_error"))
+		w.logger.Debug("pagerank: advisory lock acquire failed", "err", err)
+		return
+	}
+	if !locked {
+		mx.PageRankRuns.Add(ctx, 1, labelPageRankOutcome("skipped_other_leader"))
+		w.logger.Debug("pagerank: another replica holds the lock, skipping")
+		return
+	}
+	defer func() { _ = releasePagerankAdvisoryLock(ctx, pg) }()
 
 	cubes := w.getActiveCubes(ctx)
 	if len(cubes) == 0 {
