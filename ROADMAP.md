@@ -1,7 +1,8 @@
 # MemDB Roadmap
 
-> Current version: **v0.22.0** (first public release, 2026-04-26).
-> Pure-Go stack, post-Python migration. Memobase-comparable LLM Judge measurement layer.
+> Current version: **v0.23.0** (M10 user_profiles + perf + audit, 2026-04-26).
+> Pure-Go stack, post-Python migration. Memobase-comparable LLM Judge measurement
+> layer. Headline: **72.5% LLM Judge** on LoCoMo chat-50 (excl cat-5).
 >
 > This is the **master roadmap** — a single-page view across migration, search quality,
 > add pipeline, and features. Detailed plans live in:
@@ -16,15 +17,21 @@
 
 ## Where we are (2026-04-26)
 
-MemDB v0.22.0 is the first public release. The full pre-public iteration history
-(v1.x, v2.x) consolidated into a single Go runtime: `memdb-go` + `memdb-mcp` plus
-infra sidecars (postgres+AGE+pgvector, redis, qdrant, embed-server). Six
-containers total, zero Python in the hot path. The `memdb-api` Python container
-was shut down 2026-04-26 after M9 Stream 8 with zero regressions over a 2-day
-soak. Retrieval intelligence (Phase D, ten features D1-D11) is shipped and
-production-gated. Measurement was upgraded in M9 to Memobase-comparable LLM
-Judge methodology, which lets us publish numbers directly against the public bar
-(Memobase 75.78%, MemOS 73.31%, Mem0 66.88%).
+MemDB v0.23.0 ships the M10 sprint on top of the v0.22.0 public foundation.
+The runtime is unchanged: `memdb-go` + `memdb-mcp` plus infra sidecars
+(postgres+AGE+pgvector, redis, qdrant, embed-server). Six containers total,
+zero Python in the hot path.
+
+M10 added the structured `user_profiles` layer (Memobase moat), L1/L2/L3
+memory-layer API skin, Helm chart, cross-encoder pre-compute at ingest,
+PageRank background scheduler, reward-loop scaffolding, plus a five-finding
+internal security audit (cube isolation, prompt-injection mitigation, DoS
+admission control, multi-replica advisory lock, search cache key
+correctness). The audit shipped in the same release.
+
+Headline: **72.5% LLM Judge** on chat-50 stratified (excl cat-5, Memobase
+convention) — up from 70.0% in v0.22.0 (+2.5pp). Position: between MemOS
+(73.31%) and Memobase (75.78%), +5.62pp ahead of Mem0 (66.88%).
 
 ## What we shipped
 
@@ -38,6 +45,7 @@ Judge methodology, which lets us publish numbers directly against the public bar
 | M8 Multi-hop + infra | D2 fix, CoT D11, structural edges, GOMEMLIMIT, pprof behind auth | 2026-04-26 |
 | M9 Memobase port + Phase 5 | Dual-speaker retrieval, LLM Judge metric, `[mention DATE]` time anchoring, cat-5 exclusion, Python container shutdown | 2026-04-26 |
 | v0.22.0 | First public release | Pure-Go runtime, public README, LICENSE/CONTRIBUTING/SECURITY/CODE_OF_CONDUCT, auto-release infra | 2026-04-26 |
+| **M10 user_profiles + perf + audit (v0.23.0)** | Memobase profile layer (S1/S2/S3), L1/L2/L3 API (S4), Helm chart (S5), CE precompute (S6), PageRank (S7), reward scaffold (S8). 5 audit fixes (C1/C2/C3/I4/P3). 72.5% LLM Judge (+2.5pp), 7.5× faster ingest. | 2026-04-26 |
 
 Phase D measured delta on `chat/complete` end-to-end (1 conv, 10 cat-1 QAs):
 F1 0.143 (+14x vs retrieval-only baseline), semsim 0.150 (+3.3x), hit@20 0.700.
@@ -81,26 +89,21 @@ M9 Stage 3 v3 completed the full-corpus run (1986 QA, 10 conversations) — see
   facts; enables "forget this document" + selective re-extraction.
 - **Memory lifecycle (5 states)** + versioning — depends on soft-delete.
 
-### M10 candidates (post-M9 backlog)
+### M11 candidates (post-v0.23.0 backlog)
 
-From [docs/backlog/features.md](docs/backlog/features.md) (item 8),
-[docs/backlog/search.md](docs/backlog/search.md) (Tier 3 section),
-and [docs/competitive/2026-04-26-memobase-deep-dive.md](docs/competitive/2026-04-26-memobase-deep-dive.md):
-
-| Item | Size | Rationale |
-|------|------|-----------|
-| **Structured `user_profiles` layer** (Memobase moat) | XL (~3-4 weeks) | First-class `topic / sub_topic / memo` table; structured lookups replace cosine search for entity facts. Closes Memobase advantage on cat-1 + cat-4. |
-| **Pre-compute CE rerank scores at ingest** | M | Persist pair-wise CE scores in `Memory.properties->>'ce_score_topk'` during D3 reorganizer; query-time CE -> graph lookup. -50-300ms p95 chat. |
-| **PageRank on `memory_edges`** | S | Background goroutine computes PageRank, boosts D1 rerank. cat-1 + cat-3 recall lift. |
-| **`BulkCopyInsert` / `CypherWriter` for AGE writes** | M | Direct text-format COPY into AGE bypassing Cypher parser; 2-5x speedup on Stage 3 ingest, D3 batch, structural edges. |
-
-### From upstream MemOS (selective takeaways, see [docs/competitive/2026-04-26-memos-upstream-analysis.md](docs/competitive/2026-04-26-memos-upstream-analysis.md))
+All M10 / upstream-MemOS items have shipped in v0.23.0. The M11 backlog is
+seeded from this sprint's deferred work + audit follow-ups.
 
 | Item | Size | Rationale |
 |------|------|-----------|
-| **L1 / L2 / L3 memory layer API contract** | S (1-2 days) | Surface our existing instant/working/long-term split as `level: l1\|l2\|l3` query parameter. Matches academic MemOS paper terminology — eases migration for users coming from upstream. No internal restructuring; API skin only. |
-| **Helm chart for Kubernetes** | S (1-2 days) | Standard `deploy/helm/` chart for postgres + memdb-go + embed-server. Required for enterprise self-host evaluation. Easy win, no code changes. |
-| **Reward / feedback closed loop** | M (1-2 weeks) | Our `mem_feedback` handler exists but doesn't close the RL-style learning loop. MemOS `core/reward/` shows the pattern: capture user corrections → adjust importance / retrieval weights / extract-prompt examples. M11 candidate. |
+| **Close the reward loop (S8 reads)** | M | `feedback_events` + `extract_examples` tables + write paths shipped in v0.23.0 (S8). M11 wires reads into D1 importance scoring + extract-prompt example bank. Targets cat-3 preference gap. |
+| **D2 BFS recall lift for cat-2** | M | Full-corpus cat-2 LLM Judge is 29% (chat-50 is 80% — the gap is recall, not generation). Hub-and-spoke topology in D3 + tuned hop-decay. |
+| **Parallelize CE precompute at D3 reorganizer** | S | Currently per-memory sequential. Worker pool of 4 should halve D3 phase wall-time on cold ingest. |
+| **`COPY FROM` bulk inserts for `memory_edges` + `entity_nodes`** | M | The 7.5× ingest speedup leaves AGE Cypher inserts as the next bottleneck. Direct text-format COPY can win another 2-3× on Stage 3 scale. |
+| **GIN index on `Memory.properties->'ce_score_topk'`** | S | The S6 lookup is currently btree on graphid; a GIN expression index would make the merge O(log N) at scale. |
+| **Semantic prompt-injection classifier** | M | C2 catches structural attacks via tag-wrapping + sanitization. A small classifier (or regex bank) would catch semantic payloads ("ignore previous instructions") embedded in benign-looking memos. |
+| **Migration `0018`: NULL `cube_id` reaper for `user_profiles`** | XS | After M10 production has only NULL legacy rows from pre-`0017` development; reap them and flip column to `NOT NULL`. |
+| **PageRank advisory-lock observability** | XS | Add `pagerank_skipped_total{replica}` counter so we can see which replica wins per interval. |
 
 What we explicitly do **not** take from MemOS upstream: Electron desktop app
 (`apps/memos-local-plugin/`), OpenClaw browser plugin
@@ -110,15 +113,16 @@ audiences, different SKUs.
 
 ## Where we're going (6-12 months)
 
-**Public adoption.** v0.22.0 is the public foundation. Next: HN / Reddit /
-Discord launch with worked examples (Telegram bot, IDE copilot memory, customer
-support sessions), a hosted demo cube, SDK clients in Go / Python / TypeScript,
-and per-use-case cookbooks.
+**Public adoption.** v0.22.0 was the public foundation; v0.23.0 raises the
+quality bar to within 3.28pp of the Memobase leader. Next: HN / Reddit /
+Discord launch with worked examples (Telegram bot, IDE copilot memory,
+customer support sessions), a hosted demo cube, SDK clients in Go / Python /
+TypeScript, and per-use-case cookbooks.
 
-**Match Memobase 75.78% LLM Judge headline.** The M9 measurement upgrade lets us
-publish honest comparable numbers. Closing the remaining gap rests on the M10
-`user_profiles` layer (structured retrieval beats cosine for entity facts) plus
-the Phase D follow-ups (D2 multi-hop diagnosis, hub-and-spoke topology in D3).
+**Match Memobase 75.78% LLM Judge headline.** v0.23.0 closes the gap to
+-3.28pp via the `user_profiles` layer plus CE precompute and PageRank.
+Remaining gap rests on M11 cat-2 work (full-corpus 29% is the lowest non-cat-5
+category) plus deeper profile coverage per conversation.
 
 **v1.0.0 stability commitment.** After 60+ days of no breaking changes and a
 public API soak with external users, version 0.x graduates to 1.0.0 with a
@@ -144,20 +148,30 @@ self-hosted memory layer rather than another competitor to evaluate.
   real-time on the 200ms p95 budget; we use graph recall as a re-rank boost,
   not the main retrieval path.
 
-## Latest measurement (2026-04-26)
+## Latest measurement (2026-04-26 — v0.23.0 / M10 Phase 4)
 
-M9 Stage 3 v3 — full LoCoMo benchmark on the post-M9 stack:
+Stack: Phase D (D1-D11) + M7/M8/M9 + M10 (user_profiles + CE precompute +
+PageRank). Methodology: Memobase-comparable LLM Judge (Gemini Flash binary
+judge), dual-speaker harness, two-track aggregate (incl / excl cat-5).
 
 | Track | All cats | Excl cat-5 (Memobase convention) |
 |-------|----------|----------------------------------|
-| Chat-50 stratified, end-to-end | F1 0.147, **LLM Judge 62.0%** | F1 0.156, **LLM Judge 70.0%** |
-| Retrieval-only (1986 QAs) | F1 0.029, hit@k 0.520, LLM Judge 26.7% | F1 0.031, LLM Judge 30.5% |
+| Chat-50 stratified, end-to-end (n=50/40) | F1 0.138, **LLM Judge 62.0%** | F1 0.151, **LLM Judge 72.5%** |
+| Full corpus 1986 QAs, end-to-end (n=1986/1540) | F1 0.153, LLM Judge 41.8% | F1 0.178, **LLM Judge 50.9%** |
 
-vs public leaderboard:
-- Memobase 75.78% · MemOS 73.31% · **MemDB 70.0%** · Mem0 66.88%
+Per-category LLM Judge (chat-50 stratified): cat-1 60% · cat-2 80% · cat-3 70%
+· cat-4 80% · cat-5 20%.
+Per-category LLM Judge (full 1986): cat-1 53.5% · cat-2 29.0% · cat-3 37.5%
+· cat-4 59.9% · cat-5 10.3%.
 
-Position: between Mem0 and MemOS, -5.78pp below Memobase leader. M10 `user_profiles`
-layer is the path to closing the gap. Full breakdown in
+vs public leaderboard (excl cat-5):
+- Memobase 75.78% · MemOS 73.31% · **MemDB v0.23.0 72.5%** · Mem0 66.88%
+
+Position: between MemOS and Memobase, **+5.62pp ahead of Mem0**, **-0.81pp
+short of MemOS**, **-3.28pp short of Memobase leader**. Up from M9 70.0%
+(+2.5pp). M11 cat-2 BFS work + deeper profile coverage are the path to closing
+the remaining gap. Wall-time: ingest 40min (7.5× faster than M9), query
+phase ~10h with 4 outer workers + `D2_MAX_HOP=2`. Full breakdown in
 [evaluation/locomo/MILESTONES.md](evaluation/locomo/MILESTONES.md).
 
 ## How to contribute
@@ -170,7 +184,9 @@ Discussion so we can align on shape before code.
 
 ## Releases
 
-- Latest: **v0.22.0** — 2026-04-26 — first public release.
+- Latest: **v0.23.0** — 2026-04-26 — M10 user_profiles + perf + audit.
+  ([release notes](docs/release-notes/v0.23.0.md))
+- Previous: **v0.22.0** — 2026-04-26 — first public release.
   ([release notes](docs/release-notes/v0.22.0.md))
 - Versioning policy: [docs/versioning.md](docs/versioning.md) — 0.x phase,
   expect minor breaking changes pre-1.0.

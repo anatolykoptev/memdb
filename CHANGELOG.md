@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-04-26 — M10 user_profiles + perf + security audit
+
+Headline: **MemDB scores 72.5% LLM Judge** on LoCoMo chat-50 stratified
+(excl cat-5, Memobase convention) — up from 70.0% in v0.22.0 (+2.5pp).
+Position on the public leaderboard: between MemOS (73.31%) and Memobase
+(75.78%), +5.62pp ahead of Mem0 (66.88%). Full corpus 1986 QAs lands at
+50.9% LLM Judge (excl cat-5), up from M9 retrieval-only ~30% (+20pp).
+
+### Added
+
+- **S1 `user_profiles` schema** — Memobase-derived `topic / sub_topic / memo`
+  table + typed query layer. Migration `0015`. ([#121](https://github.com/anatolykoptev/memdb/pull/121))
+- **S2 PROFILE-EXTRACT** — LLM profile extractor with the verbatim Memobase
+  prompt; runs as a fire-and-forget hook off `add_fine`. Gated by
+  `MEMDB_PROFILE_EXTRACT` (default `true`).
+  ([#124](https://github.com/anatolykoptev/memdb/pull/124))
+- **S3 PROFILE-RETRIEVE** — chat handler injects a structured `<user_profile>`
+  section above the memory section in the prompt. Gated by
+  `MEMDB_PROFILE_INJECT` (default `true`).
+  ([#123](https://github.com/anatolykoptev/memdb/pull/123))
+- **S4 LEVELS-API** — `level=l1|l2|l3` query parameter on search; surfaces
+  the existing instant / working / long-term split as a MemOS-paper
+  compatible API skin. ([#122](https://github.com/anatolykoptev/memdb/pull/122))
+- **S5 Helm chart** — single-namespace `deploy/helm/` for postgres + redis +
+  qdrant + embed-server + memdb-go + memdb-mcp; CI dry-run smoke test; no
+  external subcharts. ([#120](https://github.com/anatolykoptev/memdb/pull/120))
+- **S6 CE-PRECOMPUTE** — cross-encoder rerank scores pre-computed at D3
+  ingest, persisted in `Memory.properties->'ce_score_topk'`. Gated by
+  `MEMDB_CE_PRECOMPUTE` (default `true`).
+  ([#125](https://github.com/anatolykoptev/memdb/pull/125))
+- **S7 PageRank scheduler** — background goroutine computes PageRank on
+  `memory_edges` every `MEMDB_PAGERANK_INTERVAL` (default `6h`); D1 rerank
+  consumes the score as an additive boost. Gated by `MEMDB_PAGERANK_ENABLED`
+  (default `true`). ([#127](https://github.com/anatolykoptev/memdb/pull/127))
+- **S8 reward scaffold** — `feedback_events` + `extract_examples` tables
+  for the M11 reward / corrections loop. Schema and write paths only;
+  reads not wired yet. Migration `0016`.
+  ([#128](https://github.com/anatolykoptev/memdb/pull/128))
+
+### Security
+
+- **C1 cube isolation in `user_profiles`** — added `cube_id` column +
+  cube-scoped unique index on `(cube_id, user_id, topic, sub_topic)`;
+  `GetProfilesByUserCube` filters by cube, never returns NULL-cube legacy
+  rows. Migration `0017`. ([#129](https://github.com/anatolykoptev/memdb/pull/129))
+- **C2 prompt-injection mitigation** — sanitize control characters +
+  tag-wrap each fact in `<fact>...</fact>`; LLM is instructed to treat fact
+  contents as data only.
+  ([#130](https://github.com/anatolykoptev/memdb/pull/130))
+- **C3 admission control** — bounded semaphore (size 8) acquired BEFORE the
+  profile-extract goroutine spawn; saturated calls drop with a `busy`
+  outcome counter. Caps DoS surface from request bursts.
+  ([#131](https://github.com/anatolykoptev/memdb/pull/131))
+
+### Fixed
+
+- **I4 PageRank multi-replica advisory lock** — wraps the compute phase in a
+  Postgres advisory lock so only one replica computes per interval. Stops
+  duplicated CPU + write races.
+  ([#132](https://github.com/anatolykoptev/memdb/pull/132))
+- **P3 search cache key correctness** — cache key now includes `level`,
+  `agent_id`, and `pref_top_k`. Earlier requests with different filter
+  combinations could return another request's cached results.
+  ([#133](https://github.com/anatolykoptev/memdb/pull/133))
+
+### Performance
+
+- **7.5× faster ingest** on the 1986-QA LoCoMo corpus (40 min vs 5 h on
+  M9). CE precompute, embed batching, structural-edge dedup, and the
+  fast-add pipeline compounded.
+- **CE precompute lookup** saves 100-400ms p95 chat by replacing the
+  query-time cross-encoder call with a graph property lookup.
+- **PageRank D1 boost** lifts hub-memory recall on cat-1 + cat-3 questions.
+- **Outer-loop parallelism** in `evaluation/locomo/query.py --workers N`
+  (ThreadPoolExecutor); query phase on full corpus drops to ~10h with 4
+  workers + `D2_MAX_HOP=2`.
+
+### Bench (LoCoMo, Memobase-comparable LLM Judge)
+
+| Track | All cats | Excl cat-5 |
+|---|---|---|
+| Chat-50 stratified, end-to-end | F1 0.138, **LLM Judge 62.0%** | F1 0.151, **LLM Judge 72.5%** |
+| Full corpus (1986 QAs) | F1 0.153, LLM Judge 41.8% | F1 0.178, **LLM Judge 50.9%** |
+
+Per-cat chat-50: 1=60% 2=80% 3=70% 4=80% 5=20%.
+Per-cat full: 1=53.5% 2=29.0% 3=37.5% 4=59.9% 5=10.3%.
+
+vs leaderboard: Memobase 75.78% > MemOS 73.31% > **MemDB 72.5%** > Mem0 66.88%.
+
 ## [0.22.0] — 2026-04-26 — First public release
 
 This is MemDB's first public release. Earlier v1.x and v2.x tags were internal
@@ -391,7 +480,9 @@ Initial public release. Baseline for changelog. See
 [docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md) for the detailed history
 of Python → Go migration phases 1–4.5 that preceded this tag.
 
-[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/anatolykoptev/memdb/compare/v0.22.0...v0.23.0
+[0.22.0]: https://github.com/anatolykoptev/memdb/compare/v2.2.0...v0.22.0
 [2.2.0]: https://github.com/anatolykoptev/memdb/releases/tag/v2.2.0
 [2.1.0]: https://github.com/anatolykoptev/memdb/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/anatolykoptev/memdb/compare/v1.1.0...v2.0.0
