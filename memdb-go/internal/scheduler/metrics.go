@@ -20,7 +20,7 @@ type schedMetricsStruct struct {
 	Duration       metric.Float64Histogram // labels: label
 	DLQ            metric.Int64Counter     // labels: label
 	TreeReorg      metric.Int64Counter     // labels: tier, outcome
-	PageRankRuns   metric.Int64Counter     // labels: outcome (success|empty|db_error|compute_error)
+	PageRankRuns   metric.Int64Counter     // labels: outcome (success|empty|db_error|compute_error|skipped_other_leader)
 	PageRankLastRun metric.Float64Gauge    // seconds since epoch of last completed run
 }
 
@@ -47,7 +47,7 @@ func schedMx() *schedMetricsStruct {
 			metric.WithDescription("D3 tree reorganizer outcomes (tier in episodic/semantic/all/relation, outcome in created/skipped_below_threshold/error/edge_write_error/hierarchy_write_error/audit_write_error/relation_attempted/relation_written_<RELATION>/relation_skipped/relation_error)"),
 		)
 		prRuns, _ := meter.Int64Counter("memdb.scheduler.pagerank_runs_total",
-			metric.WithDescription("PageRank background task runs by outcome (success|empty|db_error|compute_error)"),
+			metric.WithDescription("PageRank background task runs by outcome (success|empty|db_error|compute_error|skipped_other_leader)"),
 		)
 		prLast, _ := meter.Float64Gauge("memdb.scheduler.pagerank_last_run_seconds",
 			metric.WithDescription("Duration in seconds of the last PageRank computation cycle"),
@@ -67,8 +67,9 @@ func schedMx() *schedMetricsStruct {
 			attribute.String("tier", ""),
 			attribute.String("outcome", ""),
 		))
-		// Pre-register PageRank counters at zero.
-		for _, outcome := range []string{"success", "empty", "db_error", "compute_error"} {
+		// Pre-register PageRank counters at zero so Prometheus scrapers see
+		// every outcome series before the first tick (including the HA skip label).
+		for _, outcome := range []string{"success", "empty", "db_error", "compute_error", "skipped_other_leader"} {
 			prRuns.Add(context.Background(), 0, metric.WithAttributes(
 				attribute.String("outcome", outcome),
 			))
