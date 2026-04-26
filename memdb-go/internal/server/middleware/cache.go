@@ -32,8 +32,14 @@ var cacheRules = map[string]cacheRule{
 		keyFn: func(r *http.Request, _ []byte) string { return cache.PathCacheKey(r.URL.Path) },
 	},
 	"POST /product/search": {
-		ttl:    30 * time.Second,
-		keyFn:  func(_ *http.Request, body []byte) string { return cache.SearchCacheKey(body) },
+		ttl: 30 * time.Second,
+		keyFn: func(_ *http.Request, body []byte) string {
+			fields, err := cache.ParseSearchCacheKey(body)
+			if err != nil {
+				return ""
+			}
+			return cache.SearchCacheKey(fields)
+		},
 		isPost: true,
 	},
 }
