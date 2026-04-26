@@ -122,6 +122,11 @@ func recordProfileExtractOutcome(ctx context.Context, outcome string, dur time.D
 // into a chat scoped to cube=B. An empty cubeID short-circuits as
 // "disabled" — same as missing user_id.
 //
+// Admission control (security audit C3): TryAcquire is called in the caller
+// goroutine BEFORE spawning. If the semaphore is saturated the call returns
+// false immediately — no goroutine is queued, no closure is allocated, the
+// "busy" counter fires at the point of saturation (not 60 s later).
+//
 // Returns true when a goroutine was scheduled (useful for tests / metrics).
 func (h *Handler) triggerProfileExtract(conversation, userID, cubeID string) bool {
 	if h == nil || h.postgres == nil || h.llmExtractor == nil {
@@ -140,27 +145,31 @@ func (h *Handler) triggerProfileExtract(conversation, userID, cubeID string) boo
 		return false
 	}
 
-	go h.runProfileExtract(conversation, userID, cubeID)
+	// ADMISSION CONTROL (C3): acquire semaphore slot BEFORE spawning.
+	// Under burst load this bounds goroutine count to profileExtractSemaphoreSize.
+	// Never queue — if all slots are occupied, drop the work immediately.
+	sem := profileExtractSemaphore()
+	if !sem.TryAcquire(1) {
+		recordProfileExtractOutcome(context.Background(), profileOutcomeBusy, 0)
+		h.logger.Debug("profile extract: semaphore saturated, dropping",
+			slog.String("user_id", userID), slog.String("cube_id", cubeID))
+		return false
+	}
+	// Semaphore slot is held; the goroutine is responsible for releasing it.
+	go func() {
+		defer sem.Release(1)
+		h.runProfileExtractWithSem(conversation, userID, cubeID)
+	}()
 	return true
 }
 
-// runProfileExtract is the goroutine body. Acquires the semaphore (with the
-// goroutine's own timeout budget — drops on contention to protect the add
-// path), runs ExtractProfile (cube-scoped), then BulkUpserts the result.
-func (h *Handler) runProfileExtract(conversation, userID, cubeID string) {
+// runProfileExtractWithSem is the goroutine body. The caller has already
+// acquired the semaphore; this function runs ExtractProfile (cube-scoped)
+// and BulkUpserts the result under the per-call 60 s deadline.
+func (h *Handler) runProfileExtractWithSem(conversation, userID, cubeID string) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), profileExtractTimeout)
 	defer cancel()
-
-	sem := profileExtractSemaphore()
-	if err := sem.Acquire(ctx, 1); err != nil {
-		// Context cancelled while waiting — record "busy" and bail.
-		recordProfileExtractOutcome(ctx, profileOutcomeBusy, time.Since(start))
-		h.logger.Debug("profile extract: semaphore acquire failed",
-			slog.String("user_id", userID), slog.String("cube_id", cubeID), slog.Any("error", err))
-		return
-	}
-	defer sem.Release(1)
 
 	// Reuse the existing LLM client behind the fact extractor — same retry,
 	// model fallback, and metrics namespace. Avoids duplicating credentials.
