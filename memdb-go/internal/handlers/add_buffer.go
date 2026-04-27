@@ -226,7 +226,7 @@ func (h *Handler) runFinePipeline(ctx context.Context, conversation, cubeID stri
 
 	// Step 5: apply actions (no session/agent context for buffered adds)
 	// Buffer flush has no original request — use cubeID as userID fallback (no person identity available).
-	allNodes, items, vsetInserts := h.applyFineActions(ctx, embedded, cubeID, cubeID, "", "", now, nil, nil, nil)
+	allNodes, items, vsetInserts := h.applyFineActions(ctx, embedded, cubeID, cubeID, "", "", now, nil, nil, nil, "")
 
 	if len(allNodes) > 0 {
 		if err := h.postgres.InsertMemoryNodes(ctx, allNodes); err != nil {

@@ -103,7 +103,7 @@ func TestBuildAddNodes_ContentHashInInfo(t *testing.T) {
 	}
 	embVec := "[0.1,0.2,0.3]"
 	nodes, item := buildAddNodes(fact, embVec, nil, "cube1", "user1", "", "sess1", "2026-01-01T00:00:00",
-		map[string]any{}, nil, nil)
+		map[string]any{}, nil, nil, "")
 
 	if len(nodes) != 2 {
 		t.Fatalf("expected 2 nodes (WM+LTM), got %d", len(nodes))
@@ -131,7 +131,7 @@ func TestBuildAddNodes_ContentHashInInfo(t *testing.T) {
 func TestBuildAddNodes_EmptyEmbVecReturnsNil(t *testing.T) {
 	fact := llm.ExtractedFact{Memory: "test", Type: "LongTermMemory", Action: llm.MemAdd}
 	nodes, item := buildAddNodes(fact, "", nil, "cube1", "user1", "", "sess1", "2026-01-01T00:00:00",
-		map[string]any{}, nil, nil)
+		map[string]any{}, nil, nil, "")
 	if nodes != nil || item != nil {
 		t.Fatal("expected nil nodes and nil item when embVec is empty")
 	}
@@ -219,7 +219,7 @@ func TestBuildAddNodes_PropagatesD6D8Fields(t *testing.T) {
 	}
 	embVec := "[0.1,0.2,0.3]"
 	nodes, item := buildAddNodes(fact, embVec, nil, "cube1", "user1", "", "sess1",
-		"2026-04-23T00:00:00", map[string]any{}, nil, nil)
+		"2026-04-23T00:00:00", map[string]any{}, nil, nil, "")
 	if len(nodes) != 2 {
 		t.Fatalf("expected 2 nodes (WM+LTM), got %d", len(nodes))
 	}

@@ -68,6 +68,56 @@ func (p *Postgres) GetMemoryByPropertyIDs(ctx context.Context, ids []string, use
 	return results, rows.Err()
 }
 
+// MemoryKeyListItem is the per-row payload for ListMemoriesByKeyPrefix.
+// Char size avoids returning full memory text for listing requests.
+type MemoryKeyListItem struct {
+	ID         string `json:"id"`
+	Key        string `json:"key"`
+	MemoryType string `json:"memory_type"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+	CharSize   int    `json:"char_size"`
+}
+
+// GetMemoryByKey retrieves a single activated memory addressed by
+// (cubeID, userID, key). Returns nil if not found. Used by
+// POST /product/get_memory_by_key.
+func (p *Postgres) GetMemoryByKey(ctx context.Context, cubeID, userID, key string) (map[string]any, error) {
+	q := fmt.Sprintf(queries.GetMemoryByKey, graphName)
+	var id, propsStr string
+	err := p.pool.QueryRow(ctx, q, cubeID, userID, key).Scan(&id, &propsStr)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return map[string]any{"memory_id": id, "properties": propsStr}, nil
+}
+
+// ListMemoriesByKeyPrefix returns activated memories for (cubeID, userID)
+// whose key starts with prefix. Limit/offset enforced by the caller; this
+// method passes them through verbatim. Uses a LIKE query backed by the
+// trigram GIN index on properties.key (migration 0018).
+func (p *Postgres) ListMemoriesByKeyPrefix(ctx context.Context, cubeID, userID, prefix string, limit, offset int) ([]MemoryKeyListItem, error) {
+	q := fmt.Sprintf(queries.ListMemoriesByKeyPrefix, graphName)
+	pattern := prefix + "%"
+	rows, err := p.pool.Query(ctx, q, cubeID, userID, pattern, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MemoryKeyListItem
+	for rows.Next() {
+		var it MemoryKeyListItem
+		if err := rows.Scan(&it.ID, &it.Key, &it.MemoryType, &it.CreatedAt, &it.UpdatedAt, &it.CharSize); err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
 // scanPaginatedMemoryRows scans id+propsJSON pairs from a pgx rows result set.
 func scanPaginatedMemoryRows(rows interface {
 	Next() bool

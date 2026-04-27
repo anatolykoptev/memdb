@@ -73,6 +73,7 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 
 	// Validate required fields
 	errs := validateAddRequest(req.UserID, req.AsyncMode, req.Mode)
+	errs = append(errs, validateKey(req.Key)...)
 	isAsync := req.AsyncMode != nil && *req.AsyncMode == modeAsync
 	if !isAsync && len(req.Messages) == 0 {
 		errs = append(errs, "messages must not be empty")

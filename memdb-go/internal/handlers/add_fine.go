@@ -101,7 +101,7 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 
 	// Step 5: apply actions
 	sources := buildSourcesFromMessages(req.Messages)
-	allNodes, items, vsetInserts := h.applyFineActions(ctx, embedded, cubeID, *req.UserID, stringOrEmpty(req.AgentID), sessionID, now, info, req.CustomTags, sources)
+	allNodes, items, vsetInserts := h.applyFineActions(ctx, embedded, cubeID, *req.UserID, stringOrEmpty(req.AgentID), sessionID, now, info, req.CustomTags, sources, stringOrEmpty(req.Key))
 
 	if len(allNodes) > 0 {
 		if err := h.postgres.InsertMemoryNodes(ctx, allNodes); err != nil {
@@ -335,6 +335,7 @@ func (h *Handler) applyFineActions(
 	info map[string]any,
 	customTags []string,
 	sources []map[string]any,
+	key string,
 ) ([]db.MemoryInsertNode, []addResponseItem, []wmVSetInsert) {
 	var allNodes []db.MemoryInsertNode
 	var items []addResponseItem
@@ -354,13 +355,13 @@ func (h *Handler) applyFineActions(
 		case llm.MemUpdate:
 			h.applyUpdateAction(ctx, f.TargetID, f.Memory, ef.embVec, now)
 			embedded[i].ltmID = f.TargetID
-			if node, vsi, ok := buildUpdateWMNode(f, ef, cubeID, userID, agentID, sessionID, now, info, customTags, sources); ok {
+			if node, vsi, ok := buildUpdateWMNode(f, ef, cubeID, userID, agentID, sessionID, now, info, customTags, sources, key); ok {
 				allNodes = append(allNodes, node)
 				vsetInserts = append(vsetInserts, vsi)
 			}
 
 		default: // llm.MemAdd
-			nodes, item := buildAddNodes(f, ef.embVec, ef.embedding, cubeID, userID, agentID, sessionID, now, info, customTags, sources)
+			nodes, item := buildAddNodes(f, ef.embVec, ef.embedding, cubeID, userID, agentID, sessionID, now, info, customTags, sources, key)
 			allNodes = append(allNodes, nodes...)
 			if item != nil {
 				items = append(items, *item)
@@ -387,6 +388,7 @@ func buildUpdateWMNode(
 	info map[string]any,
 	customTags []string,
 	sources []map[string]any,
+	key string,
 ) (db.MemoryInsertNode, wmVSetInsert, bool) {
 	if ef.embVec == "" || len(ef.embedding) == 0 {
 		return db.MemoryInsertNode{}, wmVSetInsert{}, false
@@ -410,6 +412,7 @@ func buildUpdateWMNode(
 		Mode: modeFine, Now: now, CreatedAt: createdAt,
 		Info: factInfo, CustomTags: allTags, Sources: sources, Background: "",
 		RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
+		Key: key,
 	}))
 	if err != nil {
 		return db.MemoryInsertNode{}, wmVSetInsert{}, false
@@ -505,6 +508,7 @@ func buildAddNodes(
 	cubeID, userID, agentID, sessionID, now string,
 	info map[string]any, customTags []string,
 	sources []map[string]any,
+	key string,
 ) ([]db.MemoryInsertNode, *addResponseItem) {
 	if embVec == "" {
 		return nil, nil
@@ -539,6 +543,7 @@ func buildAddNodes(
 		Mode: modeFine, Now: now, CreatedAt: createdAt,
 		Info: factInfo, CustomTags: allTags, Sources: sources, Background: "",
 		RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
+		Key: key,
 	}))
 	ltJSON, err2 := marshalProps(buildNodeProps(memoryNodeProps{
 		ID: ltID, Memory: f.Memory, MemoryType: f.Type,
@@ -546,6 +551,7 @@ func buildAddNodes(
 		Mode: modeFine, Now: now, CreatedAt: createdAt,
 		Info: factInfo, CustomTags: allTags, Sources: sources, Background: background,
 		RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
+		Key: key,
 	}))
 	if err1 != nil || err2 != nil {
 		return nil, nil
