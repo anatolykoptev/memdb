@@ -346,6 +346,14 @@ See [docs/llm-providers.md](docs/llm-providers.md) for provider-specific configu
 
 ---
 
+## Claude Integrations
+
+MemDB ships with three Claude integration surfaces — see [docs/integrations/](docs/integrations/) for details:
+
+- **[Claude Code plugin](docs/integrations/claude-code-plugin.md)** — IDE hooks for automatic context injection and extraction (zero user action required)
+- **[MCP server](docs/integrations/claude-code-mcp.md)** — Standard MCP tools for any compatible agent: `claude mcp add memdb http://127.0.0.1:8001/mcp`
+- **[Claude API memory tool adapter](docs/integrations/claude-api-memory-tool.md)** — Python package; drop-in `BetaAbstractMemoryTool` implementation for Anthropic's `memory_20250818`
+
 ## Claude Desktop Integration (MCP)
 
 ```bash
