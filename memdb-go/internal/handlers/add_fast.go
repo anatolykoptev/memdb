@@ -26,6 +26,10 @@ type fastAddContext struct {
 	now        string
 	info       map[string]any
 	customTags []string
+	// key is the optional caller-supplied stable identifier propagated from
+	// fullAddRequest.Key into properties.key. Empty means "no key" (historical
+	// default). Validation lives at the request boundary.
+	key string
 }
 
 // pendingFastMemory is a memory that survived hash-dedup and is queued for embedding.
@@ -56,6 +60,7 @@ func (h *Handler) nativeFastAddForCube(ctx context.Context, req *fullAddRequest,
 		now:        nowTimestamp(),
 		info:       mapOrEmpty(req.Info),
 		customTags: req.CustomTags,
+		key:        stringOrEmpty(req.Key),
 	}
 
 	hashes := computeHashes(memories)
@@ -192,19 +197,25 @@ func (h *Handler) buildFastNodes(
 ) ([]db.MemoryInsertNode, addResponseItem, error) {
 	embeddingStr := db.FormatVector(embedding)
 	wmID := uuid.New().String()
-	wmJSON, err := marshalProps(buildMemoryProperties(
-		wmID, mem.Text, "WorkingMemory", fac.cubeID, fac.userID, fac.agentID, fac.sessionID, fac.now,
-		memInfo, fac.customTags, mem.Sources, "",
-	))
+	wmJSON, err := marshalProps(buildNodeProps(memoryNodeProps{
+		ID: wmID, Memory: mem.Text, MemoryType: "WorkingMemory",
+		UserName: fac.cubeID, UserID: fac.userID, AgentID: fac.agentID, SessionID: fac.sessionID,
+		Mode: modeFast, Now: fac.now, CreatedAt: fac.now,
+		Info: memInfo, CustomTags: fac.customTags, Sources: mem.Sources, Background: "",
+		Key: fac.key,
+	}))
 	if err != nil {
 		return nil, addResponseItem{}, fmt.Errorf("marshal wm properties: %w", err)
 	}
 
 	ltID := uuid.New().String()
-	ltJSON, err := marshalProps(buildMemoryProperties(
-		ltID, mem.Text, mem.MemoryType, fac.cubeID, fac.userID, fac.agentID, fac.sessionID, fac.now,
-		memInfo, fac.customTags, mem.Sources, workingBinding(wmID),
-	))
+	ltJSON, err := marshalProps(buildNodeProps(memoryNodeProps{
+		ID: ltID, Memory: mem.Text, MemoryType: mem.MemoryType,
+		UserName: fac.cubeID, UserID: fac.userID, AgentID: fac.agentID, SessionID: fac.sessionID,
+		Mode: modeFast, Now: fac.now, CreatedAt: fac.now,
+		Info: memInfo, CustomTags: fac.customTags, Sources: mem.Sources, Background: workingBinding(wmID),
+		Key: fac.key,
+	}))
 	if err != nil {
 		return nil, addResponseItem{}, fmt.Errorf("marshal lt properties: %w", err)
 	}

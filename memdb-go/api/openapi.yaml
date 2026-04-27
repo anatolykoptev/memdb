@@ -448,6 +448,67 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /product/get_memory_by_key:
+    post:
+      tags:
+      - Server API
+      summary: Get a single memory by stable key
+      description: |
+        Anthropic memory-tool adapter Phase 1. Looks up an activated memory by
+        the (cube_id, user_id, key) triple and returns it in the same shape as
+        GET /product/get_memory/{memory_id}. Returns 404 if no memory matches.
+      operationId: get_memory_by_key_product_get_memory_by_key_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GetMemoryByKeyRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetMemoryResponse'
+        '404':
+          description: Memory not found
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /product/list_memories_by_prefix:
+    post:
+      tags:
+      - Server API
+      summary: List memories whose key starts with a prefix
+      description: |
+        Anthropic memory-tool adapter Phase 1 — the "view directory" operation.
+        Returns lightweight rows (id, key, memory_type, created_at, updated_at,
+        char_size) so listing pages do not pay the cost of the full memory
+        text. Backed by a trigram GIN index on properties.key (migration 0018).
+      operationId: list_memories_by_prefix_product_list_memories_by_prefix_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ListMemoriesByPrefixRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListMemoriesByPrefixResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /product/delete_memory:
     post:
       tags:
@@ -569,6 +630,90 @@ paths:
               schema: {}
 components:
   schemas:
+    GetMemoryByKeyRequest:
+      type: object
+      title: GetMemoryByKeyRequest
+      required:
+      - cube_id
+      - user_id
+      - key
+      properties:
+        cube_id:
+          type: string
+          minLength: 1
+          title: Cube Id
+          description: Cube partition key (matched against properties.user_name).
+        user_id:
+          type: string
+          minLength: 1
+          title: User Id
+          description: Person identity (matched against properties.user_id).
+        key:
+          type: string
+          minLength: 1
+          maxLength: 512
+          title: Key
+          description: Caller-supplied stable identifier (e.g. "/memories/foo.txt").
+    ListMemoriesByPrefixRequest:
+      type: object
+      title: ListMemoriesByPrefixRequest
+      required:
+      - cube_id
+      - user_id
+      - prefix
+      properties:
+        cube_id:
+          type: string
+          minLength: 1
+          title: Cube Id
+        user_id:
+          type: string
+          minLength: 1
+          title: User Id
+        prefix:
+          type: string
+          minLength: 1
+          title: Prefix
+          description: Key prefix used as LIKE "<prefix>%".
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+          title: Limit
+        offset:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+    MemoryKeyListItem:
+      type: object
+      title: MemoryKeyListItem
+      properties:
+        id:
+          type: string
+        key:
+          type: string
+        memory_type:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        char_size:
+          type: integer
+    ListMemoriesByPrefixResponse:
+      type: object
+      title: ListMemoriesByPrefixResponse
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryKeyListItem'
     APIADDRequest:
       properties:
         user_id:
@@ -702,6 +847,17 @@ components:
           - type: 'null'
           title: Operation
           description: (Internal) Operation definitions for multi-cube write permissions.
+        key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          maxLength: 512
+          title: Key
+          description: |
+            Optional caller-supplied stable identifier persisted to properties.key.
+            Used by the Anthropic memory-tool adapter to address memories by
+            hierarchical paths (e.g. "/memories/foo.txt"). Max 512 characters,
+            no NUL bytes. Empty / omitted preserves the historical default ("").
       type: object
       title: APIADDRequest
       description: Request model for creating memories.

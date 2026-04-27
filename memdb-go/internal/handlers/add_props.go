@@ -36,6 +36,11 @@ type memoryNodeProps struct {
 	// D8: one of the 22-key MemOS preference taxonomy. Only set for PreferenceMemory
 	// entries; empty otherwise.
 	PreferenceCategory string
+
+	// Key is an optional caller-supplied stable identifier (e.g. an
+	// Anthropic memory-tool path "/memories/foo.txt"). Empty preserves the
+	// historical default. Validation enforced at the request boundary.
+	Key string
 }
 
 // buildNodeProps constructs the JSONB properties dict matching the Python format.
@@ -58,7 +63,7 @@ func buildNodeProps(p memoryNodeProps) map[string]any {
 		"delete_time":       "",
 		"delete_record_id":  "",
 		"tags":              tags,
-		"key":               "",
+		"key":               p.Key,
 		"usage":             []string{},
 		"sources":           serializeSources(p.Sources),
 		"background":        p.Background,

@@ -85,6 +85,50 @@ FROM %[1]s."Memory"
 WHERE properties->>(('id'::text)) = ANY($1)
   AND properties->>(('status'::text)) = 'activated'`
 
+// GetMemoryByKey retrieves a single activated memory node addressed by
+// (cube_id, user_id, key). Used by POST /product/get_memory_by_key — the
+// Anthropic memory-tool adapter "view <path>" operation.
+//
+// cube_id is matched against properties.user_name (Phase 2 cube partition key).
+// user_id is the person identity slot. key is the caller-supplied stable
+// identifier persisted in properties.key.
+//
+// Args: $1 = cube_id (text), $2 = user_id (text), $3 = key (text)
+const GetMemoryByKey = `
+SELECT properties->>(('id'::text)) AS memory_id,
+       properties::text             AS properties
+FROM %[1]s."Memory"
+WHERE properties->>(('user_name'::text)) = $1
+  AND properties->>(('user_id'::text))   = $2
+  AND properties->>(('key'::text))       = $3
+  AND properties->>(('status'::text))    = 'activated'
+LIMIT 1`
+
+// ListMemoriesByKeyPrefix returns paginated activated memories for
+// (cube_id, user_id) whose key starts with the given prefix. Designed for the
+// Anthropic memory-tool "view directory" operation (e.g. prefix "/memories/").
+//
+// Output is intentionally narrow — id, key, memory_type, created_at,
+// updated_at, char_size — so listing pages do not pay the cost of the full
+// memory text. Ordered by key ASC for deterministic pagination.
+//
+// Args: $1 = cube_id (text), $2 = user_id (text), $3 = prefix LIKE pattern
+//       (caller appends '%'), $4 = limit (int), $5 = offset (int)
+const ListMemoriesByKeyPrefix = `
+SELECT properties->>(('id'::text))                       AS memory_id,
+       properties->>(('key'::text))                      AS key,
+       properties->>(('memory_type'::text))              AS memory_type,
+       properties->>(('created_at'::text))               AS created_at,
+       properties->>(('updated_at'::text))               AS updated_at,
+       char_length(properties->>(('memory'::text)))      AS char_size
+FROM %[1]s."Memory"
+WHERE properties->>(('user_name'::text)) = $1
+  AND properties->>(('user_id'::text))   = $2
+  AND properties->>(('key'::text)) LIKE $3
+  AND properties->>(('status'::text)) = 'activated'
+ORDER BY properties->>(('key'::text)) ASC
+LIMIT $4 OFFSET $5`
+
 // --- Delete ---
 
 // DeleteByPropertyIDs deletes nodes by their properties->>(('id'::text)) values.
