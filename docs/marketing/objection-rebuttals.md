@@ -6,7 +6,7 @@
 
 ## "Why not just use Mem0 or Zep?"
 
-Both are cloud-first and paid past a small free tier. MemDB is MIT, fully self-hostable as one `docker-compose.yml`, BYO-LLM (Gemini/GPT/local), and ships three first-class Claude integrations (Code plugin, MCP server, `memory_20250818` adapter) that neither Mem0 nor Zep currently offers.
+Both are cloud-first and paid past a small free tier. MemDB is Apache-2.0, fully self-hostable as one `docker-compose.yml`, BYO-LLM (Gemini/GPT/local), and ships three first-class Claude integrations (Code plugin, MCP server, `memory_20250818` adapter) that neither Mem0 nor Zep currently offers.
 
 ## "What's LoCoMo? Sounds made up."
 
@@ -18,7 +18,7 @@ Same Gemini 2.5 Flash judge prompt as Memobase, same chat-50 stratified subset, 
 
 ## "Memobase is 75.78%, you're 72.5% — why care?"
 
-Three reasons: (1) we sit between MemOS and Zep, +5.62 pp over Mem0; (2) we're the only system in that tier you can self-host with no Python runtime and no per-seat pricing; (3) M11 is in flight to close the gap (D2 multi-hop default depth, judge re-tune, retrieval re-weighting) — track it in [`evaluation/locomo/MILESTONES.md`](../../evaluation/locomo/MILESTONES.md).
+Three reasons: (1) we sit between Mem0 and MemOS, +5.62 pp over Mem0; (2) we're the only system in that tier you can self-host with no Python runtime and no per-seat pricing; (3) M11 is in flight to close the gap (D2 multi-hop default depth, judge re-tune, retrieval re-weighting) — track it in [`evaluation/locomo/MILESTONES.md`](../../evaluation/locomo/MILESTONES.md).
 
 ## "Why Postgres + Apache AGE? Why not Neo4j or a real graph DB?"
 
@@ -42,7 +42,7 @@ Operational, not religious. Single Go binary means no venv drift, no GIL, no col
 
 ## "Open source is great, but how do you make money?"
 
-Open core. The memory engine, the three Claude surfaces, the SDKs, and the docker-compose stack are MIT and stay that way. The monetization path is enterprise features (SSO, audit logging, hardened multi-tenant governance) and a managed cloud offering for teams that want the engine without the operational burden — same playbook as HashiCorp / Confluent / ClickHouse.
+Open core. The memory engine, the three Claude surfaces, the SDKs, and the docker-compose stack are Apache-2.0 and stay that way. The monetization path is enterprise features (SSO, audit logging, hardened multi-tenant governance) and a managed cloud offering for teams that want the engine without the operational burden — same playbook as HashiCorp / Confluent / ClickHouse.
 
 ## "Your team is too small to compete with Mem0 / Zep."
 

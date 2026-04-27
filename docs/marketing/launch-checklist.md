@@ -23,7 +23,7 @@ Two-week rollout plan. Each item is concrete enough to execute or delegate witho
 - [ ] Pin GitHub issue: "Show HN feedback thread" linking back to the HN post
 - [ ] Post short Twitter / X thread (5 tweets): hook from `elevator_pitch`, benchmark table, install snippet, adapter snippet, repo link
 - [ ] Submit to Lobsters under `release` and `ai` tags
-- [ ] Post to `r/LocalLLaMA` — angle: "Self-hostable agent memory, no Python, MIT, beats Mem0 by 5.6 pp on LoCoMo"
+- [ ] Post to `r/LocalLLaMA` — angle: "Self-hostable agent memory, no Python, Apache-2, beats Mem0 by 5.6 pp on LoCoMo"
 
 ### Day 2 — Reddit + Discord saturation
 - [ ] Post to `r/MachineLearning` ([P] tag, project post, focus on benchmark methodology not marketing)
@@ -106,7 +106,7 @@ Two-week rollout plan. Each item is concrete enough to execute or delegate witho
 ## Anti-goals (do not do)
 
 - No paid ads in week 1-2 — we want organic signal first.
-- No "MemDB is better than X" headline phrasing anywhere; always relative ("between MemOS and Zep") with the table.
+- No "MemDB is better than X" headline phrasing anywhere; always relative ("between Mem0 and MemOS") with the table.
 - No deleting or hiding negative HN comments; respond once, then let them stand.
 - No `gh pr merge` from launch-related PRs by anyone but the controller (per repo `CLAUDE.md`).
 - No Instagram (banned in RU per user prefs); no Perplexity references; LinkedIn fine but low priority.

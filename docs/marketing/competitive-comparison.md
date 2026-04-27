@@ -14,14 +14,14 @@ Positioning gap MemDB targets: **the only fully self-hostable memory layer with 
 |-----:|-----------|----------:|-------------------------------------------------------------|
 | 1    | Memobase  | **75.78** | [memobase-io/Memobase blog post / paper](https://github.com/memobase-io/memobase) |
 | 2    | Zep       | **75.14** | [Zep LoCoMo benchmark write-up](https://blog.getzep.com/) (Graphiti)              |
-| 3    | **MemDB v0.23.0** | **72.50** | This repo, `evaluation/locomo/MILESTONES.md` (M9, M10, M11) |
-| 4    | MemOS     | **73.31** | [MemOS technical report](https://github.com/MemTensor/MemOS) |
+| 3    | MemOS     | **73.31** | [MemOS technical report](https://github.com/MemTensor/MemOS) |
+| 4    | **MemDB v0.23.0** | **72.50** | This repo, `evaluation/locomo/MILESTONES.md` (M9, M10, M11) |
 | 5    | Mem0      | **66.88** | [Mem0 LoCoMo paper](https://arxiv.org/abs/2504.19413)        |
 
 > Stratified subset: chat-50, single-hop + multi-hop + temporal questions, category-5 (open-domain unanswerable) excluded — same composition Memobase, Zep, and MemOS report.
 > Letta does not currently publish a LoCoMo score; we marked it N/A in the matrices below.
 
-**Read this as:** MemDB sits between MemOS and Zep, **+5.62 pp ahead of Mem0**, **−3.28 pp behind Memobase**. We close the Memobase gap in M11 (planned: D2 multi-hop default depth=3, judge re-tune, retrieval re-weighting).
+**Read this as:** MemDB sits between Mem0 and MemOS, **+5.62 pp ahead of Mem0**, **−0.81 pp behind MemOS**, **−2.64 pp behind Zep**, **−3.28 pp behind Memobase**. We close the Memobase gap in M11 (planned: D2 multi-hop default depth=3, judge re-tune, retrieval re-weighting).
 
 ## Integration surface matrix
 
@@ -46,7 +46,7 @@ Positioning gap MemDB targets: **the only fully self-hostable memory layer with 
 | Python runtime required          | **no**            | yes      | yes        | yes      | yes       | yes      |
 | Multi-tenant cube isolation      | **yes** (explicit `cube_id`) | partial | partial | partial | yes | partial |
 | BYO-LLM (Gemini/GPT/local)       | **yes**           | partial  | partial    | no (OAI/Claude) | yes  | yes      |
-| License                          | **MIT**           | Apache-2 | Apache-2 + Cloud | Commercial cloud | Apache-2 | Apache-2 |
+| License                          | **Apache-2**      | Apache-2 | Apache-2 + Cloud | Commercial cloud | Apache-2 | Apache-2 |
 | Hosted cloud option              | not yet           | yes      | yes        | yes      | no        | yes      |
 
 ## Per-competitor narrative (from `competitive_analysis`)
@@ -61,13 +61,13 @@ Structured memory architecture for AI agents, emphasizing long-term state manage
 Memory layer for LLM applications. Long-term memory, structured data extraction, semantic search. Production-ready infrastructure with strong DX.
 - **Strengths**: production-ready infra, both self-hosted and cloud.
 - **Weaknesses**: heavy initial setup for small teams, high resource consumption at scale.
-- **MemDB delta**: lighter (Go binary vs Python services), MIT (Zep OSS is Apache + commercial Cloud), explicit cube isolation, MCP server out of the box.
+- **MemDB delta**: lighter (Go binary vs Python services), Apache-2.0 (parity with Zep OSS, no commercial cloud upsell), explicit cube isolation, MCP server out of the box.
 
 ### Mem0
 Personalized memory layer that learns user preferences over time. Strong user-personalization focus.
 - **Strengths**: user personalization, easy framework integration.
 - **Weaknesses**: depends on specific LLM providers for optimal performance, weaker enterprise multi-tenancy.
-- **MemDB delta**: +5.62 pp on LoCoMo, self-host (Mem0 is cloud-first), BYO-LLM, MIT.
+- **MemDB delta**: +5.62 pp on LoCoMo, self-host (Mem0 is cloud-first), BYO-LLM, Apache-2.
 
 ### Letta (ex-MemGPT)
 Tiered memory architecture (memory hierarchy modeled after computer architecture). Long-context specialist.
@@ -79,7 +79,7 @@ Tiered memory architecture (memory hierarchy modeled after computer architecture
 Enterprise knowledge retrieval and document-based memory. Secure, scalable, proprietary-data grounding.
 - **Strengths**: enterprise security and compliance, document-heavy retrieval.
 - **Weaknesses**: less flexible for real-time conversational memory, weaker community integrations.
-- **MemDB delta**: −3.28 pp on LoCoMo (closing in M11), but MIT vs commercial cloud, native Claude integrations Memobase does not ship, Go ops simplicity.
+- **MemDB delta**: −3.28 pp on LoCoMo (closing in M11), but Apache-2.0 vs commercial cloud, native Claude integrations Memobase does not ship, Go ops simplicity.
 
 ## Why MemDB wins specific deals
 

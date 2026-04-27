@@ -1,4 +1,4 @@
-# Show HN: MemDB – open-source agent memory, 72.5% LoCoMo F1 (between MemOS and Zep)
+# Show HN: MemDB – open-source agent memory, 72.5% LoCoMo F1 (between Mem0 and MemOS)
 
 Most AI agents today suffer from fragmented, unreliable memory. MemDB is an open-source, self-hostable memory layer with a pure-Go stack — Postgres + Apache AGE graph + pgvector + qdrant + redis + an embed-server sidecar — shipped as one `docker-compose.yml`. It is a drop-in replacement for Anthropic's `memory_20250818` tool, with native MCP and Claude Code plugin surfaces alongside the HTTP API.
 
@@ -31,11 +31,11 @@ MemDB exists to be the option that does not ask you to give up self-host, ops si
 |-----:|-----------------|----------:|---------|
 | 1    | Memobase        | 75.78     | Commercial cloud |
 | 2    | Zep             | 75.14     | Apache-2 OSS + Cloud |
-| 3    | **MemDB v0.23.0** | **72.50** | **MIT** |
-| 4    | MemOS           | 73.31     | Apache-2 |
+| 3    | MemOS           | 73.31     | Apache-2 |
+| 4    | **MemDB v0.23.0** | **72.50** | **Apache-2** |
 | 5    | Mem0            | 66.88     | Commercial cloud |
 
-Between MemOS and Zep. **+5.62 pp ahead of Mem0**, **−3.28 pp behind Memobase** (closing in M11). And — to my knowledge — the only system in the top tier you can run end-to-end without paying anyone or running Python.
+Between Mem0 and MemOS. **+5.62 pp ahead of Mem0**, **−0.81 pp behind MemOS**, **−2.64 pp behind Zep**, **−3.28 pp behind Memobase** (closing in M11). And — to my knowledge — the only system in the top tier you can run end-to-end without paying anyone or running Python.
 
 Full methodology: [`evaluation/locomo/MILESTONES.md`](../../evaluation/locomo/MILESTONES.md). Full comparison matrix: [`docs/marketing/competitive-comparison.md`](competitive-comparison.md).
 
@@ -84,4 +84,4 @@ client.messages.create(
 Repo: https://github.com/anatolykoptev/memdb
 Docs: [`docs/API.md`](../API.md) (full HTTP reference), [`docs/integrations/`](../integrations/)
 Adapter: https://github.com/anatolykoptev/memdb-claude-memory-tool
-License: MIT
+License: Apache-2.0
