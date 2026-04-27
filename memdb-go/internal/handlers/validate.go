@@ -469,6 +469,31 @@ func validateAddRequest(userID, asyncMode, mode *string) []string {
 	return errs
 }
 
+// maxKeyLen caps the length of properties.key for the Anthropic memory-tool
+// adapter. Mirrors typical filesystem path limits and keeps GIN trigram index
+// lookups bounded. NUL bytes are rejected because Postgres text values cannot
+// store them.
+const maxKeyLen = 512
+
+// validateKey enforces the Anthropic-memory-tool key constraints: optional,
+// max 512 chars, no NUL bytes. Empty / nil is allowed and means "no key".
+func validateKey(key *string) []string {
+	if key == nil || *key == "" {
+		return nil
+	}
+	var errs []string
+	if len(*key) > maxKeyLen {
+		errs = append(errs, "key must be at most 512 characters")
+	}
+	for i := 0; i < len(*key); i++ {
+		if (*key)[i] == 0 {
+			errs = append(errs, "key must not contain NUL bytes")
+			break
+		}
+	}
+	return errs
+}
+
 // validateGetAllRequest validates the common fields for get_all requests.
 // Returns a list of validation errors (empty if valid).
 func validateGetAllRequest(userID, memoryType *string) []string {

@@ -77,6 +77,11 @@ type fullAddRequest struct {
 	Info            map[string]any `json:"info,omitempty"`
 	IsFeedback      *bool          `json:"is_feedback,omitempty"`
 	TaskID          *string        `json:"task_id,omitempty"`
+	// Key is an optional caller-supplied stable identifier stored in
+	// properties.key (default ""). Used by the Anthropic memory-tool adapter
+	// to address memories by hierarchical paths like "/memories/foo.txt".
+	// Validation: max 512 chars, no NUL bytes. See validateAddRequest.
+	Key *string `json:"key,omitempty"`
 }
 
 // chatMessage represents a single message in the add request.

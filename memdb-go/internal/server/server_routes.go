@@ -58,6 +58,10 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler, serviceSecret strin
 	mux.HandleFunc("POST /product/get_memory", h.NativePostGetMemory)
 	mux.HandleFunc("GET /product/get_memory/{memory_id}", h.NativeGetMemory)
 	mux.HandleFunc("POST /product/get_memory_by_ids", h.NativeGetMemoryByIDs)
+	// Anthropic memory-tool adapter Phase 1 — address by stable key /
+	// list by key prefix. See migration 0018 for the trigram GIN index.
+	mux.HandleFunc("POST /product/get_memory_by_key", h.NativeGetMemoryByKey)
+	mux.HandleFunc("POST /product/list_memories_by_prefix", h.NativeListMemoriesByPrefix)
 	mux.HandleFunc("POST /product/delete_memory", h.NativeDelete)
 	mux.HandleFunc("POST /product/delete_all_memories", h.NativeDeleteAll)
 	mux.HandleFunc("POST /product/update_memory", h.NativeUpdateMemory)

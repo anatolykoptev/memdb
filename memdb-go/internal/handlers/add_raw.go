@@ -36,6 +36,7 @@ func (h *Handler) nativeRawAddForCube(ctx context.Context, req *fullAddRequest, 
 		now:        nowTimestamp(),
 		info:       mapOrEmpty(req.Info),
 		customTags: req.CustomTags,
+		key:        stringOrEmpty(req.Key),
 	}
 
 	hashes := hashRawTexts(texts)
@@ -166,6 +167,7 @@ func buildRawNode(
 		CustomTags: fac.customTags,
 		Sources:    nil,
 		Background: "",
+		Key:        fac.key,
 	})
 
 	propsJSON, err := marshalProps(props)
