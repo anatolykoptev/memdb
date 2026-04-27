@@ -182,6 +182,16 @@ Runnable examples:
 [examples/go/quickstart](examples/go/quickstart), [examples/python/quickstart](examples/python/quickstart),
 [examples/mcp/claude-desktop](examples/mcp/claude-desktop).
 
+### Examples
+
+Working code for the three integration paths:
+
+- [`examples/python_chat/`](examples/python_chat/) — Claude API + Python adapter, persistent memory across sessions
+- [`examples/go_client/`](examples/go_client/) — Pure Go HTTP client, no SDK dependency
+- [`examples/mcp_setup/`](examples/mcp_setup/) — MCP server registration for Claude Code / Claude Desktop / Cursor
+
+Each example runs copy-paste. See per-example `README.md` for prerequisites.
+
 ---
 
 ## Kubernetes Install (Helm)

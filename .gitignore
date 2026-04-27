@@ -230,6 +230,11 @@ OVERVIEW*.md
 
 # Allow example dependency files
 !examples/**/requirements.txt
+!examples/**/*.example.json
+!examples/**/.env.example
+
+# Ignore built example binaries
+examples/go_client/go_client
 
 # go-code MCP local SQLite cache (gc-pr / gc-graph)
 .code-review-graph/

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "memdb-mcp": {
+      "url": "http://127.0.0.1:8001/mcp",
+      "headers": {
+        "X-Service-Secret": "your-service-secret-here"
+      }
+    }
+  }
+}
