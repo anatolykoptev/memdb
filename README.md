@@ -7,6 +7,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg?logo=apache)](https://opensource.org/license/apache-2-0/)
 [![Version](https://img.shields.io/badge/version-0.23.0-blue.svg)](https://github.com/anatolykoptev/memdb/releases)
+[![LoCoMo LLM-Judge](https://img.shields.io/badge/LoCoMo%20LLM--Judge-72.5%25-blue.svg?logo=anthropic)](evaluation/locomo/MILESTONES.md)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8.svg?logo=go)](https://go.dev/)
 [![GitHub stars](https://img.shields.io/github/stars/anatolykoptev/memdb?style=social)](https://github.com/anatolykoptev/memdb/stargazers)
 [![Discord](https://img.shields.io/badge/Discord-join%20chat-7289DA.svg?logo=discord)](https://discord.gg/8vhbTZgf)
@@ -34,8 +35,12 @@ MemDB stores, retrieves, and manages long-term memory for AI agents. It runs as 
 agents (Telegram bots, IDE copilots, support agents, personal assistants) can recall facts,
 preferences, and prior conversations across sessions.
 
-<!-- TODO benchmark-comparison.svg: drop bar chart here once M9 Stage 3 re-run lands -->
-<!-- <p align="center"><img src="docs/assets/benchmark-comparison.svg" alt="LLM-Judge: MemDB vs Mem0 vs Letta vs Zep vs Memobase" width="80%" /></p> -->
+<p align="center">
+  <img src="docs/assets/benchmark-chart.svg" alt="LoCoMo benchmark — MemDB 72.5% LLM Judge, between Mem0 and MemOS" width="80%" />
+</p>
+<p align="center">
+  <em>72.5% LLM Judge on LoCoMo chat-50 stratified — between Mem0 and MemOS, +5.62pp ahead of Mem0. <a href="evaluation/locomo/MILESTONES.md">Methodology</a> · <a href="docs/marketing/competitive-comparison.md">Full comparison</a></em>
+</p>
 
 ---
 
