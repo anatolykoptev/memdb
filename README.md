@@ -171,7 +171,9 @@ docker compose -f docker/docker-compose.yml --profile embed up -d
 
 Then in `.env`: `MEMDB_EMBEDDER_TYPE=http` and `MEMDB_EMBED_URL=http://embed-server:8080`.
 
-Full API reference: [docs/openapi.json](docs/openapi.json). Runnable examples:
+Full API reference: **[docs/API.md](docs/API.md)** — curl examples, auth flow, env gates, performance notes.
+Machine-readable spec: [memdb-go/api/openapi.yaml](memdb-go/api/openapi.yaml) · Swagger UI at `/docs`.
+Runnable examples:
 [examples/go/quickstart](examples/go/quickstart), [examples/python/quickstart](examples/python/quickstart),
 [examples/mcp/claude-desktop](examples/mcp/claude-desktop).
 
