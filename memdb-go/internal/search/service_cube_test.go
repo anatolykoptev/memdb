@@ -138,6 +138,10 @@ func (m *mockPostgres) MultiHopEdgeExpansion(_ context.Context, _ []string, _, _
 	return nil, nil
 }
 
+func (m *mockPostgres) GetMemoriesByLinkedIDs(_ context.Context, _ []string, _, _, _ string, _ int) ([]db.VectorSearchResult, error) {
+	return nil, nil
+}
+
 func (m *mockPostgres) FindEntitiesByNormalizedID(_ context.Context, _ []string, cubeID, personID string) ([]string, error) {
 	m.findEntitiesCubeID = cubeID
 	m.findEntitiesPersonID = personID
