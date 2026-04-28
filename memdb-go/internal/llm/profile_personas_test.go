@@ -62,6 +62,59 @@ func TestTaxonomyForPersona_AllFive(t *testing.T) {
 	}
 }
 
+// TestCountTopics verifies the top-level topic counter handles all five
+// shipped taxonomies plus the edge cases (empty / no leading dash).
+//
+// The expected counts come from the verbatim ports above:
+//   - default:   8 (basic_info, contact_info, education, demographics, work,
+//                interest, psychological, life_event)
+//   - locomo:    5 (basic_info, personal_narrative, life_circumstances,
+//                personal_growth, plans)
+//   - assistant: 6 (basic_info, schedule_prefs, task_management,
+//                productivity_settings, lifestyle_prefs, communication_style)
+//   - companion: 4 (basic_info, companion_preferences, interaction_history,
+//                personalization)
+//   - education: 5 (basic_info, academic_profile, learning_preferences,
+//                progress_tracking, engagement_metrics)
+func TestCountTopics(t *testing.T) {
+	cases := []struct {
+		persona string
+		want    int
+	}{
+		{PersonaDefault, 8},
+		{PersonaLocomo, 5},
+		{PersonaAssistant, 6},
+		{PersonaCompanion, 4},
+		{PersonaEducation, 5},
+	}
+	for _, tc := range cases {
+		got := countTopics(TaxonomyForPersona(tc.persona))
+		if got != tc.want {
+			t.Errorf("countTopics(%q) = %d; want %d", tc.persona, got, tc.want)
+		}
+	}
+}
+
+// TestCountTopics_EdgeCases covers empty, no-prefix, and indented-only inputs.
+func TestCountTopics_EdgeCases(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want int
+	}{
+		{"empty", "", 0},
+		{"no prefix", "basic_info\nwork\n", 0},
+		{"indented only", "  - sub1\n  - sub2\n", 0},
+		{"single", "- only\n", 1},
+		{"mixed", "- a\n  - x\n- b\n  - y\n  - z\n- c\n", 3},
+	}
+	for _, tc := range cases {
+		if got := countTopics(tc.in); got != tc.want {
+			t.Errorf("countTopics(%s) = %d; want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestBuildProfileFactRetrievalPromptWith_InjectsGuidelines verifies that
 // the persona guidelines block is injected into the prompt body correctly.
 func TestBuildProfileFactRetrievalPromptWith_InjectsGuidelines(t *testing.T) {

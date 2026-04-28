@@ -116,13 +116,19 @@ const profileExamplesBlock = "<example>\n" +
 // The persona is resolved from the MEMDB_PROFILE_TAXONOMY env var; unknown
 // values fall back to PersonaDefault. The function also fires the once-per-
 // process startup log so callers (e.g. ExtractProfile) don't need to.
+//
+// Note: os.Getenv runs on EVERY call by design. The taxonomy is a runtime
+// override (operators flip it without restarting); the cost is one syscall
+// per profile extraction, negligible compared to the LLM round-trip. The
+// startup-log slog.Info fires only on the first call (sync.Once) so log
+// volume stays bounded even though env is read repeatedly.
 func buildProfileFactRetrievalPrompt() string {
 	persona := os.Getenv("MEMDB_PROFILE_TAXONOMY")
 	if persona == "" {
 		persona = PersonaDefault
 	}
-	logPersonaOnce(persona)
 	guidelines := TaxonomyForPersona(persona)
+	logPersonaOnce(persona, guidelines)
 	return buildProfileFactRetrievalPromptWith(guidelines)
 }
 
