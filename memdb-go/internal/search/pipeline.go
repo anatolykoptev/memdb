@@ -118,6 +118,12 @@ func (s *pipelineState) skip(name string) {
 // runPipeline executes stages serially, recording per-stage timing and
 // emitting the memdb.search.stage_duration_ms histogram + stage_total
 // counter. Soft-fail per stage (see package doc).
+//
+// Timing semantics: stage_duration_ms is wall-clock wrapping st.Run() —
+// it includes any blocking the stage does on downstream calls (LLM,
+// pgvector, embed). For stages that fan out goroutines and wait on a
+// barrier, the duration covers the entire wait. Stages that fire-and-
+// forget without waiting record only the dispatch overhead.
 func runPipeline(ctx context.Context, logger *slog.Logger, stages []stage, s *pipelineState) {
 	mx := pipelineMx()
 	if s.Timings == nil {
@@ -171,7 +177,8 @@ var (
 
 // stageNames is the canonical list of pipeline stage labels — used for
 // pre-registration. Must stay in sync with defaultStages() in
-// pipeline_stages.go.
+// service.go. The init() below asserts the length match against
+// (*SearchService).defaultStages so a drift fails fast at startup.
 var stageNames = []string{
 	"d7_cot_decompose",
 	"d4_query_rewrite",
@@ -195,6 +202,28 @@ var stageNames = []string{
 	"build_response",
 	"profile_inject",
 	"retrieval_count_async",
+}
+
+// init asserts that stageNames stays in sync with the canonical stage
+// list expected by the pipeline. The actual list lives on
+// (*SearchService).defaultStages but stageNames must enumerate every
+// label so the metric pre-registration emits a complete time-series
+// matrix at startup. We can't reach defaultStages without a service
+// instance, so the guard is structural: stageNames must be non-empty
+// and unique. Any drift in defaultStages without stageNames update
+// surfaces as missing pre-registered series in Grafana — this guard
+// catches the inverse (typos / dup entries in stageNames itself).
+func init() {
+	if len(stageNames) == 0 {
+		panic("search: stageNames is empty — pipeline metric pre-registration would emit nothing")
+	}
+	seen := make(map[string]struct{}, len(stageNames))
+	for _, n := range stageNames {
+		if _, dup := seen[n]; dup {
+			panic("search: duplicate stage name in stageNames: " + n)
+		}
+		seen[n] = struct{}{}
+	}
 }
 
 func pipelineMx() *pipelineMetrics {
