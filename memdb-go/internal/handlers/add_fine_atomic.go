@@ -62,10 +62,6 @@ func atomicFactsEnabled() bool {
 	}
 }
 
-// atomicExtractorOnce lazily wraps h.llmExtractor.Client() so we don't
-// allocate a second LLM transport. Bound to the Handler via the closure.
-var atomicExtractorOnce sync.Once
-
 // atomicExtractorCache holds the lazy singleton. Keyed off the underlying
 // llm.Client pointer because tests inject fresh extractors per case and we
 // want a fresh wrapper when that happens.

@@ -106,19 +106,19 @@ var ADDITIVE_EXTRACTION_PROMPT string
 // AtomicFact is one mem0-style atomic memory: a 15-80-word self-contained
 // factual statement with optional speaker attribution and soft graph edges.
 type AtomicFact struct {
-	// ID is the per-extraction sequential id from the LLM ("0", "1", ...).
-	// Not a UUID — used only to disambiguate facts within one batch.
-	ID string `json:"id"`
 	// Text is the 15-80-word factual statement (up to ~100 for detail-rich content).
 	Text string `json:"text"`
 	// AttributedTo is the speaker the memory belongs to: "user" or "assistant"
 	// (mem0 default), OR a named speaker for multi-speaker conversations
 	// (Example 12: "John", "Maria"). Required by the prompt.
 	AttributedTo string `json:"attributed_to,omitempty"`
-	// LinkedMemoryIDs is the set of EXISTING memory UUIDs this fact links to
-	// (same entity, updated preference, continuation, or contradiction).
-	// Soft graph edges populated at extract time. F12 will wire these into
-	// the memory_edges table; for now they are stored on the fact properties.
+	// LinkedMemoryIDs is the set of EXISTING memory UUIDs this fact links to —
+	// resolved against the SAME chunk's sibling extractions plus the cosine
+	// candidate window passed in at extract-time. These are NOT cross-chunk
+	// references to arbitrary memories; the LLM is restricted to UUIDs that
+	// appear in `## Existing Memories` (sibling-link resolution). F12's
+	// linked_memory_ids resolver later expands the set against a wider
+	// pgvector top-N pool, but extract-time linking stays sibling-scoped.
 	LinkedMemoryIDs []string `json:"linked_memory_ids,omitempty"`
 	// TopicTag is an optional single-word topic tag — not in mem0's spec but
 	// useful for downstream classification. Populated opportunistically.
