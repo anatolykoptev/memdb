@@ -32,49 +32,6 @@ type BiTemporalEdgeRef struct {
 	CreatedAt string
 }
 
-// FetchActiveMemoryEdgesBySubject returns currently-valid memory_edges where
-// from_id = subjectID and relation = predicate. Caller wraps results in
-// FactRef and passes to the LLM judge.
-//
-// Bounded by limit; ordered by created_at DESC so the freshest competing
-// facts come first when limit truncates.
-func (p *Postgres) FetchActiveMemoryEdgesBySubject(
-	ctx context.Context, subjectID, predicate string, limit int,
-) ([]BiTemporalEdgeRef, error) {
-	if subjectID == "" || predicate == "" {
-		return nil, nil
-	}
-	if limit <= 0 {
-		limit = 8
-	}
-	const q = `
-SELECT from_id, to_id, relation, COALESCE(created_at, '')
-FROM memory_edges
-WHERE from_id = $1
-  AND relation = $2
-  AND invalid_at IS NULL
-ORDER BY created_at DESC NULLS LAST
-LIMIT $3`
-	rows, err := p.pool.Query(ctx, q, subjectID, predicate, limit)
-	if err != nil {
-		return nil, fmt.Errorf("fetch active memory edges (%s,%s): %w", subjectID, predicate, err)
-	}
-	defer rows.Close()
-
-	var out []BiTemporalEdgeRef
-	for rows.Next() {
-		var r BiTemporalEdgeRef
-		if err := rows.Scan(&r.FromID, &r.ToID, &r.Predicate, &r.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan memory edge row: %w", err)
-		}
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate memory edges: %w", err)
-	}
-	return out, nil
-}
-
 // FetchActiveEntityEdgesBySubject returns currently-valid entity_edges where
 // from_entity_id = subjectID and predicate = predicate, scoped to a user.
 // Same bounded-DESC ordering as FetchActiveMemoryEdgesBySubject.
@@ -116,43 +73,10 @@ LIMIT $4`
 	return out, nil
 }
 
-// InvalidateMemoryEdgesByTriples sets invalid_at on rows matching any of the
-// provided (from_id, to_id, relation) triples. Returns the number of rows
-// actually flipped (rows where invalid_at IS NULL becomes != NULL).
-//
-// Idempotent: re-running on already-invalidated rows is a no-op.
-func (p *Postgres) InvalidateMemoryEdgesByTriples(
-	ctx context.Context, triples []BiTemporalEdgeRef, invalidAt string,
-) (int64, error) {
-	if len(triples) == 0 || invalidAt == "" {
-		return 0, nil
-	}
-	froms := make([]string, len(triples))
-	tos := make([]string, len(triples))
-	rels := make([]string, len(triples))
-	for i, t := range triples {
-		froms[i] = t.FromID
-		tos[i] = t.ToID
-		rels[i] = t.Predicate
-	}
-	const q = `
-UPDATE memory_edges AS e
-SET invalid_at = $4
-FROM UNNEST($1::text[], $2::text[], $3::text[]) AS u(from_id, to_id, relation)
-WHERE e.from_id = u.from_id
-  AND e.to_id   = u.to_id
-  AND e.relation = u.relation
-  AND e.invalid_at IS NULL`
-	tag, err := p.pool.Exec(ctx, q, froms, tos, rels, invalidAt)
-	if err != nil {
-		return 0, fmt.Errorf("invalidate memory edges by triples: %w", err)
-	}
-	return tag.RowsAffected(), nil
-}
-
-// InvalidateEntityEdgesByTriples is the entity_edges twin of
-// InvalidateMemoryEdgesByTriples. Scoped to userName because entity_edges
-// is partitioned per user.
+// InvalidateEntityEdgesByTriples sets invalid_at on entity_edges rows matching
+// any of the provided (from_entity_id, to_entity_id, predicate) triples.
+// Scoped to userName because entity_edges is partitioned per user.
+// Returns the number of rows actually flipped. Idempotent.
 func (p *Postgres) InvalidateEntityEdgesByTriples(
 	ctx context.Context, userName string, triples []BiTemporalEdgeRef, invalidAt string,
 ) (int64, error) {

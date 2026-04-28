@@ -13,8 +13,10 @@
 --      "find prior edges with same (from_entity_id, predicate) for this user"
 --      lookup it issues per newly-extracted edge. Conditional on invalid_at
 --      IS NULL so the planner can ignore historical rows.
---   3. memory_edges_from_relation_idx — supports the F11 judge's analogous
---      lookup over memory_edges (same from_id + relation, currently valid).
+--
+-- Note: memory_edges_from_relation_idx was dropped — the memory_edges F11
+-- helpers (FetchActiveMemoryEdgesBySubject, InvalidateMemoryEdgesByTriples)
+-- were dead code. memory_edges bi-temporal coverage is deferred to M12.
 --
 -- All indexes are CREATE INDEX IF NOT EXISTS; safe to run repeatedly.
 
@@ -24,8 +26,4 @@ CREATE INDEX IF NOT EXISTS entity_edges_active_idx
 
 CREATE INDEX IF NOT EXISTS entity_edges_subject_predicate_idx
     ON entity_edges(user_name, from_entity_id, predicate)
-    WHERE invalid_at IS NULL;
-
-CREATE INDEX IF NOT EXISTS memory_edges_from_relation_idx
-    ON memory_edges(from_id, relation)
     WHERE invalid_at IS NULL;

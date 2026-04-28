@@ -109,6 +109,7 @@ const (
 	validatorOutcomeInvalidated = "invalidated"
 	validatorOutcomeSkip        = "skip"
 	validatorOutcomeLLMError    = "llm_error"
+	validatorOutcomeDBError     = "db_error" // Postgres fetch/update failure
 	validatorOutcomeNoPeers     = "no_peers"
 )
 
@@ -124,7 +125,7 @@ func validatorMetrics() {
 		meter := otel.Meter("memdb-go/scheduler")
 		validatorMx.Edges, _ = meter.Int64Counter(
 			"memdb.scheduler.bitemporal_validator_edges_total",
-			metric.WithDescription("F11 background validator per-edge outcomes (invalidated|skip|llm_error|no_peers)"),
+			metric.WithDescription("F11 background validator per-edge outcomes (invalidated|skip|llm_error|db_error|no_peers)"),
 		)
 		// Pre-register at zero so the series exist before the first tick.
 		ctx := context.Background()
@@ -132,6 +133,7 @@ func validatorMetrics() {
 			validatorOutcomeInvalidated,
 			validatorOutcomeSkip,
 			validatorOutcomeLLMError,
+			validatorOutcomeDBError,
 			validatorOutcomeNoPeers,
 		} {
 			validatorMx.Edges.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
@@ -225,7 +227,7 @@ func (w *Worker) judgeOneStaleEdge(ctx context.Context, cubeID, now string, edge
 
 	peers, err := w.pg.FetchActiveEntityEdgesBySubject(callCtx, cubeID, edge.FromID, edge.Predicate, 8)
 	if err != nil {
-		recordValidatorEdgeOutcome(ctx, validatorOutcomeLLMError, 1)
+		recordValidatorEdgeOutcome(ctx, validatorOutcomeDBError, 1)
 		return
 	}
 	if len(peers) <= 1 {
@@ -275,7 +277,7 @@ func (w *Worker) judgeOneStaleEdge(ctx context.Context, cubeID, now string, edge
 	}
 	n, err := w.pg.InvalidateEntityEdgesByTriples(ctx, cubeID, doomed, now)
 	if err != nil {
-		recordValidatorEdgeOutcome(ctx, validatorOutcomeLLMError, 1)
+		recordValidatorEdgeOutcome(ctx, validatorOutcomeDBError, 1)
 		w.logger.Warn("bitemporal_validator: invalidate failed",
 			slog.String("cube_id", cubeID), slog.Any("error", err))
 		return

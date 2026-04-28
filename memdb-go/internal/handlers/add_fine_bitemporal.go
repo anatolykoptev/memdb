@@ -20,9 +20,9 @@ package handlers
 // budget because each /add can fan out to multiple judges.
 //
 // Metrics:
-//   - memdb.add.edges_invalidated_total{table=memory|entity}
+//   - memdb.add.edges_invalidated_total{table=entity}
 //   - memdb.add.edge_invalidation_confidence histogram
-//   - memdb.add.edge_judge_total{outcome=success|skip|llm_error|busy|disabled}
+//   - memdb.add.edge_judge_total{outcome=success|skip|llm_error|db_error|busy|disabled}
 //
 // On any error the goroutine logs at Debug. The sync write path is
 // untouched: a failed judge just leaves the prior edges valid (status quo).
@@ -85,6 +85,7 @@ const (
 	edgeJudgeOutcomeSuccess  = "success"
 	edgeJudgeOutcomeSkip     = "skip" // judge ran but confidence below threshold
 	edgeJudgeOutcomeLLMError = "llm_error"
+	edgeJudgeOutcomeDBError  = "db_error" // Postgres fetch/update failure
 	edgeJudgeOutcomeBusy     = "busy"
 	edgeJudgeOutcomeDisabled = "disabled"
 	edgeJudgeOutcomeNoPeers  = "no_peers" // nothing to judge against — common
@@ -107,11 +108,12 @@ var (
 		edgeJudgeOutcomeSuccess,
 		edgeJudgeOutcomeSkip,
 		edgeJudgeOutcomeLLMError,
+		edgeJudgeOutcomeDBError,
 		edgeJudgeOutcomeBusy,
 		edgeJudgeOutcomeDisabled,
 		edgeJudgeOutcomeNoPeers,
 	}
-	preregisteredJudgeTables = []string{"memory", "entity"}
+	preregisteredJudgeTables = []string{"entity"}
 )
 
 func edgeJudgeMetrics() {
@@ -128,7 +130,7 @@ func edgeJudgeMetrics() {
 		)
 		edgeJudgeMx.JudgeTotal, _ = meter.Int64Counter(
 			"memdb.add.edge_judge_total",
-			metric.WithDescription("F11 LLM judge invocations by outcome (success|skip|llm_error|busy|disabled|no_peers)"),
+			metric.WithDescription("F11 LLM judge invocations by outcome (success|skip|llm_error|db_error|busy|disabled|no_peers)"),
 		)
 
 		// Pre-register at zero for both label sets.
@@ -170,6 +172,16 @@ func recordJudgeConfidence(ctx context.Context, conf float64) {
 	}
 }
 
+// --- DB interface (allows test injection without a real pgx pool) ---
+
+// edgeJudgePG is the minimal Postgres surface needed by the F11 judge.
+// *db.Postgres satisfies it; tests can provide a stub.
+type edgeJudgePG interface {
+	FetchFreshEntityEdgesForCube(ctx context.Context, userName, now string, limit int) ([]db.BiTemporalEdgeRef, error)
+	FetchActiveEntityEdgesBySubject(ctx context.Context, userName, subjectID, predicate string, limit int) ([]db.BiTemporalEdgeRef, error)
+	InvalidateEntityEdgesByTriples(ctx context.Context, userName string, triples []db.BiTemporalEdgeRef, invalidAt string) (int64, error)
+}
+
 // --- entry point ---
 
 // triggerEdgeInvalidationJudge launches a fire-and-forget bi-temporal
@@ -201,7 +213,7 @@ func (h *Handler) triggerEdgeInvalidationJudge(cubeID, now string) bool {
 	}
 	go func() {
 		defer sem.Release(1)
-		h.runEdgeInvalidationJudge(cubeID, now)
+		h.runEdgeInvalidationJudge(h.postgres, cubeID, now)
 	}()
 	return true
 }
@@ -209,13 +221,13 @@ func (h *Handler) triggerEdgeInvalidationJudge(cubeID, now string) bool {
 // runEdgeInvalidationJudge is the goroutine body. Loads fresh entity edges
 // for the cube, groups by (subject,predicate), and dispatches one LLM judge
 // per group with active peers.
-func (h *Handler) runEdgeInvalidationJudge(cubeID, now string) {
+func (h *Handler) runEdgeInvalidationJudge(pg edgeJudgePG, cubeID, now string) {
 	ctx, cancel := context.WithTimeout(context.Background(), edgeJudgeOverallTimeout)
 	defer cancel()
 
-	fresh, err := h.postgres.FetchFreshEntityEdgesForCube(ctx, cubeID, now, edgeJudgeBatchCap)
+	fresh, err := pg.FetchFreshEntityEdgesForCube(ctx, cubeID, now, edgeJudgeBatchCap)
 	if err != nil {
-		recordJudgeOutcome(ctx, edgeJudgeOutcomeLLMError) // db_error rolled into llm_error label budget; handler-side detail in the log
+		recordJudgeOutcome(ctx, edgeJudgeOutcomeDBError)
 		h.logger.Debug("edge judge: fetch fresh edges failed",
 			slog.String("cube_id", cubeID), slog.Any("error", err))
 		return
@@ -237,7 +249,7 @@ func (h *Handler) runEdgeInvalidationJudge(cubeID, now string) {
 		if ctx.Err() != nil {
 			return
 		}
-		h.judgeOneEntityGroup(ctx, cubeID, now, k.subject, k.predicate, freshGroup)
+		h.judgeOneEntityGroup(ctx, pg, cubeID, now, k.subject, k.predicate, freshGroup)
 	}
 }
 
@@ -248,6 +260,7 @@ func (h *Handler) runEdgeInvalidationJudge(cubeID, now string) {
 // fresh edge per group anyway.)
 func (h *Handler) judgeOneEntityGroup(
 	ctx context.Context,
+	pg edgeJudgePG,
 	cubeID, now, subject, predicate string,
 	freshGroup []db.BiTemporalEdgeRef,
 ) {
@@ -255,9 +268,9 @@ func (h *Handler) judgeOneEntityGroup(
 		return
 	}
 	// Pull the wider set of currently-valid peers for the same key.
-	peers, err := h.postgres.FetchActiveEntityEdgesBySubject(ctx, cubeID, subject, predicate, edgeJudgePeerCap)
+	peers, err := pg.FetchActiveEntityEdgesBySubject(ctx, cubeID, subject, predicate, edgeJudgePeerCap)
 	if err != nil {
-		recordJudgeOutcome(ctx, edgeJudgeOutcomeLLMError)
+		recordJudgeOutcome(ctx, edgeJudgeOutcomeDBError)
 		h.logger.Debug("edge judge: fetch peers failed",
 			slog.String("cube_id", cubeID), slog.Any("error", err))
 		return
@@ -322,9 +335,9 @@ func (h *Handler) judgeOneEntityGroup(
 		return
 	}
 
-	n, err := h.postgres.InvalidateEntityEdgesByTriples(ctx, cubeID, doomed, now)
+	n, err := pg.InvalidateEntityEdgesByTriples(ctx, cubeID, doomed, now)
 	if err != nil {
-		recordJudgeOutcome(ctx, edgeJudgeOutcomeLLMError)
+		recordJudgeOutcome(ctx, edgeJudgeOutcomeDBError)
 		h.logger.Debug("edge judge: UPDATE failed",
 			slog.String("cube_id", cubeID), slog.Any("error", err))
 		return

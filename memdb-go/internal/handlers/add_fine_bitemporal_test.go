@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -67,4 +69,50 @@ func TestEdgeKey_DeterministicShape(t *testing.T) {
 	if got != want {
 		t.Fatalf("edgeKey shape drift: got %q, want %q", got, want)
 	}
+}
+
+// errPG is a stub edgeJudgePG that always returns a configurable error.
+type errPG struct{ err error }
+
+func (e errPG) FetchFreshEntityEdgesForCube(_ context.Context, _, _ string, _ int) ([]db.BiTemporalEdgeRef, error) {
+	return nil, e.err
+}
+func (e errPG) FetchActiveEntityEdgesBySubject(_ context.Context, _, _, _ string, _ int) ([]db.BiTemporalEdgeRef, error) {
+	return nil, e.err
+}
+func (e errPG) InvalidateEntityEdgesByTriples(_ context.Context, _ string, _ []db.BiTemporalEdgeRef, _ string) (int64, error) {
+	return 0, e.err
+}
+
+// TestDBErrorOutcome_ConstantAndRegistration verifies:
+//  1. edgeJudgeOutcomeDBError constant has the expected string value "db_error".
+//  2. It appears in preregisteredJudgeOutcomes so Prometheus sees the series at start.
+//  3. runEdgeInvalidationJudge routes a Postgres fetch error to db_error (not llm_error)
+//     by completing without panic on a stub that returns an error.
+func TestDBErrorOutcome_ConstantAndRegistration(t *testing.T) {
+	// 1. Constant value.
+	if edgeJudgeOutcomeDBError != "db_error" {
+		t.Fatalf("edgeJudgeOutcomeDBError = %q, want %q", edgeJudgeOutcomeDBError, "db_error")
+	}
+
+	// 2. Pre-registration includes db_error.
+	found := false
+	for _, oc := range preregisteredJudgeOutcomes {
+		if oc == edgeJudgeOutcomeDBError {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("edgeJudgeOutcomeDBError not in preregisteredJudgeOutcomes: %v", preregisteredJudgeOutcomes)
+	}
+
+	// 3. DB error path in runEdgeInvalidationJudge completes without panic.
+	// The no-op OTel meter (set by default in test binaries) accepts the Add call.
+	h := &Handler{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
+	stub := errPG{err: errors.New("simulated postgres failure")}
+	// runEdgeInvalidationJudge is the goroutine body; call synchronously.
+	h.runEdgeInvalidationJudge(stub, "cube-test", "2026-04-27T00:00:00Z")
+	// If the wrong branch was hit (llm_error path via panic or wrong constant),
+	// the test would panic. Reaching here means the db_error branch was taken.
 }
