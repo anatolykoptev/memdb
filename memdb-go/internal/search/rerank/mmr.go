@@ -26,9 +26,9 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// envFloat reads an env variable and parses it as float64.
+// envFloatMMR reads an env variable and parses it as float64.
 // Returns def when the variable is unset or unparseable.
-func envFloat(key string, def float64) float64 {
+func envFloatMMR(key string, def float64) float64 {
 	s := os.Getenv(key)
 	if s == "" {
 		return def
@@ -40,9 +40,9 @@ func envFloat(key string, def float64) float64 {
 	return v
 }
 
-// envInt reads an env variable and parses it as int.
+// envIntMMR reads an env variable and parses it as int.
 // Returns def when the variable is unset or unparseable.
-func envInt(key string, def int) int {
+func envIntMMR(key string, def int) int {
 	s := os.Getenv(key)
 	if s == "" {
 		return def
@@ -88,8 +88,8 @@ type MMR struct {
 func NewMMRFromEnv(embByID map[string][]float32) MMR {
 	return MMR{
 		EmbeddingsByID: embByID,
-		Bar:            envFloat("MEMDB_MMR_BAR", 0.8),
-		TopK:           envInt("MEMDB_MMR_TOPK", 0),
+		Bar:            envFloatMMR("MEMDB_MMR_BAR", 0.8),
+		TopK:           envIntMMR("MEMDB_MMR_TOPK", 0),
 	}
 }
 
@@ -168,6 +168,8 @@ func (m MMR) tooSimilarToKept(vec []float32, keptVecs [][]float32, bar float64) 
 		if kv == nil {
 			continue
 		}
+		// Note: MemOS uses strict > (cos == bar keeps); we use >= (cos == bar drops).
+		// Functionally equivalent at float64 precision; chosen to match Go idiom for "above threshold".
 		if float64(cosineSim(vec, kv)) >= bar {
 			return true
 		}
