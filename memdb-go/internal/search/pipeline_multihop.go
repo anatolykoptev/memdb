@@ -27,9 +27,14 @@ import (
 // recall. False negatives (genuine cat-2 that don't match) fall through to
 // the default threshold unchanged.
 //
+// We use \b word-boundary anchors at the start so questions wrapped in
+// quotes/parens ("Was it?  When did Marcus...") and short stand-alone
+// questions ("When?") still match. The followers ("year", "did" etc.) keep
+// the old phrase coupling.
+//
 // Env override MEMDB_CAT2_THRESHOLD=0 disables the adjustment entirely.
 var cat2QueryRe = regexp.MustCompile(
-	`(?i)^(when |how long |how many (months|years|days|weeks|times) |after what |before what |at what (time|point) |what (year|month|day|date) )`,
+	`(?i)\b(when\b|how long\b|how many (months|years|days|weeks|times)\b|after what\b|before what\b|at what (time|point)\b|what (year|month|day|date)\b)`,
 )
 
 // isCat2Query returns true when q matches the cat-2 temporal heuristic.

@@ -161,12 +161,17 @@ func searchMx() *searchMetricsInstruments {
 		for _, stage := range []string{"1_cosine", "2_refine", "3_justify"} {
 			d5size.Record(ctx, 0, metric.WithAttributes(attribute.String("stage", stage)))
 		}
-		// Pre-register F9 recall budget counter for both category labels.
+		// Pre-register F9 recall budget counter for both category labels
+		// across the bounded top_k bucket set so dashboards see every
+		// series from container start.  Cardinality stays at
+		// 2 × len(recallBudgetTopKBuckets) — bounded.
 		for _, cat := range []string{"cat2", "other"} {
-			rb.Add(ctx, 0, metric.WithAttributes(
-				attribute.String("category", cat),
-				attribute.Int64("top_k", 0),
-			))
+			for _, k := range recallBudgetTopKBuckets {
+				rb.Add(ctx, 0, metric.WithAttributes(
+					attribute.String("category", cat),
+					attribute.Int64("top_k", int64(k)),
+				))
+			}
 		}
 		// Pre-register F12 linked_expand outcomes for all label values.
 		for _, oc := range []string{"expanded", "empty_seeds", "no_neighbors", "error", "disabled"} {
@@ -177,10 +182,38 @@ func searchMx() *searchMetricsInstruments {
 	return searchMetrics
 }
 
+// recallBudgetTopKBuckets is the bounded set of top_k label values used by
+// the RecallBudget counter.  Any incoming top_k is rounded UP to the closest
+// bucket (with overflow clamped to the highest), keeping Prometheus label
+// cardinality at exactly len(recallBudgetTopKBuckets) × 2 (cat2|other).
+//
+// Buckets cover the realistic top_k range used by current call-sites
+// (text/skill/tool budgets) plus a small headroom.  Add a bucket here
+// (sorted ASC) when a new tier appears — never push the raw int as a label.
+var recallBudgetTopKBuckets = []int{1, 3, 5, 10, 20, 30, 50, 100}
+
+// bucketTopK rounds an arbitrary top_k value UP to the closest entry in
+// recallBudgetTopKBuckets so the metric label set stays bounded.  Out-of-range
+// values (≤ 0) collapse to the smallest bucket; values above the largest
+// bucket are clamped to it.
+func bucketTopK(topK int) int {
+	if topK <= 0 {
+		return recallBudgetTopKBuckets[0]
+	}
+	for _, b := range recallBudgetTopKBuckets {
+		if topK <= b {
+			return b
+		}
+	}
+	return recallBudgetTopKBuckets[len(recallBudgetTopKBuckets)-1]
+}
+
 // recallBudgetAttrs builds the OTel attribute set for the RecallBudget counter.
+// `topK` is bucketed via bucketTopK so the label cardinality is bounded — see
+// recallBudgetTopKBuckets for the canonical set.
 func recallBudgetAttrs(category string, topK int) metric.MeasurementOption {
 	return metric.WithAttributes(
 		attribute.String("category", category),
-		attribute.Int64("top_k", int64(topK)),
+		attribute.Int64("top_k", int64(bucketTopK(topK))),
 	)
 }
