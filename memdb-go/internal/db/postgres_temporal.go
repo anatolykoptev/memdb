@@ -61,15 +61,19 @@ func (p *Postgres) SearchMemoriesByDateRange(
 	// Build the date predicate. We always emit something so the prepared
 	// statement is stable; empty bounds become NULL and the comparison is
 	// elided via COALESCE.
+	// AGE caveat: properties is agtype, not jsonb. The `?` existence operator
+	// and `jsonb_array_elements_text` both require jsonb input, so we route
+	// through `properties::text::jsonb` (same pattern as queries_search_vector.go
+	// and migration 0022/0024).
 	const q = `
 SELECT properties->>(('id'::text)) AS prop_id,
        properties::text             AS props
 FROM memos_graph."Memory"
 WHERE properties->>(('user_name'::text)) = $1
-  AND properties ? 'event_dates'
+  AND (properties::text::jsonb) ? 'event_dates'
   AND EXISTS (
       SELECT 1
-      FROM jsonb_array_elements_text(properties->'event_dates') AS d(val)
+      FROM jsonb_array_elements_text((properties::text::jsonb) -> 'event_dates') AS d(val)
       WHERE ($2 = '' OR d.val >= $2)
         AND ($3 = '' OR d.val <= $3)
   )
