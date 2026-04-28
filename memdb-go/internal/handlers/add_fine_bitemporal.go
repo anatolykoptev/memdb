@@ -19,6 +19,21 @@ package handlers
 // Concurrency cap: edgeJudgeSemaphoreSize (4) — half of the profile-extract
 // budget because each /add can fan out to multiple judges.
 //
+// Cost shape (default-on, p95 estimate):
+//   - 1 LLM judge call per (subject,predicate) group with ≥1 prior peer.
+//   - Realistic /add fan-out: 0–2 groups per request (most /adds add 0–1
+//     fresh entity edges that have a prior peer).
+//   - At ~$0.0001 per cached-prompt judge call (gemini-2.5-flash-lite via
+//     CLIProxyAPI), incremental cost per /add stays under $0.0002 p95.
+//   - Wallclock cost is OFF the request path (fire-and-forget goroutine).
+//
+// Group fan-out vs per-pair fan-out: the judge ALREADY batches up to
+// edgeJudgePeerCap (8) peers into a single LLM call per (subject,predicate)
+// group via DecideInvalidation's `refs` parameter. We do not batch ACROSS
+// groups in one call because the prompt is keyed on a single (newFact,
+// subject) pair — combining groups would require a second prompt template
+// and lose the prompt-cache hits the per-group call enjoys.
+//
 // Metrics:
 //   - memdb.add.edges_invalidated_total{table=entity}
 //   - memdb.add.edge_invalidation_confidence histogram
