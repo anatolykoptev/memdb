@@ -187,3 +187,19 @@ func d1HalfLifeDays() int {
 func d1DecayAlpha() float64 {
 	return math.Ln2 / float64(d1HalfLifeDays())
 }
+
+// ---- F9 — cat-2 recall budget -----------------------------------------------
+
+// defaultCat2Threshold is the similarity threshold applied to cat-2 queries
+// (temporal multi-hop: "When...", "How long...", etc.).  Lowered from 0.2
+// to 0.05 to let weak bridging hops survive — they would otherwise be
+// filtered out before reaching the reranker.
+const defaultCat2Threshold = 0.05
+
+// cat2Threshold returns the similarity threshold used for cat-2 (temporal
+// multi-hop) queries detected by isCat2Query.
+// Env: MEMDB_CAT2_THRESHOLD in [0, 0.5].
+// Default: 0.05 (vs the standard 0.2 for other categories).
+func cat2Threshold() float64 {
+	return parseEnvFloat("MEMDB_CAT2_THRESHOLD", 0, 0.5, defaultCat2Threshold)
+}

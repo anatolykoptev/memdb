@@ -17,6 +17,14 @@ Env:
                        gold QAs are sampled — ingest always pushes the
                        full conversation so every QA category has
                        evidence to retrieve.
+
+F9 changes (mem0 arxiv pattern):
+    --reverse-role     Ingest each conversation TWICE: once with the normal
+                       speaker assignment, and once with speaker_a ↔ speaker_b
+                       roles swapped. Each speaker becomes "user" from their own
+                       POV in one pass, doubling fact coverage per the mem0
+                       eval harness pattern. Default: true for new runs.
+                       Use --no-reverse-role to reproduce pre-F9 baselines.
 """
 
 from __future__ import annotations
@@ -180,15 +188,37 @@ def first_two_speakers(conversation: dict) -> tuple[str, str]:
     return "speaker_a", "speaker_b"
 
 
-def ingest(conversations: list[dict], memdb_url: str, dry_run: bool = False) -> dict:
-    stats = {"conversations": 0, "sessions": 0, "messages": 0, "errors": []}
+def ingest(
+    conversations: list[dict],
+    memdb_url: str,
+    dry_run: bool = False,
+    reverse_role: bool = True,
+) -> dict:
+    """Ingest conversations into memdb-go.
+
+    When ``reverse_role=True`` (default, F9 mem0 arxiv pattern), each
+    conversation is ingested twice: once with normal speaker assignments and
+    once with speaker_a ↔ speaker_b roles swapped.  This doubles the fact
+    coverage per speaker's user store — each speaker becomes "user" from their
+    own POV in one pass AND from the other speaker's POV in the swapped pass.
+    The session_id for the swapped pass is suffixed with ``__rev`` to avoid
+    collision with normal ingest sessions.
+
+    Set ``reverse_role=False`` to reproduce pre-F9 baselines.
+    """
+    stats = {"conversations": 0, "sessions": 0, "messages": 0, "errors": [],
+             "reverse_role": reverse_role, "reverse_role_sessions": 0}
     conversations = sorted(conversations, key=lambda c: c.get("sample_id", ""))
     for conv in conversations:
         sample_id = conv.get("sample_id", "locomo_unknown")
         conversation = conv.get("conversation", {})
         speaker_a, speaker_b = first_two_speakers(conversation)
         user_a, user_b = user_ids_for(sample_id)
-        print(f"[ingest] conv={sample_id} speakers=({speaker_a}, {speaker_b})", flush=True)
+        print(
+            f"[ingest] conv={sample_id} speakers=({speaker_a}, {speaker_b}) "
+            f"reverse_role={reverse_role}",
+            flush=True,
+        )
         for session_key, iso_date, messages in iter_sessions(conversation):
             session_id = f"{sample_id}__{session_key}"
             stats["sessions"] += 1
@@ -196,6 +226,8 @@ def ingest(conversations: list[dict], memdb_url: str, dry_run: bool = False) -> 
             print(f"  session={session_key} msgs={len(messages)} date={iso_date}", flush=True)
             if dry_run:
                 continue
+
+            # Normal pass: each speaker from their own POV.
             for perspective, uid in (("a", user_a), ("b", user_b)):
                 try:
                     ingest_one_session(
@@ -211,6 +243,32 @@ def ingest(conversations: list[dict], memdb_url: str, dry_run: bool = False) -> 
                 except requests.RequestException as exc:
                     stats["errors"].append(f"{sample_id}/{session_key}/{perspective}: {exc}")
                     print(f"    ERROR: {exc}", file=sys.stderr, flush=True)
+
+            # Reverse-role pass: swap speaker_a ↔ speaker_b so each speaker
+            # also stores the conversation from the other's POV.  Session ID
+            # gets a __rev suffix to remain deterministic and avoid stomping
+            # the normal pass (server deduplicates by session_id).
+            if reverse_role:
+                rev_session_id = f"{session_id}__rev"
+                for perspective, uid in (("a", user_a), ("b", user_b)):
+                    try:
+                        ingest_one_session(
+                            memdb_url=memdb_url,
+                            user_id=uid,
+                            session_id=rev_session_id,
+                            speaker_a=speaker_b,  # swapped
+                            speaker_b=speaker_a,  # swapped
+                            messages=messages,
+                            iso_date=iso_date,
+                            perspective=perspective,
+                        )
+                        stats["reverse_role_sessions"] += 1
+                    except requests.RequestException as exc:
+                        stats["errors"].append(
+                            f"{sample_id}/{session_key}/{perspective}/rev: {exc}"
+                        )
+                        print(f"    ERROR (rev): {exc}", file=sys.stderr, flush=True)
+
         stats["conversations"] += 1
     return stats
 
@@ -232,6 +290,22 @@ def main() -> int:
             "Use '1,2,3,4,5' to enable the 5-category 50-QA mode. "
             "Ingest always pushes the full conversation regardless of this flag."
         ),
+    )
+    p.add_argument(
+        "--reverse-role",
+        action="store_true",
+        default=True,
+        help=(
+            "Ingest each conversation TWICE: once normal, once with speaker_a ↔ "
+            "speaker_b roles swapped (mem0 pattern, doubles fact coverage). "
+            "Default: enabled. Use --no-reverse-role for pre-F9 baselines."
+        ),
+    )
+    p.add_argument(
+        "--no-reverse-role",
+        dest="reverse_role",
+        action="store_false",
+        help="Disable reverse-role ingest (pre-F9 baseline mode).",
     )
     args = p.parse_args()
 
@@ -260,9 +334,15 @@ def main() -> int:
     cat_label = ",".join(str(c) for c in categories)
     print(f"[ingest] mode={INGEST_MODE!r}", flush=True)
     print(f"[ingest] categories={cat_label!r} (ingest always pushes full conversation)", flush=True)
+    print(f"[ingest] reverse_role={args.reverse_role}", flush=True)
 
     start = time.time()
-    stats = ingest(conversations, args.memdb_url, dry_run=args.dry_run)
+    stats = ingest(
+        conversations,
+        args.memdb_url,
+        dry_run=args.dry_run,
+        reverse_role=args.reverse_role,
+    )
     stats["duration_sec"] = round(time.time() - start, 2)
     stats["memdb_url"] = args.memdb_url
     stats["data_path"] = str(path)

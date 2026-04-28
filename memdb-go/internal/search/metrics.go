@@ -44,6 +44,10 @@ type searchMetricsInstruments struct {
 	D1BoostMagnitude metric.Float64Histogram
 	// D5StageInputSize (Q5) — candidate count entering each staged-retrieval stage.
 	D5StageInputSize metric.Int64Histogram
+	// RecallBudget (F9) — counter fired once per search request with labels
+	// category (cat2|other) and top_k (text budget).  Used for A/B comparison
+	// of cat-2 threshold lowering on LoCoMo full-corpus runs.
+	RecallBudget metric.Int64Counter
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -93,6 +97,8 @@ func searchMx() *searchMetricsInstruments {
 		d5size, _ := m.Int64Histogram("memdb.search.d5_stage_input_size",
 			metric.WithDescription("Candidate count at each D5 staged-retrieval stage entry (stage=1_cosine|2_refine|3_justify)"),
 			metric.WithExplicitBucketBoundaries(0, 5, 10, 20, 50, 100, 200))
+		rb, _ := m.Int64Counter("memdb.search.recall_budget_total",
+			metric.WithDescription("F9 recall budget: search requests by category heuristic (category=cat2|other) and text top_k"))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -111,6 +117,7 @@ func searchMx() *searchMetricsInstruments {
 			CELiveCall:       celive,
 			D1BoostMagnitude: d1boost,
 			D5StageInputSize: d5size,
+			RecallBudget:     rb,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -141,6 +148,21 @@ func searchMx() *searchMetricsInstruments {
 		for _, stage := range []string{"1_cosine", "2_refine", "3_justify"} {
 			d5size.Record(ctx, 0, metric.WithAttributes(attribute.String("stage", stage)))
 		}
+		// Pre-register F9 recall budget counter for both category labels.
+		for _, cat := range []string{"cat2", "other"} {
+			rb.Add(ctx, 0, metric.WithAttributes(
+				attribute.String("category", cat),
+				attribute.Int64("top_k", 0),
+			))
+		}
 	})
 	return searchMetrics
+}
+
+// recallBudgetAttrs builds the OTel attribute set for the RecallBudget counter.
+func recallBudgetAttrs(category string, topK int) metric.MeasurementOption {
+	return metric.WithAttributes(
+		attribute.String("category", category),
+		attribute.Int64("top_k", int64(topK)),
+	)
 }
