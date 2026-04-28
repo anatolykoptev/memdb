@@ -277,5 +277,145 @@ class TestIngestReverseRoleDefault(unittest.TestCase):
         self.assertEqual(len(normal_ids), 2, "Both speakers should have a normal session")
 
 
+# ---------------------------------------------------------------------------
+# F9 + reverse_role parity — table-driven assertions against the Memobase
+# reference shape.  Numbers below mirror the contract documented in
+# memobase_search.py (compete-research/memobase/.../memobase_search.py:71-105):
+#
+#   per-speaker top_k = 30  →  60 candidates total per question
+#   merged top_k       = 20  (truncates merged stream to harness budget)
+#   reverse_role=True  →  4 ingest calls per single-session conversation
+#                         (2 perspectives × {normal, __rev})
+#
+# These are the guard-rails that make a LoCoMo run an apples-to-apples
+# comparison with the Memobase benchmark.  If any of them drift, the run
+# is no longer comparable to the published numbers and the test fails loud.
+# ---------------------------------------------------------------------------
+
+class TestMemobaseParity(unittest.TestCase):
+    PARITY_CASES = [
+        # (case_label, top_k, top_k_per_speaker, reverse_role,
+        #  expected_per_speaker_calls, expected_merged_cap, expected_ingest_calls)
+        ("default",     20, 30, True,  30, 20, 4),
+        ("smaller_pool", 10, 15, True, 15, 10, 4),
+        ("no_reverse",  20, 30, False, 30, 20, 2),
+    ]
+
+    def test_dual_search_per_speaker_top_k_table(self) -> None:
+        for label, top_k, kps, _rev, exp_per_speaker, exp_cap, _exp_ingest in self.PARITY_CASES:
+            with self.subTest(case=label):
+                seen: list[int] = []
+
+                def fake_query_search(url, user_id, query, top_k_arg, session_id, timeout):
+                    seen.append(top_k_arg)
+                    # Return more rows than the merged cap; merge must trim.
+                    items = [
+                        {"id": f"{user_id}-{i}", "content": f"row{i}", "score": 1.0 - i * 0.01}
+                        for i in range(top_k_arg)
+                    ]
+                    return items, 5
+
+                with patch.object(q, "query_search", side_effect=fake_query_search):
+                    items_a, items_b, merged, _ms = q.query_search_dual(
+                        memdb_url="http://localhost:8080",
+                        conv_id="conv-26",
+                        query="When did Marcus get promoted?",
+                        top_k=top_k,
+                        top_k_per_speaker=kps,
+                    )
+
+                # Per-speaker calls used the configured budget.
+                self.assertEqual(len(seen), 2, f"{label}: expected 2 fan-out calls")
+                for v in seen:
+                    self.assertEqual(v, exp_per_speaker,
+                                     f"{label}: per-speaker top_k must be {exp_per_speaker}")
+                # Merged stream truncated to the harness top_k.
+                self.assertLessEqual(len(merged), exp_cap,
+                                     f"{label}: merged stream must respect top_k={exp_cap}")
+                # Both speakers contributed all rows.
+                self.assertEqual(len(items_a), exp_per_speaker)
+                self.assertEqual(len(items_b), exp_per_speaker)
+
+    def test_reverse_role_ingest_call_table(self) -> None:
+        """Ingest call counts mirror Memobase: 4 with reverse_role, 2 without."""
+        for label, _top_k, _kps, reverse_role, _eps, _ec, exp_ingest in self.PARITY_CASES:
+            with self.subTest(case=label):
+                posted: list[dict] = []
+
+                def fake_ingest_one(memdb_url, user_id, session_id, speaker_a, speaker_b,
+                                    messages, iso_date, perspective, timeout=120):
+                    posted.append({"user_id": user_id, "perspective": perspective,
+                                   "session_id": session_id})
+                    return {}
+
+                convs = [{
+                    "sample_id": "conv-26",
+                    "conversation": {
+                        "session_1": [
+                            {"speaker": "Alice", "text": "Hello"},
+                            {"speaker": "Bob", "text": "Hi"},
+                        ],
+                        "session_1_date_time": None,
+                    },
+                }]
+
+                with patch.object(ig, "ingest_one_session", side_effect=fake_ingest_one):
+                    ig.ingest(convs, "http://localhost:8080", reverse_role=reverse_role)
+
+                self.assertEqual(len(posted), exp_ingest,
+                                 f"{label}: ingest call count must equal {exp_ingest}")
+                if reverse_role:
+                    rev = [p for p in posted if p["session_id"].endswith("__rev")]
+                    self.assertEqual(len(rev), exp_ingest // 2,
+                                     f"{label}: half of calls must be __rev passes")
+
+
+# ---------------------------------------------------------------------------
+# _extract_ts type tolerance — str OR int epoch (Q1 followup item)
+# ---------------------------------------------------------------------------
+
+class TestExtractTsTypeTolerance(unittest.TestCase):
+    def test_epoch_seconds(self) -> None:
+        # 2023-05-08 13:56:00 UTC = 1683554160
+        self.assertEqual(q._extract_ts({"chat_time": 1683554160}), "2023-05-08")
+
+    def test_epoch_milliseconds(self) -> None:
+        # Same instant in ms.
+        self.assertEqual(q._extract_ts({"chat_time": 1683554160000}), "2023-05-08")
+
+    def test_epoch_float(self) -> None:
+        self.assertEqual(q._extract_ts({"chat_time": 1683554160.0}), "2023-05-08")
+
+    def test_negative_epoch_skipped(self) -> None:
+        self.assertIsNone(q._extract_ts({"chat_time": -100}))
+
+    def test_zero_epoch_skipped(self) -> None:
+        self.assertIsNone(q._extract_ts({"chat_time": 0}))
+
+    def test_pre_2001_epoch_skipped(self) -> None:
+        # ~1969 epoch seconds — too small, treated as garbage.
+        self.assertIsNone(q._extract_ts({"chat_time": 1234}))
+
+    def test_far_future_skipped(self) -> None:
+        # 1e14 → year ~5138 in seconds; rejected by upper bound.
+        self.assertIsNone(q._extract_ts({"chat_time": 10**14}))
+
+    def test_bool_not_treated_as_int(self) -> None:
+        # Pythonically True == 1 but we don't want bool inputs to look like
+        # "1970-01-01" — must be skipped explicitly.
+        self.assertIsNone(q._extract_ts({"chat_time": True}))
+
+    def test_string_still_works(self) -> None:
+        # Regression guard for the original happy path.
+        self.assertEqual(
+            q._extract_ts({"chat_time": "2024-01-15T10:00:00Z"}),
+            "2024-01-15",
+        )
+
+    def test_falls_back_to_next_field(self) -> None:
+        meta = {"chat_time": "", "created_at": 1683554160}
+        self.assertEqual(q._extract_ts(meta), "2023-05-08")
+
+
 if __name__ == "__main__":
     unittest.main()

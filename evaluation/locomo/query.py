@@ -67,6 +67,7 @@ import time
 import threading
 
 from pathlib import Path
+from typing import Any, Callable, TypeVar
 
 import requests
 
@@ -130,14 +131,14 @@ def _is_transient_http_error(exc: requests.HTTPError) -> bool:
     Retries on 500 only when the response body / exception message matches a
     known-transient pattern (see _TRANSIENT_500_PATTERNS).
     """
-    resp = exc.response
+    resp: requests.Response | None = exc.response
     if resp is None:
         return False
-    code = resp.status_code
+    code: int = resp.status_code
     if code in (502, 503, 504):
         return True
     if code == 500:
-        body = ""
+        body: str = ""
         try:
             body = resp.text or ""
         except Exception:
@@ -173,6 +174,11 @@ def _short_reason(exc: Exception) -> str:
 # ---------------------------------------------------------------------------
 # Per-run retry counters (thread-safe)
 # ---------------------------------------------------------------------------
+# Note: a module-level singleton (`_RETRY_STATS`) is used for backwards-compat
+# with `print_summary()` at end of `main()`.  Test isolation: tests that need
+# a clean slate either instantiate a fresh `_RetryStats()` (preferred — see
+# tests/test_query_retry.py::TestRetryStats) or call `_RETRY_STATS.reset()`.
+# Do not assume zeroed counters between unit-test cases.
 class _RetryStats:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -192,6 +198,13 @@ class _RetryStats:
         with self._lock:
             self.final_errors += 1
 
+    def reset(self) -> None:
+        """Zero all counters under the lock. Test helper."""
+        with self._lock:
+            self.attempts = 0
+            self.recovered = 0
+            self.final_errors = 0
+
     def print_summary(self) -> None:
         pct = (
             f"{100 * self.recovered / self.attempts:.0f}%"
@@ -210,16 +223,29 @@ class _RetryStats:
 
 _RETRY_STATS = _RetryStats()
 
+# DeadlineExceeded — raised by `_call_with_retry` when the cumulative wall-clock
+# spent on a single call (across attempts + backoff sleeps) crosses the
+# `deadline` budget passed by the caller.  Distinct from
+# `requests.exceptions.Timeout` so callers can differentiate per-attempt
+# socket timeouts from per-call overall budget exhaustion.
+class DeadlineExceeded(Exception):
+    """Raised when `_call_with_retry` exceeds its overall wall-clock deadline."""
+
+
+T = TypeVar("T")
+
 
 def _call_with_retry(
-    fn,
-    *args,
+    fn: Callable[..., T],
+    *args: Any,
     max_retries: int = 2,
     backoff_base: float = 5.0,
+    deadline: float | None = None,
     cat: str = "",
     qid: str = "",
-    **kwargs,
-):
+    stats: _RetryStats | None = None,
+    **kwargs: Any,
+) -> T:
     """Call ``fn(*args, **kwargs)`` with automatic retry on transient errors.
 
     Parameters
@@ -231,8 +257,18 @@ def _call_with_retry(
     backoff_base:
         Sleep duration in seconds before the first retry; doubles on each
         subsequent attempt (5 → 10 → 20 …).
+    deadline:
+        Optional overall wall-clock budget in seconds.  When set, the helper
+        refuses to start a new attempt or sleep past `start + deadline` and
+        raises :class:`DeadlineExceeded` (chained to the last seen exception
+        when there is one).  ``None`` (default) preserves legacy behaviour
+        where only the per-attempt socket timeout applies.
     cat, qid:
         Metadata logged to stderr on each retry attempt.
+    stats:
+        Optional :class:`_RetryStats` instance to record into.  Defaults to
+        the module-level singleton ``_RETRY_STATS`` so existing call-sites
+        keep working unchanged.
 
     Returns
     -------
@@ -240,33 +276,58 @@ def _call_with_retry(
 
     Raises
     ------
-    Re-raises the last exception when all retries are exhausted.
+    Re-raises the last exception when all retries are exhausted, or
+    :class:`DeadlineExceeded` if the per-call deadline is hit first.
     """
+    counters = stats if stats is not None else _RETRY_STATS
     last_exc: Exception | None = None
     delay = backoff_base
+    start_ts = time.monotonic()
     for attempt in range(max_retries + 1):
+        if deadline is not None and (time.monotonic() - start_ts) >= deadline:
+            err = DeadlineExceeded(
+                f"per-call deadline {deadline:.1f}s exceeded before attempt={attempt + 1} "
+                f"cat={cat} qid={qid}"
+            )
+            if last_exc is not None:
+                raise err from last_exc
+            raise err
         try:
             result = fn(*args, **kwargs)
             if attempt > 0:
                 # Successful recovery after at least one retry
-                _RETRY_STATS.record_recovered()
+                counters.record_recovered()
             return result
         except Exception as exc:
             if attempt < max_retries and _is_retryable(exc):
-                _RETRY_STATS.record_attempt()
+                counters.record_attempt()
                 reason = _short_reason(exc)
                 print(
                     f"[retry attempt={attempt + 1} cat={cat} qid={qid} reason={reason}]",
                     file=sys.stderr,
                     flush=True,
                 )
-                time.sleep(delay)
+                # Honour the deadline BEFORE we sleep — sleeping past the
+                # budget would leak wall-clock to no benefit.
+                if deadline is not None:
+                    remaining = deadline - (time.monotonic() - start_ts)
+                    if remaining <= 0:
+                        if attempt > 0:
+                            counters.record_final_error()
+                        raise DeadlineExceeded(
+                            f"per-call deadline {deadline:.1f}s exceeded after attempt={attempt + 1} "
+                            f"cat={cat} qid={qid}"
+                        ) from exc
+                    sleep_for = min(delay, remaining)
+                else:
+                    sleep_for = delay
+                time.sleep(sleep_for)
                 delay *= 2
                 last_exc = exc
                 continue
             # Not retryable or exhausted — propagate
             if attempt > 0:
-                _RETRY_STATS.record_final_error()
+                counters.record_final_error()
             raise
     # Should be unreachable, but satisfy type checker
     raise last_exc  # type: ignore[misc]
@@ -431,13 +492,34 @@ def _extract_ts(metadata: dict) -> str | None:
     Tries common field names in priority order.  Returns None when no usable
     timestamp is found so callers can skip the prefix rather than emit an
     empty/uninformative one.
+
+    Accepts either an ISO8601 string ("2023-05-08T13:56:00Z") or a numeric
+    epoch (seconds or milliseconds — autodetected by magnitude).  Numeric
+    epochs are normalised to "YYYY-MM-DD" UTC.  Out-of-range or unparseable
+    values are skipped, matching the historic str-only behaviour.
     """
     for key in ("chat_time", "created_at", "created_time", "time", "date"):
         val = metadata.get(key)
-        if val and isinstance(val, str):
+        if val is None or val == "":
+            continue
+        if isinstance(val, str):
             # Trim to date-only part (first 10 chars of ISO8601) for brevity.
             # "2023-05-08T13:56:00Z" → "2023-05-08"
             return val[:10] if len(val) >= 10 else val
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            # Heuristic: ≥ 1e12 → epoch milliseconds; ≥ 1e9 → epoch seconds.
+            # Reject anything outside [1e9, 1e13] BEFORE normalising — that
+            # window covers 2001-09-09 through 2286-11-20, which is comfortably
+            # past LoCoMo's range without admitting Y10K-style overflow.
+            num = float(val)
+            if num < 1e9 or num > 1e13:
+                continue
+            if num >= 1e12:  # ms → s
+                num /= 1000.0
+            try:
+                return time.strftime("%Y-%m-%d", time.gmtime(num))
+            except (OverflowError, ValueError, OSError):
+                continue
     return None
 
 
@@ -895,6 +977,18 @@ def main() -> int:
         ),
     )
     p.add_argument(
+        "--per-question-deadline",
+        type=float,
+        default=float(os.getenv("LOCOMO_PER_Q_DEADLINE", "0")),
+        metavar="SECONDS",
+        help=(
+            "Overall wall-clock budget per /search and /chat call (across "
+            "retries + backoff sleeps).  0 (default) disables — only the "
+            "per-attempt socket timeout applies.  Recommended: 60-120 to "
+            "cap pathological backoff chains.  Env: LOCOMO_PER_Q_DEADLINE."
+        ),
+    )
+    p.add_argument(
         "--qids-from-file",
         type=Path,
         default=None,
@@ -964,8 +1058,13 @@ def main() -> int:
 
     retry_n = args.retry_on_timeout
     retry_backoff = args.retry_backoff_base
+    # 0 → disabled; pass None into _call_with_retry to keep legacy behaviour.
+    per_q_deadline: float | None = (
+        args.per_question_deadline if args.per_question_deadline > 0 else None
+    )
     print(
-        f"[query] retry_on_timeout={retry_n} backoff_base={retry_backoff}s",
+        f"[query] retry_on_timeout={retry_n} backoff_base={retry_backoff}s "
+        f"per_q_deadline={per_q_deadline if per_q_deadline is not None else 'disabled'}",
         flush=True,
     )
 
@@ -1007,6 +1106,7 @@ def main() -> int:
                     args.top_k_per_speaker,
                     max_retries=retry_n,
                     backoff_base=retry_backoff,
+                    deadline=per_q_deadline,
                     cat=cat_str,
                     qid=qid_str,
                 )
@@ -1016,7 +1116,7 @@ def main() -> int:
                 rec["speaker_b_memories"] = speaker_b_items
                 rec["merged_top_k"] = len(merged)
                 rec["top_k_per_speaker"] = args.top_k_per_speaker
-            except requests.RequestException as exc:
+            except (requests.RequestException, DeadlineExceeded) as exc:
                 rec["error"] = f"search: {exc}"
                 rec.setdefault("_errors", []).append(rec["error"])
                 print(f"  SEARCH ERROR: {exc}", file=sys.stderr, flush=True)
@@ -1033,12 +1133,13 @@ def main() -> int:
                         speaker_b_items,
                         max_retries=retry_n,
                         backoff_base=retry_backoff,
+                        deadline=per_q_deadline,
                         cat=cat_str,
                         qid=qid_str,
                     )
                     rec["chat_answer"] = answer
                     rec["chat_ms"] = ms
-                except requests.RequestException as exc:
+                except (requests.RequestException, DeadlineExceeded) as exc:
                     rec["error"] = f"chat: {exc}"
                     rec.setdefault("_errors", []).append(rec["error"])
                     print(f"  CHAT ERROR: {exc}", file=sys.stderr, flush=True)
@@ -1054,12 +1155,13 @@ def main() -> int:
                     None,  # session_id
                     max_retries=retry_n,
                     backoff_base=retry_backoff,
+                    deadline=per_q_deadline,
                     cat=cat_str,
                     qid=qid_str,
                 )
                 rec["retrieved"] = items
                 rec["search_ms"] = ms
-            except requests.RequestException as exc:
+            except (requests.RequestException, DeadlineExceeded) as exc:
                 rec["error"] = f"search: {exc}"
                 rec.setdefault("_errors", []).append(rec["error"])
                 print(f"  SEARCH ERROR: {exc}", file=sys.stderr, flush=True)
@@ -1074,12 +1176,13 @@ def main() -> int:
                         args.top_k,
                         max_retries=retry_n,
                         backoff_base=retry_backoff,
+                        deadline=per_q_deadline,
                         cat=cat_str,
                         qid=qid_str,
                     )
                     rec["chat_answer"] = answer
                     rec["chat_ms"] = ms
-                except requests.RequestException as exc:
+                except (requests.RequestException, DeadlineExceeded) as exc:
                     rec["error"] = f"chat: {exc}"
                     rec.setdefault("_errors", []).append(rec["error"])
                     print(f"  CHAT ERROR: {exc}", file=sys.stderr, flush=True)
@@ -1133,6 +1236,7 @@ def main() -> int:
                     "dual_speaker": dual_speaker,
                     "retry_on_timeout": retry_n,
                     "retry_backoff_base": retry_backoff,
+                    "per_question_deadline": per_q_deadline,
                 },
             },
             f,

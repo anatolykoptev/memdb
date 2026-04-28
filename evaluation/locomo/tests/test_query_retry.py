@@ -298,6 +298,140 @@ class TestRetryStats(unittest.TestCase):
         out = buf.getvalue()
         self.assertIn("n/a", out)
 
+    def test_high_concurrency_increments(self) -> None:
+        """N threads × M increments must produce exactly N*M total counts.
+
+        Validates the lock-protected increment claim under contention beyond
+        the trivial 20-thread test above.  Each thread mixes attempts /
+        recovered / final_errors at random to exercise all three paths.
+        """
+        import threading
+        import random
+
+        stats = q._RetryStats()
+        n_threads = 32
+        per_thread = 200
+        barrier = threading.Barrier(n_threads)
+
+        def worker(seed: int) -> None:
+            r = random.Random(seed)
+            barrier.wait()  # maximise contention by aligning starts
+            for _ in range(per_thread):
+                roll = r.random()
+                if roll < 0.5:
+                    stats.record_attempt()
+                elif roll < 0.8:
+                    stats.record_recovered()
+                else:
+                    stats.record_final_error()
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        total = stats.attempts + stats.recovered + stats.final_errors
+        self.assertEqual(total, n_threads * per_thread,
+                         "Lost or duplicated increments → mutex broken")
+
+    def test_reset_clears_counters(self) -> None:
+        """`reset()` must zero all three counters atomically."""
+        stats = q._RetryStats()
+        stats.record_attempt()
+        stats.record_recovered()
+        stats.record_final_error()
+        stats.reset()
+        self.assertEqual(stats.attempts, 0)
+        self.assertEqual(stats.recovered, 0)
+        self.assertEqual(stats.final_errors, 0)
+
+
+# ---------------------------------------------------------------------------
+# _call_with_retry — thread hammering (validates _RetryStats lock claim)
+# ---------------------------------------------------------------------------
+
+class TestCallWithRetryThreadSafety(unittest.TestCase):
+    def test_concurrent_retries_record_correctly(self) -> None:
+        """N parallel retry-recovering calls produce exactly N recovered increments."""
+        import threading
+
+        stats = q._RetryStats()
+        n_threads = 16
+
+        def fn() -> str:
+            # First call raises retryable; second succeeds.
+            if not getattr(threading.current_thread(), "_did_first_call", False):
+                threading.current_thread()._did_first_call = True  # type: ignore[attr-defined]
+                raise _timeout_exc()
+            return "ok"
+
+        def worker() -> None:
+            with patch("time.sleep"):
+                q._call_with_retry(fn, max_retries=2, backoff_base=0, stats=stats)
+
+        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(stats.attempts, n_threads,
+                         "Each call recorded exactly one retry attempt")
+        self.assertEqual(stats.recovered, n_threads,
+                         "Each call recovered exactly once")
+        self.assertEqual(stats.final_errors, 0)
+
+
+# ---------------------------------------------------------------------------
+# _call_with_retry — per-call deadline
+# ---------------------------------------------------------------------------
+
+class TestCallWithRetryDeadline(unittest.TestCase):
+    def test_deadline_disabled_when_none(self) -> None:
+        """deadline=None is the legacy path — no DeadlineExceeded ever raised."""
+        fn = MagicMock(side_effect=[_timeout_exc(), "ok"])
+        with patch("time.sleep"):
+            result = q._call_with_retry(fn, max_retries=2, backoff_base=0, deadline=None)
+        self.assertEqual(result, "ok")
+
+    def test_deadline_short_circuits_before_attempt(self) -> None:
+        """If the deadline is already in the past on entry, raise immediately."""
+        # backoff 0 + only retryable failures → wall-clock bumped via patched
+        # monotonic clock. We bump time by 100s on every call to time.monotonic.
+        clock = [0.0]
+
+        def fake_mono() -> float:
+            clock[0] += 100.0
+            return clock[0]
+
+        fn = MagicMock(side_effect=_timeout_exc())
+        with patch("time.sleep"), patch("time.monotonic", side_effect=fake_mono):
+            with self.assertRaises(q.DeadlineExceeded):
+                q._call_with_retry(fn, max_retries=5, backoff_base=0, deadline=10.0)
+
+    def test_deadline_passes_through_when_fast(self) -> None:
+        """A quick call well under the deadline returns normally."""
+        fn = MagicMock(return_value="ok")
+        result = q._call_with_retry(fn, max_retries=2, backoff_base=0, deadline=60.0)
+        self.assertEqual(result, "ok")
+
+    def test_deadline_clamps_sleep(self) -> None:
+        """Backoff sleep is clamped to remaining deadline."""
+        fn = MagicMock(side_effect=[_timeout_exc(), "ok"])
+        # Stub monotonic so first call returns 0, subsequent calls return 0.5
+        # (well under any reasonable deadline) — this proves `min(delay,
+        # remaining)` runs without raising.
+        clock = iter([0.0, 0.5, 0.6, 0.7])
+        sleeps: list[float] = []
+        with patch("time.sleep", side_effect=lambda s: sleeps.append(s)), \
+             patch("time.monotonic", side_effect=lambda: next(clock)):
+            result = q._call_with_retry(fn, max_retries=2, backoff_base=10.0, deadline=2.0)
+        self.assertEqual(result, "ok")
+        # backoff_base=10 but only ~1.5s left → clamp must yield ≤ 1.5s sleep
+        self.assertEqual(len(sleeps), 1)
+        self.assertLessEqual(sleeps[0], 2.0)
+
 
 if __name__ == "__main__":
     unittest.main()
