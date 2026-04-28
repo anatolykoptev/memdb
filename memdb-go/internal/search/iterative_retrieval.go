@@ -187,7 +187,7 @@ func buildSeenSet(items []map[string]any) map[string]bool {
 	return seen
 }
 
-// sortByRelativity sorts items by their metadata.relativity score descending.
+// sortByRelativity sorts items by their relativity score (descending).
 func sortByRelativity(items []map[string]any) {
 	sort.SliceStable(items, func(i, j int) bool {
 		si, sj := 0.0, 0.0

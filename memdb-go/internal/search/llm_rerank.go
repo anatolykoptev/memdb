@@ -1,199 +1,36 @@
 package search
 
-// llm_rerank.go — LLM-powered reranker for top-K memory candidates.
-//
-// After vector+fulltext recall, the LLM assigns a relevance score [0.0, 1.0]
-// to each candidate. This replaces the cosine-only ordering before final trimming.
-//
-// Architecture decisions:
-//   - Uses the same OpenAI-compatible LLM API endpoint as the extractor.
-//   - Applied ONLY to the final text_mem top-K (not skill/pref; too low value).
-//   - Results are cached per (query × node_ids_hash) with a 5-minute TTL.
-//     This means repeated searches with identical queries are essentially free.
-//   - Non-fatal: any LLM or parse failure falls back to cosine scores silently.
+// llm_rerank.go — backward-compatible wrappers around the rerank.LLMJudge
+// strategy. The implementation moved to internal/search/rerank/llm.go in
+// M11/R3. Public callers (tests, profiles.go::SearchParams.LLMRerank flag)
+// keep working unchanged.
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"sort"
-	"strings"
-	"time"
 
-	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/search/rerank"
 )
 
-const rerankRespBodyLimit = 32 * 1024 // 32 KB max LLM response body for reranking
-
-// LLMRerankConfig holds the parameters for the LLM reranker.
+// LLMRerankConfig holds the parameters for the LLM reranker. Mirrors
+// rerank.LLMConfig field-for-field — declared locally so SearchService
+// and profiles.go don't need to import the rerank subpackage.
 type LLMRerankConfig struct {
 	APIURL string
 	APIKey string
 	Model  string
 }
 
-// llmRerankCache is an in-process TTL cache for reranker results.
-// Key: sha256(query + sorted_node_ids), Value: map[nodeID]score
-type llmRerankCache struct {
-	mu      chan struct{}
-	entries map[string]*llmRerankEntry
-}
-
-type llmRerankEntry struct {
-	expires time.Time
-	scores  map[string]float64
-}
-
-var globalRerankCache = &llmRerankCache{
-	mu:      make(chan struct{}, 1),
-	entries: make(map[string]*llmRerankEntry),
-}
-
-func (c *llmRerankCache) get(key string) (map[string]float64, bool) {
-	c.mu <- struct{}{}
-	defer func() { <-c.mu }()
-	e, ok := c.entries[key]
-	if !ok || time.Now().After(e.expires) {
-		delete(c.entries, key)
-		return nil, false
-	}
-	return e.scores, true
-}
-
-func (c *llmRerankCache) set(key string, scores map[string]float64, ttl time.Duration) {
-	c.mu <- struct{}{}
-	defer func() { <-c.mu }()
-	c.entries[key] = &llmRerankEntry{expires: time.Now().Add(ttl), scores: scores}
-}
-
-const llmRerankCacheTTL = 5 * time.Minute
-const llmRerankMaxCandidates = 20
-
-// LLMRerank re-scores the top-K candidates using an LLM and re-sorts them.
-// items must already be sorted by cosine score descending (best first).
-// Returns a new slice ordered by LLM relevance score.
-// Falls back to the original cosine ordering on any error.
+// LLMRerank re-scores top-K candidates via an LLM and re-sorts. Thin
+// wrapper around rerank.LLMJudge; preserves the original signature so
+// existing tests in llm_rerank_test.go pass UNCHANGED.
 func LLMRerank(ctx context.Context, query string, items []map[string]any, cfg LLMRerankConfig) []map[string]any {
-	if len(items) <= 1 || cfg.APIURL == "" {
+	if len(items) == 0 {
 		return items
 	}
-	// Cap: only rerank top-N to control latency
-	candidates := items
-	rest := []map[string]any{}
-	if len(candidates) > llmRerankMaxCandidates {
-		candidates = items[:llmRerankMaxCandidates]
-		rest = items[llmRerankMaxCandidates:]
-	}
-
-	// Build cache key
-	nodeIDs := make([]string, 0, len(candidates))
-	for _, item := range candidates {
-		if id, ok := item["id"].(string); ok {
-			nodeIDs = append(nodeIDs, id)
-		}
-	}
-	sort.Strings(nodeIDs)
-	cacheKey := fmt.Sprintf("%x", sha256.Sum256([]byte(query+"\x00"+strings.Join(nodeIDs, ","))))
-
-	if cached, ok := globalRerankCache.get(cacheKey); ok {
-		return applyRerankScores(candidates, rest, cached)
-	}
-
-	scores, err := callLLMReranker(ctx, query, candidates, cfg)
-	if err != nil {
-		return items // fallback
-	}
-	globalRerankCache.set(cacheKey, scores, llmRerankCacheTTL)
-	return applyRerankScores(candidates, rest, scores)
-}
-
-// applyRerankScores updates metadata.relativity with LLM scores and re-sorts candidates.
-func applyRerankScores(candidates, rest []map[string]any, scores map[string]float64) []map[string]any {
-	for _, item := range candidates {
-		id, _ := item["id"].(string)
-		if score, ok := scores[id]; ok {
-			if meta, ok := item["metadata"].(map[string]any); ok {
-				meta["relativity"] = score
-				meta["llm_reranked"] = true
-			}
-		}
-	}
-	sort.SliceStable(candidates, func(i, j int) bool {
-		si, sj := 0.0, 0.0
-		if mi, ok := candidates[i]["metadata"].(map[string]any); ok {
-			si, _ = mi["relativity"].(float64)
-		}
-		if mj, ok := candidates[j]["metadata"].(map[string]any); ok {
-			sj, _ = mj["relativity"].(float64)
-		}
-		return si > sj
-	})
-	return append(candidates, rest...)
-}
-
-// callLLMReranker sends a single chat completion request asking the LLM to score each memory.
-func callLLMReranker(ctx context.Context, query string, items []map[string]any, cfg LLMRerankConfig) (map[string]float64, error) {
-	type candidate struct {
-		ID     string `json:"id"`
-		Memory string `json:"memory"`
-	}
-	cands := make([]candidate, 0, len(items))
-	for _, item := range items {
-		id, _ := item["id"].(string)
-		mem, _ := item["memory"].(string)
-		if id != "" && mem != "" {
-			cands = append(cands, candidate{ID: id, Memory: mem})
-		}
-	}
-	if len(cands) == 0 {
-		return nil, errors.New("no valid candidates")
-	}
-	scored, err := rerankHTTPCall(ctx, query, cands, cfg)
-	if err != nil {
-		return nil, err
-	}
-	result := make(map[string]float64, len(scored))
-	for _, s := range scored {
-		result[s.ID] = s.Score
-	}
-	return result, nil
-}
-
-// rerankScore is the per-candidate score the LLM emits.
-type rerankScore struct {
-	ID    string  `json:"id"`
-	Score float64 `json:"score"`
-}
-
-// rerankHTTPCall builds and sends the LLM rerank request, returning the parsed
-// per-candidate scores. Uses llm.ChatStructured for transport, fence stripping,
-// and per-prompt metrics.
-func rerankHTTPCall(ctx context.Context, query string, cands any, cfg LLMRerankConfig) ([]rerankScore, error) {
-	candsJSON, _ := json.Marshal(cands)
-	userMsg := fmt.Sprintf(`Query: %s
-
-Candidates:
-%s
-
-Score each candidate's relevance to the query on [0.0, 1.0].
-Return ONLY valid JSON: [{"id": "...", "score": 0.8}, ...]`, query, string(candsJSON))
-
-	var scored []rerankScore
-	client := llm.NewSimpleClient(cfg.APIURL, cfg.APIKey, cfg.Model)
-	if err := llm.ChatStructured(ctx, client, "llm_rerank", []llm.Message{
-		{
-			Role:    "system",
-			Content: "You are a memory relevance scorer. Given a query and memory candidates, score each [0.0,1.0]. Respond with only a JSON array.",
-		},
-		{Role: "user", Content: userMsg},
-	}, &scored,
-		llm.WithMaxTokens(512),
-		llm.WithTimeout(15*time.Second),
-		llm.WithRespBodyLimit(rerankRespBodyLimit),
-	); err != nil {
-		return nil, err
-	}
-	return scored, nil
+	adapted := adaptItems(items)
+	out, _ := rerank.LLMJudge{
+		Config: rerank.LLMConfig{APIURL: cfg.APIURL, APIKey: cfg.APIKey, Model: cfg.Model},
+		Cap:    0, // legacy entrypoint passes the whole slice; cap handled by maxCandidates inside.
+	}.Rerank(ctx, query, adapted)
+	return unadaptItems(out)
 }
