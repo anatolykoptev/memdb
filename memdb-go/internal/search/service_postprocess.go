@@ -49,7 +49,7 @@ func (s *SearchService) postProcessResults(
 	llmDecision := rerankStrategy(text)
 	llmEnabled := p.LLMRerank && s.LLMReranker.APIURL != "" && llmDecision.ShouldRerank
 
-	suffix := buildTextRerankSuffix(s, llmEnabled, llmDecision.TopK)
+	suffix := buildTextRerankSuffix(s, llmEnabled, llmDecision.TopK, textEmbByID)
 	suffixResult := runRerankChainWithTimings(ctx, suffix, p.Query, text)
 	text = suffixResult.items
 
@@ -147,14 +147,17 @@ func buildTextRerankPrefix(s *SearchService, queryVec []float32, embByID map[str
 }
 
 // buildTextRerankSuffix composes the post-gate rerank chain applied to
-// text_mem: [LLMJudge?, Staged]. LLMJudge is included only when the
-// rerank gate (rerankStrategy on prefix output) said ShouldRerank —
-// keeps the existing gate semantics. Staged is always included; the
-// strategy self-skips when MEMDB_SEARCH_STAGED is unset.
+// text_mem: [LLMJudge?, MMR, Staged]. LLMJudge is included only when the
+// rerank gate (rerankStrategy on prefix output) said ShouldRerank.
+// MMR diversification runs after CE+LLMJudge and before the final Staged
+// cut — filters near-duplicate memories (cosine ≥ MEMDB_MMR_BAR, default 0.8)
+// so the user sees diverse results even when the corpus has many paraphrases.
+// Staged is always included; the strategy self-skips when MEMDB_SEARCH_STAGED
+// is unset.
 //
 // Adding a new reranker is strictly additive: write a Reranker, append
 // here, never touch postProcessResults again.
-func buildTextRerankSuffix(s *SearchService, llmEnabled bool, llmCap int) rerankpkg.Chain {
+func buildTextRerankSuffix(s *SearchService, llmEnabled bool, llmCap int, embByID map[string][]float32) rerankpkg.Chain {
 	chain := rerankpkg.Chain{}
 	if llmEnabled {
 		chain = append(chain, rerankpkg.LLMJudge{
@@ -166,6 +169,7 @@ func buildTextRerankSuffix(s *SearchService, llmEnabled bool, llmCap int) rerank
 			Cap: llmCap,
 		})
 	}
+	chain = append(chain, rerankpkg.NewMMRFromEnv(embByID))
 	chain = append(chain, rerankpkg.Staged{
 		Config: rerankpkg.LLMConfig{
 			APIURL: s.LLMReranker.APIURL,
