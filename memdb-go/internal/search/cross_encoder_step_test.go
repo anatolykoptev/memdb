@@ -65,16 +65,22 @@ func TestPostProcessResults_CrossEncoderCalledWhenURLSet(t *testing.T) {
 		}, nil),
 	}
 
-	queryVec := []float32{0.1, 0.2, 0.3}
+	// queryVec and embeddings chosen so that:
+	//   (a) cosine sort preserves A > B > C (A most aligned with {1,0,0})
+	//       → CE receives A=doc0, B=doc1, C=doc2
+	//   (b) CE mock (score = index+1): doc0→1, doc1→2, doc2→3
+	//       → output order after CE: C(3), B(2), A(1)
+	//   (c) pairwise cosine between A/B/C = 0 < MMR bar 0.8 → all kept
+	queryVec := []float32{1, 0, 0}
 	text := []map[string]any{
 		{"id": "A", "memory": "first doc about cats", "metadata": map[string]any{"relativity": 0.9}},
 		{"id": "B", "memory": "second doc about dogs", "metadata": map[string]any{"relativity": 0.8}},
 		{"id": "C", "memory": "third doc about pasta", "metadata": map[string]any{"relativity": 0.7}},
 	}
 	embByID := map[string][]float32{
-		"A": {0.1, 0.2, 0.3},
-		"B": {0.1, 0.2, 0.3},
-		"C": {0.1, 0.2, 0.3},
+		"A": {1, 0, 0},
+		"B": {0, 1, 0},
+		"C": {0, 0, 1},
 	}
 
 	retText, _, _, _, _, _, _ := svc.postProcessResults(

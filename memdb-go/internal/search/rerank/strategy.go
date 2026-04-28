@@ -134,7 +134,7 @@ var (
 
 // known names pre-registered at zero. Adding a new strategy MUST extend
 // this list to keep the dashboard pre-populated.
-var preregNames = []string{"cosine", "cross_encoder", "llm_judge", "staged"}
+var preregNames = []string{"cosine", "cross_encoder", "llm_judge", "mmr", "staged"}
 
 func init() {
 	m := otel.Meter("memdb-go/search/rerank")
