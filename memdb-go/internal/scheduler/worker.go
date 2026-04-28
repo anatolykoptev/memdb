@@ -20,6 +20,7 @@ import (
 "github.com/redis/go-redis/v9"
 
 "github.com/anatolykoptev/memdb/memdb-go/internal/db"
+"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 const (
@@ -94,6 +95,7 @@ type Worker struct {
 	redis      *redis.Client
 	reorg      *Reorganizer
 	pg         *db.Postgres // optional; required for PageRank goroutine
+	llmJudge   *llm.Client  // optional; required for F11 bitemporal_validator loop
 	logger     *slog.Logger
 	highMsgCh  chan streamMsg // high-priority: mem_update, query, mem_feedback
 	lowMsgCh   chan streamMsg // low-priority:  mem_organize, mem_read, pref_add, add, answer
@@ -121,6 +123,14 @@ func (w *Worker) SetPostgres(pg *db.Postgres) {
 	w.pg = pg
 }
 
+// SetLLMJudge wires the LLM client used by the F11 bitemporal_validator
+// background loop. Must be called before Run() to enable the loop. Reusing
+// the chat client (not the extractor) keeps per-judge cost predictable —
+// the judge prompt is short and tolerates the chat-tier model.
+func (w *Worker) SetLLMJudge(c *llm.Client) {
+	w.llmJudge = c
+}
+
 // Run starts the worker goroutines and blocks until ctx is cancelled.
 func (w *Worker) Run(ctx context.Context) {
 w.logger.Info("scheduler worker: starting",
@@ -139,6 +149,16 @@ if w.pg != nil && pageRankEnabled() {
 	go w.startPageRankLoop(ctx, w.pg)
 	w.logger.Info("pagerank: background goroutine started",
 		slog.Duration("interval", pageRankInterval()),
+	)
+}
+// M11 F11: bi-temporal validator loop — requires Postgres + LLM judge + feature gate.
+// Disabled by default; enable with MEMDB_F11_VALIDATOR_ENABLED=true once sync-path
+// invalidation rates have stabilised in prod.
+if w.pg != nil && w.llmJudge != nil && validatorEnabled() {
+	go w.startBitemporalValidatorLoop(ctx)
+	w.logger.Info("bitemporal_validator: background goroutine started",
+		slog.Duration("interval", validatorInterval()),
+		slog.Duration("staleness", validatorStaleness()),
 	)
 }
 w.processLoop(ctx) // blocks until ctx cancelled
