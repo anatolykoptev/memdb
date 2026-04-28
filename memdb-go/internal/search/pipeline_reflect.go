@@ -38,6 +38,9 @@ func (s *SearchService) stageReflect(ctx context.Context, st *pipelineState) err
 	mx := reflectionMx()
 
 	for iter := 0; iter < reflectionMaxIter; iter++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		dec, err := s.Reflection.Reflect(ctx, st.Params.Query, st.TextFormatted)
 		if err != nil {
 			s.logger.Warn("reflection agent error",
