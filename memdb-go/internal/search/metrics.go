@@ -101,7 +101,7 @@ func searchMx() *searchMetricsInstruments {
 			metric.WithDescription("D1 combined boost value before the >1.0 cap (formula=combined)"),
 			metric.WithExplicitBucketBoundaries(0.5, 1.0, 1.5, 2.0, 3.0, 5.0))
 		d5size, _ := m.Int64Histogram("memdb.search.d5_stage_input_size",
-			metric.WithDescription("Candidate count at each D5 staged-retrieval stage entry (stage=1_cosine|2_refine|3_justify)"),
+			metric.WithDescription("Candidate count at each D5 staged-retrieval stage entry (stage=0_cosine_prefilter|2_refine|3_justify)"),
 			metric.WithExplicitBucketBoundaries(0, 5, 10, 20, 50, 100, 200))
 		rb, _ := m.Int64Counter("memdb.search.recall_budget_total",
 			metric.WithDescription("F9 recall budget: search requests by category heuristic (category=cat2|other) and text top_k"))
@@ -158,7 +158,9 @@ func searchMx() *searchMetricsInstruments {
 		// visible from the first Prometheus scrape.
 		d1boost.Record(ctx, 0, metric.WithAttributes(attribute.String("formula", "combined")))
 		// Pre-register D5 stage input size for all three stage labels.
-		for _, stage := range []string{"1_cosine", "2_refine", "3_justify"} {
+		// Note: 0_cosine_prefilter (was 1_cosine) reflects the cosine
+		// pre-filter feeding D5, not a stage of D5 itself — Q5 followup.
+		for _, stage := range []string{"0_cosine_prefilter", "2_refine", "3_justify"} {
 			d5size.Record(ctx, 0, metric.WithAttributes(attribute.String("stage", stage)))
 		}
 		// Pre-register F9 recall budget counter for both category labels

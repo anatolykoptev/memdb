@@ -21,12 +21,12 @@ import (
 )
 
 const (
-	stagedTimeout             = 15 * time.Second
-	stagedMaxTokens           = 800
-	stagedMinInputSize        = 5 // below this, staged adds no value
-	stagedRespBodyLimit int64 = 16 * 1024
-	stagedMemTruncStage2      = 200
-	stagedMemTruncStage3      = 300
+	stagedTimeout              = 15 * time.Second
+	stagedMaxTokens            = 800
+	stagedMinInputSize         = 5 // below this, staged adds no value
+	stagedRespBodyLimit  int64 = 16 * 1024
+	stagedMemTruncStage2       = 200
+	stagedMemTruncStage3       = 300
 
 	stagedStage2SystemPrompt = `You are a precision retrieval judge. Given a user's query and N candidate memories, identify the TOP 10 that are most likely to contain the answer.
 
@@ -52,14 +52,18 @@ Do not invent IDs. If an input ID doesn't match any memory you saw, omit it.`
 // Hook callbacks let the parent register otel metric writes without
 // pulling otel into this package's transport.
 type Staged struct {
-	Config         LLMConfig
-	Logger         *slog.Logger
-	ShortlistSize  int // 0 → 10
-	MaxInputSize   int // 0 → 50
-	OnStage        func(ctx context.Context, stage, outcome string)
-	OnJustified    func(ctx context.Context, relevance string)
+	Config        LLMConfig
+	Logger        *slog.Logger
+	ShortlistSize int // 0 → 10
+	MaxInputSize  int // 0 → 50
+	OnStage       func(ctx context.Context, stage, outcome string)
+	OnJustified   func(ctx context.Context, relevance string)
 	// OnStageSize fires at each stage entry with the candidate count.
-	// stage ∈ {1_cosine, 2_refine, 3_justify}. Optional (nil → no-op).
+	// stage ∈ {0_cosine_prefilter, 2_refine, 3_justify}. The
+	// 0_cosine_prefilter label reflects that cosine is the upstream
+	// pre-filter feeding D5 (NOT a stage of D5 itself) — Q5 followup
+	// renamed this from the misleading "1_cosine" so dashboards
+	// stop suggesting D5 owns three stages. Optional (nil → no-op).
 	OnStageSize func(ctx context.Context, stage string, size int)
 }
 
@@ -78,8 +82,10 @@ func (s Staged) Rerank(ctx context.Context, query string, items []Item) ([]Item,
 		candidates = candidates[:maxIn]
 	}
 
-	// Stage 1 = cosine (pre-filter): record total candidate count entering D5.
-	s.fireStageSize(ctx, "1_cosine", len(candidates))
+	// Cosine pre-filter (Q5 followup: was misleadingly labelled "1_cosine"
+	// suggesting D5 stage-1; cosine actually runs upstream and feeds D5).
+	// Record the candidate count entering D5 under the corrected label.
+	s.fireStageSize(ctx, "0_cosine_prefilter", len(candidates))
 
 	// Stage 2: refine (LLM shortlist).
 	s.fireStageSize(ctx, "2_refine", len(candidates))

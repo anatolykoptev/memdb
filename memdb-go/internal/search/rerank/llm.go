@@ -25,11 +25,11 @@ import (
 )
 
 const (
-	llmRerankRespBodyLimit          = 32 * 1024
-	llmRerankCacheTTL               = 5 * time.Minute
-	llmRerankMaxCandidates          = 20
-	llmRerankPromptID               = "llm_rerank"
-	llmRerankSystemPrompt           = "You are a memory relevance scorer. Given a query and memory candidates, score each [0.0,1.0]. Respond with only a JSON array."
+	llmRerankRespBodyLimit = 32 * 1024
+	llmRerankCacheTTL      = 5 * time.Minute
+	llmRerankMaxCandidates = 20
+	llmRerankPromptID      = "llm_rerank"
+	llmRerankSystemPrompt  = "You are a memory relevance scorer. Given a query and memory candidates, score each [0.0,1.0]. Respond with only a JSON array."
 )
 
 // LLMConfig carries the LLM endpoint credentials. Mirrors the legacy
@@ -109,6 +109,12 @@ func (j LLMJudge) Rerank(ctx context.Context, query string, items []Item) ([]Ite
 
 // applyLLMScores writes scores onto each candidate, marks llm_reranked,
 // sorts by score DESC, and re-appends the unscored remainder.
+//
+// R3 I5 followup: after the sort, the top item carries meta["anchor"]=
+// true so downstream rerankers (CE precompute lookup, MMR diversifier)
+// can identify the LLM-judged anchor without recomputing the order.
+// Mirrors the convention in ce.go where items[0] is treated as the
+// anchor of the cached neighbour map.
 func applyLLMScores(candidates, rest []Item, scores map[string]float64) []Item {
 	for _, it := range candidates {
 		if score, ok := scores[it.ID()]; ok {
@@ -119,6 +125,9 @@ func applyLLMScores(candidates, rest []Item, scores map[string]float64) []Item {
 	sort.SliceStable(candidates, func(i, j int) bool {
 		return candidates[i].Score() > candidates[j].Score()
 	})
+	if len(candidates) > 0 {
+		candidates[0].SetMeta("anchor", true)
+	}
 	out := make([]Item, 0, len(candidates)+len(rest))
 	out = append(out, candidates...)
 	out = append(out, rest...)

@@ -19,12 +19,12 @@ func TestStagedFireStageSize_HookWired(t *testing.T) {
 		},
 	}
 	ctx := context.Background()
-	s.fireStageSize(ctx, "1_cosine", 10)
+	s.fireStageSize(ctx, "0_cosine_prefilter", 10)
 	s.fireStageSize(ctx, "2_refine", 8)
 	s.fireStageSize(ctx, "3_justify", 5)
 
-	if called["1_cosine"] != 10 {
-		t.Errorf("1_cosine: want 10 got %d", called["1_cosine"])
+	if called["0_cosine_prefilter"] != 10 {
+		t.Errorf("0_cosine_prefilter: want 10 got %d", called["0_cosine_prefilter"])
 	}
 	if called["2_refine"] != 8 {
 		t.Errorf("2_refine: want 8 got %d", called["2_refine"])
@@ -37,6 +37,6 @@ func TestStagedFireStageSize_HookWired(t *testing.T) {
 // TestStagedFireStageSize_NilSafe verifies that a nil OnStageSize does not panic.
 func TestStagedFireStageSize_NilSafe(t *testing.T) {
 	s := Staged{} // OnStageSize is nil
-	s.fireStageSize(context.Background(), "1_cosine", 42)
+	s.fireStageSize(context.Background(), "0_cosine_prefilter", 42)
 	// no panic = pass
 }
