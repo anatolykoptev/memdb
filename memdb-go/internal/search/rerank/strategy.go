@@ -14,6 +14,7 @@ package rerank
 
 import (
 	"context"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -60,9 +61,43 @@ type Chain []Reranker
 // Rerank runs every strategy in order, returning the final slice. On a
 // strategy error the previous slice is forwarded unchanged so the chain
 // degrades gracefully — no rerank step is allowed to fail the whole search.
+//
+// Per-strategy timings are discarded; callers needing them should use
+// RerankWithTimings.
 func (c Chain) Rerank(ctx context.Context, query string, items []Item) ([]Item, error) {
+	res, err := c.RerankWithTimings(ctx, query, items)
+	if err != nil {
+		return nil, err
+	}
+	return res.Items, nil
+}
+
+// ChainResult is the output of RerankWithTimings: the final reordered
+// slice plus per-strategy wall-clock durations keyed by Reranker.Name().
+//
+// Durations contains an entry for every strategy that ran, including
+// those that errored or returned nil (skipped) — operators reading the
+// map need to attribute time even to no-op strategies. Strategies that
+// were never reached (e.g. chain ended early — currently never) are
+// absent from the map.
+type ChainResult struct {
+	Items     []Item
+	Durations map[string]time.Duration
+}
+
+// RerankWithTimings runs every strategy in order and records each one's
+// wall-clock duration. Same error / skipped semantics as Rerank: a
+// strategy returning err forwards the previous items unchanged; a
+// strategy returning nil items is treated as skipped.
+//
+// The returned ChainResult is never nil on success. Total chain time
+// is the sum of Durations (strategies run sequentially, no overlap).
+func (c Chain) RerankWithTimings(ctx context.Context, query string, items []Item) (*ChainResult, error) {
+	durations := make(map[string]time.Duration, len(c))
 	for _, r := range c {
+		t0 := time.Now()
 		out, err := r.Rerank(ctx, query, items)
+		durations[r.Name()] = time.Since(t0)
 		if err != nil {
 			recordOutcome(ctx, r.Name(), "error")
 			// Forward the input on error — chain must be best-effort.
@@ -74,7 +109,7 @@ func (c Chain) Rerank(ctx context.Context, query string, items []Item) ([]Item, 
 		}
 		items = out
 	}
-	return items, nil
+	return &ChainResult{Items: items, Durations: durations}, nil
 }
 
 // Name returns "chain" so the Chain itself can be used as a Reranker. Useful

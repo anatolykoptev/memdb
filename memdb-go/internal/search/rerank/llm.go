@@ -93,10 +93,13 @@ func (j LLMJudge) Rerank(ctx context.Context, query string, items []Item) ([]Ite
 
 	scores, err := callLLMJudge(ctx, query, candidates, j.Config)
 	if err != nil {
-		// Fallback: return original input — chain will skip on nil, so we
-		// return items (not nil) and report success since fallback is the
-		// designed path. The chain emits no error label in this case.
-		return items, nil
+		// Surface the failure: return (nil, err) so Chain.Rerank records
+		// outcome=error against memdb.search.rerank_strategy_total and
+		// forwards the input items unchanged (chain is best-effort — see
+		// strategy.go RerankWithTimings). Operators can detect LLM rerank
+		// failures from the metric instead of silently mistaking them for
+		// successful no-ops.
+		return nil, err
 	}
 	globalLLMCache.set(cacheKey, scores, llmRerankCacheTTL)
 	out := applyLLMScores(candidates, rest, scores)

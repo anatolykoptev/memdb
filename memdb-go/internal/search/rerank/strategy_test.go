@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 // stubItem is a tiny in-memory Item used by chain + strategy tests so we
@@ -139,5 +140,96 @@ func TestChain_NameIsChain(t *testing.T) {
 	c := Chain{}
 	if c.Name() != "chain" {
 		t.Errorf("Chain.Name() should be 'chain'")
+	}
+}
+
+// sleepReranker sleeps for d in Rerank — used to verify per-strategy
+// timing attribution in RerankWithTimings.
+type sleepReranker struct {
+	name string
+	d    time.Duration
+}
+
+func (s sleepReranker) Name() string { return s.name }
+func (s sleepReranker) Rerank(ctx context.Context, _ string, items []Item) ([]Item, error) {
+	time.Sleep(s.d)
+	RecordSuccess(ctx, s.name)
+	return items, nil
+}
+
+// TestChain_TracksPerStrategyDurations pins the C1 contract: ChainResult
+// exposes per-strategy wall-clock timings keyed by Reranker.Name() so
+// service_postprocess can attribute ce/llm cost separately instead of
+// double-counting the chain total.
+func TestChain_TracksPerStrategyDurations(t *testing.T) {
+	const slept = 5 * time.Millisecond // generous to avoid flake on slow runners
+	c := Chain{
+		sleepReranker{name: "alpha", d: slept},
+		sleepReranker{name: "beta", d: slept},
+		sleepReranker{name: "gamma", d: slept},
+	}
+	items := []Item{newStub("a", 0.5)}
+	res, err := c.RerankWithTimings(context.Background(), "q", items)
+	if err != nil {
+		t.Fatalf("RerankWithTimings err: %v", err)
+	}
+	if res == nil {
+		t.Fatal("expected non-nil ChainResult")
+	}
+	if len(res.Durations) != 3 {
+		t.Fatalf("expected 3 duration entries, got %d", len(res.Durations))
+	}
+	var total time.Duration
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		d, ok := res.Durations[name]
+		if !ok {
+			t.Errorf("missing duration entry for %q", name)
+			continue
+		}
+		if d < slept {
+			t.Errorf("strategy %q duration %v < expected sleep %v", name, d, slept)
+		}
+		total += d
+	}
+	// Sequential execution: total ≈ 3 * slept (within a generous slack
+	// to absorb scheduler jitter).
+	if total < 3*slept {
+		t.Errorf("total duration %v < 3*slept %v — strategies should be sequential", total, 3*slept)
+	}
+}
+
+// TestChain_TimingsRecordedOnError verifies a strategy that errors still
+// gets a duration entry — operators need timing even for the error path.
+func TestChain_TimingsRecordedOnError(t *testing.T) {
+	c := Chain{
+		stubReranker{name: "broken", wantErr: errors.New("boom")},
+		stubReranker{name: "ok", flag: "ok"},
+	}
+	res, err := c.RerankWithTimings(context.Background(), "q", []Item{newStub("a", 0.5), newStub("b", 0.6)})
+	if err != nil {
+		t.Fatalf("RerankWithTimings err: %v", err)
+	}
+	if _, ok := res.Durations["broken"]; !ok {
+		t.Error("expected duration entry for errored strategy")
+	}
+	if _, ok := res.Durations["ok"]; !ok {
+		t.Error("expected duration entry for ok strategy")
+	}
+}
+
+// TestChain_RerankDelegatesToTimings confirms the legacy Chain.Rerank
+// API still returns the final items by delegating to RerankWithTimings.
+func TestChain_RerankDelegatesToTimings(t *testing.T) {
+	items := []Item{newStub("a", 0.5), newStub("b", 0.6)}
+	c := Chain{stubReranker{name: "x", flag: "x"}}
+	out, err := c.Rerank(context.Background(), "q", items)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(out))
+	}
+	if out[0].ID() != "b" {
+		t.Errorf("expected reversed order from stubReranker, got %s first", out[0].ID())
 	}
 }

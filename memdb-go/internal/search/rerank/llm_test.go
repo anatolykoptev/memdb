@@ -67,7 +67,10 @@ func TestLLMJudge_RescoresAndCaches(t *testing.T) {
 	}
 }
 
-func TestLLMJudge_ErrorFallsBack(t *testing.T) {
+func TestLLMJudge_ErrorPropagatesToChain(t *testing.T) {
+	// LLMJudge MUST surface HTTP errors as (nil, err) so Chain.Rerank
+	// records outcome=error on memdb.search.rerank_strategy_total. The
+	// chain (not the strategy) provides the items-passthrough fallback.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -75,14 +78,25 @@ func TestLLMJudge_ErrorFallsBack(t *testing.T) {
 	j := LLMJudge{Config: LLMConfig{APIURL: ts.URL, Model: "x"}}
 	items := []Item{newStub("a", 0.5), newStub("b", 0.4)}
 	out, err := j.Rerank(context.Background(), "q", items)
-	if err != nil {
-		t.Fatalf("err: %v", err)
+	if err == nil {
+		t.Fatalf("expected error to propagate, got nil")
 	}
-	if len(out) != 2 {
-		t.Fatalf("expected fallback to preserve length")
+	if out != nil {
+		t.Fatalf("expected nil items on error, got %d", len(out))
 	}
-	if out[0].ID() != "a" {
-		t.Errorf("expected fallback to preserve original order, got %s", out[0].ID())
+
+	// Verify the chain's fallback contract: error from LLMJudge does not
+	// drop items — Chain.Rerank forwards the input slice unchanged.
+	chain := Chain{j}
+	chainOut, chainErr := chain.Rerank(context.Background(), "q", items)
+	if chainErr != nil {
+		t.Fatalf("chain must not propagate strategy errors: got %v", chainErr)
+	}
+	if len(chainOut) != 2 {
+		t.Fatalf("chain expected to preserve length on LLM error, got %d", len(chainOut))
+	}
+	if chainOut[0].ID() != "a" {
+		t.Errorf("chain expected original order on fallback, got %s", chainOut[0].ID())
 	}
 }
 
