@@ -79,5 +79,8 @@ func (h *Handler) triggerBackgroundExtractors(in extractorTriggerInput) {
 	// rows with [mention YYYY/MM/DD] anchors + tag list, persisted to
 	// memos_graph.user_events for the search-time inject_events stage.
 	// Bounded by eventExtractSemaphore; gated by MEMDB_F3_EVENTS.
-	h.triggerEventExtract(in.Conversation, in.UserID, in.CubeID)
+	// The `in.Now` anchor is threaded through so EventExtractor.Extract
+	// uses the request-time clock the rest of the /add pipeline saw,
+	// instead of an unrelated time.Now() call.
+	h.triggerEventExtract(in.Conversation, in.UserID, in.CubeID, in.Now)
 }
