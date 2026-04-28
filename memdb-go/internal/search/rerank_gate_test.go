@@ -2,6 +2,53 @@ package search
 
 import "testing"
 
+// TestRerankStrategy_EnvOverrides verifies that the four gate thresholds
+// can be tuned at runtime via env. Set MEMDB_RERANK_TOP_COSINE_THRESHOLD
+// to 0.5 — anything above 0.5 should now skip as high-confidence even if
+// the default (0.85) would have let it pass.
+func TestRerankStrategy_EnvOverrides(t *testing.T) {
+	t.Setenv("MEMDB_RERANK_TOP_COSINE_THRESHOLD", "0.5")
+	t.Setenv("MEMDB_RERANK_CLUSTERED_SPREAD", "0.20")
+	t.Setenv("MEMDB_RERANK_WIDE_SPREAD", "0.50")
+	t.Setenv("MEMDB_RERANK_TOPK_CAP", "12")
+
+	// Top 0.70 > 0.50 (overridden) → high-confidence skip.
+	items := []map[string]any{
+		{"id": "a", "metadata": map[string]any{"relativity": 0.70}},
+		{"id": "b", "metadata": map[string]any{"relativity": 0.60}},
+		{"id": "c", "metadata": map[string]any{"relativity": 0.55}},
+		{"id": "d", "metadata": map[string]any{"relativity": 0.50}},
+	}
+	d := rerankStrategy(items)
+	if d.ShouldRerank || d.Reason != "high-confidence" {
+		t.Fatalf("env override of TOP_COSINE_THRESHOLD ignored: got %+v", d)
+	}
+
+	// Top 0.40 (below override 0.50), spread 0.10 (below override clustered=0.20) → clustered, rerank-all.
+	items2 := []map[string]any{
+		{"id": "a", "metadata": map[string]any{"relativity": 0.40}},
+		{"id": "b", "metadata": map[string]any{"relativity": 0.35}},
+		{"id": "c", "metadata": map[string]any{"relativity": 0.32}},
+		{"id": "d", "metadata": map[string]any{"relativity": 0.30}},
+	}
+	d2 := rerankStrategy(items2)
+	if !d2.ShouldRerank || d2.Reason != "clustered" {
+		t.Fatalf("env override of CLUSTERED_SPREAD ignored: got %+v", d2)
+	}
+
+	// Medium-spread → TopK cap = 12 (overridden).
+	items3 := []map[string]any{
+		{"id": "a", "metadata": map[string]any{"relativity": 0.45}},
+		{"id": "b", "metadata": map[string]any{"relativity": 0.20}},
+		{"id": "c", "metadata": map[string]any{"relativity": 0.15}},
+		{"id": "d", "metadata": map[string]any{"relativity": 0.10}},
+	}
+	d3 := rerankStrategy(items3)
+	if !d3.ShouldRerank || d3.Reason != "medium-spread" || d3.TopK != 12 {
+		t.Fatalf("env override of TOPK_CAP ignored: got %+v", d3)
+	}
+}
+
 // --- Backward-compatible shouldLLMRerank tests ---
 
 func TestShouldLLMRerank_TooFewResults(t *testing.T) {
@@ -25,6 +72,7 @@ func TestShouldLLMRerank_ThreeResults(t *testing.T) {
 }
 
 func TestShouldLLMRerank_HighTopCosine(t *testing.T) {
+	// Top relativity 0.95 > defaultRerankTopCosineThreshold (0.85) → high-confidence skip.
 	items := []map[string]any{
 		{"id": "a", "metadata": map[string]any{"relativity": 0.95}},
 		{"id": "b", "metadata": map[string]any{"relativity": 0.80}},
@@ -32,16 +80,16 @@ func TestShouldLLMRerank_HighTopCosine(t *testing.T) {
 		{"id": "d", "metadata": map[string]any{"relativity": 0.60}},
 	}
 	if shouldLLMRerank(items) {
-		t.Error("expected false when top result relativity > 0.93")
+		t.Errorf("expected false when top relativity > defaultRerankTopCosineThreshold (%.2f)", defaultRerankTopCosineThreshold)
 	}
 }
 
 func TestShouldLLMRerank_ShouldRerank(t *testing.T) {
-	// Medium spread (0.85-0.70 = 0.15) → should rerank.
+	// Top 0.84 (≤ 0.85 high-conf threshold), spread 0.14 → medium-spread (in [0.10, 0.30]) → rerank.
 	items := []map[string]any{
-		{"id": "a", "metadata": map[string]any{"relativity": 0.85}},
-		{"id": "b", "metadata": map[string]any{"relativity": 0.80}},
-		{"id": "c", "metadata": map[string]any{"relativity": 0.75}},
+		{"id": "a", "metadata": map[string]any{"relativity": 0.84}},
+		{"id": "b", "metadata": map[string]any{"relativity": 0.79}},
+		{"id": "c", "metadata": map[string]any{"relativity": 0.74}},
 		{"id": "d", "metadata": map[string]any{"relativity": 0.70}},
 	}
 	if !shouldLLMRerank(items) {
@@ -71,16 +119,16 @@ func TestShouldLLMRerank_EmptySlice(t *testing.T) {
 }
 
 func TestShouldLLMRerank_ExactlyAtThreshold(t *testing.T) {
-	// Exactly 0.93 should NOT trigger high-confidence skip (> 0.93, not >=).
-	// Spread 0.93-0.80 = 0.13 → medium-spread → rerank.
+	// Top exactly 0.85 should NOT trigger high-confidence skip (gate uses
+	// strict > comparison). Spread 0.85-0.72 = 0.13 → medium-spread → rerank.
 	items := []map[string]any{
-		{"id": "a", "metadata": map[string]any{"relativity": 0.93}},
-		{"id": "b", "metadata": map[string]any{"relativity": 0.88}},
-		{"id": "c", "metadata": map[string]any{"relativity": 0.84}},
-		{"id": "d", "metadata": map[string]any{"relativity": 0.80}},
+		{"id": "a", "metadata": map[string]any{"relativity": 0.85}},
+		{"id": "b", "metadata": map[string]any{"relativity": 0.80}},
+		{"id": "c", "metadata": map[string]any{"relativity": 0.76}},
+		{"id": "d", "metadata": map[string]any{"relativity": 0.72}},
 	}
 	if !shouldLLMRerank(items) {
-		t.Error("expected true when relativity == 0.93 exactly (threshold is strict >)")
+		t.Errorf("expected true when relativity == defaultRerankTopCosineThreshold (%.2f) exactly (threshold is strict >)", defaultRerankTopCosineThreshold)
 	}
 }
 
@@ -112,7 +160,7 @@ func TestShouldLLMRerank_MetadataWithoutRelativity(t *testing.T) {
 // --- RerankDecision / rerankStrategy tests ---
 
 func TestRerankStrategy_ClusteredScores(t *testing.T) {
-	// Spread < 0.05 → clustered, rerank all.
+	// Top below high-conf threshold (0.85) and spread < 0.10 → clustered, rerank all.
 	items := []map[string]any{
 		{"id": "a", "metadata": map[string]any{"relativity": 0.82}},
 		{"id": "b", "metadata": map[string]any{"relativity": 0.81}},
@@ -121,7 +169,7 @@ func TestRerankStrategy_ClusteredScores(t *testing.T) {
 	}
 	d := rerankStrategy(items)
 	if !d.ShouldRerank {
-		t.Error("expected rerank for clustered scores (spread < 0.05)")
+		t.Errorf("expected rerank for clustered scores (spread < %.2f)", defaultRerankClusteredSpread)
 	}
 	if d.Reason != "clustered" {
 		t.Errorf("expected reason 'clustered', got %q", d.Reason)
@@ -132,16 +180,17 @@ func TestRerankStrategy_ClusteredScores(t *testing.T) {
 }
 
 func TestRerankStrategy_WideSpread(t *testing.T) {
-	// Spread > 0.25 → skip (clear separation).
+	// Top below high-conf threshold (0.85), spread > 0.30 → wide-spread skip.
+	// Use 0.85 top to dodge the high-confidence cut and still produce > 0.30 spread.
 	items := []map[string]any{
-		{"id": "a", "metadata": map[string]any{"relativity": 0.90}},
-		{"id": "b", "metadata": map[string]any{"relativity": 0.70}},
-		{"id": "c", "metadata": map[string]any{"relativity": 0.60}},
-		{"id": "d", "metadata": map[string]any{"relativity": 0.50}},
+		{"id": "a", "metadata": map[string]any{"relativity": 0.85}},
+		{"id": "b", "metadata": map[string]any{"relativity": 0.65}},
+		{"id": "c", "metadata": map[string]any{"relativity": 0.55}},
+		{"id": "d", "metadata": map[string]any{"relativity": 0.45}},
 	}
 	d := rerankStrategy(items)
 	if d.ShouldRerank {
-		t.Error("expected skip for wide spread (> 0.25)")
+		t.Errorf("expected skip for wide spread (> %.2f)", defaultRerankWideSpread)
 	}
 	if d.Reason != "wide-spread" {
 		t.Errorf("expected reason 'wide-spread', got %q", d.Reason)
@@ -149,7 +198,8 @@ func TestRerankStrategy_WideSpread(t *testing.T) {
 }
 
 func TestRerankStrategy_MediumSpread(t *testing.T) {
-	// Spread 0.05–0.25 → rerank with TopK cap.
+	// Top 0.85 (== high-conf threshold, so NOT skipped — strict >),
+	// spread 0.15 (in [0.10, 0.30]) → rerank with TopK cap.
 	items := []map[string]any{
 		{"id": "a", "metadata": map[string]any{"relativity": 0.85}},
 		{"id": "b", "metadata": map[string]any{"relativity": 0.78}},
@@ -160,8 +210,8 @@ func TestRerankStrategy_MediumSpread(t *testing.T) {
 	if !d.ShouldRerank {
 		t.Error("expected rerank for medium spread")
 	}
-	if d.TopK != rerankTopKCap {
-		t.Errorf("expected TopK=%d for medium spread, got %d", rerankTopKCap, d.TopK)
+	if d.TopK != defaultRerankTopKCap {
+		t.Errorf("expected TopK=%d for medium spread, got %d", defaultRerankTopKCap, d.TopK)
 	}
 	if d.Reason != "medium-spread" {
 		t.Errorf("expected reason 'medium-spread', got %q", d.Reason)
@@ -199,32 +249,32 @@ func TestRerankStrategy_HighTopCosine(t *testing.T) {
 }
 
 func TestRerankStrategy_ExactlyAtSpreadBoundaries(t *testing.T) {
-	// Spread ~0.06 → above clustered threshold (0.05), below wide (0.25) → medium-spread.
-	// Note: using 0.06 gap instead of 0.05 to avoid float64 rounding at boundary.
+	// Spread ~0.12 (above clustered threshold 0.10, below wide 0.30) on a
+	// top score below the high-conf threshold (0.85) → medium-spread.
 	items := []map[string]any{
-		{"id": "a", "metadata": map[string]any{"relativity": 0.86}},
-		{"id": "b", "metadata": map[string]any{"relativity": 0.84}},
-		{"id": "c", "metadata": map[string]any{"relativity": 0.82}},
-		{"id": "d", "metadata": map[string]any{"relativity": 0.80}},
+		{"id": "a", "metadata": map[string]any{"relativity": 0.84}},
+		{"id": "b", "metadata": map[string]any{"relativity": 0.78}},
+		{"id": "c", "metadata": map[string]any{"relativity": 0.74}},
+		{"id": "d", "metadata": map[string]any{"relativity": 0.72}},
 	}
 	d := rerankStrategy(items)
 	if !d.ShouldRerank {
-		t.Error("spread ~0.06 should be medium-spread (not clustered)")
+		t.Error("spread 0.12 should be medium-spread (not clustered)")
 	}
 	if d.Reason != "medium-spread" {
 		t.Errorf("expected 'medium-spread', got %q", d.Reason)
 	}
 
-	// Spread exactly 0.25 → NOT > 0.25, so not wide-spread. → medium-spread.
+	// Spread exactly defaultRerankWideSpread (0.30) → NOT > 0.30, so still medium.
 	items2 := []map[string]any{
 		{"id": "a", "metadata": map[string]any{"relativity": 0.85}},
 		{"id": "b", "metadata": map[string]any{"relativity": 0.75}},
 		{"id": "c", "metadata": map[string]any{"relativity": 0.65}},
-		{"id": "d", "metadata": map[string]any{"relativity": 0.60}},
+		{"id": "d", "metadata": map[string]any{"relativity": 0.55}},
 	}
 	d2 := rerankStrategy(items2)
 	if !d2.ShouldRerank {
-		t.Error("spread exactly 0.25 should be medium-spread (not wide-spread)")
+		t.Errorf("spread exactly %.2f should be medium-spread (gate is strict >)", defaultRerankWideSpread)
 	}
 	if d2.Reason != "medium-spread" {
 		t.Errorf("expected 'medium-spread', got %q", d2.Reason)

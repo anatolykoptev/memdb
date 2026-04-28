@@ -170,6 +170,14 @@ func buildSearchParams(req searchRequest) (search.SearchParams, error) {
 	}
 
 	// 1. Start with hardcoded defaults.
+	//
+	// LLMRerank defaults to TRUE — LLM Judge is a feature, not opt-in.
+	// The downstream gate (rerankStrategy) decides per-query whether to
+	// actually invoke the LLM, so the cost is bounded; with the default
+	// off (the M11 silent regression discovered in M12.7) it never fires
+	// at all because the LoCoMo harness and most callers don't set the
+	// JSON field. To suppress LLM rerank, callers must now send
+	// {"llm_rerank": false} explicitly.
 	params := search.SearchParams{
 		Query:            strings.TrimSpace(*req.Query),
 		UserName:         userName,
@@ -187,6 +195,7 @@ func buildSearchParams(req searchRequest) (search.SearchParams, error) {
 		IncludePref:      true,
 		IncludeTool:      false,
 		NumStages:        0,
+		LLMRerank:        true,
 	}
 
 	// 2. Apply profile overrides (if any).

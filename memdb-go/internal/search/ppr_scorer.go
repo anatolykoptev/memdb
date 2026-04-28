@@ -135,6 +135,22 @@ func envFloatSearch(key string, def float64) float64 {
 	return v
 }
 
+// envIntSearchDefault reads key from env as int; returns def on missing or
+// parse error. Named with a Default suffix to avoid colliding with the
+// Atoi-style helpers in sibling packages and to make the fallback value
+// explicit at the call site.
+func envIntSearchDefault(key string, def int) int {
+	s := os.Getenv(key)
+	if s == "" {
+		return def
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return v
+}
+
 // readMetaFloat reads a float64 from a metadata map that may store the value
 // as float64 (JSON decode) or string (agtype TEXT). Returns 0 on any miss.
 func readMetaFloat(meta map[string]any, key string) float64 {
