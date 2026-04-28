@@ -139,6 +139,7 @@ func buildTextRerankPrefix(s *SearchService, queryVec []float32, embByID map[str
 			OnPrecompute:   cePrecomputeHook,
 			QueryUserID:    p.UserName,
 			QuerySessionID: p.AgentID,
+			QueryTags:      p.Tags,
 			BoostWeights:   rerankpkg.DefaultBoostWeights(),
 		})
 	}

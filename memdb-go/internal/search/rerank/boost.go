@@ -18,6 +18,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"sync"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -171,22 +172,22 @@ type boostMetricsInstruments struct {
 
 var (
 	boostMxInst *boostMetricsInstruments
+	boostMxOnce sync.Once
 )
 
 func boostMx() *boostMetricsInstruments {
-	if boostMxInst != nil {
-		return boostMxInst
-	}
-	m := otel.Meter("memdb-go/search/rerank")
-	c, _ := m.Int64Counter("memdb.search.rerank_boost_applied_total",
-		metric.WithDescription("Per-factor metadata boost applied during CE rerank (factor in user_id|session_id|tags)"))
-	inst := &boostMetricsInstruments{BoostApplied: c}
-	// Pre-register all factor labels at zero so Prometheus scrapes see
-	// the series from container start even before any boost fires.
-	ctx := context.Background()
-	for _, factor := range []string{"user_id", "session_id", "tags"} {
-		c.Add(ctx, 0, metric.WithAttributes(attribute.String("factor", factor)))
-	}
-	boostMxInst = inst
-	return inst
+	boostMxOnce.Do(func() {
+		m := otel.Meter("memdb-go/search/rerank")
+		c, _ := m.Int64Counter("memdb.search.rerank_boost_applied_total",
+			metric.WithDescription("Per-factor metadata boost applied during CE rerank (factor in user_id|session_id|tags)"))
+		inst := &boostMetricsInstruments{BoostApplied: c}
+		// Pre-register all factor labels at zero so Prometheus scrapes see
+		// the series from container start even before any boost fires.
+		ctx := context.Background()
+		for _, factor := range []string{"user_id", "session_id", "tags"} {
+			c.Add(ctx, 0, metric.WithAttributes(attribute.String("factor", factor)))
+		}
+		boostMxInst = inst
+	})
+	return boostMxInst
 }

@@ -93,6 +93,11 @@ type SearchParams struct {
 	// LevelAll (empty string, the zero value) = full search (backward compat).
 	// LevelL1 = working memory only; LevelL2 = episodic only; LevelL3 = LTM full graph.
 	Level Level
+	// Tags is the optional set of tag strings from the query context. When
+	// non-nil it is threaded into CrossEncoder.QueryTags so the metadata
+	// boost post-step can award per-tag score multipliers (Q3 stream).
+	// An empty or nil slice means "no tag boost" — no items are penalised.
+	Tags []string
 }
 
 // SearchOutput holds the formatted result plus optional embedding sidecar.
