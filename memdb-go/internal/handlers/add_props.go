@@ -41,6 +41,18 @@ type memoryNodeProps struct {
 	// Anthropic memory-tool path "/memories/foo.txt"). Empty preserves the
 	// historical default. Validation enforced at the request boundary.
 	Key string
+
+	// M12.1: observation_date is the in-conversation timestamp of the latest
+	// message in the source batch (YYYY-MM-DD). Distinct from CreatedAt which
+	// records server wall-clock at ingest. Empty when no chat_time was present
+	// on any message — callers/consumers fall back to CreatedAt as before.
+	//
+	// Background: LoCoMo (and any replay-style benchmark with historic dates)
+	// must answer questions like "when did X happen?" against the
+	// conversation's own timeline, not server NOW. Surfacing this on memory
+	// metadata lets retrieval clients prefix candidates with the real
+	// conversation date instead of a stale ingest stamp.
+	ObservationDate string
 }
 
 // buildNodeProps constructs the JSONB properties dict matching the Python format.
@@ -90,6 +102,12 @@ func buildNodeProps(p memoryNodeProps) map[string]any {
 	// explicit about which rows are categorised.
 	if p.PreferenceCategory != "" {
 		props["preference_category"] = p.PreferenceCategory
+	}
+	// M12.1: observation_date — only emit when known. Absence means
+	// "no in-conversation timestamp available; use created_at" (the
+	// pre-M12 behaviour).
+	if p.ObservationDate != "" {
+		props["observation_date"] = p.ObservationDate
 	}
 	return props
 }

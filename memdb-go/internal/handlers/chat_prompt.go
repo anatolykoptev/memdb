@@ -5,10 +5,36 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
 )
+
+// chatNowOverrideEnvVar is the env-var consulted by chatPromptNow before
+// falling back to time.Now(). M12.1: lets harnesses (LoCoMo, replay benches)
+// pin the "Current Time" baseline against a historic conversation date so
+// the model resolves "last week" / "yesterday" against the right anchor.
+//
+// Format: any string the operator wants the prompt to display verbatim.
+// Empty / unset preserves the legacy time.Now() behaviour byte-for-byte
+// (zero regression for production clients).
+const chatNowOverrideEnvVar = "MEMDB_CHAT_NOW_OVERRIDE"
+
+// chatPromptNow returns the string to inject into the "Current Time" header
+// of cloud / factual chat prompts. Honours MEMDB_CHAT_NOW_OVERRIDE when set
+// (whitespace-trimmed, non-empty), else falls back to wall-clock formatted
+// to match the historic %Y-%m-%d %H:%M (%A) layout.
+//
+// Reading the env on each call (vs. at process start) is intentional: keeps
+// integration tests cheap (no t.Setenv + restart) and the per-call cost is a
+// single map lookup — chat is already an LLM round-trip path.
+func chatPromptNow() string {
+	if v := strings.TrimSpace(os.Getenv(chatNowOverrideEnvVar)); v != "" {
+		return v
+	}
+	return time.Now().Format("2006-01-02 15:04 (Monday)")
+}
 
 // buildSystemPrompt constructs the chat system prompt with memory context.
 // Routing precedence:
@@ -49,7 +75,7 @@ func buildSystemPromptWithProfile(_ context.Context, query string, memories []ma
 		} else if lang == "zh" {
 			tpl = cloudChatPromptZH
 		}
-		now := time.Now().Format("2006-01-02 15:04 (Monday)")
+		now := chatPromptNow()
 		rendered = fmt.Sprintf(tpl, now, memCtx)
 	case strings.Contains(basePrompt, "{memories}"):
 		rendered = strings.Replace(basePrompt, "{memories}", memCtx, 1)

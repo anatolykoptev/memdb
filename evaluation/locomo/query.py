@@ -498,8 +498,15 @@ def _extract_ts(metadata: dict) -> str | None:
     epoch (seconds or milliseconds — autodetected by magnitude).  Numeric
     epochs are normalised to "YYYY-MM-DD" UTC.  Out-of-range or unparseable
     values are skipped, matching the historic str-only behaviour.
+
+    M12.1 priority change: ``observation_date`` is checked FIRST. memdb-go's
+    add pipeline (M12.1) stamps it on memory props as the latest source
+    message's chat_time (YYYY-MM-DD), surviving the ``sources`` strip done by
+    search/response.go::FormatMemoryItem. ``chat_time`` is kept second for
+    forward-compat with future server changes that surface it directly. Then
+    ``created_at`` (ingest wall-clock) and the legacy fallbacks remain.
     """
-    for key in ("chat_time", "created_at", "created_time", "time", "date"):
+    for key in ("observation_date", "chat_time", "created_at", "created_time", "time", "date"):
         val = metadata.get(key)
         if val is None or val == "":
             continue
@@ -758,6 +765,30 @@ def query_search_dual(
     return items_a, items_b, merged, elapsed_ms
 
 
+def _conversation_now(items: list[dict]) -> str | None:
+    """Return the latest in-conversation date from a flat list of retrieved items.
+
+    Used by `_build_dual_speaker_system_prompt` as the "Current time:" anchor.
+    Picks the max non-None `ts` (already YYYY-MM-DD via _extract_ts).
+    Returns None when no item carries a usable ts — caller falls back to env
+    override or omits the line entirely.
+
+    M12.1: replaces the previous `time.strftime("%Y-%m-%d %H:%M (%A)")` which
+    poisoned LoCoMo cat-2 by anchoring "last week" / "yesterday" against
+    server NOW (2026-04-26..28) instead of the conversation's own timeline
+    (2022/2023). 42.7% of cat-2 misses traced to this single line — see
+    `docs/superpowers/plans/2026-04-29-m12-recovery-analysis.md` (S1).
+    """
+    latest: str | None = None
+    for it in items:
+        ts = it.get("ts")
+        if not ts or not isinstance(ts, str):
+            continue
+        if latest is None or ts > latest:
+            latest = ts
+    return latest
+
+
 def _build_dual_speaker_system_prompt(
     speaker_a_items: list[dict],
     speaker_b_items: list[dict],
@@ -766,12 +797,19 @@ def _build_dual_speaker_system_prompt(
 
     Mirrors Memobase's `answer_question` template (memobase_search.py:81-88):
     each speaker's memories are presented as a labelled block so the model
-    cannot "miss" cross-speaker evidence.  The current date placeholder
-    matches the server-side `factualQAPromptEN` style.
+    cannot "miss" cross-speaker evidence.
 
-    F9: each memory line is prefixed with its timestamp when available
-    (`f"{ts}: {content}"`) so the LLM gets a time anchor per fact — mem0
-    arxiv pattern for temporal multi-hop (cat-2) queries.
+    M12.1 — temporal anchor fix:
+      1. `Current time:` line is derived from the LATEST `ts` across retrieved
+         memories (the in-conversation date), not server wall-clock.
+      2. Per-memory `ts:<date>` prefix is kept (mem0 arxiv pattern for cat-2
+         multi-hop), but `ts` now resolves to `observation_date` /
+         `chat_time` from server-side metadata (M12.1 add-pipeline change),
+         so the value is the real conversation date — not `time.Now()` at
+         ingest as in PR #155 / M11.
+      3. Override priority: `LOCOMO_CONV_NOW` env (operator pin) >
+         max(retrieved.ts) > omit the header. NEVER falls back to `time.Now()`
+         — that was the M11 regression vector.
     """
     def _fmt(items: list[dict], label: str) -> str:
         if not items:
@@ -786,19 +824,39 @@ def _build_dual_speaker_system_prompt(
             lines.append(f"{i}. {entry}")
         return "\n".join(lines)
 
-    now = time.strftime("%Y-%m-%d %H:%M (%A)")
     block_a = _fmt(speaker_a_items, "A")
     block_b = _fmt(speaker_b_items, "B")
+
+    # Resolve the conversation reference time. NEVER use server NOW —
+    # LoCoMo's gold answers reference 2022/2023; server NOW is 2026.
+    override = os.getenv("LOCOMO_CONV_NOW", "").strip()
+    if override:
+        conv_now: str | None = override
+    else:
+        conv_now = _conversation_now(speaker_a_items + speaker_b_items)
+
+    if conv_now:
+        now_line = f"Current time: {conv_now}\n\n"
+    else:
+        # No retrieved memory carries a ts AND no operator pin —
+        # safer to omit than to leak today's date.
+        now_line = ""
+
     return (
         "You are a factual QA assistant answering a question about a recorded "
         "two-speaker conversation.  Below are memories retrieved separately "
         "from each speaker's personal memory store; treat both speakers' "
         "evidence as equally authoritative and combine across speakers when "
         "the question requires it.\n\n"
-        f"Current time: {now}\n\n"
+        f"{now_line}"
         "## Memories\n"
         f"{block_a}\n\n"
         f"{block_b}\n\n"
+        "Each memory line is prefixed with its in-conversation date (YYYY-MM-DD). "
+        "Resolve relative phrases like 'last week', 'yesterday', 'next month' "
+        "against the dated memory, NOT against the 'Current time' header. "
+        "When asked WHEN an event happened, answer with the most specific "
+        "date or relative phrase present in the memories themselves.\n\n"
         "Answer the user's question with a short, direct factual response. "
         "If the memories do not contain the answer, say so plainly."
     )

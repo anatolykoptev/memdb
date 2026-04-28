@@ -7,7 +7,9 @@ Run: python -m pytest evaluation/locomo/tests/test_f9_recall_budget.py -v
 
 from __future__ import annotations
 
+import os
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -28,6 +30,17 @@ import ingest as ig  # noqa: E402
 # ---------------------------------------------------------------------------
 
 class TestExtractTs(unittest.TestCase):
+    def test_observation_date_field_wins(self) -> None:
+        # M12.1: server-emitted observation_date takes priority over
+        # everything else — it's the in-conversation date the harness
+        # actually wants.
+        meta = {
+            "observation_date": "2023-05-08",
+            "chat_time": "2026-04-26T10:00:00Z",
+            "created_at": "2026-04-26T10:00:00+00:00",
+        }
+        self.assertEqual(q._extract_ts(meta), "2023-05-08")
+
     def test_chat_time_field(self) -> None:
         meta = {"chat_time": "2023-05-08T13:56:00Z"}
         self.assertEqual(q._extract_ts(meta), "2023-05-08")
@@ -109,6 +122,60 @@ class TestDualSpeakerSystemPromptTs(unittest.TestCase):
         items_b = []
         prompt = q._build_dual_speaker_system_prompt(items_a, items_b)
         self.assertIn("(no memories retrieved)", prompt)
+
+    # -----------------------------------------------------------------
+    # M12.1 — temporal anchor regression guards.
+    #
+    # The M11 implementation used time.strftime("%Y-%m-%d %H:%M (%A)")
+    # for the "Current time:" header which poisoned 42.7% of LoCoMo
+    # cat-2 answers (model resolved "last week" / "yesterday" against
+    # 2026-04 instead of the 2022/2023 conversation date). These tests
+    # pin the new behaviour so the bug cannot slip back in.
+    # -----------------------------------------------------------------
+
+    def test_current_time_uses_max_retrieved_ts(self) -> None:
+        items_a = [
+            {"content": "fact1", "ts": "2023-05-01", "score": 0.9, "id": "1"},
+            {"content": "fact2", "ts": "2023-08-15", "score": 0.8, "id": "2"},
+        ]
+        items_b = [{"content": "fact3", "ts": "2023-06-01", "score": 0.85, "id": "3"}]
+        prompt = q._build_dual_speaker_system_prompt(items_a, items_b)
+        # max ts across both speakers wins.
+        self.assertIn("Current time: 2023-08-15", prompt)
+        # And, critically, NOT today's date.
+        self.assertNotIn(time.strftime("%Y-%m"), prompt)
+
+    def test_current_time_omitted_when_no_ts_anywhere(self) -> None:
+        items_a = [{"content": "fact1", "ts": None, "score": 0.9, "id": "1"}]
+        items_b = [{"content": "fact2", "ts": None, "score": 0.8, "id": "2"}]
+        # Clear any operator override that could accidentally inject a date.
+        with patch.dict(os.environ, {"LOCOMO_CONV_NOW": ""}, clear=False):
+            prompt = q._build_dual_speaker_system_prompt(items_a, items_b)
+        self.assertNotIn("Current time:", prompt)
+
+    def test_locomo_conv_now_env_override_wins(self) -> None:
+        items_a = [{"content": "fact1", "ts": "2023-05-01", "score": 0.9, "id": "1"}]
+        items_b = []
+        with patch.dict(os.environ, {"LOCOMO_CONV_NOW": "2024-12-31"}, clear=False):
+            prompt = q._build_dual_speaker_system_prompt(items_a, items_b)
+        self.assertIn("Current time: 2024-12-31", prompt)
+        # Override beats the max-retrieved-ts fallback.
+        self.assertNotIn("Current time: 2023-05-01", prompt)
+
+    def test_no_server_now_leak(self) -> None:
+        """Belt-and-braces: today's year/month never appears in the header
+        even when retrieved memories carry valid historic ts values."""
+        items_a = [{"content": "fact", "ts": "2022-01-01", "score": 0.9, "id": "1"}]
+        items_b = []
+        with patch.dict(os.environ, {"LOCOMO_CONV_NOW": ""}, clear=False):
+            prompt = q._build_dual_speaker_system_prompt(items_a, items_b)
+        # Pull the "Current time:" line and assert it doesn't reference today.
+        for line in prompt.splitlines():
+            if line.startswith("Current time:"):
+                self.assertNotIn(time.strftime("%Y-%m"), line)
+                break
+        else:
+            self.fail("Current time line missing — should be 2022-01-01")
 
 
 # ---------------------------------------------------------------------------

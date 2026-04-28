@@ -62,9 +62,10 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 	fc := factContext{
 		CubeID: cubeID, UserID: *req.UserID, AgentID: stringOrEmpty(req.AgentID),
 		SessionID: sessionID, Now: now, Info: mapOrEmpty(req.Info),
-		CustomTags: req.CustomTags,
-		Sources:    buildSourcesFromMessages(req.Messages),
-		Key:        stringOrEmpty(req.Key),
+		CustomTags:      req.CustomTags,
+		Sources:         buildSourcesFromMessages(req.Messages),
+		Key:             stringOrEmpty(req.Key),
+		ObservationDate: observationDateFromMessages(req.Messages),
 	}
 	items, err := h.applyAndPersistFineFacts(ctx, embedded, fc)
 	recordStageDuration(ctx, "apply", t)
