@@ -23,7 +23,8 @@ Predictions JSON layout (dual-speaker mode, M9+):
       "dual_speaker": true,
       "speaker_a_memories": [...],
       "speaker_b_memories": [...],
-      "merged_top_k": 20
+      "merged_top_k": 20,
+      "top_k_per_speaker": 30
     }, ...
   ]
 
@@ -46,6 +47,13 @@ Env:
                       stores in parallel and merge results. Set to `false`
                       (or `0`) to reproduce M7/M8 single-speaker baselines.
                       M9 Stream 1 (HARNESS-DUAL).
+
+F9 changes (mem0 arxiv pattern):
+  --top-k-per-speaker N  Per-speaker top_k for dual-speaker search (default 30,
+                         matching mem0 eval harness). Each speaker is queried
+                         independently with this budget; results are merged and
+                         presented to chat with timestamp prefixes so the LLM
+                         gets a time anchor per fact.
 """
 
 from __future__ import annotations
@@ -417,6 +425,22 @@ def build_sample_gold(
     return out
 
 
+def _extract_ts(metadata: dict) -> str | None:
+    """Extract a timestamp string from memory item metadata (best-effort).
+
+    Tries common field names in priority order.  Returns None when no usable
+    timestamp is found so callers can skip the prefix rather than emit an
+    empty/uninformative one.
+    """
+    for key in ("chat_time", "created_at", "created_time", "time", "date"):
+        val = metadata.get(key)
+        if val and isinstance(val, str):
+            # Trim to date-only part (first 10 chars of ISO8601) for brevity.
+            # "2023-05-08T13:56:00Z" → "2023-05-08"
+            return val[:10] if len(val) >= 10 else val
+    return None
+
+
 def extract_memory_items(payload) -> list[dict]:
     """Normalize /product/search response → list of {content, score, id}.
 
@@ -445,12 +469,14 @@ def extract_memory_items(payload) -> list[dict]:
             or ""
         )
         score = m.get("score") or m.get("relativity") or metadata.get("relativity")
+        ts = _extract_ts(metadata)
         items.append(
             {
                 "content": content,
                 "score": score,
                 "id": m.get("id") or m.get("memory_id") or metadata.get("id") or "",
                 "type": memory_type,
+                "ts": ts,
             }
         )
 
@@ -618,6 +644,7 @@ def query_search_dual(
     top_k: int,
     session_id: str | None = None,
     timeout: int = 60,
+    top_k_per_speaker: int = 30,
 ) -> tuple[list[dict], list[dict], list[dict], int]:
     """Dual-speaker fan-out of `query_search`.
 
@@ -626,16 +653,20 @@ def query_search_dual(
     returns `(speaker_a_items, speaker_b_items, merged_items, elapsed_ms)`.
     The merged list is bounded to `top_k` by `_merge_dual_results`.
 
+    F9: each speaker is queried with `top_k_per_speaker` (default 30, matching
+    the mem0 eval harness: 30 per speaker × 2 = 60 candidates).  Merged list
+    is still capped at `top_k` so downstream callers see the same budget.
+
     Network errors propagate (caller handles `requests.RequestException`).
     """
     uid_a, uid_b = _speaker_user_ids(conv_id)
     start = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         fut_a = pool.submit(
-            query_search, memdb_url, uid_a, query, top_k, session_id, timeout
+            query_search, memdb_url, uid_a, query, top_k_per_speaker, session_id, timeout
         )
         fut_b = pool.submit(
-            query_search, memdb_url, uid_b, query, top_k, session_id, timeout
+            query_search, memdb_url, uid_b, query, top_k_per_speaker, session_id, timeout
         )
         items_a, _ = fut_a.result()
         items_b, _ = fut_b.result()
@@ -654,6 +685,10 @@ def _build_dual_speaker_system_prompt(
     each speaker's memories are presented as a labelled block so the model
     cannot "miss" cross-speaker evidence.  The current date placeholder
     matches the server-side `factualQAPromptEN` style.
+
+    F9: each memory line is prefixed with its timestamp when available
+    (`f"{ts}: {content}"`) so the LLM gets a time anchor per fact — mem0
+    arxiv pattern for temporal multi-hop (cat-2) queries.
     """
     def _fmt(items: list[dict], label: str) -> str:
         if not items:
@@ -663,7 +698,9 @@ def _build_dual_speaker_system_prompt(
             content = (it.get("content") or "").strip()
             if not content:
                 continue
-            lines.append(f"{i}. {content}")
+            ts = it.get("ts")
+            entry = f"{ts}: {content}" if ts else content
+            lines.append(f"{i}. {entry}")
         return "\n".join(lines)
 
     now = time.strftime("%Y-%m-%d %H:%M (%A)")
@@ -794,6 +831,17 @@ def main() -> int:
     g.add_argument("--gold", type=Path, help="Custom gold JSON.")
     p.add_argument("--memdb-url", default="http://localhost:8080")
     p.add_argument("--top-k", type=int, default=20)
+    p.add_argument(
+        "--top-k-per-speaker",
+        type=int,
+        default=30,
+        metavar="N",
+        help=(
+            "Per-speaker top_k for dual-speaker search (default: 30, matching "
+            "mem0 eval harness: 30 per speaker × 2 = 60 candidates). "
+            "Ignored in single-speaker mode. F9 recall budget tuning."
+        ),
+    )
     p.add_argument("--out", type=Path, required=True)
     p.add_argument(
         "--skip-chat",
@@ -907,6 +955,12 @@ def main() -> int:
         f"(env LOCOMO_DUAL_SPEAKER={os.getenv('LOCOMO_DUAL_SPEAKER', '<unset>')!r})",
         flush=True,
     )
+    if dual_speaker:
+        print(
+            f"[query] top_k_per_speaker={args.top_k_per_speaker} "
+            f"(total candidates = {args.top_k_per_speaker * 2} before merge to top_k={args.top_k})",
+            flush=True,
+        )
 
     retry_n = args.retry_on_timeout
     retry_backoff = args.retry_backoff_base
@@ -949,6 +1003,8 @@ def main() -> int:
                     question,
                     args.top_k,
                     None,  # session_id
+                    60,    # timeout
+                    args.top_k_per_speaker,
                     max_retries=retry_n,
                     backoff_base=retry_backoff,
                     cat=cat_str,
@@ -959,6 +1015,7 @@ def main() -> int:
                 rec["speaker_a_memories"] = speaker_a_items
                 rec["speaker_b_memories"] = speaker_b_items
                 rec["merged_top_k"] = len(merged)
+                rec["top_k_per_speaker"] = args.top_k_per_speaker
             except requests.RequestException as exc:
                 rec["error"] = f"search: {exc}"
                 rec.setdefault("_errors", []).append(rec["error"])
@@ -1067,6 +1124,7 @@ def main() -> int:
                 "meta": {
                     "memdb_url": args.memdb_url,
                     "top_k": args.top_k,
+                    "top_k_per_speaker": args.top_k_per_speaker,
                     "speaker": args.speaker,
                     "total": len(gold),
                     "errors": len(errors),
