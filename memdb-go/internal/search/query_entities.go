@@ -7,15 +7,17 @@ package search
 // and looks them up in the entity_nodes table for the given cube. The returned IDs
 // are string (text primary key) suitable for use as ComputePersonalizedPR seeds.
 //
-// Heavy alternative (LLM-based NER) is env-gated via MEMDB_PPR_LLM_ENTITIES=true.
-// Default is regex path — zero LLM cost, sub-millisecond latency.
-//
 // The postgresClient interface in service_types.go already exposes
 // FindEntitiesByNormalizedID; no new DB methods are needed.
+//
+// Note: an experimental LLM-NER path was previously gated behind
+// MEMDB_PPR_LLM_ENTITIES. Both branches resolved to the regex implementation
+// (the LLM path was never wired) and the env var was never set in any deploy,
+// so the gate was removed in M11. If a real LLM path lands in the future it
+// should reuse this entry point and re-introduce the gate at that time.
 
 import (
 	"context"
-	"os"
 	"regexp"
 	"strings"
 	"unicode"
@@ -28,28 +30,14 @@ import (
 // single "I" while catching proper names: "Alice", "MemDB", "OpenAI", "GPT-4".
 var reCapitalizedToken = regexp.MustCompile(`\b[A-Z][A-Za-z0-9][A-Za-z0-9_-]*\b`)
 
-// pprLLMEntitiesEnabled reports whether the experimental LLM-NER path is active.
-// Default false — regex path is used (cheap, no latency).
-func pprLLMEntitiesEnabled() bool {
-	return os.Getenv("MEMDB_PPR_LLM_ENTITIES") == "true"
-}
-
 // ExtractQueryEntities returns entity_node IDs (string PKs from entity_nodes) that
 // match tokens extracted from query for the given cube.
 //
-// Two extraction strategies (env-gated):
-//   - Regex (default): capitalized token extraction → db.NormalizeEntityID → lookup.
-//   - LLM (MEMDB_PPR_LLM_ENTITIES=true): reserved for future; falls back to regex.
-//
+// Strategy: capitalized token extraction → db.NormalizeEntityID → lookup.
 // Returns nil (not error) when no entities match — callers treat nil as "no seed".
 func ExtractQueryEntities(ctx context.Context, pg postgresClient, cubeID, query string) ([]string, error) {
 	if query == "" || cubeID == "" {
 		return nil, nil
-	}
-
-	// LLM path placeholder — deferred to a future stream.
-	if pprLLMEntitiesEnabled() {
-		return extractQueryEntitiesRegex(ctx, pg, cubeID, query)
 	}
 	return extractQueryEntitiesRegex(ctx, pg, cubeID, query)
 }
