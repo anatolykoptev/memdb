@@ -73,7 +73,7 @@ func loopMx() *loopMetricsStruct {
 		// Pre-register at zero for known loop names so scrapers see the series
 		// before the first tick (matches the db/metrics.go and metrics.go pattern).
 		ctx := context.Background()
-		for _, name := range []string{"pagerank", "periodic_reorg"} {
+		for _, name := range []string{"pagerank", "periodic_reorg", "bitemporal_validator"} {
 			for _, outcome := range []string{"success", "error", "skipped_other_leader"} {
 				iters.Add(ctx, 0, labelLoopOutcome(name, outcome))
 			}

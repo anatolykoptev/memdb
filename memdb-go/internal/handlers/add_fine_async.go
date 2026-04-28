@@ -35,13 +35,15 @@ type extractorTriggerInput struct {
 // its own internal admission control / no-op guards. Adding the F3 event
 // extractor is a one-line change here.
 //
-// Extractor list (5 today, 6 with F3):
+// Extractor list (6 today, +F3 in flight):
 //  1. generateEpisodicSummary    — session-level recap node
 //  2. generateSkillMemory        — code/task skill chunks
 //  3. generateToolTrajectory     — tool-call traces
 //  4. profiler.TriggerRefresh    — legacy unstructured profile summary
 //  5. triggerProfileExtract      — structured user profile (M10 S2,
 //                                  bounded by profileExtractSemaphore)
+//  6. triggerEdgeInvalidationJudge — M11 F11 bi-temporal edge invalidator
+//                                  (bounded by edgeJudgeSemaphore)
 func (h *Handler) triggerBackgroundExtractors(in extractorTriggerInput) {
 	if h == nil {
 		return
@@ -64,4 +66,10 @@ func (h *Handler) triggerBackgroundExtractors(in extractorTriggerInput) {
 	// bounded by profileExtractSemaphore (M10 audit C3 fix). Do NOT remove the
 	// admission control: it caps goroutine count under burst load.
 	h.triggerProfileExtract(in.Conversation, in.UserID, in.CubeID)
+
+	// 6. M11 F11 — bi-temporal edge invalidation judge. Re-judges entity
+	// edges this /add just wrote against their currently-valid peers; on
+	// confidence >= 0.7 flips invalid_at on superseded peers. Bounded by
+	// edgeJudgeSemaphore; gated by MEMDB_F11_EDGE_JUDGE.
+	h.triggerEdgeInvalidationJudge(in.CubeID, in.Now)
 }

@@ -46,8 +46,9 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	extractor := initLLMExtractor(cfg, h, logger)
 
 	// Initialize chat LLM client (reuses LLM API config, same default model)
+	var chatClient *llm.Client
 	if cfg.LLMProxyURL != "" {
-		chatClient := llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel, cfg.LLMFallbackModels, logger)
+		chatClient = llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMDefaultModel, cfg.LLMFallbackModels, logger)
 		h.SetChatLLM(chatClient)
 		logger.Info("chat LLM client initialized", slog.String("model", cfg.LLMDefaultModel))
 	}
@@ -80,6 +81,12 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 		// M10 Stream 7: wire Postgres for PageRank background goroutine.
 		// SetPostgres is a no-op when pg is nil, so no extra nil guard needed.
 		w.SetPostgres(pg)
+		// M11 F11: wire chat LLM as the bi-temporal validator's judge.
+		// Loop is gated by MEMDB_F11_VALIDATOR_ENABLED so a nil-safe wire here
+		// is harmless when the feature flag is off.
+		if chatClient != nil {
+			w.SetLLMJudge(chatClient)
+		}
 		go w.Run(ctx)
 		if reorg != nil {
 			h.SetReorganizer(reorg)
