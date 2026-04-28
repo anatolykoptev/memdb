@@ -68,6 +68,10 @@ func (s *SearchService) stageMergeCandidates(_ context.Context, st *pipelineStat
 // so expanded neighbors also get the penalty if they are contradicted by
 // a seed. No-op when disabled or on DB error.
 func (s *SearchService) stageD2GraphExpand(ctx context.Context, st *pipelineState) error {
+	if st.PSR == nil {
+		st.skip("d2_graph_expand")
+		return nil
+	}
 	st.TextMerged = expandViaGraph(ctx, s.postgres, s.logger, st.TextMerged, st.QueryVec, st.Params.CubeID, st.Params.UserName, st.Params.AgentID)
 	return nil
 }
@@ -77,6 +81,10 @@ func (s *SearchService) stageD2GraphExpand(ctx context.Context, st *pipelineStat
 // get a score multiplier reduction. Soft-fails on DB error (returns the
 // input unchanged via the helper's existing graceful path).
 func (s *SearchService) stageContradictsPenalty(ctx context.Context, st *pipelineState) error {
+	if st.PSR == nil {
+		st.skip("contradicts_penalty")
+		return nil
+	}
 	st.TextMerged = s.applyContradictsPenalty(ctx, st.TextMerged, st.Params)
 	return nil
 }

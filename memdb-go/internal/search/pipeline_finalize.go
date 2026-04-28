@@ -37,7 +37,7 @@ func (s *SearchService) stageFormatItems(_ context.Context, st *pipelineState) e
 // (which is what operators want for budget tracking). Detailed breakdown
 // stays available in the existing logs.
 func (s *SearchService) stagePostProcess(ctx context.Context, st *pipelineState) error {
-	text, skill, tool, pref, _, _, _ := s.postProcessResults(
+	text, skill, tool, pref, llmDur, iterDur, ceDur := s.postProcessResults(
 		ctx, st.QueryVec,
 		st.TextEmbByID, st.SkillEmbByID, st.ToolEmbByID,
 		st.TextFormatted, st.SkillFormatted, st.ToolFormatted, st.PrefFormatted,
@@ -47,6 +47,9 @@ func (s *SearchService) stagePostProcess(ctx context.Context, st *pipelineState)
 	st.SkillFormatted = skill
 	st.ToolFormatted = tool
 	st.PrefFormatted = pref
+	st.Timings["ce_rerank"] = ceDur
+	st.Timings["llm_rerank"] = llmDur
+	st.Timings["iterative"] = iterDur
 	return nil
 }
 

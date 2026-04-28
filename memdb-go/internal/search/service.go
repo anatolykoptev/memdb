@@ -102,6 +102,9 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 		slog.Duration("bfs", st.Timings["bfs_expand"]),
 		slog.Duration("multihop", st.Timings["d2_graph_expand"]),
 		slog.Duration("contradicts", st.Timings["contradicts_penalty"]),
+		slog.Duration("ce_rerank", st.Timings["ce_rerank"]),
+		slog.Duration("llm_rerank", st.Timings["llm_rerank"]),
+		slog.Duration("iterative", st.Timings["iterative"]),
 		slog.Duration("post_process", st.Timings["post_process"]),
 		slog.Duration("profile", st.Timings["profile_inject"]),
 	)

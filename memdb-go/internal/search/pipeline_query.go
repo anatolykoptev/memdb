@@ -81,6 +81,7 @@ func (s *SearchService) stageD7CoTAugment(ctx context.Context, st *pipelineState
 	}
 	if len(st.Subqueries) <= 1 {
 		st.skip("d7_cot_augment")
+		return nil
 	}
 	s.augmentWithSubqueries(ctx, st.PSR, st.Subqueries, st.Params, st.Budget)
 	return nil
@@ -99,6 +100,7 @@ func (s *SearchService) stageD11CoTDecompose(ctx context.Context, st *pipelineSt
 	}
 	if s.CoTDecomposer == nil {
 		st.skip("d11_cot_decompose")
+		return nil
 	}
 	st.D11Subqueries = s.applyCoTDecomposition(ctx, st.PSR, st.Params.Query, st.Params, st.Budget)
 	return nil
