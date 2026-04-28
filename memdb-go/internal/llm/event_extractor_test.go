@@ -43,7 +43,11 @@ The user moved to Berlin to start a new consulting job [mention 2024/03/12].
 	}
 }
 
-func TestParseEventResponse_NoMentionDefaultsToNow(t *testing.T) {
+func TestParseEventResponse_NoMentionLeavesDateNil(t *testing.T) {
+	// Un-anchored events must NOT default to `now` — that would make every
+	// freshly-extracted event match every cat-4 query inside the ±7d
+	// search window (false positives). Leaving EventDate nil routes the
+	// row past the partial btree index (WHERE event_date IS NOT NULL).
 	now := time.Date(2024, 5, 1, 12, 30, 0, 0, time.UTC)
 	raw := `[event_summary]
 User mentioned they enjoy hiking on weekends.
@@ -55,8 +59,8 @@ User mentioned they enjoy hiking on weekends.
 	if len(out) != 1 {
 		t.Fatalf("want 1 event, got %d", len(out))
 	}
-	if out[0].EventDate == nil || out[0].EventDate.Format("2006-01-02") != "2024-05-01" {
-		t.Errorf("expected default date 2024-05-01, got %v", out[0].EventDate)
+	if out[0].EventDate != nil {
+		t.Errorf("expected nil EventDate when no [mention] anchor, got %v", out[0].EventDate)
 	}
 }
 

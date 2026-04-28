@@ -339,13 +339,12 @@ func buildEvent(summaryBlock, tagsBlock string, now time.Time) (Event, bool) {
 		tags = append(tags, flat)
 	}
 
-	// Default to today's date when no anchor was present. F3 search-time
-	// date-window matching needs *some* anchor — Memobase's entry_summary
-	// always stamps one, so this is just a defensive fallback.
-	if eventDate == nil {
-		t := now.UTC().Truncate(24 * time.Hour)
-		eventDate = &t
-	}
+	// No fallback when LLM omits [mention …]: leaving EventDate nil writes
+	// NULL to event_date and the partial btree index (WHERE event_date IS
+	// NOT NULL) skips the row on date-window lookups. Stamping `now` here
+	// would make every freshly-extracted un-anchored event match every
+	// cat-4 query within the ±7d search window — false positives on the
+	// metric F3 targets.
 
 	return Event{
 		EventText: summaryLine,
