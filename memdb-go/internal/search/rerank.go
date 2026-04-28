@@ -17,6 +17,9 @@ import (
 	"strconv"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search/rerank"
 )
 
@@ -259,6 +262,11 @@ func applyDecayToItem(item map[string]any, now time.Time, alpha float64) {
 		}
 		pr := pageRankMultiplier(meta)
 		combined := cosine * recency * imp * hier * pr
+		// Record the pre-cap boost for observability (Q5).
+		if mx := searchMx(); mx != nil && mx.D1BoostMagnitude != nil {
+			mx.D1BoostMagnitude.Record(context.Background(), combined,
+				metric.WithAttributes(attribute.String("formula", "combined")))
+		}
 		if combined > 1.0 {
 			combined = 1.0
 		}

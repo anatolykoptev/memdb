@@ -27,6 +27,10 @@ type dbMetricsInstruments struct {
 	// Emitted after InsertMemoryNodes commits the transaction. A stalled rate
 	// (0 for 1h) means the memory-write pipeline is silently broken.
 	MemoryAdded metric.Int64Counter
+
+	// ExtractExamplesWritten (Q5) — successful INSERT into extract_examples by kind.
+	// kind ∈ {positive, negative, correction}.
+	ExtractExamplesWritten metric.Int64Counter
 }
 
 func dbMx() *dbMetricsInstruments {
@@ -38,17 +42,17 @@ func dbMx() *dbMetricsInstruments {
 		added, _ := meter.Int64Counter("memdb.memory.added",
 			metric.WithDescription("Count of memory nodes successfully inserted into memos_graph.Memory, labelled by type and cube_id. Stall (rate=0 for 1h) indicates pipeline breakage."),
 		)
+		exWritten, _ := meter.Int64Counter("memdb.feedback.extract_examples_written_total",
+			metric.WithDescription("Successful INSERTs into extract_examples by kind (positive|negative|correction)"),
+		)
 		dbMetrics = &dbMetricsInstruments{
 			MigrationChecksumDrift: drift,
 			MemoryAdded:            added,
+			ExtractExamplesWritten: exWritten,
 		}
 
-		// Pre-register both counters at value 0 so Prometheus scrapes them
-		// before any real event fires. Without this, dashboards and alert
-		// rules see "metric not found" until the first Inc — a gap in
-		// observability especially problematic for the drift counter
-		// (drift IS the signal; not-seeing-it must not look identical to
-		// "nothing scraped yet").
+		// Pre-register counters at value 0 so Prometheus scrapes them
+		// before any real event fires.
 		ctx := context.Background()
 		drift.Add(ctx, 0, metric.WithAttributes(attribute.String("name", "")))
 		added.Add(ctx, 0,
@@ -57,6 +61,10 @@ func dbMx() *dbMetricsInstruments {
 				attribute.String("cube_id", ""),
 			),
 		)
+		// Pre-register extract_examples kinds at zero.
+		for _, kind := range []string{"positive", "negative", "correction"} {
+			exWritten.Add(ctx, 0, metric.WithAttributes(attribute.String("kind", kind)))
+		}
 	})
 	return dbMetrics
 }

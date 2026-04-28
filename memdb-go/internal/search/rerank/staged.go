@@ -58,6 +58,9 @@ type Staged struct {
 	MaxInputSize   int // 0 → 50
 	OnStage        func(ctx context.Context, stage, outcome string)
 	OnJustified    func(ctx context.Context, relevance string)
+	// OnStageSize fires at each stage entry with the candidate count.
+	// stage ∈ {1_cosine, 2_refine, 3_justify}. Optional (nil → no-op).
+	OnStageSize func(ctx context.Context, stage string, size int)
 }
 
 // Name implements Reranker.
@@ -75,6 +78,11 @@ func (s Staged) Rerank(ctx context.Context, query string, items []Item) ([]Item,
 		candidates = candidates[:maxIn]
 	}
 
+	// Stage 1 = cosine (pre-filter): record total candidate count entering D5.
+	s.fireStageSize(ctx, "1_cosine", len(candidates))
+
+	// Stage 2: refine (LLM shortlist).
+	s.fireStageSize(ctx, "2_refine", len(candidates))
 	shortlist, err := s.stage2Refine(ctx, query, candidates)
 	if err != nil {
 		s.fireStage(ctx, "2_refine", "error")
@@ -87,6 +95,8 @@ func (s Staged) Rerank(ctx context.Context, query string, items []Item) ([]Item,
 		return items, nil
 	}
 
+	// Stage 3: justify (LLM relevance filter).
+	s.fireStageSize(ctx, "3_justify", len(shortlist))
 	justified, err := s.stage3Justify(ctx, query, shortlist, candidates)
 	if err != nil {
 		s.fireStage(ctx, "3_justify", "fallback")
@@ -251,5 +261,11 @@ func (s Staged) fireJustified(ctx context.Context, relevance string) {
 func (s Staged) debug(msg string, err error) {
 	if s.Logger != nil {
 		s.Logger.Debug(msg, slog.Any("error", err))
+	}
+}
+
+func (s Staged) fireStageSize(ctx context.Context, stage string, size int) {
+	if s.OnStageSize != nil {
+		s.OnStageSize(ctx, stage, size)
 	}
 }

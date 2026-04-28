@@ -16,12 +16,15 @@ var (
 )
 
 type schedMetricsStruct struct {
-	Messages       metric.Int64Counter     // labels: label, outcome
-	Duration       metric.Float64Histogram // labels: label
-	DLQ            metric.Int64Counter     // labels: label
-	TreeReorg      metric.Int64Counter     // labels: tier, outcome
-	PageRankRuns   metric.Int64Counter     // labels: outcome (success|empty|db_error|compute_error|skipped_other_leader)
-	PageRankLastRun metric.Float64Gauge    // seconds since epoch of last completed run
+	Messages        metric.Int64Counter     // labels: label, outcome
+	Duration        metric.Float64Histogram // labels: label
+	DLQ             metric.Int64Counter     // labels: label
+	TreeReorg       metric.Int64Counter     // labels: tier, outcome
+	PageRankRuns    metric.Int64Counter     // labels: outcome (success|empty|db_error|compute_error|skipped_other_leader)
+	PageRankLastRun metric.Float64Gauge     // seconds since epoch of last completed run
+	// D3ClusterSize (Q5) — number of members in each cluster at promotion time.
+	// tier ∈ {episodic, semantic}.
+	D3ClusterSize metric.Int64Histogram
 }
 
 // labelPageRankOutcome returns an OTel attribute option for pagerank outcome labels.
@@ -53,6 +56,10 @@ func schedMx() *schedMetricsStruct {
 			metric.WithDescription("Duration in seconds of the last PageRank computation cycle"),
 			metric.WithUnit("s"),
 		)
+		d3cs, _ := meter.Int64Histogram("memdb.scheduler.d3_cluster_size",
+			metric.WithDescription("D3 reorganizer: member count of each cluster at promotion (tier=episodic|semantic)"),
+			metric.WithExplicitBucketBoundaries(2, 3, 5, 10, 20, 50),
+		)
 		schedMetricsInstruments = &schedMetricsStruct{
 			Messages:        msgs,
 			Duration:        dur,
@@ -60,6 +67,7 @@ func schedMx() *schedMetricsStruct {
 			TreeReorg:       tr,
 			PageRankRuns:    prRuns,
 			PageRankLastRun: prLast,
+			D3ClusterSize:   d3cs,
 		}
 		// Pre-register TreeReorg at zero so Prometheus scrapers see the
 		// series immediately (matches db/metrics.go pattern).
@@ -72,6 +80,12 @@ func schedMx() *schedMetricsStruct {
 		for _, outcome := range []string{"success", "empty", "db_error", "compute_error", "skipped_other_leader"} {
 			prRuns.Add(context.Background(), 0, metric.WithAttributes(
 				attribute.String("outcome", outcome),
+			))
+		}
+		// Pre-register D3 cluster size for both tiers.
+		for _, tier := range []string{"episodic", "semantic"} {
+			d3cs.Record(context.Background(), 0, metric.WithAttributes(
+				attribute.String("tier", tier),
 			))
 		}
 	})

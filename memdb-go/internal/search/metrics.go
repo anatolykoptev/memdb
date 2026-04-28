@@ -38,6 +38,12 @@ type searchMetricsInstruments struct {
 	// CELiveCall (M10 Stream 6) — fired every time the live cross-encoder
 	// HTTP path executed (regardless of why it was reached).
 	CELiveCall metric.Int64Counter
+	// D1BoostMagnitude (Q5) — combined D1 boost before the > 1.0 cap.
+	// formula label is always "combined" (single code path); kept as label
+	// so future formulas can be compared without schema change.
+	D1BoostMagnitude metric.Float64Histogram
+	// D5StageInputSize (Q5) — candidate count entering each staged-retrieval stage.
+	D5StageInputSize metric.Int64Histogram
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -81,6 +87,12 @@ func searchMx() *searchMetricsInstruments {
 			metric.WithDescription("M10 Stream 6: CE precompute lookup outcome (outcome in hit|miss|stale)"))
 		celive, _ := m.Int64Counter("memdb.search.ce_live_call_total",
 			metric.WithDescription("M10 Stream 6: live cross-encoder HTTP rerank invocations"))
+		d1boost, _ := m.Float64Histogram("memdb.search.d1_boost_magnitude",
+			metric.WithDescription("D1 combined boost value before the >1.0 cap (formula=combined)"),
+			metric.WithExplicitBucketBoundaries(0.5, 1.0, 1.5, 2.0, 3.0, 5.0))
+		d5size, _ := m.Int64Histogram("memdb.search.d5_stage_input_size",
+			metric.WithDescription("Candidate count at each D5 staged-retrieval stage entry (stage=1_cosine|2_refine|3_justify)"),
+			metric.WithExplicitBucketBoundaries(0, 5, 10, 20, 50, 100, 200))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -97,6 +109,8 @@ func searchMx() *searchMetricsInstruments {
 			LevelTotal:       lvl,
 			CEPrecomputeHit:  ceph,
 			CELiveCall:       celive,
+			D1BoostMagnitude: d1boost,
+			D5StageInputSize: d5size,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -120,6 +134,13 @@ func searchMx() *searchMetricsInstruments {
 			ceph.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
 		}
 		celive.Add(ctx, 0)
+		// Pre-register D1 boost magnitude so the formula=combined bucket-set is
+		// visible from the first Prometheus scrape.
+		d1boost.Record(ctx, 0, metric.WithAttributes(attribute.String("formula", "combined")))
+		// Pre-register D5 stage input size for all three stage labels.
+		for _, stage := range []string{"1_cosine", "2_refine", "3_justify"} {
+			d5size.Record(ctx, 0, metric.WithAttributes(attribute.String("stage", stage)))
+		}
 	})
 	return searchMetrics
 }

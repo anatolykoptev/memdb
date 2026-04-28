@@ -2,9 +2,11 @@
 package embedder
 
 import (
+	"context"
 	"sync"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -14,9 +16,12 @@ var (
 )
 
 type embedderMetricsStruct struct {
-	Requests  metric.Int64Counter
-	Duration  metric.Float64Histogram
-	BatchSize metric.Float64Histogram
+	Requests   metric.Int64Counter
+	Duration   metric.Float64Histogram
+	BatchSize  metric.Float64Histogram
+	// RetryTotal (Q5) — retry attempts by classified reason.
+	// reason ∈ {transient, http_429, http_5xx, context}.
+	RetryTotal metric.Int64Counter
 }
 
 // embedderMetrics returns the singleton embedder instruments, lazy-initialised.
@@ -33,10 +38,19 @@ func embedderMetrics() *embedderMetricsStruct {
 		batch, _ := meter.Float64Histogram("memdb.embedder.batch_size",
 			metric.WithDescription("Number of texts per embedding request"),
 		)
+		retries, _ := meter.Int64Counter("memdb.embedder.retry_total",
+			metric.WithDescription("Embedder retry attempts by reason (transient|http_429|http_5xx|context)"),
+		)
 		embedderMetricsInstruments = &embedderMetricsStruct{
-			Requests:  reqs,
-			Duration:  dur,
-			BatchSize: batch,
+			Requests:   reqs,
+			Duration:   dur,
+			BatchSize:  batch,
+			RetryTotal: retries,
+		}
+		// Pre-register all retry reason labels at zero.
+		ctx := context.Background()
+		for _, reason := range []string{"transient", "http_429", "http_5xx", "context"} {
+			retries.Add(ctx, 0, metric.WithAttributes(attribute.String("reason", reason)))
 		}
 	})
 	return embedderMetricsInstruments

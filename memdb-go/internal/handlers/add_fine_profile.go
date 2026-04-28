@@ -78,8 +78,9 @@ const (
 var (
 	profileMetricsOnce sync.Once
 	profileMetrics     struct {
-		Total    metric.Int64Counter
-		Duration metric.Float64Histogram
+		Total        metric.Int64Counter
+		Duration     metric.Float64Histogram
+		FactsPerMsg  metric.Int64Histogram
 	}
 )
 
@@ -95,6 +96,13 @@ func profileExtractMetrics() {
 			metric.WithDescription("User profile extraction duration"),
 			metric.WithUnit("s"),
 		)
+		profileMetrics.FactsPerMsg, _ = meter.Int64Histogram(
+			"memdb.add.profile_facts_extracted",
+			metric.WithDescription("Number of profile fact entries returned by a single LLM extraction call"),
+			metric.WithExplicitBucketBoundaries(0, 1, 3, 5, 10, 20),
+		)
+		// Pre-register at zero so Prometheus sees the series from startup.
+		profileMetrics.FactsPerMsg.Record(context.Background(), 0)
 	})
 }
 
@@ -185,6 +193,11 @@ func (h *Handler) runProfileExtractWithSem(conversation, userID, cubeID string) 
 		h.logger.Debug("profile extract: LLM call failed",
 			slog.String("user_id", userID), slog.String("cube_id", cubeID), slog.Any("error", err))
 		return
+	}
+	// Record how many profile facts the LLM returned, including zero (Q5).
+	profileExtractMetrics()
+	if profileMetrics.FactsPerMsg != nil {
+		profileMetrics.FactsPerMsg.Record(ctx, int64(len(entries)))
 	}
 	if len(entries) == 0 {
 		recordProfileExtractOutcome(ctx, profileOutcomeEmpty, time.Since(start))
