@@ -187,6 +187,7 @@ var stageNames = []string{
 	"contradicts_penalty",
 	"format_items",
 	"post_process",
+	"reflect",
 	"working_mem_format",
 	"build_response",
 	"profile_inject",

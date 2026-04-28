@@ -149,6 +149,14 @@ func initSearchService(
 				slog.Int("timeout_ms", cfg.CoTTimeoutMS),
 			)
 		}
+		// F2 reflection-loop deep-search agent — env-gated by MEMDB_F2_REFLECTION
+		// (default OFF). Constructed when LLM proxy is configured so flipping
+		// the env at runtime activates the stage without a rebuild. Reuses the
+		// same LLMSearchModel as the rest of the search service.
+		reflectionClient := llm.NewSimpleClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMSearchModel)
+		svc.SetReflectionAgent(search.NewReflectionAgent(reflectionClient))
+		logger.Info("f2 reflection agent wired (gated by MEMDB_F2_REFLECTION)")
+
 		// D7 (MEMDB_SEARCH_COT) + D11 (MEMDB_COT_DECOMPOSE) both enabled:
 		// each query may trigger 2 LLM round-trips + up to 6 extra VectorSearch
 		// calls. Fine for ablation; not recommended for production.
