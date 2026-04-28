@@ -15,6 +15,14 @@
 // expansion: queries that hit a fact also surface its causally-linked
 // neighbours via the GIN index migration 0022 already shipped.
 //
+// Persistence semantics (F12 followup): linked_memory_ids on disk
+// converges from the extract-time set (≤10-candidate window) toward the
+// resolver-enriched set (≤20-candidate window) asynchronously. Search may
+// observe EITHER snapshot at any moment — the extract-time set is written
+// first synchronously by F8, the resolver overwrites it later via the
+// fire-and-forget trigger. Operators chasing "missing link" reports
+// should check both Postgres state and resolver outcome metrics.
+//
 // Env-gate: MEMDB_F12_LINKED — default ON (resolverEnabled = true) per the
 // M11 plan. Set MEMDB_F12_LINKED=false to disable.
 //
@@ -44,8 +52,8 @@ const linkedResolverEnvVar = "MEMDB_F12_LINKED"
 // linkedResolverDefaults — knobs sized to keep the call cheap without losing
 // the long-tail relations the extract-time pass missed.
 const (
-	linkedResolverTopN     = 20            // candidate window (cosine top-N)
-	linkedResolverMaxLinks = 8             // hard cap per fact (avoid jsonb bloat)
+	linkedResolverTopN     = 20 // candidate window (cosine top-N)
+	linkedResolverMaxLinks = 8  // hard cap per fact (avoid jsonb bloat)
 	linkedResolverTimeout  = 30 * time.Second
 	linkedResolverPromptID = "linked_resolver"
 	linkedResolverMaxTok   = 512
@@ -128,6 +136,10 @@ func (r *LinkedIDsResolver) Resolve(
 
 	// Filter: only candidates the LLM was actually offered, valid UUID,
 	// dedup, capped. Anything else is a hallucination.
+	//
+	// F12 followup: bump relations_filtered_total{reason} per drop so
+	// dashboards can split filter pressure by cause. The four reasons
+	// match the closed set in metrics_linked_ids.go.
 	allowed := make(map[string]struct{}, len(candidates))
 	for _, c := range candidates {
 		allowed[c.ID] = struct{}{}
@@ -137,15 +149,19 @@ func (r *LinkedIDsResolver) Resolve(
 	for _, id := range resp.LinkedIDs {
 		id = strings.TrimSpace(id)
 		if id == "" {
+			recordLinkedRelationsFiltered(ctx, linkedFilterEmpty, 1)
 			continue
 		}
 		if _, ok := allowed[id]; !ok {
+			recordLinkedRelationsFiltered(ctx, linkedFilterHallucination, 1)
 			continue
 		}
 		if _, dup := seen[id]; dup {
+			recordLinkedRelationsFiltered(ctx, linkedFilterDup, 1)
 			continue
 		}
 		if _, perr := uuid.Parse(id); perr != nil {
+			recordLinkedRelationsFiltered(ctx, linkedFilterInvalidUUID, 1)
 			continue
 		}
 		seen[id] = struct{}{}

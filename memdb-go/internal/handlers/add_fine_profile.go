@@ -33,9 +33,9 @@ import (
 )
 
 const (
-	profileExtractEnvVar       = "MEMDB_PROFILE_EXTRACT"
+	profileExtractEnvVar        = "MEMDB_PROFILE_EXTRACT"
 	profileExtractSemaphoreSize = 8
-	profileExtractTimeout      = 60 * time.Second
+	profileExtractTimeout       = 60 * time.Second
 )
 
 // profileExtractEnabled reports whether the post-add profile extraction
@@ -78,9 +78,9 @@ const (
 var (
 	profileMetricsOnce sync.Once
 	profileMetrics     struct {
-		Total        metric.Int64Counter
-		Duration     metric.Float64Histogram
-		FactsPerMsg  metric.Int64Histogram
+		Total       metric.Int64Counter
+		Duration    metric.Float64Histogram
+		FactsPerMsg metric.Int64Histogram
 	}
 )
 

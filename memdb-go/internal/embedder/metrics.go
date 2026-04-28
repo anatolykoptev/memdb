@@ -16,11 +16,16 @@ var (
 )
 
 type embedderMetricsStruct struct {
-	Requests   metric.Int64Counter
-	Duration   metric.Float64Histogram
-	BatchSize  metric.Float64Histogram
-	// RetryTotal (Q5) — retry attempts by classified reason.
-	// reason ∈ {transient, http_429, http_5xx, context}.
+	Requests  metric.Int64Counter
+	Duration  metric.Float64Histogram
+	BatchSize metric.Float64Histogram
+	// RetryTotal (Q5) — retry attempts by classified reason. The reason
+	// label is sourced from a closed set so dashboards never see free-form
+	// strings: transient (network/timeout), http_429 (rate-limited),
+	// http_5xx (upstream 5xx), context (caller cancellation / deadline).
+	// Pre-registered at zero below so all four series are visible from
+	// container start. Bumped from internal/embedder/retry.go at the
+	// point each retry decision is taken.
 	RetryTotal metric.Int64Counter
 }
 
