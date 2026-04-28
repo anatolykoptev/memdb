@@ -2,10 +2,71 @@ package search
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"testing"
+	"time"
 
+	"github.com/anatolykoptev/go-kit/rerank"
 	rerankpkg "github.com/anatolykoptev/memdb/memdb-go/internal/search/rerank"
 )
+
+// TestBuildTextRerankPrefix_QueryTagsWired is the Q3 wiring regression test.
+// It asserts that SearchParams.Tags is threaded into CrossEncoder.QueryTags so
+// tag-boost is not dead code at runtime. Without this test the original bug
+// (QueryTags: nil regardless of SearchParams.Tags) was invisible because
+// applyMetadataBoost was only ever tested in unit tests that call it directly.
+func TestBuildTextRerankPrefix_QueryTagsWired(t *testing.T) {
+	// Stand up a minimal CE server so RerankClient.Available() returns true
+	// and buildTextRerankPrefix appends a CrossEncoder to the chain.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Response shape doesn't matter — we only inspect the chain, not run it.
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	svc := &SearchService{
+		RerankClient: rerank.New(rerank.Config{
+			URL:     ts.URL,
+			Model:   "test-ce",
+			Timeout: 2 * time.Second,
+		}, nil),
+	}
+
+	queryVec := []float32{1, 0}
+	embByID := map[string][]float32{"a": {1, 0}, "b": {0, 1}}
+	wantTags := []string{"foo", "bar"}
+
+	p := SearchParams{
+		Query:    "test query",
+		UserName: "user-42",
+		AgentID:  "session-7",
+		Tags:     wantTags,
+	}
+
+	// textLen > 1 triggers CrossEncoder inclusion.
+	chain := buildTextRerankPrefix(svc, queryVec, embByID, 2, p)
+
+	// chain[0] is Cosine, chain[1] is CrossEncoder (when RerankClient available).
+	if len(chain) < 2 {
+		t.Fatalf("expected chain length ≥ 2 (cosine + CE), got %d", len(chain))
+	}
+	ce, ok := chain[1].(rerankpkg.CrossEncoder)
+	if !ok {
+		t.Fatalf("chain[1] is %T, want rerankpkg.CrossEncoder", chain[1])
+	}
+	if !reflect.DeepEqual(ce.QueryTags, wantTags) {
+		t.Errorf("CrossEncoder.QueryTags = %v, want %v (tag-boost wiring missing)", ce.QueryTags, wantTags)
+	}
+	// Smoke-check the other identity fields while we're here.
+	if ce.QueryUserID != p.UserName {
+		t.Errorf("CrossEncoder.QueryUserID = %q, want %q", ce.QueryUserID, p.UserName)
+	}
+	if ce.QuerySessionID != p.AgentID {
+		t.Errorf("CrossEncoder.QuerySessionID = %q, want %q", ce.QuerySessionID, p.AgentID)
+	}
+}
 
 // TestRerankGate_PostCosineOrdering pins the C2 contract: the rerank
 // gate (rerankStrategy) is evaluated on POST-cosine scores, not on the
