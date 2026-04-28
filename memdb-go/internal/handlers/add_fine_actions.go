@@ -50,7 +50,10 @@ func (h *Handler) applyFineActionsCtx(
 			h.applyDeleteAction(ctx, f.TargetID, fc.CubeID)
 			h.evictFromVSet(ctx, fc.CubeID, f.TargetID, "fine add: vset vrem failed")
 		case llm.MemUpdate:
-			h.applyUpdateAction(ctx, f.TargetID, f.Memory, ef.embVec, fc.Now)
+			h.applyUpdateAction(ctx, updateActionArgs{
+				TargetID: f.TargetID, Memory: f.Memory,
+				EmbVec: ef.embVec, Now: fc.Now,
+			})
 			embedded[i].ltmID = f.TargetID
 			if node, vsi, ok := buildUpdateWMNode(f, ef,
 				fc.CubeID, fc.UserID, fc.AgentID, fc.SessionID, fc.Now,
@@ -144,33 +147,43 @@ func (h *Handler) applyDeleteAction(ctx context.Context, targetID, cubeID string
 	}
 }
 
+// updateActionArgs bundles the parameters applyUpdateAction needs. Extracted
+// to satisfy the >4-param style rule (CLAUDE.md "pass a struct"); callers
+// build it inline at the apply site so the data flow stays obvious.
+type updateActionArgs struct {
+	TargetID string
+	Memory   string
+	EmbVec   string
+	Now      string
+}
+
 // applyUpdateAction merges a fact into an existing memory and re-embeds it.
 // Bi-temporal: invalidates old edges (re-created by linkEntitiesAsync with
 // the new valid_at). Clears local + neighbour ce_score_topk caches.
-func (h *Handler) applyUpdateAction(ctx context.Context, targetID, memory, embVec, now string) {
-	if targetID == "" || memory == "" || embVec == "" {
+func (h *Handler) applyUpdateAction(ctx context.Context, a updateActionArgs) {
+	if a.TargetID == "" || a.Memory == "" || a.EmbVec == "" {
 		return
 	}
-	if err := h.postgres.InvalidateEdgesByMemoryID(ctx, targetID, now); err != nil {
+	if err := h.postgres.InvalidateEdgesByMemoryID(ctx, a.TargetID, a.Now); err != nil {
 		h.logger.Debug("fine add: invalidate memory edges on update failed (non-fatal)",
-			slog.String("id", targetID), slog.Any("error", err))
+			slog.String("id", a.TargetID), slog.Any("error", err))
 	}
-	if err := h.postgres.InvalidateEntityEdgesByMemoryID(ctx, targetID, now); err != nil {
+	if err := h.postgres.InvalidateEntityEdgesByMemoryID(ctx, a.TargetID, a.Now); err != nil {
 		h.logger.Debug("fine add: invalidate entity edges on update failed (non-fatal)",
-			slog.String("id", targetID), slog.Any("error", err))
+			slog.String("id", a.TargetID), slog.Any("error", err))
 	}
-	if err := h.postgres.UpdateMemoryNodeFull(ctx, targetID, memory, embVec, now); err != nil {
+	if err := h.postgres.UpdateMemoryNodeFull(ctx, a.TargetID, a.Memory, a.EmbVec, a.Now); err != nil {
 		h.logger.Debug("fine add: update node failed",
-			slog.String("id", targetID), slog.Any("error", err))
+			slog.String("id", a.TargetID), slog.Any("error", err))
 	} else {
-		h.logger.Debug("fine add: merged update", slog.String("target_id", targetID))
+		h.logger.Debug("fine add: merged update", slog.String("target_id", a.TargetID))
 	}
-	if err := h.postgres.ClearCEScoresTopK(ctx, targetID); err != nil {
+	if err := h.postgres.ClearCEScoresTopK(ctx, a.TargetID); err != nil {
 		h.logger.Debug("fine add: clear ce_score_topk on update failed (non-fatal)",
-			slog.String("id", targetID), slog.Any("error", err))
+			slog.String("id", a.TargetID), slog.Any("error", err))
 	}
-	if err := h.postgres.ClearCEScoresTopKForNeighbor(ctx, targetID); err != nil {
+	if err := h.postgres.ClearCEScoresTopKForNeighbor(ctx, a.TargetID); err != nil {
 		h.logger.Debug("fine add: clear ce_score_topk cascade on update failed (non-fatal)",
-			slog.String("id", targetID), slog.Any("error", err))
+			slog.String("id", a.TargetID), slog.Any("error", err))
 	}
 }

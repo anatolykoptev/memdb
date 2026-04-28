@@ -45,8 +45,10 @@ var (
 )
 
 type linkedMetricsStruct struct {
-	FactsProcessed metric.Int64Counter // labels: outcome
-	RelationsFound metric.Int64Counter // unlabeled
+	FactsProcessed metric.Int64Counter     // labels: outcome
+	RelationsFound metric.Int64Counter     // unlabeled
+	CapHit         metric.Int64Counter     // unlabeled — fires when merged set hits linkedResolverMaxLinks
+	Inflight       metric.Int64UpDownCounter // unlabeled — current goroutines past the semaphore
 }
 
 func linkedMx() *linkedMetricsStruct {
@@ -58,15 +60,24 @@ func linkedMx() *linkedMetricsStruct {
 		rf, _ := meter.Int64Counter("memdb.linked_resolver.relations_found_total",
 			metric.WithDescription("F12 linked_memory_ids resolver: total validated relations emitted"),
 		)
+		ch, _ := meter.Int64Counter("memdb.linked_resolver.cap_hit_total",
+			metric.WithDescription("F12 linked_memory_ids resolver: merged set truncated at linkedResolverMaxLinks (8)"),
+		)
+		ic, _ := meter.Int64UpDownCounter("memdb.linked_resolver.inflight_count",
+			metric.WithDescription("F12 linked_memory_ids resolver: goroutines currently past the per-fact semaphore (saturation gauge for 45s budget tail)"),
+		)
 		linkedInstruments = &linkedMetricsStruct{
 			FactsProcessed: fp,
 			RelationsFound: rf,
+			CapHit:         ch,
+			Inflight:       ic,
 		}
 		ctx := context.Background()
 		for _, oc := range linkedOutcomes {
 			fp.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
 		}
 		rf.Add(ctx, 0)
+		ch.Add(ctx, 0)
 	})
 	return linkedInstruments
 }
@@ -88,4 +99,29 @@ func recordLinkedRelationsFound(ctx context.Context, n int) {
 		return
 	}
 	mx.RelationsFound.Add(ctx, int64(n))
+}
+
+// recordLinkedCapHit fires when mergeLinkedIDs / Resolve truncates the
+// emitted set at linkedResolverMaxLinks. Useful as a "should we raise the
+// cap" signal — sustained non-zero rate suggests the LLM is finding more
+// real links than we let through.
+func recordLinkedCapHit(ctx context.Context) {
+	mx := linkedMx()
+	if mx.CapHit == nil {
+		return
+	}
+	mx.CapHit.Add(ctx, 1)
+}
+
+// recordLinkedInflightDelta adjusts the in-flight goroutine gauge. Pass +1
+// after the semaphore acquire and -1 in the release defer — the gauge
+// shows how close we are to saturating linkedResolverSemaphoreSize (4).
+// At sustained 4 with non-trivial p95 latency we are dropping the 45s
+// budget tail and need to raise the cap or shed work.
+func recordLinkedInflightDelta(ctx context.Context, delta int64) {
+	mx := linkedMx()
+	if mx.Inflight == nil {
+		return
+	}
+	mx.Inflight.Add(ctx, delta)
 }

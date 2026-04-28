@@ -214,9 +214,11 @@ func countTopics(guidelines string) int {
 var personaLogOnce sync.Once
 
 // logPersonaOnce emits a single slog.Info line at startup (first call).
-func logPersonaOnce(persona string) {
+// guidelines is the already-resolved taxonomy block — passing it in keeps us
+// from doing a second TaxonomyForPersona map lookup per call (the caller
+// always has it on hand).
+func logPersonaOnce(persona, guidelines string) {
 	personaLogOnce.Do(func() {
-		guidelines := TaxonomyForPersona(persona)
 		topicCount := countTopics(guidelines)
 		slog.Info("profile_taxonomy", "persona", persona, "topic_count", topicCount)
 	})
