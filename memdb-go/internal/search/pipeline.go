@@ -184,6 +184,7 @@ var stageNames = []string{
 	"internet_embed",
 	"merge_candidates",
 	"temporal_augment",
+	"inject_events",
 	"d2_graph_expand",
 	"contradicts_penalty",
 	"format_items",
