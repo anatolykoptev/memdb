@@ -10,6 +10,9 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // FeedbackEvent is a row from memos_graph.feedback_events.
@@ -97,6 +100,11 @@ RETURNING id, prompt_kind, input_text, gold_output, source_event_id, active, cre
 	)
 	if err != nil {
 		return ExtractExample{}, err
+	}
+	// Record successful write (Q5).
+	if mx := dbMx(); mx.ExtractExamplesWritten != nil {
+		mx.ExtractExamplesWritten.Add(ctx, 1,
+			metric.WithAttributes(attribute.String("kind", params.PromptKind)))
 	}
 	return ex, nil
 }

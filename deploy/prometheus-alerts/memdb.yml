@@ -1,0 +1,38 @@
+groups:
+  - name: memdb_q5
+    rules:
+      # Alert when the cache hit ratio across all routes drops below 30% for 10 minutes.
+      # A sustained low ratio means either the cache is mis-keyed or Redis is unhealthy.
+      - alert: MemDBLowCacheHitRatio
+        expr: |
+          (
+            sum(rate(memdb_cache_hits_total[5m]))
+            /
+            (
+              sum(rate(memdb_cache_hits_total[5m]))
+              + sum(rate(memdb_cache_misses_total[5m]))
+            )
+          ) < 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MemDB cache hit ratio below 30%"
+          description: >
+            Cache hit ratio has been below 30% for 10 minutes.
+            Current value: {{ $value | humanizePercentage }}.
+            Investigate Redis connectivity or cache key correctness.
+
+      # Alert when the embedder retry rate is high — indicates upstream embed
+      # server is flapping or rate-limiting aggressively.
+      - alert: MemDBHighEmbedderRetry
+        expr: rate(memdb_embedder_retry_total[5m]) > 50
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MemDB embedder retry rate is high"
+          description: >
+            Embedder retry rate is {{ $value | humanize }} req/s over the last 5 minutes.
+            Reason breakdown available via the `reason` label.
+            Investigate embed-server health or upstream rate limits.

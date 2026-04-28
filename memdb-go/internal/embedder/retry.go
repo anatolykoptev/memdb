@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // retryConfig holds exponential backoff parameters.
@@ -43,6 +46,31 @@ func isRetryableStatus(code int) bool {
 		code == http.StatusGatewayTimeout
 }
 
+// retryReason classifies an error + HTTP status into a metric label.
+// reason ∈ {transient, http_429, http_5xx, context}.
+func retryReason(err error, status int) string {
+	if err != nil && errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) {
+		return "context"
+	}
+	if status == http.StatusTooManyRequests {
+		return "http_429"
+	}
+	if status >= 500 {
+		return "http_5xx"
+	}
+	return "transient"
+}
+
+// recordRetry bumps the retry counter for the given reason.
+func recordRetry(ctx context.Context, reason string) {
+	mx := embedderMetrics()
+	if mx.RetryTotal == nil {
+		return
+	}
+	mx.RetryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
+}
+
 // withRetry executes fn up to cfg.maxAttempts times with exponential backoff.
 // It retries on transient errors returned by fn. fn should return (result, httpStatus, error).
 // Pass httpStatus=0 when not applicable (e.g. non-HTTP errors).
@@ -62,6 +90,10 @@ func withRetry[T any](ctx context.Context, cfg retryConfig, fn func() (T, int, e
 		if last || !retryable {
 			return zero, err
 		}
+
+		// Record this retry attempt with the classified reason.
+		reason := retryReason(err, status)
+		recordRetry(ctx, reason)
 
 		select {
 		case <-ctx.Done():
