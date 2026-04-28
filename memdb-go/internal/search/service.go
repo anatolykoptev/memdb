@@ -71,164 +71,72 @@ func (s *SearchService) CanSearch() bool {
 	return s.embedder != nil && s.postgres != nil
 }
 
-// Search executes the full native search pipeline.
+// Search executes the full native search pipeline as a sequence of stages
+// (see pipeline.go / pipeline_*.go). Per-stage timings are emitted as
+// memdb.search.stage_duration_ms / stage_total — the legacy "search
+// pipeline timing" slog line is preserved for backward compatibility.
+//
+// Only embed_query is fatal — every other stage soft-fails. The
+// orchestrator inspects state.embedErr after runPipeline to surface that
+// one specific error to callers (existing contract).
 func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutput, error) {
 	pipelineStart := time.Now()
+	st := &pipelineState{Params: p, EmbedQuery: p.Query}
+	stages := s.defaultStages()
 
-	// Step 0.25: D7 — optional LLM Chain-of-Thought query decomposition.
-	// Env-gated (MEMDB_SEARCH_COT=true, default off). Multi-part questions
-	// get split into up to 3 atomic sub-questions. subqueries[0] is always
-	// the original; each of subqueries[1:] drives an extra vector search
-	// after the primary parallel phase. Graceful degrade: single-element
-	// slice on any error / short query / disabled env.
-	subqueries := DecomposeQuery(ctx, s.logger, p.Query, CoTConfig{
-		APIURL: s.LLMReranker.APIURL,
-		APIKey: s.LLMReranker.APIKey,
-		Model:  s.LLMReranker.Model,
-	})
-	// Ensure the original query is always the first subquery. The primary
-	// pipeline (rewrite → embed → parallel search) always runs on p.Query;
-	// subqueries[1:] drive the D7 augmentation below.
-	if len(subqueries) == 0 || subqueries[0] != p.Query {
-		subqueries = append([]string{p.Query}, subqueries...)
+	runPipeline(ctx, s.logger, stages, st)
+
+	// embed_query is the only fatal stage — surface its error verbatim.
+	if st.embedErr != nil {
+		return nil, st.embedErr
 	}
 
-	// Step 0.5: D4 — optional LLM rewrite of the query before embedding.
-	// Env-gated (MEMDB_QUERY_REWRITE=true, default off). Falls back to the
-	// original query on any error / low confidence / short or long query.
-	// Only the embed call uses embedQuery; BM25, CE rerank, LLM rerank,
-	// and D10 enhance keep p.Query for user-intent fidelity.
-	embedQuery, _ := applyQueryRewrite(ctx, s.logger, p.Query,
-		time.Now().UTC().Format(time.RFC3339),
-		QueryRewriteConfig{
-			APIURL: s.LLMReranker.APIURL,
-			APIKey: s.LLMReranker.APIKey,
-			Model:  s.LLMReranker.Model,
-		})
-
-	// Step 1: Embed query (uses EmbedQuery for query-specific prefix if configured)
-	t0 := time.Now()
-	queryVec, err := s.embedder.EmbedQuery(ctx, embedQuery)
-	if err != nil {
-		return nil, err
-	}
-	embedDur := time.Since(t0)
-
-	// Step 2: Tokenize for fulltext + temporal detection
-	tokens := TokenizeMixed(p.Query)
-	tsquery := BuildTSQuery(tokens)
-	cutoffISO, hasCutoff := s.detectTemporalCutoff(p.Query)
-
-	budget := s.computeBudget(p)
-
-	// Step 3: Parallel DB searches
-	t0 = time.Now()
-	psr, err := s.runParallelSearches(ctx, queryVec, tokens, tsquery, cutoffISO, hasCutoff, p, budget)
-	if err != nil {
-		return nil, err
-	}
-	parallelDur := time.Since(t0)
-
-	// Step 3.25: D7 — per-subquery vector augmentation. No-op for atomic
-	// queries (len(subqueries) <= 1). For multi-part queries, runs an extra
-	// VectorSearch per scope for each sub-question and unions the results
-	// into psr by id (max-score). The rest of the pipeline is unchanged.
-	cotStart := time.Now()
-	s.augmentWithSubqueries(ctx, psr, subqueries, p, budget)
-	cotDur := time.Since(cotStart)
-
-	// Step 3.5: D11 — Chain-of-Thought query decomposition for multi-hop /
-	// temporal questions. Sibling of D7 with a stricter heuristic gate
-	// (length + temporal connectors + multi-entity) and a temporal-aware
-	// prompt. Each sub-query[1:] runs an extra text-scope VectorSearch and
-	// the results are unioned into psr.textVec so the downstream D2
-	// expandViaGraph step walks edges from a richer seed set. No-op when
-	// CoTDecomposer is nil (default) or the gate skips. Best-effort: any
-	// error → silent fallback to the original-query-only path.
-	d11Start := time.Now()
-	d11Subs := s.applyCoTDecomposition(ctx, psr, p.Query, p, budget)
-	d11Dur := time.Since(d11Start)
-
-	// BFS multi-hop expansion (serially after parallel phase)
-	t0 = time.Now()
-	bfsResults := s.runBFSExpansion(ctx, psr.textVec, p)
-	bfsDur := time.Since(t0)
-
-	// Step 3.5: Embed internet results (if any)
-	internetMerged := s.embedInternetResults(ctx, psr.internetResults)
-
-	// Step 4: Merge per type
-	textMerged, skillMerged, toolMerged := s.mergeSearchResults(psr, bfsResults, internetMerged, p)
-
-	// Step 4.25: D2 multi-hop graph expansion (env-gated by
-	// MEMDB_SEARCH_MULTIHOP=true; default off). Walks memory_edges up to
-	// 2 hops from current text_mem candidates, injecting neighbors with
-	// 0.8^hop score decay. Pool capped at 2× original size. Runs before
-	// CONTRADICTS so expanded neighbors also get the penalty if they are
-	// contradicted by a seed. No-op when disabled or on DB error.
-	t0 = time.Now()
-	textMerged = expandViaGraph(ctx, s.postgres, s.logger, textMerged, queryVec, p.CubeID, p.UserName, p.AgentID)
-	multihopDur := time.Since(t0)
-
-	// Step 4.5: CONTRADICTS penalty
-	t0 = time.Now()
-	textMerged = s.applyContradictsPenalty(ctx, textMerged, p)
-	contradictsDur := time.Since(t0)
-
-	// Step 5: Format per type
-	textFormatted, textEmbByID := FormatMergedItems(textMerged, p.IncludeEmbedding)
-	skillFormatted, skillEmbByID := FormatMergedItems(skillMerged, p.IncludeEmbedding)
-	toolFormatted, toolEmbByID := FormatMergedItems(toolMerged, p.IncludeEmbedding)
-	prefFormatted := FormatPrefResults(psr.prefResults)
-
-	// Steps 6–11: Rerank, dedup, trim.
-	var llmRerankDur, iterativeDur, ceRerankDur time.Duration
-	textFormatted, skillFormatted, toolFormatted, prefFormatted, llmRerankDur, iterativeDur, ceRerankDur =
-		s.postProcessResults(ctx, queryVec, textEmbByID, skillEmbByID, toolEmbByID, textFormatted, skillFormatted, toolFormatted, prefFormatted, p)
-
-	// Step 12: WorkingMemory → ActMem
-	actMemFormatted := s.formatWorkingMem(queryVec, psr.workingMemItems, p)
-
-	// Step 12: Build response
-	result := buildFullSearchResult(textFormatted, skillFormatted, toolFormatted, prefFormatted, actMemFormatted, p.CubeID)
-
-	// Step 12.5: Inject user profile summary
-	t0 = time.Now()
-	if s.Profiler != nil && p.CubeID != "" {
-		result.ProfileMem = s.Profiler.GetProfile(ctx, p.CubeID)
-	}
-	profileDur := time.Since(t0)
-
-	// Pipeline timing log
+	// Backward-compat slog line — operators have dashboards keyed off it.
 	s.logger.Info("search pipeline timing",
 		slog.Duration("total", time.Since(pipelineStart)),
-		slog.Duration("embed", embedDur),
-		slog.Duration("parallel_db", parallelDur),
-		slog.Duration("cot_augment", cotDur),
-		slog.Duration("d11_decompose", d11Dur),
-		slog.Int("d11_subqueries", len(d11Subs)),
-		slog.Duration("bfs", bfsDur),
-		slog.Duration("multihop", multihopDur),
-		slog.Duration("contradicts", contradictsDur),
-		slog.Duration("ce_rerank", ceRerankDur),
-		slog.Duration("llm_rerank", llmRerankDur),
-		slog.Duration("iterative", iterativeDur),
-		slog.Duration("profile", profileDur),
+		slog.Duration("embed", st.Timings["embed_query"]),
+		slog.Duration("parallel_db", st.Timings["parallel_db_fanout"]),
+		slog.Duration("cot_augment", st.Timings["d7_cot_augment"]),
+		slog.Duration("d11_decompose", st.Timings["d11_cot_decompose"]),
+		slog.Int("d11_subqueries", len(st.D11Subqueries)),
+		slog.Duration("bfs", st.Timings["bfs_expand"]),
+		slog.Duration("multihop", st.Timings["d2_graph_expand"]),
+		slog.Duration("contradicts", st.Timings["contradicts_penalty"]),
+		slog.Duration("ce_rerank", st.Timings["ce_rerank"]),
+		slog.Duration("llm_rerank", st.Timings["llm_rerank"]),
+		slog.Duration("iterative", st.Timings["iterative"]),
+		slog.Duration("post_process", st.Timings["post_process"]),
+		slog.Duration("profile", st.Timings["profile_inject"]),
 	)
 
-	// Step 13: Async retrieval_count increment
-	if s.postgres != nil {
-		if ids := collectResultIDs(textFormatted, skillFormatted); len(ids) > 0 {
-			nowStr := time.Now().UTC().Format("2006-01-02T15:04:05.000000")
-			go func() {
-				if err := s.postgres.IncrRetrievalCount(context.Background(), ids, nowStr); err != nil {
-					s.logger.Debug("incr retrieval count failed", slog.Any("error", err))
-				}
-			}()
-		}
-	}
+	return &SearchOutput{Result: st.Result}, nil
+}
 
-	return &SearchOutput{Result: result}, nil
+// defaultStages returns the canonical search pipeline. New features (F1
+// VEC_COT, F2 reflection-loop, F6) plug in by inserting a stage at the
+// right point — no edits to Search() needed. Stage order MUST match
+// stageNames in pipeline.go (used for metric pre-registration).
+func (s *SearchService) defaultStages() []stage {
+	return []stage{
+		funcStage{"d7_cot_decompose", s.stageD7CoTDecompose},
+		funcStage{"d4_query_rewrite", s.stageD4QueryRewrite},
+		funcStage{"embed_query", s.stageEmbedQuery},
+		funcStage{"tokenize_temporal_cutoff", s.stageTokenizeTemporal},
+		funcStage{"parallel_db_fanout", s.stageParallelDB},
+		funcStage{"d7_cot_augment", s.stageD7CoTAugment},
+		funcStage{"d11_cot_decompose", s.stageD11CoTDecompose},
+		funcStage{"bfs_expand", s.stageBFSExpand},
+		funcStage{"internet_embed", s.stageInternetEmbed},
+		funcStage{"merge_candidates", s.stageMergeCandidates},
+		funcStage{"d2_graph_expand", s.stageD2GraphExpand},
+		funcStage{"contradicts_penalty", s.stageContradictsPenalty},
+		funcStage{"format_items", s.stageFormatItems},
+		funcStage{"post_process", s.stagePostProcess},
+		funcStage{"working_mem_format", s.stageWorkingMemFormat},
+		funcStage{"build_response", s.stageBuildResponse},
+		funcStage{"profile_inject", s.stageProfileInject},
+		funcStage{"retrieval_count_async", s.stageRetrievalCountAsync},
+	}
 }
 
 // detectTemporalCutoff detects and returns the temporal cutoff ISO string and a boolean.
