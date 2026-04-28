@@ -29,8 +29,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -39,13 +37,14 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/featureflags"
 )
 
-const (
-	// eventInjectEnvVar is shared with the extractor (handlers package);
-	// duplicated as a literal here to avoid a circular import.
-	eventInjectEnvVar = "MEMDB_F3_EVENTS"
+// eventInjectEnvVar mirrors featureflags.EnvF3Events for legacy test
+// references; do not change it here without updating the package-level const.
+const eventInjectEnvVar = featureflags.EnvF3Events
 
+const (
 	// eventInjectTopN caps how many events we splice into a single search.
 	// Five matches the cap on profile_mem snippets — enough to seed the
 	// rerank pool without crowding out memory rows.
@@ -72,13 +71,7 @@ type eventsPostgres interface {
 }
 
 func eventInjectEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(eventInjectEnvVar)))
-	switch v {
-	case "false", "0":
-		return false
-	default:
-		return true
-	}
+	return featureflags.F3EventsEnabled()
 }
 
 // --- metrics ---
@@ -235,6 +228,12 @@ func (s *SearchService) lookupEvents(
 // properties JSON mirrors what FormatMemoryItem expects: id, memory,
 // memory_type, plus the F3-specific event_date / tags fields so downstream
 // rerank or LLM-judge stages can boost matching candidates.
+//
+// Best-effort JSON encode — failure means we drop the row's metadata but
+// never abort the search.  json.Marshal on this `map[string]any` shape can
+// only fail on cycles (which our shape cannot produce) or on non-marshalable
+// values; both surface as a slog.Debug line so the silent-failure mode is
+// visible in traces.
 func eventToMergedResult(ev db.EventEntry) MergedResult {
 	props := map[string]any{
 		"id":          ev.ID.String(),
@@ -246,10 +245,12 @@ func eventToMergedResult(ev db.EventEntry) MergedResult {
 	if ev.EventDate != nil {
 		props["event_date"] = ev.EventDate.Format("2006-01-02")
 	}
-	// Best-effort JSON encode — failure here means we drop the row's
-	// metadata, but never abort the search. (json.Marshal on map[string]any
-	// can only fail on cycles, which our shape cannot produce.)
-	propsBytes, _ := json.Marshal(props)
+	propsBytes, err := json.Marshal(props)
+	if err != nil {
+		slog.Debug("inject_events: properties marshal failed (sending bare row)",
+			slog.String("event_id", ev.ID.String()),
+			slog.Any("error", err))
+	}
 	return MergedResult{
 		ID:         ev.ID.String(),
 		Properties: string(propsBytes),

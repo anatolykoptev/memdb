@@ -21,8 +21,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -32,25 +30,20 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/featureflags"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 const (
-	eventExtractEnvVar        = "MEMDB_F3_EVENTS"
 	eventExtractSemaphoreSize = 4
 	eventExtractTimeout       = 60 * time.Second
 )
 
 // eventExtractEnabled reports whether the post-add event extraction goroutine
-// should run. Default TRUE; only "false"/"0" disable.
+// should run. Default TRUE; only "false"/"0" disable. Shares MEMDB_F3_EVENTS
+// with the search-time injector via internal/featureflags.
 func eventExtractEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(eventExtractEnvVar)))
-	switch v {
-	case "false", "0":
-		return false
-	default:
-		return true
-	}
+	return featureflags.F3EventsEnabled()
 }
 
 // --- bounded concurrency ---
@@ -127,9 +120,14 @@ func recordEventOutcome(ctx context.Context, outcome string, dur time.Duration) 
 // triggerProfileExtract — both run from triggerBackgroundExtractors and share
 // the per-/add conversation/userID/cubeID context.
 //
+// `now` is the request-time anchor (already computed by the caller); it
+// flows into llm.EventExtractor.Extract so date-relative event extraction
+// uses the same instant the rest of the /add pipeline sees.  An empty or
+// unparseable now collapses to time.Now().UTC() — never breaks the call.
+//
 // Returns true when a goroutine was scheduled (used by tests / callers that
 // want to know whether the work was admitted).
-func (h *Handler) triggerEventExtract(conversation, userID, cubeID string) bool {
+func (h *Handler) triggerEventExtract(conversation, userID, cubeID, now string) bool {
 	if h == nil || h.postgres == nil || h.llmExtractor == nil {
 		return false
 	}
@@ -150,21 +148,39 @@ func (h *Handler) triggerEventExtract(conversation, userID, cubeID string) bool 
 	}
 	go func() {
 		defer sem.Release(1)
-		h.runEventExtractWithSem(conversation, userID, cubeID)
+		h.runEventExtractWithSem(conversation, userID, cubeID, now)
 	}()
 	return true
+}
+
+// parseNowAnchor parses the ISO timestamp produced by nowTimestamp() and falls
+// back to time.Now().UTC() on any error so a malformed anchor never breaks
+// extraction.
+func parseNowAnchor(now string) time.Time {
+	if now == "" {
+		return time.Now().UTC()
+	}
+	const layout = "2006-01-02T15:04:05.000000"
+	if t, err := time.Parse(layout, now); err == nil {
+		return t.UTC()
+	}
+	const layout2 = "2006-01-02T15:04:05"
+	if t, err := time.Parse(layout2, now); err == nil {
+		return t.UTC()
+	}
+	return time.Now().UTC()
 }
 
 // runEventExtractWithSem is the goroutine body. The caller has already
 // acquired the semaphore; this function runs Extract under a 60s deadline,
 // embeds each event text, and inserts the rows into user_events.
-func (h *Handler) runEventExtractWithSem(conversation, userID, cubeID string) {
+func (h *Handler) runEventExtractWithSem(conversation, userID, cubeID, now string) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), eventExtractTimeout)
 	defer cancel()
 
 	ee := llm.NewEventExtractor(h.llmExtractor.Client())
-	events, err := ee.Extract(ctx, conversation, time.Now().UTC())
+	events, err := ee.Extract(ctx, conversation, parseNowAnchor(now))
 	if err != nil {
 		if errors.Is(err, llm.ErrEventEmptyConversation) {
 			recordEventOutcome(ctx, eventOutcomeEmpty, time.Since(start))
@@ -182,12 +198,16 @@ func (h *Handler) runEventExtractWithSem(conversation, userID, cubeID string) {
 
 	// Embed event_text for cosine search. Failures are non-fatal — the row
 	// can still be inserted without an embedding (date/tag search still works).
-	texts := make([]string, len(events))
-	for i, ev := range events {
-		texts[i] = ev.EventText
-	}
+	// M2 followup: skip the texts/embed allocations entirely when len==0
+	// (the early `if len(events) == 0` above already handles that, so the
+	// allocation here is by definition non-empty — kept as defence-in-depth
+	// in case future code paths reach this point with zero events).
 	var embeddings [][]float32
-	if h.embedder != nil {
+	if h.embedder != nil && len(events) > 0 {
+		texts := make([]string, len(events))
+		for i, ev := range events {
+			texts[i] = ev.EventText
+		}
 		if vecs, embErr := h.embedder.Embed(ctx, texts); embErr == nil {
 			embeddings = vecs
 		} else {
