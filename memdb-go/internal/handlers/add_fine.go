@@ -14,7 +14,15 @@ import (
 
 // nativeFineAddForCube implements the fine-mode add pipeline (v2) for a single cube.
 // Steps emit per-stage timing into memdb.add.stage_duration_ms{stage=...}.
+//
+// M11 F8: when MEMDB_ATOMIC_FACTS=true, delegates to runAtomicFineForCube,
+// which uses mem0's verbatim ADDITIVE_EXTRACTION_PROMPT (atomic per-fact
+// extraction). Default-off preserves the legacy single-paragraph path
+// byte-identical.
 func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
+	if atomicFactsEnabled() {
+		return h.runAtomicFineForCube(ctx, req, cubeID)
+	}
 	if len(req.Messages) == 0 {
 		return nil, nil
 	}

@@ -170,6 +170,7 @@ venv.bak/
 *.txt
 !memdb-go/vendor/**/modules.txt
 !memdb-go/vendor/modules.txt
+!memdb-go/internal/llm/*.txt
 *.docx
 *.doc
 *.pptx
