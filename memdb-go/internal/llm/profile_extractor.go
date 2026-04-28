@@ -172,7 +172,7 @@ func (e *ProfileExtractor) ExtractProfile(ctx context.Context, conversation, use
 	}
 
 	msgs := []map[string]string{
-		{"role": "system", "content": profileFactRetrievalPrompt},
+		{"role": "system", "content": buildProfileFactRetrievalPrompt()},
 		{"role": "user", "content": profilePackUser(memo)},
 	}
 
