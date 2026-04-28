@@ -56,6 +56,7 @@ import json
 import os
 import sys
 import time
+import threading
 
 from pathlib import Path
 
@@ -101,6 +102,166 @@ LOCOMO_DUAL_SPEAKER = _parse_dual_speaker_env(os.getenv("LOCOMO_DUAL_SPEAKER"))
 # Suppresses server-side retrieval in chat: above this cosine score, server
 # returns nothing extra so we rely on our pre-fetched dual-speaker context.
 _CHAT_RETRIEVAL_SUPPRESS_THRESHOLD = 0.99
+
+# Error substrings that indicate a transient 500 (safe to retry).
+# Permanent 500s (e.g. "invalid user", "not found") must NOT be retried.
+_TRANSIENT_500_PATTERNS = (
+    "Internal Server Error",
+    "request canceled",
+    "context deadline exceeded",
+    "connection reset by peer",
+    "EOF",
+    "upstream connect error",
+)
+
+
+def _is_transient_http_error(exc: requests.HTTPError) -> bool:
+    """Return True if the HTTPError is safe to retry.
+
+    Retries on 502, 503, 504 unconditionally.
+    Retries on 500 only when the response body / exception message matches a
+    known-transient pattern (see _TRANSIENT_500_PATTERNS).
+    """
+    resp = exc.response
+    if resp is None:
+        return False
+    code = resp.status_code
+    if code in (502, 503, 504):
+        return True
+    if code == 500:
+        body = ""
+        try:
+            body = resp.text or ""
+        except Exception:
+            pass
+        msg = str(exc)
+        combined = (body + " " + msg).lower()
+        return any(p.lower() in combined for p in _TRANSIENT_500_PATTERNS)
+    return False
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Return True if the exception is worth retrying."""
+    if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+        return True
+    if isinstance(exc, requests.exceptions.HTTPError):
+        return _is_transient_http_error(exc)
+    return False
+
+
+def _short_reason(exc: Exception) -> str:
+    """One-line human-readable reason for a retry."""
+    if isinstance(exc, requests.exceptions.Timeout):
+        return "timeout"
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return "connection_error"
+    if isinstance(exc, requests.exceptions.HTTPError):
+        resp = exc.response
+        if resp is not None:
+            return f"http_{resp.status_code}"
+    return type(exc).__name__
+
+
+# ---------------------------------------------------------------------------
+# Per-run retry counters (thread-safe)
+# ---------------------------------------------------------------------------
+class _RetryStats:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.attempts: int = 0
+        self.recovered: int = 0
+        self.final_errors: int = 0
+
+    def record_attempt(self) -> None:
+        with self._lock:
+            self.attempts += 1
+
+    def record_recovered(self) -> None:
+        with self._lock:
+            self.recovered += 1
+
+    def record_final_error(self) -> None:
+        with self._lock:
+            self.final_errors += 1
+
+    def print_summary(self) -> None:
+        pct = (
+            f"{100 * self.recovered / self.attempts:.0f}%"
+            if self.attempts
+            else "n/a"
+        )
+        print(
+            "[locomo retry summary]\n"
+            f"  retries_attempted={self.attempts}\n"
+            f"  retries_recovered={self.recovered} ({pct})\n"
+            f"  final_errors={self.final_errors}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
+_RETRY_STATS = _RetryStats()
+
+
+def _call_with_retry(
+    fn,
+    *args,
+    max_retries: int = 2,
+    backoff_base: float = 5.0,
+    cat: str = "",
+    qid: str = "",
+    **kwargs,
+):
+    """Call ``fn(*args, **kwargs)`` with automatic retry on transient errors.
+
+    Parameters
+    ----------
+    fn:
+        Callable to invoke.
+    max_retries:
+        Maximum number of retry attempts (0 = no retries, matches legacy behaviour).
+    backoff_base:
+        Sleep duration in seconds before the first retry; doubles on each
+        subsequent attempt (5 → 10 → 20 …).
+    cat, qid:
+        Metadata logged to stderr on each retry attempt.
+
+    Returns
+    -------
+    The return value of ``fn``.
+
+    Raises
+    ------
+    Re-raises the last exception when all retries are exhausted.
+    """
+    last_exc: Exception | None = None
+    delay = backoff_base
+    for attempt in range(max_retries + 1):
+        try:
+            result = fn(*args, **kwargs)
+            if attempt > 0:
+                # Successful recovery after at least one retry
+                _RETRY_STATS.record_recovered()
+            return result
+        except Exception as exc:
+            if attempt < max_retries and _is_retryable(exc):
+                _RETRY_STATS.record_attempt()
+                reason = _short_reason(exc)
+                print(
+                    f"[retry attempt={attempt + 1} cat={cat} qid={qid} reason={reason}]",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                time.sleep(delay)
+                delay *= 2
+                last_exc = exc
+                continue
+            # Not retryable or exhausted — propagate
+            if attempt > 0:
+                _RETRY_STATS.record_final_error()
+            raise
+    # Should be unreachable, but satisfy type checker
+    raise last_exc  # type: ignore[misc]
 
 
 def build_headers() -> dict:
@@ -594,6 +755,37 @@ def query_chat_dual(
     return answer, speaker_a_items, speaker_b_items, elapsed_ms
 
 
+def _load_qids_from_file(path: Path) -> set[tuple[str, int]]:
+    """Load a set of (conv_id, question_idx) pairs from a text file.
+
+    Each non-empty, non-comment line must be: ``<conv_id> <question_idx>``
+    (space-separated).  Lines starting with ``#`` are ignored.
+    """
+    pairs: set[tuple[str, int]] = set()
+    with path.open() as fh:
+        for lineno, raw in enumerate(fh, 1):
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                print(
+                    f"[qids-from-file] WARNING: line {lineno} skipped (expected "
+                    f"'<conv_id> <question_idx>', got {line!r})",
+                    file=sys.stderr,
+                )
+                continue
+            try:
+                pairs.add((parts[0], int(parts[1])))
+            except ValueError:
+                print(
+                    f"[qids-from-file] WARNING: line {lineno} skipped "
+                    f"(question_idx not an int: {parts[1]!r})",
+                    file=sys.stderr,
+                )
+    return pairs
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     g = p.add_mutually_exclusive_group(required=True)
@@ -633,6 +825,38 @@ def main() -> int:
             "CLIProxyAPI :8317 handles 60+ concurrent. Env: LOCOMO_WORKERS."
         ),
     )
+    p.add_argument(
+        "--retry-on-timeout",
+        type=int,
+        default=2,
+        metavar="N",
+        help=(
+            "Number of retry attempts on connection timeout or 5xx errors. "
+            "0 disables retries (parity with legacy behaviour). Default: 2."
+        ),
+    )
+    p.add_argument(
+        "--retry-backoff-base",
+        type=float,
+        default=5.0,
+        metavar="N",
+        help=(
+            "First backoff in seconds before the initial retry; "
+            "each subsequent retry doubles the delay (5 → 10 → 20 …). "
+            "Default: 5."
+        ),
+    )
+    p.add_argument(
+        "--qids-from-file",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help=(
+            "Path to a text file containing '<conv_id> <question_idx>' pairs "
+            "(one per line).  When supplied, only those QAs are processed "
+            "(useful for targeted re-runs of previously failed questions)."
+        ),
+    )
     args = p.parse_args()
 
     try:
@@ -666,10 +890,28 @@ def main() -> int:
 
     gold.sort(key=lambda g: (g["conv_id"], g["question_idx"]))
 
+    # --qids-from-file: filter gold to only the specified (conv_id, question_idx) pairs
+    if args.qids_from_file is not None:
+        qid_filter = _load_qids_from_file(args.qids_from_file)
+        before = len(gold)
+        gold = [qa for qa in gold if (qa["conv_id"], qa["question_idx"]) in qid_filter]
+        print(
+            f"[query] --qids-from-file: kept {len(gold)}/{before} QAs "
+            f"({len(qid_filter)} pairs requested, {len(qid_filter) - len(gold)} not found in gold)",
+            flush=True,
+        )
+
     dual_speaker = LOCOMO_DUAL_SPEAKER
     print(
         f"[query] dual_speaker={dual_speaker} "
         f"(env LOCOMO_DUAL_SPEAKER={os.getenv('LOCOMO_DUAL_SPEAKER', '<unset>')!r})",
+        flush=True,
+    )
+
+    retry_n = args.retry_on_timeout
+    retry_backoff = args.retry_backoff_base
+    print(
+        f"[query] retry_on_timeout={retry_n} backoff_base={retry_backoff}s",
         flush=True,
     )
 
@@ -678,6 +920,8 @@ def main() -> int:
 
     def process_one_qa(qi: int, qa: dict) -> dict:
         question = qa["question"]
+        cat_str = str(qa.get("category", "?"))
+        qid_str = str(qa["question_idx"])
         print(f"[{qi}/{len(gold)}] {qa['conv_id']} q={question[:70]!r}", flush=True)
         rec: dict = {
             "conv_id": qa["conv_id"],
@@ -698,12 +942,17 @@ def main() -> int:
             speaker_a_items: list[dict] = []
             speaker_b_items: list[dict] = []
             try:
-                speaker_a_items, speaker_b_items, merged, ms = query_search_dual(
+                speaker_a_items, speaker_b_items, merged, ms = _call_with_retry(
+                    query_search_dual,
                     args.memdb_url,
                     qa["conv_id"],
                     question,
                     args.top_k,
-                    session_id=None,
+                    None,  # session_id
+                    max_retries=retry_n,
+                    backoff_base=retry_backoff,
+                    cat=cat_str,
+                    qid=qid_str,
                 )
                 rec["retrieved"] = merged
                 rec["search_ms"] = ms
@@ -717,13 +966,18 @@ def main() -> int:
 
             if not args.skip_chat and rec["error"] is None:
                 try:
-                    answer, _, _, ms = query_chat_dual(
+                    answer, _, _, ms = _call_with_retry(
+                        query_chat_dual,
                         args.memdb_url,
                         qa["conv_id"],
                         question,
                         args.top_k,
-                        speaker_a_items=speaker_a_items,
-                        speaker_b_items=speaker_b_items,
+                        speaker_a_items,
+                        speaker_b_items,
+                        max_retries=retry_n,
+                        backoff_base=retry_backoff,
+                        cat=cat_str,
+                        qid=qid_str,
                     )
                     rec["chat_answer"] = answer
                     rec["chat_ms"] = ms
@@ -734,12 +988,17 @@ def main() -> int:
         else:
             user_id = f"{qa['conv_id']}__speaker_{args.speaker}"
             try:
-                items, ms = query_search(
+                items, ms = _call_with_retry(
+                    query_search,
                     args.memdb_url,
                     user_id,
                     question,
                     args.top_k,
-                    session_id=None,
+                    None,  # session_id
+                    max_retries=retry_n,
+                    backoff_base=retry_backoff,
+                    cat=cat_str,
+                    qid=qid_str,
                 )
                 rec["retrieved"] = items
                 rec["search_ms"] = ms
@@ -750,7 +1009,17 @@ def main() -> int:
 
             if not args.skip_chat and rec["error"] is None:
                 try:
-                    answer, ms = query_chat(args.memdb_url, user_id, question, args.top_k)
+                    answer, ms = _call_with_retry(
+                        query_chat,
+                        args.memdb_url,
+                        user_id,
+                        question,
+                        args.top_k,
+                        max_retries=retry_n,
+                        backoff_base=retry_backoff,
+                        cat=cat_str,
+                        qid=qid_str,
+                    )
                     rec["chat_answer"] = answer
                     rec["chat_ms"] = ms
                 except requests.RequestException as exc:
@@ -787,6 +1056,9 @@ def main() -> int:
                 errors.extend(rec.pop("_errors"))
             predictions.append(rec)
 
+    # Print retry summary to stderr (even when retries=0; shows zero counts)
+    _RETRY_STATS.print_summary()
+
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w") as f:
         json.dump(
@@ -801,6 +1073,8 @@ def main() -> int:
                     "skip_chat": args.skip_chat,
                     "categories": categories,
                     "dual_speaker": dual_speaker,
+                    "retry_on_timeout": retry_n,
+                    "retry_backoff_base": retry_backoff,
                 },
             },
             f,
