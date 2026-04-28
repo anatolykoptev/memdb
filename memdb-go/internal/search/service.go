@@ -47,6 +47,10 @@ type SearchService struct {
 	// probes BEFORE the D2 expandViaGraph step so the graph walk sees a
 	// richer seed set.
 	CoTDecomposer *CoTDecomposer
+	// pprScorer computes Personalized PageRank for F14 (HippoRAG 2). nil = disabled.
+	// Wire in via SetPPRScorer (ppr_scorer.go). The concrete type is *scheduler.Worker
+	// but we hold the interface to avoid import cycles.
+	pprScorer PPRScorer
 }
 
 // NewSearchService creates a SearchService. Any dependency may be nil (caller
