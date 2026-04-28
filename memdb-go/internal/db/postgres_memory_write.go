@@ -217,3 +217,66 @@ WHERE properties->>(('id'::text)) = u.mem_id
 	}
 	return nil
 }
+
+// SetLinkedMemoryIDs replaces the linked_memory_ids array on a single
+// memory's JSONB properties (top-level + info-mirrored). Single round-trip,
+// no read-modify-write race. Used by F12's resolver to persist the merged
+// (extract-time + LLM-emitted) link set after the fact has been written.
+//
+// ids may be nil — passes through as a JSON empty array `[]`. The caller
+// is expected to dedup / cap before calling. Returns nil even if no row
+// matches (the memory may have been deleted between persist and resolve).
+func (p *Postgres) SetLinkedMemoryIDs(ctx context.Context, memoryID, cubeID string, ids []string) error {
+	if memoryID == "" || cubeID == "" {
+		return nil
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	body, err := json.Marshal(ids)
+	if err != nil {
+		return fmt.Errorf("marshal linked_memory_ids: %w", err)
+	}
+	if _, err := p.pool.Exec(ctx, fmt.Sprintf(queries.SetLinkedMemoryIDs, graphName), memoryID, cubeID, string(body)); err != nil {
+		return fmt.Errorf("set linked_memory_ids: %w", err)
+	}
+	return nil
+}
+
+// GetMemoriesByLinkedIDs returns memories whose top-level
+// linked_memory_ids array contains any of the supplied UUIDs. The GIN
+// index idx_memory_linked_ids (migration 0022) supports the ?| operator
+// used in the SQL — query plan stays index-bound even at large pool size.
+//
+// Returns up to `limit` rows. agentID == "" matches any agent.
+//
+// Used by F12's search-side stageLinkedExpand 1-hop expansion. Soft-fail
+// path: caller should treat (nil, err) as a no-op (return seeds unchanged).
+func (p *Postgres) GetMemoriesByLinkedIDs(
+	ctx context.Context,
+	linkIDs []string,
+	cubeID, personID, agentID string,
+	limit int,
+) ([]VectorSearchResult, error) {
+	if len(linkIDs) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	q := fmt.Sprintf(queries.GetMemoriesByLinkedIDs, graphName)
+	rows, err := p.pool.Query(ctx, q, linkIDs, cubeID, personID, agentID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get memories by linked_ids: %w", err)
+	}
+	defer rows.Close()
+
+	var out []VectorSearchResult
+	for rows.Next() {
+		var r VectorSearchResult
+		if err := rows.Scan(&r.ID, &r.Properties, &r.EmbeddingStr); err != nil {
+			continue
+		}
+		// Best-effort embedding parse — empty / malformed stays empty.
+		r.Embedding = ParseVectorString(r.EmbeddingStr)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

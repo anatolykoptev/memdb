@@ -239,3 +239,60 @@ const ClearCEScoresTopKForNeighbor = `
 UPDATE %[1]s."Memory"
 SET properties = ((properties::text::jsonb - 'ce_score_topk')::text)::agtype
 WHERE properties::text::jsonb -> 'ce_score_topk' @> jsonb_build_array(jsonb_build_object('neighbor_id', $1::text))`
+
+// --- F12 linked_memory_ids resolver ---
+
+// SetLinkedMemoryIDs replaces the linked_memory_ids array on a single memory.
+// Lifts the value to the TOP LEVEL of properties (sibling of memory, kind,
+// attributed_to) so migration 0022's GIN index idx_memory_linked_ids
+// (USING GIN ((properties -> 'linked_memory_ids'))) can match. Mirrored to
+// properties.info.linked_memory_ids too — duplication intentional, matches
+// liftAtomicDiscriminators behaviour.
+//
+// Args: $1 = memory_id (text, UUID = properties->>(('id'::text))),
+//       $2 = user_name (cube id),
+//       $3 = linked_memory_ids JSON array as text (e.g. '["uuid-1","uuid-2"]')
+const SetLinkedMemoryIDs = `
+UPDATE %[1]s."Memory"
+SET properties = (
+        jsonb_set(
+            jsonb_set(properties::text::jsonb, '{linked_memory_ids}', $3::jsonb, true),
+            '{info,linked_memory_ids}', $3::jsonb, true
+        )::text
+    )::agtype
+WHERE properties->>(('id'::text)) = $1
+  AND properties->>(('user_name'::text)) = $2
+  AND properties->>(('status'::text)) = 'activated'`
+
+// GetMemoriesByLinkedIDs fetches memories whose top-level linked_memory_ids
+// array contains ANY of the supplied UUIDs. Powers the F12 search-side
+// stageLinkedExpand 1-hop GIN expansion: for each top-K seed, surface
+// memories that link TO it (reverse direction).
+//
+// The GIN index idx_memory_linked_ids on (properties -> 'linked_memory_ids')
+// supports the @> containment operator — we OR-fold per-id @> clauses via
+// jsonb_path_exists with jsonpath @? syntax, OR fall back to a single ?|
+// (jsonb_exists_any) on the array's flat string form. The simpler approach:
+// `properties -> 'linked_memory_ids' ?| $1::text[]` uses the GIN index when
+// the array stores strings (which it does — see liftAtomicDiscriminators).
+//
+// Args: $1 = link_ids (text[]) — UUIDs to match,
+//       $2 = user_name (cube id, text),
+//       $3 = user_id (text),
+//       $4 = agent_id (text, '' for any),
+//       $5 = limit (int)
+//
+// Returns: id, properties (with sources stripped to keep payload small),
+// embedding (text). Mirrors VectorSearch's projection so the search-side
+// merge code can reuse MergedResult / MergeVectorAndFulltext shapes.
+const GetMemoriesByLinkedIDs = `
+SELECT properties->>(('id'::text)) AS memory_id,
+       (properties::text::jsonb - 'sources')::text,
+       embedding::text
+FROM %[1]s."Memory"
+WHERE properties->>(('status'::text)) = 'activated'
+  AND properties->>(('user_name'::text)) = $2
+  AND properties->>(('user_id'::text))   = $3
+  AND ($4::text = '' OR properties->>(('agent_id'::text)) = $4)
+  AND (properties::text::jsonb -> 'linked_memory_ids') ?| $1::text[]
+LIMIT $5`

@@ -48,6 +48,12 @@ type searchMetricsInstruments struct {
 	// category (cat2|other) and top_k (text budget).  Used for A/B comparison
 	// of cat-2 threshold lowering on LoCoMo full-corpus runs.
 	RecallBudget metric.Int64Counter
+	// LinkedExpand (F12) — counter for stageLinkedExpand outcomes
+	// (expanded|empty_seeds|no_neighbors|error|disabled).
+	LinkedExpand metric.Int64Counter
+	// LinkedExpandCount (F12) — histogram of linked-by neighbours injected
+	// per query (excluding seeds). Mirrors HopsPerQuery's shape.
+	LinkedExpandCount metric.Int64Histogram
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -99,6 +105,11 @@ func searchMx() *searchMetricsInstruments {
 			metric.WithExplicitBucketBoundaries(0, 5, 10, 20, 50, 100, 200))
 		rb, _ := m.Int64Counter("memdb.search.recall_budget_total",
 			metric.WithDescription("F9 recall budget: search requests by category heuristic (category=cat2|other) and text top_k"))
+		lex, _ := m.Int64Counter("memdb.search.linked_expand_total",
+			metric.WithDescription("F12 linked_memory_ids 1-hop expansion outcomes (expanded|empty_seeds|no_neighbors|error|disabled)"))
+		lexc, _ := m.Int64Histogram("memdb.search.linked_expand_count",
+			metric.WithDescription("F12 linked_memory_ids: linked-by neighbours injected per query (excluding seeds)"),
+			metric.WithExplicitBucketBoundaries(0, 1, 3, 5, 10, 25, 50))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -118,6 +129,8 @@ func searchMx() *searchMetricsInstruments {
 			D1BoostMagnitude: d1boost,
 			D5StageInputSize: d5size,
 			RecallBudget:     rb,
+			LinkedExpand:     lex,
+			LinkedExpandCount: lexc,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -155,6 +168,11 @@ func searchMx() *searchMetricsInstruments {
 				attribute.Int64("top_k", 0),
 			))
 		}
+		// Pre-register F12 linked_expand outcomes for all label values.
+		for _, oc := range []string{"expanded", "empty_seeds", "no_neighbors", "error", "disabled"} {
+			lex.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
+		}
+		lexc.Record(ctx, 0)
 	})
 	return searchMetrics
 }
