@@ -16,11 +16,15 @@ package scheduler
 //	}).Start(ctx)
 //
 // Metrics emitted per iteration:
-//   - memdb.scheduler.loop_iterations_total{name, outcome=success|error|skipped_other_leader}
-//   - memdb.scheduler.loop_duration_ms{name} histogram
+//   - memdb.scheduler.loop_iterations_total{name, outcome=success|error|cancelled|panic|skipped_other_leader}
+//   - memdb.scheduler.loop_duration_ms{name} histogram (recorded on every iteration that
+//     reached runOnce, regardless of outcome — including error/cancelled/panic)
 
 import (
 	"context"
+	"errors"
+	"log/slog"
+	"runtime/debug"
 	"time"
 )
 
@@ -83,6 +87,13 @@ func (p *periodicLoop) Start(ctx context.Context, stopCh <-chan struct{}) {
 }
 
 // runIteration executes one loop tick: optional lock, runOnce, metrics.
+//
+// Panic safety: runOnce panics are recovered, logged, and counted under
+// outcome=panic so a single broken iteration cannot crash the worker.
+// Duration is recorded on every iteration that reached runOnce (success,
+// error, cancelled, panic) — even on the lock-error path — for symmetric
+// histograms. The skipped_other_leader path is intentionally skipped from
+// the duration histogram (it is dominated by the lock RTT, not work).
 func (p *periodicLoop) runIteration(ctx context.Context, lmx *loopMetricsStruct) {
 	start := time.Now()
 
@@ -104,13 +115,36 @@ func (p *periodicLoop) runIteration(ctx context.Context, lmx *loopMetricsStruct)
 		}
 	}
 
-	err := p.runOnce(ctx)
+	outcome := "success"
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				outcome = "panic"
+				slog.Error("scheduler.periodicLoop: runOnce panicked",
+					slog.String("name", p.name),
+					slog.Any("panic", r),
+					slog.String("stack", string(debug.Stack())),
+				)
+			}
+		}()
+		err = p.runOnce(ctx)
+	}()
 	elapsed := float64(time.Since(start).Milliseconds())
 
-	outcome := "success"
-	if err != nil {
-		outcome = "error"
+	if outcome != "panic" {
+		switch {
+		case err == nil:
+			outcome = "success"
+		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+			// Treat ctx cancellation as a benign shutdown signal, not an error
+			// — alerts on outcome=error should not fire on graceful shutdowns.
+			outcome = "cancelled"
+		default:
+			outcome = "error"
+		}
 	}
+
 	lmx.Iterations.Add(ctx, 1, labelLoopOutcome(p.name, outcome))
 	lmx.DurationMs.Record(ctx, elapsed, labelLoopName(p.name))
 }

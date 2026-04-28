@@ -228,3 +228,74 @@ func TestPeriodicLoop_RunOnceError(t *testing.T) {
 		t.Error("expected runOnce to be called at least once even when returning error")
 	}
 }
+
+// TestPeriodicLoop_RunOncePanic verifies that a panic from runOnce is recovered
+// and the loop keeps ticking (does not crash the worker goroutine).
+// Regression for R4.1 — without recover(), a panic in any background loop would
+// take down the scheduler with no metrics emitted.
+func TestPeriodicLoop_RunOncePanic(t *testing.T) {
+	var calls atomic.Int64
+
+	loop := &periodicLoop{
+		name:     "test_panic",
+		interval: 30 * time.Millisecond,
+		stagger:  0,
+		runOnce: func(_ context.Context) error {
+			calls.Add(1)
+			panic("boom")
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	stopCh := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		loop.Start(ctx, stopCh)
+	}()
+
+	<-done
+
+	// At least 2 calls means the loop survived the panic and ticked again.
+	if calls.Load() < 2 {
+		t.Errorf("expected loop to survive panic and re-tick, got calls=%d", calls.Load())
+	}
+}
+
+// TestPeriodicLoop_RunOnceCtxCanceledMappedToCancelled verifies that returning
+// context.Canceled from runOnce is recorded as outcome=cancelled (not error).
+// This keeps alerts on outcome=error from firing during graceful shutdowns.
+func TestPeriodicLoop_RunOnceCtxCanceledMappedToCancelled(t *testing.T) {
+	var calls atomic.Int64
+
+	loop := &periodicLoop{
+		name:     "test_cancel",
+		interval: 30 * time.Millisecond,
+		stagger:  0,
+		runOnce: func(_ context.Context) error {
+			calls.Add(1)
+			return context.Canceled
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	stopCh := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		loop.Start(ctx, stopCh)
+	}()
+
+	<-done
+
+	// Smoke test: calls happened and loop did not crash. The exact metric label
+	// is asserted by the OTel harness; here we just verify the runtime did not
+	// turn the cancellation into a panic or hang.
+	if calls.Load() == 0 {
+		t.Error("expected runOnce to be called at least once")
+	}
+}

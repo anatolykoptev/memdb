@@ -30,6 +30,9 @@ type schedMetricsStruct struct {
 	PPRCacheHits  metric.Int64Counter   // numerator for cache-hit ratio
 	PPRCacheTotal metric.Int64Counter   // denominator for cache-hit ratio
 	PPRIterCount  metric.Int64Histogram // convergence speed (iterations per PPR call)
+	// PPRDurationMs records wall-clock latency of ComputePersonalizedPR end-to-end
+	// (cache lookup → optional recompute → cache store). Label: outcome.
+	PPRDurationMs metric.Float64Histogram
 }
 
 // labelPageRankOutcome returns an OTel attribute option for pagerank outcome labels.
@@ -83,6 +86,11 @@ func schedMx() *schedMetricsStruct {
 			metric.WithDescription("Personalized PageRank power-iteration convergence count per call"),
 			metric.WithExplicitBucketBoundaries(1, 5, 10, 20, 30, 40, 50),
 		)
+		pprDuration, _ := meter.Float64Histogram("memdb.scheduler.personalized_pr_duration_ms",
+			metric.WithDescription("Wall-clock latency of ComputePersonalizedPR end-to-end (ms), labelled by outcome"),
+			metric.WithUnit("ms"),
+			metric.WithExplicitBucketBoundaries(1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500),
+		)
 		schedMetricsInstruments = &schedMetricsStruct{
 			Messages:        msgs,
 			Duration:        dur,
@@ -95,6 +103,7 @@ func schedMx() *schedMetricsStruct {
 			PPRCacheHits:    pprCacheHits,
 			PPRCacheTotal:   pprCacheTotal,
 			PPRIterCount:    pprIterCount,
+			PPRDurationMs:   pprDuration,
 		}
 		// Pre-register TreeReorg at zero so Prometheus scrapers see the
 		// series immediately (matches db/metrics.go pattern).
@@ -118,6 +127,9 @@ func schedMx() *schedMetricsStruct {
 		// Pre-register PPR outcome counters so Prometheus sees all series from start.
 		for _, outcome := range []string{"success", "empty_seed", "cache_hit", "fallback_global"} {
 			pprRuns.Add(context.Background(), 0, metric.WithAttributes(
+				attribute.String("outcome", outcome),
+			))
+			pprDuration.Record(context.Background(), 0, metric.WithAttributes(
 				attribute.String("outcome", outcome),
 			))
 		}

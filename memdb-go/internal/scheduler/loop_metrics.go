@@ -55,7 +55,7 @@ func loopMx() *loopMetricsStruct {
 			"memdb.scheduler.loop_iterations_total",
 			metric.WithDescription(
 				"Total periodicLoop iterations by loop name and outcome "+
-					"(success|error|skipped_other_leader)",
+					"(success|error|cancelled|panic|skipped_other_leader)",
 			),
 		)
 		dur, _ := meter.Float64Histogram(
@@ -74,7 +74,7 @@ func loopMx() *loopMetricsStruct {
 		// before the first tick (matches the db/metrics.go and metrics.go pattern).
 		ctx := context.Background()
 		for _, name := range []string{"pagerank", "periodic_reorg", "bitemporal_validator"} {
-			for _, outcome := range []string{"success", "error", "skipped_other_leader"} {
+			for _, outcome := range []string{"success", "error", "cancelled", "panic", "skipped_other_leader"} {
 				iters.Add(ctx, 0, labelLoopOutcome(name, outcome))
 			}
 			dur.Record(ctx, 0, labelLoopName(name))
