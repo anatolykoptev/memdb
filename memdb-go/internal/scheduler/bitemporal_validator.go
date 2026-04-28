@@ -187,6 +187,12 @@ func (w *Worker) runBitemporalValidatorOnce(ctx context.Context) error {
 	cutoff := time.Now().Add(-validatorStaleness()).UTC().Format(time.RFC3339)
 	now := time.Now().UTC().Format(time.RFC3339)
 
+	// Cubes are iterated SERIALLY on purpose. Parallel cube fan-out would
+	// (a) multiply LLM RPM by len(cubes) on every tick — easily breaching the
+	// 60 RPM CLIProxyAPI default; (b) increase Postgres lock contention on
+	// memos_graph."Memory" UPDATE because InvalidateEntityEdgesByTriples runs
+	// row locks per fresh edge. Per-tick budget is small (validatorBatchPerCube
+	// rows × len(cubes)); the loop interval (≥ 5 min) absorbs the wallclock.
 	for _, cubeID := range cubes {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -238,6 +244,14 @@ func (w *Worker) judgeOneStaleEdge(ctx context.Context, cubeID, now string, edge
 
 	// The "new fact" representative is the most-recent peer (peers are
 	// returned DESC by created_at). The candidate set excludes it.
+	//
+	// Edge case — new entity arrives mid-loop: if a fresh /add lands on the
+	// same (subject,predicate) AFTER FetchActiveEntityEdgesBySubject ran but
+	// BEFORE InvalidateEntityEdgesByTriples completes, our snapshot misses
+	// it. That is benign: the new edge is too young to be stale this tick,
+	// the sync judge already covered it at /add time, and the next validator
+	// pass will re-fetch with the updated peer set. We never ACT on the new
+	// edge in this loop — only on candidates returned in `peers[1:]`.
 	newPeer := peers[0]
 	candidates := peers[1:]
 
