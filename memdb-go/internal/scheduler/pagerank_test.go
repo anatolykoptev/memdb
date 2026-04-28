@@ -218,11 +218,11 @@ func TestRunPageRankLoop_MetricIncrementsAfterTick(t *testing.T) {
 	defer cancel()
 
 	// Manually invoke the loop with a nil pg — it should return immediately
-	// without panic because runPageRankLoop guards pg == nil.
+	// without panic because startPageRankLoop guards pg == nil.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		w.runPageRankLoop(ctx, nil)
+		w.startPageRankLoop(ctx, nil)
 	}()
 
 	select {

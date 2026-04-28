@@ -132,11 +132,11 @@ go w.readLoop(ctx)
 go w.reclaimLoop(ctx)
 go w.retryLoop(ctx)
 if w.reorg != nil {
-go w.periodicReorgLoop(ctx)
+go w.startPeriodicReorgLoop(ctx)
 }
 // M10 Stream 7: PageRank background goroutine — requires Postgres + feature gate.
 if w.pg != nil && pageRankEnabled() {
-	go w.runPageRankLoop(ctx, w.pg)
+	go w.startPageRankLoop(ctx, w.pg)
 	w.logger.Info("pagerank: background goroutine started",
 		slog.Duration("interval", pageRankInterval()),
 	)
