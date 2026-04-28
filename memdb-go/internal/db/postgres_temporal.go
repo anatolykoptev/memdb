@@ -37,9 +37,16 @@ type TemporalMatch struct {
 // Implementation: unnests the JSON array via jsonb_array_elements_text and
 // filters by lexical range — safe because YYYY-MM-DD is sortable as text.
 //
-// The GIN index from migration 0024 helps the planner skip the WHERE clause
-// for rows that never carry event_dates; the unnest is the bottleneck on
-// matching rows, so limit is enforced in SQL.
+// The GIN partial index from migration 0024 covers `WHERE properties ?
+// 'event_dates'` so the planner can skip rows that never carry event_dates.
+// LIMITATION: the GIN index is a row filter, NOT a range narrower —
+// every matching row still incurs a per-row jsonb_array_elements_text scan
+// to evaluate the [start, end] predicate. Performance scales with the
+// number of rows that have any event_dates, NOT with the date-range
+// selectivity. For tenants with very dense event_dates, consider
+// precomputing min/max/anchor dates as scalar columns and indexing those
+// (deferred until F7 metrics show row-count vs latency correlation).
+// limit is enforced in SQL.
 func (p *Postgres) SearchMemoriesByDateRange(
 	ctx context.Context,
 	userName, start, end string,
