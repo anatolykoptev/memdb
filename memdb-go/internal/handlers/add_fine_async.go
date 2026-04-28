@@ -35,7 +35,7 @@ type extractorTriggerInput struct {
 // its own internal admission control / no-op guards. Adding the F3 event
 // extractor is a one-line change here.
 //
-// Extractor list (6 today, +F3 in flight):
+// Extractor list (7 background extractors):
 //  1. generateEpisodicSummary    — session-level recap node
 //  2. generateSkillMemory        — code/task skill chunks
 //  3. generateToolTrajectory     — tool-call traces
@@ -44,6 +44,8 @@ type extractorTriggerInput struct {
 //                                  bounded by profileExtractSemaphore)
 //  6. triggerEdgeInvalidationJudge — M11 F11 bi-temporal edge invalidator
 //                                  (bounded by edgeJudgeSemaphore)
+//  7. triggerEventExtract        — M11 F3 Memobase event extractor
+//                                  (bounded by eventExtractSemaphore)
 func (h *Handler) triggerBackgroundExtractors(in extractorTriggerInput) {
 	if h == nil {
 		return
@@ -72,4 +74,10 @@ func (h *Handler) triggerBackgroundExtractors(in extractorTriggerInput) {
 	// confidence >= 0.7 flips invalid_at on superseded peers. Bounded by
 	// edgeJudgeSemaphore; gated by MEMDB_F11_EDGE_JUDGE.
 	h.triggerEdgeInvalidationJudge(in.CubeID, in.Now)
+
+	// 7. M11 F3 — Memobase event extraction. Produces per-blob event_summary
+	// rows with [mention YYYY/MM/DD] anchors + tag list, persisted to
+	// memos_graph.user_events for the search-time inject_events stage.
+	// Bounded by eventExtractSemaphore; gated by MEMDB_F3_EVENTS.
+	h.triggerEventExtract(in.Conversation, in.UserID, in.CubeID)
 }
