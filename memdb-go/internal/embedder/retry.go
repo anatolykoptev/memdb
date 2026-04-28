@@ -49,8 +49,8 @@ func isRetryableStatus(code int) bool {
 // retryReason classifies an error + HTTP status into a metric label.
 // reason ∈ {transient, http_429, http_5xx, context}.
 func retryReason(err error, status int) string {
-	if err != nil && errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, context.Canceled) {
+	if err != nil && (errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled)) {
 		return "context"
 	}
 	if status == http.StatusTooManyRequests {

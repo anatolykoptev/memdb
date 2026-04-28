@@ -27,7 +27,7 @@ groups:
       # server is flapping or rate-limiting aggressively.
       - alert: MemDBHighEmbedderRetry
         expr: rate(memdb_embedder_retry_total[5m]) > 50
-        for: 0m
+        for: 5m
         labels:
           severity: warning
         annotations:

@@ -24,7 +24,14 @@ type cacheMetricsStruct struct {
 
 // knownCacheRoutes are the routes pre-registered at zero so Prometheus sees
 // them from container start, before any traffic arrives.
-var knownCacheRoutes = []string{"search", "chat_complete", "add_fine", "add_buffer", "get_memory"}
+// Derived from cacheRules at init time to stay in sync automatically.
+var knownCacheRoutes = func() []string {
+	routes := make([]string, 0, len(cacheRules))
+	for key := range cacheRules {
+		routes = append(routes, routeLabel(key))
+	}
+	return routes
+}()
 
 func cacheMx() *cacheMetricsStruct {
 	cacheMetricsOnce.Do(func() {
