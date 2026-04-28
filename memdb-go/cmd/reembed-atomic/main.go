@@ -5,9 +5,9 @@
 // For a single cube, fetch every kind='paragraph_legacy' Memory row, run
 // each through the mem0 ADDITIVE_EXTRACTION_PROMPT, and INSERT the
 // resulting atomic facts as new rows with kind='atomic_fact'. Old rows
-// are NEVER deleted — they remain a fallback for the env-off path. We
-// optionally stamp properties.superseded_by = [new_uuid_list] on the
-// legacy row so audit can trace the lineage.
+// are NEVER deleted — they remain a fallback for the env-off path. The
+// new rows carry properties.info.superseded_legacy_id pointing back at
+// their source row so audit can trace the lineage.
 //
 // Usage:
 //
@@ -47,6 +47,7 @@ func main() {
 		limit   = flag.Int("limit", 0, "max paragraph_legacy rows to re-extract (0=all)")
 		dryRun  = flag.Bool("dry-run", false, "do not write atomic_fact rows; just print extraction stats")
 		timeout = flag.Duration("timeout", 60*time.Second, "per-extraction LLM timeout")
+		force   = flag.Bool("force", false, "re-run even if cube already has atomic_fact rows (will create duplicates)")
 	)
 	flag.Parse()
 
@@ -106,6 +107,35 @@ func main() {
 
 	llmClient := llm.NewClient(llmURL, llmKey, llmModel, nil, logger)
 	atomic := llm.NewAtomicExtractor(llmClient)
+
+	// Idempotency guard — refuse to re-run on a cube that already has atomic
+	// rows unless --force is passed. Without this guard a second invocation
+	// silently doubles the atomic-fact corpus and skews every M11 metric.
+	{
+		var existing int
+		countQ := fmt.Sprintf(`
+			SELECT COUNT(*) FROM "%s"."Memory" m
+			WHERE m.properties->>'user_name' = $1
+			  AND COALESCE(NULLIF(m.properties->>'kind',''), 'paragraph_legacy') = 'atomic_fact'
+		`, graphName)
+		if err := pool.QueryRow(ctx, countQ, *cube).Scan(&existing); err != nil {
+			logger.Error("idempotency check failed", slog.Any("error", err))
+			os.Exit(1)
+		}
+		if existing > 0 && !*force && !*dryRun {
+			logger.Error("cube already has atomic facts — refusing to re-run",
+				slog.Int("existing_atomic_facts", existing),
+				slog.String("cube", *cube),
+				slog.String("hint", "pass --force to re-process anyway (will create duplicates)"))
+			os.Exit(2)
+		}
+		if existing > 0 {
+			logger.Warn("cube already has atomic facts — proceeding due to --force/--dry-run",
+				slog.Int("existing_atomic_facts", existing),
+				slog.Bool("force", *force),
+				slog.Bool("dry_run", *dryRun))
+		}
+	}
 
 	type srcRow struct {
 		ID     string
@@ -181,13 +211,25 @@ func main() {
 				"user_name":   *cube,
 				"created_at":  time.Now().UTC().Format(time.RFC3339),
 				"updated_at":  time.Now().UTC().Format(time.RFC3339),
-				"kind":        "atomic_fact",
-				"tags":        []string{"mode:fine", "atomic_fact"},
-				"sources":     []string{},
-				"info":        map[string]any{"superseded_legacy_id": r.ID, "attributed_to": f.AttributedTo, "linked_memory_ids": f.LinkedMemoryIDs},
-				"confidence":  0.9,
-				"type":        "fact",
-				"raw_text":    f.Text,
+				// kind / linked_memory_ids / attributed_to MUST live at top level —
+				// migration 0022's GENERATED column reads properties->>'kind',
+				// idx_memory_linked_ids is a GIN index on (properties -> 'linked_memory_ids'),
+				// and idx_memory_attributed_to is a partial index on
+				// (properties->>'attributed_to'). Nesting them under `info`
+				// makes every atomic row degrade to kind='paragraph_legacy'.
+				"kind":    "atomic_fact",
+				"tags":    []string{"mode:fine", "atomic_fact"},
+				"sources": []string{},
+				"info":    map[string]any{"superseded_legacy_id": r.ID, "attributed_to": f.AttributedTo, "linked_memory_ids": f.LinkedMemoryIDs},
+				"confidence": 0.9,
+				"type":       "fact",
+				"raw_text":   f.Text,
+			}
+			if f.AttributedTo != "" {
+				props["attributed_to"] = f.AttributedTo
+			}
+			if len(f.LinkedMemoryIDs) > 0 {
+				props["linked_memory_ids"] = f.LinkedMemoryIDs
 			}
 			pj, _ := json.Marshal(props)
 			vec := db.FormatVector(embs[j])

@@ -74,22 +74,34 @@ func (h *Handler) applyAtomicAndPersist(
 		allTags := append([]string{}, fc.CustomTags...)
 		allTags = append(allTags, f.Tags...)
 
-		wmJSON, err1 := marshalProps(buildNodeProps(memoryNodeProps{
+		wmProps := buildNodeProps(memoryNodeProps{
 			ID: wmID, Memory: f.Memory, MemoryType: "WorkingMemory",
 			UserName: fc.CubeID, UserID: fc.UserID, AgentID: fc.AgentID, SessionID: fc.SessionID,
 			Mode: modeFine, Now: fc.Now, CreatedAt: createdAt,
 			Info: factInfo, CustomTags: allTags, Sources: fc.Sources, Background: "",
 			RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
 			Key: fc.Key,
-		}))
-		ltJSON, err2 := marshalProps(buildNodeProps(memoryNodeProps{
+		})
+		ltProps := buildNodeProps(memoryNodeProps{
 			ID: ltID, Memory: f.Memory, MemoryType: f.Type,
 			UserName: fc.CubeID, UserID: fc.UserID, AgentID: fc.AgentID, SessionID: fc.SessionID,
 			Mode: modeFine, Now: fc.Now, CreatedAt: createdAt,
 			Info: factInfo, CustomTags: allTags, Sources: fc.Sources, Background: background,
 			RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
 			Key: fc.Key,
-		}))
+		})
+		// Critical: lift atomic-fact discriminator keys to TOP-LEVEL properties.
+		// Migration 0022's GENERATED `kind` column reads properties->>'kind'
+		// (top-level); the GIN index on linked_memory_ids and the partial
+		// index on attributed_to also expect top-level paths. Leaving these
+		// nested under properties.info silently degrades to kind='paragraph_legacy'
+		// for every atomic row, which gates F8/F12 entirely. We keep the values
+		// inside `info` too (legacy callers and JSONB-property tests still
+		// assert that shape) — duplication is intentional.
+		liftAtomicDiscriminators(wmProps, factInfo)
+		liftAtomicDiscriminators(ltProps, factInfo)
+		wmJSON, err1 := marshalProps(wmProps)
+		ltJSON, err2 := marshalProps(ltProps)
 		if err1 != nil || err2 != nil {
 			h.logger.Debug("atomic persist: marshal failed",
 				slog.Any("err1", err1), slog.Any("err2", err2))

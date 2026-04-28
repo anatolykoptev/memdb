@@ -185,6 +185,34 @@ func observationDateFromRequest(req *fullAddRequest) string {
 	return ""
 }
 
+// liftAtomicDiscriminators copies the F8-specific discriminator keys from a
+// per-fact info bag onto the TOP LEVEL of the JSONB props map produced by
+// buildNodeProps. This is required because:
+//   - migration 0022 generates the `kind` column from properties->>'kind'
+//     (top-level) — nested properties.info.kind is invisible to it and every
+//     atomic row degrades to kind='paragraph_legacy';
+//   - idx_memory_linked_ids is a GIN index on (properties -> 'linked_memory_ids')
+//     and never matches values nested inside `info`;
+//   - idx_memory_attributed_to is a partial index on properties->>'attributed_to'.
+//
+// We also keep the values inside `info` so existing JSONB-property tests and
+// any downstream consumers reading info.kind still see them — the cost of the
+// duplicated keys is a few bytes per row.
+func liftAtomicDiscriminators(props map[string]any, factInfo map[string]any) {
+	if props == nil || factInfo == nil {
+		return
+	}
+	if v, ok := factInfo["kind"]; ok {
+		props["kind"] = v
+	}
+	if v, ok := factInfo["linked_memory_ids"]; ok {
+		props["linked_memory_ids"] = v
+	}
+	if v, ok := factInfo["attributed_to"]; ok {
+		props["attributed_to"] = v
+	}
+}
+
 // applyAtomicInfoToFacts merges F8 Info fragments into a list of
 // ExtractedFacts paired with their source AtomicFacts. Used by the env-on
 // branch of nativeFineAddForCube to inject kind/attributed_to/linked_ids
