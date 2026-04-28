@@ -30,9 +30,20 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"golang.org/x/sync/singleflight"
 )
+
+// pprSingleflight deduplicates concurrent ComputePersonalizedPR calls for the
+// same (cubeID, sorted seedIDs) tuple. Without it, N parallel queries on a cold
+// cache each pay the full Postgres FetchEdgesForPageRank + power-iteration cost
+// (~10–100 ms × graph size). With it, the first caller computes and the rest
+// receive the same map by reference. Map values are read-only after the
+// recompute path returns; callers MUST NOT mutate them. The single SearchService
+// caller (blendPPRIntoMetadata) only reads.
+var pprSingleflight singleflight.Group
 
 const (
 	// pprDamping is the teleportation probability α in HippoRAG 2 (0.15).
@@ -106,10 +117,21 @@ func pprCacheKey(cubeID string, seedEntityIDs []string) string {
 // the deserialized map is returned immediately. Metrics: ppr_compute_total.
 func (w *Worker) ComputePersonalizedPR(ctx context.Context, cubeID string, seedEntityIDs []string) (map[string]float64, error) {
 	mx := schedMx()
+	start := time.Now()
+
+	// recordDuration emits personalized_pr_duration_ms{outcome=...} on every
+	// return path. Bound to a pointer so we can update outcome late and still
+	// record once via defer.
+	outcome := "success"
+	defer func() {
+		mx.PPRDurationMs.Record(ctx, float64(time.Since(start).Milliseconds()),
+			metric.WithAttributes(attribute.String("outcome", outcome)))
+	}()
 
 	// empty_seed fast-path — no seeds, return empty map (not error).
 	if len(seedEntityIDs) == 0 {
-		mx.PPRRuns.Add(ctx, 1, labelPPROutcome("empty_seed"))
+		outcome = "empty_seed"
+		mx.PPRRuns.Add(ctx, 1, labelPPROutcome(outcome))
 		return map[string]float64{}, nil
 	}
 
@@ -122,7 +144,8 @@ func (w *Worker) ComputePersonalizedPR(ctx context.Context, cubeID string, seedE
 		if redisErr == nil {
 			var cachedScores map[string]float64
 			if jerr := json.Unmarshal(cached, &cachedScores); jerr == nil {
-				mx.PPRRuns.Add(ctx, 1, labelPPROutcome("cache_hit"))
+				outcome = "cache_hit"
+				mx.PPRRuns.Add(ctx, 1, labelPPROutcome(outcome))
 				mx.PPRCacheHits.Add(ctx, 1)
 				mx.PPRCacheTotal.Add(ctx, 1)
 				return cachedScores, nil
@@ -135,189 +158,79 @@ func (w *Worker) ComputePersonalizedPR(ctx context.Context, cubeID string, seedE
 
 	// Postgres required for recomputation.
 	if w.pg == nil {
-		mx.PPRRuns.Add(ctx, 1, labelPPROutcome("fallback_global"))
+		outcome = "fallback_global"
+		mx.PPRRuns.Add(ctx, 1, labelPPROutcome(outcome))
 		return map[string]float64{}, nil
 	}
 
-	// Fetch edges.
+	// Singleflight: dedupe concurrent recomputes for the same cache key.
+	// Sub-result.Shared is informational only — semantically every caller in a
+	// flight gets the same map by reference, callers must not mutate.
+	v, sfErr, _ := pprSingleflight.Do(cacheKey, func() (any, error) {
+		return w.recomputePersonalizedPR(ctx, cubeID, cacheKey, seedEntityIDs)
+	})
+	if sfErr != nil {
+		outcome = "fallback_global"
+		mx.PPRRuns.Add(ctx, 1, labelPPROutcome(outcome))
+		return nil, sfErr
+	}
+	res, ok := v.(pprComputeResult)
+	if !ok {
+		// Defensive: should never happen — recomputePersonalizedPR always returns pprComputeResult.
+		outcome = "fallback_global"
+		mx.PPRRuns.Add(ctx, 1, labelPPROutcome(outcome))
+		return map[string]float64{}, nil
+	}
+	outcome = res.outcome
+	mx.PPRRuns.Add(ctx, 1, labelPPROutcome(outcome))
+	return res.scores, nil
+}
+
+// pprComputeResult bundles the (scores, outcome) tuple returned by
+// recomputePersonalizedPR through singleflight.
+type pprComputeResult struct {
+	scores  map[string]float64
+	outcome string
+}
+
+// recomputePersonalizedPR performs the cold-path PPR computation: fetches
+// edges from Postgres, runs the power-method, and writes the result into Redis
+// (best-effort). Wrapped by singleflight in the caller so concurrent requests
+// for the same cache key share a single Postgres + compute round.
+func (w *Worker) recomputePersonalizedPR(
+	ctx context.Context,
+	cubeID, cacheKey string,
+	seedEntityIDs []string,
+) (pprComputeResult, error) {
+	mx := schedMx()
+
 	edges, err := w.pg.FetchEdgesForPageRank(ctx, cubeID)
 	if err != nil {
-		mx.PPRRuns.Add(ctx, 1, labelPPROutcome("fallback_global"))
-		return nil, fmt.Errorf("ppr: fetch edges cube=%s: %w", cubeID, err)
+		return pprComputeResult{outcome: "fallback_global"},
+			fmt.Errorf("ppr: fetch edges cube=%s: %w", cubeID, err)
 	}
 	if len(edges) == 0 {
-		mx.PPRRuns.Add(ctx, 1, labelPPROutcome("empty_seed"))
-		return map[string]float64{}, nil
+		return pprComputeResult{scores: map[string]float64{}, outcome: "empty_seed"}, nil
 	}
 
-	// Build seed set for O(1) lookup.
 	seedSet := make(map[string]struct{}, len(seedEntityIDs))
 	for _, id := range seedEntityIDs {
 		seedSet[id] = struct{}{}
 	}
 
-	// Compute PPR.
 	iterCount, scores := computePersonalizedPageRank(edges, seedSet)
 	mx.PPRIterCount.Record(ctx, int64(iterCount))
 
 	if len(scores) == 0 {
-		mx.PPRRuns.Add(ctx, 1, labelPPROutcome("fallback_global"))
-		return map[string]float64{}, nil
+		return pprComputeResult{scores: map[string]float64{}, outcome: "fallback_global"}, nil
 	}
 
-	// Store in cache (best-effort — don't fail the caller on cache write errors).
 	if w.redis != nil {
 		if b, jerr := json.Marshal(scores); jerr == nil {
 			_ = w.redis.Set(ctx, cacheKey, b, pprCacheTTL).Err()
 		}
 	}
-
-	mx.PPRRuns.Add(ctx, 1, labelPPROutcome("success"))
-	return scores, nil
+	return pprComputeResult{scores: scores, outcome: "success"}, nil
 }
 
-// computePersonalizedPageRank runs the power method with a seeded restart vector.
-//
-// seedSet: set of node IDs that form the personalization seed.
-// Nodes in seedSet each receive 1/|seedSet| restart probability; others get 0.
-// The algorithm uses continuation probability (1-α) = 0.85 with α=pprDamping=0.15.
-//
-// Returns (iterations_run, score_map). score_map sums to ~1.0.
-// Returns (0, nil) when the graph is degenerate (no valid nodes after filtering).
-func computePersonalizedPageRank(edges []db.PageRankEdge, seedSet map[string]struct{}) (int, map[string]float64) {
-	// Build adjacency — mirrors computePageRank exactly.
-	type weightedDst struct {
-		dst    string
-		weight float64
-	}
-	outEdges := make(map[string][]weightedDst)
-	nodeSet := make(map[string]struct{})
-
-	for _, e := range edges {
-		if e.FromID == "" || e.ToID == "" || e.FromID == e.ToID {
-			continue
-		}
-		nodeSet[e.FromID] = struct{}{}
-		nodeSet[e.ToID] = struct{}{}
-		w := e.Weight
-		if w <= 0 {
-			w = 1.0
-		}
-		outEdges[e.FromID] = append(outEdges[e.FromID], weightedDst{e.ToID, w})
-	}
-
-	if len(nodeSet) == 0 {
-		return 0, nil
-	}
-
-	// Index nodes.
-	nodes := make([]string, 0, len(nodeSet))
-	for n := range nodeSet {
-		nodes = append(nodes, n)
-	}
-	sort.Strings(nodes) // deterministic order for tests
-	idx := make(map[string]int, len(nodes))
-	for i, n := range nodes {
-		idx[n] = i
-	}
-	n := len(nodes)
-
-	// Personalized restart vector: seeds get 1/|seeds|; others get 0.
-	// If none of the seed IDs appear in the graph, fall back to uniform prior
-	// so PPR degrades gracefully to global PR without error.
-	restart := make([]float64, n)
-	seedCount := 0
-	for _, nd := range nodes {
-		if _, ok := seedSet[nd]; ok {
-			seedCount++
-		}
-	}
-	if seedCount == 0 {
-		// Seeds not in graph — uniform prior (degrades to global PR).
-		for i := range restart {
-			restart[i] = 1.0 / float64(n)
-		}
-	} else {
-		seedProb := 1.0 / float64(seedCount)
-		for i, nd := range nodes {
-			if _, ok := seedSet[nd]; ok {
-				restart[i] = seedProb
-			}
-		}
-	}
-
-	// Normalize out-weights.
-	type edge struct {
-		dst, src int
-		w        float64
-	}
-	var edgeList []edge
-	for u, dsts := range outEdges {
-		uid := idx[u]
-		var total float64
-		for _, d := range dsts {
-			total += d.weight
-		}
-		for _, d := range dsts {
-			vid := idx[d.dst]
-			edgeList = append(edgeList, edge{vid, uid, d.weight / total})
-		}
-	}
-
-	// Dangling nodes: sinks (no outgoing edges).
-	hasSink := make([]bool, n)
-	for i, nd := range nodes {
-		if len(outEdges[nd]) == 0 {
-			hasSink[i] = true
-		}
-	}
-
-	// Power iteration with early stopping.
-	rank := make([]float64, n)
-	newRank := make([]float64, n)
-	copy(rank, restart)
-
-	alpha := pprDamping      // teleportation probability
-	cont := 1.0 - pprDamping // continuation probability = 0.85
-
-	iterCount := 0
-	for iter := 0; iter < pprIterations; iter++ {
-		iterCount = iter + 1
-
-		// Dangling mass redistributed via personalized vector (not uniform).
-		var danglingSum float64
-		for i, sink := range hasSink {
-			if sink {
-				danglingSum += rank[i]
-			}
-		}
-
-		for i := range newRank {
-			// Teleport to personalized restart + dangling mass via restart vector.
-			newRank[i] = alpha*restart[i] + cont*danglingSum*restart[i]
-		}
-		for _, e := range edgeList {
-			newRank[e.dst] += cont * rank[e.src] * e.w
-		}
-
-		// Check convergence (L1 delta).
-		var delta float64
-		for i := range rank {
-			d := newRank[i] - rank[i]
-			if d < 0 {
-				d = -d
-			}
-			delta += d
-		}
-		copy(rank, newRank)
-		if delta < pprConvergenceThreshold {
-			break
-		}
-	}
-
-	result := make(map[string]float64, n)
-	for i, nd := range nodes {
-		result[nd] = rank[i]
-	}
-	return iterCount, result
-}
+// (computePersonalizedPageRank lives in pagerank_personalized_algo.go.)
