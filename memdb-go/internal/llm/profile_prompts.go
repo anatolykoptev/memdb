@@ -25,7 +25,10 @@ package llm
 // M11 (multi-stage merge / pick_related_profiles / topic-locked re-extraction)
 // is the planned follow-up; this file ports only the single-call extraction.
 
-import "strings"
+import (
+	"os"
+	"strings"
+)
 
 // profileTabSeparator is the literal separator emitted in place of {tab}.
 // Memobase uses this exact byte to delimit TOPIC/SUB_TOPIC/MEMO.
@@ -105,9 +108,28 @@ const profileExamplesBlock = "<example>\n" +
 	"</output>\n" +
 	"</example>\n"
 
-// profileFactRetrievalPrompt mirrors FACT_RETRIEVAL_PROMPT (lines 45–107)
-// with {system_prompt}, {topic_examples}, {examples}, and {tab} pre-rendered.
-const profileFactRetrievalPrompt = profileSystemPrompt + `
+// buildProfileFactRetrievalPrompt constructs the FACT_RETRIEVAL_PROMPT with the
+// topic guidelines block substituted for the active persona. It mirrors the
+// Memobase FACT_RETRIEVAL_PROMPT (lines 45–107) with {system_prompt},
+// {topic_examples}, {examples}, and {tab} pre-rendered.
+//
+// The persona is resolved from the MEMDB_PROFILE_TAXONOMY env var; unknown
+// values fall back to PersonaDefault. The function also fires the once-per-
+// process startup log so callers (e.g. ExtractProfile) don't need to.
+func buildProfileFactRetrievalPrompt() string {
+	persona := os.Getenv("MEMDB_PROFILE_TAXONOMY")
+	if persona == "" {
+		persona = PersonaDefault
+	}
+	logPersonaOnce(persona)
+	guidelines := TaxonomyForPersona(persona)
+	return buildProfileFactRetrievalPromptWith(guidelines)
+}
+
+// buildProfileFactRetrievalPromptWith constructs the prompt with an explicit
+// guidelines block. Extracted so tests can call it without touching env vars.
+func buildProfileFactRetrievalPromptWith(guidelines string) string {
+	return profileSystemPrompt + `
 ## Formatting
 ### Input
 #### Topics Guidelines
@@ -155,7 +177,7 @@ You need to first think, then extract the facts and preferences from the memo.
 
 #### Topics Guidelines
 Below is the list of topics and subtopics that you should focus on collecting and extracting:
-` + profileTopicGuidelines + `
+` + guidelines + `
 
 
 Remember the following:
@@ -170,6 +192,7 @@ Remember the following:
 Now perform your task.
 Following is a conversation between the user and the assistant. You have to extract/infer the relevant facts and preferences from the conversation and return them in the list format as shown above.
 `
+}
 
 // profilePackUser mirrors pack_input(already_input="", memo_str=…) from
 // extract_profile.py lines 110–120. We pass an empty `already_input` because

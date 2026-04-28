@@ -29,7 +29,7 @@ func TestProfileFactRetrievalPrompt_VerbatimMemobaseFragments(t *testing.T) {
 		"#### Memo",
 	}
 	for _, w := range wants {
-		if !strings.Contains(profileFactRetrievalPrompt+profilePackUser("X"), w) {
+		if !strings.Contains(buildProfileFactRetrievalPromptWith(profileTopicGuidelines)+profilePackUser("X"), w) {
 			t.Errorf("prompt missing expected fragment: %q", w)
 		}
 	}
