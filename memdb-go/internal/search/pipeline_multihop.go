@@ -38,6 +38,32 @@ func isCat2Query(q string) bool {
 	return cat2QueryRe.MatchString(strings.TrimSpace(q))
 }
 
+// applyCat2Threshold lowers st.Params.Relativity to thr when the query is a
+// cat-2 temporal multi-hop question and thr is strictly less than the current
+// value.
+//
+// Semantics: only-lower-never-raise.
+//   - Relativity == 0 means "no threshold filter" — that intent is preserved;
+//     we never raise it from zero to thr.
+//   - Relativity > 0 and thr < Relativity → lower to thr (broaden recall for
+//     weak bridging hops).
+//   - Relativity > 0 and thr >= Relativity → keep (caller already has a
+//     looser or equal threshold, no adjustment needed).
+//
+// Returns the category label ("cat2" or "other") for metric tagging.
+func applyCat2Threshold(st *pipelineState) string {
+	if !isCat2Query(st.Params.Query) {
+		return "other"
+	}
+	thr := cat2Threshold()
+	// Only lower the threshold for cat-2 queries; never raise.
+	// Relativity == 0 means "no threshold filter" — respect that intent.
+	if st.Params.Relativity > 0 && thr < st.Params.Relativity {
+		st.Params.Relativity = thr
+	}
+	return "cat2"
+}
+
 // stageParallelDB runs the parallel DB fan-out: vector + fulltext per scope
 // (text/skill/tool/pref), graph recall by key/tag/entity, working-memory,
 // and (optionally) the internet sidecar. The single point in the pipeline
@@ -57,15 +83,7 @@ func isCat2Query(q string) bool {
 // inspect state.Errors if they need to distinguish.
 func (s *SearchService) stageParallelDB(ctx context.Context, st *pipelineState) error {
 	// F9: cat-2 heuristic — drop threshold for temporal multi-hop queries.
-	cat := "other"
-	if isCat2Query(st.Params.Query) {
-		cat = "cat2"
-		thr := cat2Threshold()
-		// Only lower the threshold; never raise it (respect explicit zero = no filter).
-		if st.Params.Relativity == 0 || thr < st.Params.Relativity {
-			st.Params.Relativity = thr
-		}
-	}
+	cat := applyCat2Threshold(st)
 	searchMx().RecallBudget.Add(ctx, 1, recallBudgetAttrs(cat, st.Budget.textK))
 
 	psr, err := s.runParallelSearches(ctx, st.QueryVec, st.Tokens, st.TSQuery, st.CutoffISO, st.HasCutoff, st.Params, st.Budget)
