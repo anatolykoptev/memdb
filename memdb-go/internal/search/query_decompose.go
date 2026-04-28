@@ -18,14 +18,8 @@ package search
 //   - Temperature 0.0 for determinism.
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -150,60 +144,20 @@ func unionVectorResults(primary, extra []db.VectorSearchResult) []db.VectorSearc
 }
 
 func callCoTLLM(ctx context.Context, query string, cfg CoTConfig) ([]string, error) {
-	payload := map[string]any{
-		"model":       cfg.Model,
-		"temperature": 0.0,
-		"max_tokens":  cotMaxTokens,
-		"messages": []map[string]string{
-			{"role": "system", "content": cotSystemPrompt},
-			{"role": "user", "content": "Query: " + query + "\n\nReturn strict JSON only."},
-		},
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	reqCtx, cancel := context.WithTimeout(ctx, cotTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
-		cfg.APIURL+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	}
-	client := &http.Client{Timeout: cotTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("cot llm: status %d", resp.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, cotRespBodyLimit))
-	if err != nil {
-		return nil, err
-	}
-	var chatResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(raw, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return nil, errors.New("cot llm: bad response")
-	}
 	var parsed struct {
 		Questions []string `json:"questions"`
 	}
-	if err := json.Unmarshal(llm.StripJSONFence([]byte(chatResp.Choices[0].Message.Content)), &parsed); err != nil {
-		return nil, fmt.Errorf("cot parse: %w", err)
+	client := llm.NewSimpleClient(cfg.APIURL, cfg.APIKey, cfg.Model)
+	err := llm.ChatStructured(ctx, client, "d7_decompose", []llm.Message{
+		{Role: "system", Content: cotSystemPrompt},
+		{Role: "user", Content: "Query: " + query + "\n\nReturn strict JSON only."},
+	}, &parsed,
+		llm.WithMaxTokens(cotMaxTokens),
+		llm.WithTimeout(cotTimeout),
+		llm.WithRespBodyLimit(cotRespBodyLimit),
+	)
+	if err != nil {
+		return nil, err
 	}
 	return parsed.Questions, nil
 }

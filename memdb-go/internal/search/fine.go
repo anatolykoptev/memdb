@@ -2,15 +2,12 @@
 package search
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"strings"
 	"time"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 const (
@@ -57,13 +54,8 @@ func LLMFilter(ctx context.Context, query string, memories []map[string]any, cfg
 	inputJSON, _ := json.Marshal(buildMemoryList(items))
 	prompt := fmt.Sprintf("Query: %s\n\nMemories:\n%s", query, string(inputJSON))
 
-	raw, err := callLLMForJSON(ctx, fineFilterPrompt, prompt, cfg)
-	if err != nil {
-		return memories
-	}
-
 	var decisions []filterDecision
-	if err := json.Unmarshal(raw, &decisions); err != nil {
+	if err := callLLMForJSON(ctx, fineFilterPrompt, prompt, cfg, &decisions); err != nil {
 		return memories
 	}
 
@@ -97,15 +89,10 @@ func LLMRecallHint(ctx context.Context, query string, memories []map[string]any,
 	inputJSON, _ := json.Marshal(buildMemoryList(memories))
 	prompt := fmt.Sprintf("Query: %s\n\nKept memories:\n%s", query, string(inputJSON))
 
-	raw, err := callLLMForJSON(ctx, fineRecallPrompt, prompt, cfg)
-	if err != nil {
-		return ""
-	}
-
 	var hint struct {
 		Query string `json:"query"`
 	}
-	if err := json.Unmarshal(raw, &hint); err != nil {
+	if err := callLLMForJSON(ctx, fineRecallPrompt, prompt, cfg, &hint); err != nil {
 		return ""
 	}
 	return hint.Query
@@ -140,61 +127,17 @@ func buildMemoryList(items []map[string]any) []memEntry {
 	return entries
 }
 
-// callLLMForJSON makes an OpenAI-compatible chat completions call with JSON response format.
-func callLLMForJSON(ctx context.Context, systemPrompt, userMsg string, cfg FineConfig) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, fineFilterTimeout)
-	defer cancel()
-
-	payload := map[string]any{
-		"model":           cfg.Model,
-		"temperature":     0.0,
-		"response_format": map[string]string{"type": "json_object"},
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": userMsg},
-		},
-	}
-	body, _ := json.Marshal(payload)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		cfg.APIURL+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("fine: LLM returned status %d", resp.StatusCode)
-	}
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, fineRespLimit))
-	if err != nil {
-		return nil, err
-	}
-
-	var chatResp struct {
-		Choices []struct {
-			Message struct{ Content string `json:"content"` } `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(respBody, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return nil, errors.New("fine: bad LLM response")
-	}
-
-	content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
-	content = strings.TrimPrefix(content, "```json")
-	content = strings.TrimPrefix(content, "```")
-	content = strings.TrimSuffix(content, "```")
-	content = strings.TrimSpace(content)
-
-	return []byte(content), nil
+// callLLMForJSON makes an OpenAI-compatible chat completions call with the
+// JSON-object response_format hint and unmarshals the assistant content into
+// target via llm.ChatStructured.
+func callLLMForJSON[T any](ctx context.Context, systemPrompt, userMsg string, cfg FineConfig, target *T) error {
+	client := llm.NewSimpleClient(cfg.APIURL, cfg.APIKey, cfg.Model)
+	return llm.ChatStructured(ctx, client, "search_fine_judge", []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userMsg},
+	}, target,
+		llm.WithTimeout(fineFilterTimeout),
+		llm.WithRespBodyLimit(fineRespLimit),
+		llm.WithJSONResponseMode(),
+	)
 }
