@@ -26,10 +26,69 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 )
+
+// isoDateLayout is the ISO-8601 calendar-date format the F7 temporal index
+// expects on properties.event_dates. Anything that doesn't time.Parse cleanly
+// against this layout is dropped silently (metric:
+// memdb.temporal.invalid_dates_dropped_total).
+const isoDateLayout = "2006-01-02"
+
+var (
+	temporalInvalidOnce sync.Once
+	temporalInvalidCtr  metric.Int64Counter
+)
+
+// temporalInvalidCounter returns the singleton counter that tracks event_date
+// strings dropped by validateISODates. Lazy-initialised so non-extractor unit
+// tests don't materialise the OTel meter.
+func temporalInvalidCounter() metric.Int64Counter {
+	temporalInvalidOnce.Do(func() {
+		m := otel.Meter("memdb-go/llm")
+		temporalInvalidCtr, _ = m.Int64Counter("memdb.temporal.invalid_dates_dropped_total",
+			metric.WithDescription("F7: event_date entries dropped by AtomicExtractor because they failed ISO-8601 (YYYY-MM-DD) validation"))
+	})
+	return temporalInvalidCtr
+}
+
+// validateISODates filters in slice to only entries that parse as
+// "YYYY-MM-DD". Empty input returns nil (so the field is omitted from the
+// downstream JSONB blob). Bad entries bump the
+// memdb.temporal.invalid_dates_dropped_total counter; the function itself is
+// silent — the LLM occasionally emits "circa 2010" / "summer 2023" style
+// values that we never want to persist as searchable dates.
+func validateISODates(ctx context.Context, in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	dropped := int64(0)
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			dropped++
+			continue
+		}
+		if _, err := time.Parse(isoDateLayout, s); err != nil {
+			dropped++
+			continue
+		}
+		out = append(out, s)
+	}
+	if dropped > 0 {
+		temporalInvalidCounter().Add(ctx, dropped)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
 
 // ADDITIVE_EXTRACTION_PROMPT is a verbatim copy of
 // mem0/mem0/configs/prompts.py::ADDITIVE_EXTRACTION_PROMPT (lines 468-944).
@@ -156,6 +215,7 @@ func (e *AtomicExtractor) ExtractAtomicFacts(
 		}
 		f.AttributedTo = strings.TrimSpace(f.AttributedTo)
 		f.LinkedMemoryIDs = filterValidUUIDs(f.LinkedMemoryIDs)
+		f.EventDates = validateISODates(ctx, f.EventDates)
 		out = append(out, f)
 	}
 	return out, nil
