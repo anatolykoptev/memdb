@@ -165,7 +165,7 @@ func resolveRelative(phrase string, now time.Time) (temporalRange, bool) {
 // search-package postgresClient interface stays minimal; we type-assert to
 // pick up the optional method when running against a real Postgres.
 type temporalRangeSearcher interface {
-	SearchMemoriesByDateRange(ctx context.Context, cubeID, start, end string, limit int) ([]db.TemporalMatch, error)
+	SearchMemoriesByDateRange(ctx context.Context, userName, start, end string, limit int) ([]db.TemporalMatch, error)
 }
 
 // stageTemporalAugment is the F7 search stage. Wired into defaultStages

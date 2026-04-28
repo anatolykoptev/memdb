@@ -23,12 +23,16 @@ type TemporalMatch struct {
 	Properties string // raw JSON properties
 }
 
-// SearchMemoriesByDateRange returns activated memory rows scoped to (cubeID)
-// whose `event_dates` array contains at least one ISO date in [start, end]
-// (inclusive). Both start and end MUST be "YYYY-MM-DD" strings — caller is
-// responsible for sanitising; no parsing is done here. Either may be empty
-// to mean "open-ended" on that side (e.g. start="2024-01-01" end="" → all
-// dates >= 2024-01-01).
+// SearchMemoriesByDateRange returns activated memory rows scoped to a single
+// user (matched against properties->>'user_name') whose `event_dates` array
+// contains at least one ISO date in [start, end] (inclusive). Both start and
+// end MUST be "YYYY-MM-DD" strings — caller is responsible for sanitising;
+// no parsing is done here. Either may be empty to mean "open-ended" on that
+// side (e.g. start="2024-01-01" end="" → all dates >= 2024-01-01).
+//
+// Naming note: historically this scope key was called "cubeID" across the
+// codebase, but the actual SQL filter is on `user_name`. The parameter is
+// named `userName` here to match the column it ends up bound to.
 //
 // Implementation: unnests the JSON array via jsonb_array_elements_text and
 // filters by lexical range — safe because YYYY-MM-DD is sortable as text.
@@ -38,10 +42,10 @@ type TemporalMatch struct {
 // matching rows, so limit is enforced in SQL.
 func (p *Postgres) SearchMemoriesByDateRange(
 	ctx context.Context,
-	cubeID, start, end string,
+	userName, start, end string,
 	limit int,
 ) ([]TemporalMatch, error) {
-	if cubeID == "" {
+	if userName == "" {
 		return nil, nil
 	}
 	if limit <= 0 {
@@ -63,9 +67,9 @@ WHERE properties->>(('user_name'::text)) = $1
         AND ($3 = '' OR d.val <= $3)
   )
 LIMIT $4`
-	rows, err := p.pool.Query(ctx, q, cubeID, start, end, limit)
+	rows, err := p.pool.Query(ctx, q, userName, start, end, limit)
 	if err != nil {
-		return nil, fmt.Errorf("temporal date range search (%s, [%s, %s]): %w", cubeID, start, end, err)
+		return nil, fmt.Errorf("temporal date range search (%s, [%s, %s]): %w", userName, start, end, err)
 	}
 	defer rows.Close()
 	out := make([]TemporalMatch, 0, 16)
