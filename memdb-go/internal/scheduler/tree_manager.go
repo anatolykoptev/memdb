@@ -95,6 +95,9 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 				))
 				continue
 			}
+			// Record cluster size before promotion (Q5).
+			schedMx().D3ClusterSize.Record(ctx, int64(len(cluster)),
+				metric.WithAttributes(attribute.String("tier", "episodic")))
 			info, err := r.promoteCluster(ctx, cubeID, cluster, hierarchyLevelEpisodic)
 			if err != nil {
 				schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
@@ -157,6 +160,9 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 				))
 				continue
 			}
+			// Record cluster size before promotion (Q5).
+			schedMx().D3ClusterSize.Record(ctx, int64(len(cluster)),
+				metric.WithAttributes(attribute.String("tier", "semantic")))
 			info, err := r.promoteCluster(ctx, cubeID, cluster, hierarchyLevelSemantic)
 			if err != nil {
 				schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(

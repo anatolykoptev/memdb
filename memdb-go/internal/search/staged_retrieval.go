@@ -58,6 +58,7 @@ func RunStagedRetrieval(ctx context.Context, logger *slog.Logger, query string, 
 		MaxInputSize:  stagedMaxInputSize(),
 		OnStage:       stagedStageHook,
 		OnJustified:   stagedJustifiedHook,
+		OnStageSize:   stagedStageSizeHook,
 	}.Rerank(ctx, query, adapted)
 	return unadaptItems(out)
 }
@@ -81,6 +82,15 @@ func stagedJustifiedHook(ctx context.Context, relevance string) {
 		return
 	}
 	mx.D5Justified.Add(ctx, 1, metric.WithAttributes(attribute.String("relevance", relevance)))
+}
+
+// stagedStageSizeHook records the candidate count entering each staged-retrieval stage.
+func stagedStageSizeHook(ctx context.Context, stage string, size int) {
+	mx := searchMx()
+	if mx == nil || mx.D5StageInputSize == nil {
+		return
+	}
+	mx.D5StageInputSize.Record(ctx, int64(size), metric.WithAttributes(attribute.String("stage", stage)))
 }
 
 // reorderByIDs places items with IDs in `order` first (in that order),

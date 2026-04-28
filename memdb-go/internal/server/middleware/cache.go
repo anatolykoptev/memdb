@@ -5,10 +5,21 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/cache"
 )
+
+// routeLabel derives a short metric-friendly label from the raw routeKey
+// (e.g. "POST /product/search" → "search"). Falls back to the full key.
+func routeLabel(routeKey string) string {
+	parts := strings.Split(routeKey, "/")
+	if len(parts) == 0 {
+		return routeKey
+	}
+	return parts[len(parts)-1]
+}
 
 // CacheConfig defines which paths to cache and their TTLs.
 type CacheConfig struct {
@@ -70,15 +81,19 @@ func Cache(logger *slog.Logger, cfg CacheConfig) func(http.Handler) http.Handler
 				return // body read failed; response already sent via next
 			}
 
+			label := routeLabel(routeKey)
+			keyStart := time.Now()
 			cacheKey := rule.keyFn(r, body)
+			recordCacheKeyBuild(r.Context(), label, keyStart)
 			if cacheKey == "" {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			if serveCacheHit(w, r, cfg.Client, cacheKey, logger) {
+			if serveCacheHit(w, r, cfg.Client, cacheKey, logger, label) {
 				return
 			}
+			recordCacheMiss(r.Context(), label)
 
 			captureAndCache(w, r, next, cfg.Client, cacheKey, rule.ttl, logger)
 		})
@@ -103,7 +118,7 @@ func readPostBody(w http.ResponseWriter, r *http.Request, rule cacheRule, next h
 }
 
 // serveCacheHit writes a cached response if available and returns true.
-func serveCacheHit(w http.ResponseWriter, r *http.Request, client *cache.Client, cacheKey string, logger *slog.Logger) bool {
+func serveCacheHit(w http.ResponseWriter, r *http.Request, client *cache.Client, cacheKey string, logger *slog.Logger, label string) bool {
 	cached, err := client.Get(r.Context(), cacheKey)
 	if err != nil {
 		logger.Debug("cache get error", slog.Any("error", err))
@@ -111,6 +126,7 @@ func serveCacheHit(w http.ResponseWriter, r *http.Request, client *cache.Client,
 	if cached == nil {
 		return false
 	}
+	recordCacheHit(r.Context(), label)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Cache", "HIT")
 	w.WriteHeader(http.StatusOK)
