@@ -1,0 +1,265 @@
+// Package rerank — cross-encoder strategy (precompute lookup + live fallback).
+//
+// Ports cross_encoder_adapter.go + cross_encoder_precompute.go from the
+// parent search pkg into a typed Reranker. Two execution paths preserved:
+//
+//  1. Lookup-first (M10 Stream 6, default ON): if items[0] (the cosine
+//     anchor) has a ce_score_topk cache covering every other item, we
+//     reorder by the cached pair scores and skip the live HTTP call.
+//  2. Live fallback: any miss / disabled / too-few items / empty anchor
+//     falls through to the go-kit/rerank.Client HTTP path.
+//
+// Metric hooks (OnLiveCall, OnPrecompute) let the parent search pkg attach
+// the legacy memdb.search.ce_live_call_total + .ce_precompute_hit_total
+// counters without leaking otel imports into this package's caller paths.
+// nil hooks are no-ops.
+package rerank
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+
+	"github.com/anatolykoptev/go-kit/rerank"
+)
+
+// CrossEncoder reranks via a precompute lookup with live HTTP fallback.
+// Disabled (skip lookup, always live) when MEMDB_CE_PRECOMPUTE=false.
+//
+// The strategy is constructed per-search; Client may be nil (in which case
+// Rerank skips entirely — chain treats it as skipped).
+type CrossEncoder struct {
+	Client *rerank.Client
+	// OnLiveCall fires when the live HTTP path executes (regardless of
+	// the reason — miss, anchor without cache, env-disabled).
+	OnLiveCall func(ctx context.Context)
+	// OnPrecompute fires for every lookup outcome (hit | miss | stale).
+	OnPrecompute func(ctx context.Context, outcome string)
+}
+
+// Name implements Reranker.
+func (CrossEncoder) Name() string { return "cross_encoder" }
+
+// Rerank implements Reranker. Behaviour parity with the legacy
+// rerankMemoryItemsPrecomputed + rerankMemoryItems pair.
+//
+// Skip → no client / empty batch.
+// Live (no lookup) → 1 item, env-disabled, anchor without ID, missing /
+// stale cache, or any per-neighbour cache miss.
+// Lookup hit → all neighbours present in cache; reorder by cached scores
+// and skip the live HTTP call entirely.
+func (ce CrossEncoder) Rerank(ctx context.Context, query string, items []Item) ([]Item, error) {
+	if ce.Client == nil || !ce.Client.Available() || len(items) == 0 {
+		RecordSkipped(ctx, ce.Name())
+		return items, nil
+	}
+
+	// Single-item batch — precompute lookup needs ≥2 items (anchor +
+	// neighbour). Defer to live, which runs the HTTP path even for n=1
+	// (parity with legacy rerankMemoryItems).
+	if !cePrecomputeEnabled() || len(items) < 2 {
+		out := ce.runLive(ctx, query, items)
+		RecordSuccess(ctx, ce.Name())
+		return out, nil
+	}
+
+	anchorID := items[0].ID()
+	if anchorID == "" {
+		out := ce.runLive(ctx, query, items)
+		RecordSuccess(ctx, ce.Name())
+		return out, nil
+	}
+
+	scoreByID, hasStale := extractCEScoreTopK(items[0])
+	if scoreByID == nil {
+		if hasStale {
+			ce.fireOnPrecompute(ctx, "stale")
+		} else {
+			ce.fireOnPrecompute(ctx, "miss")
+		}
+		out := ce.runLive(ctx, query, items)
+		RecordSuccess(ctx, ce.Name())
+		return out, nil
+	}
+	if hasStale {
+		ce.fireOnPrecompute(ctx, "stale")
+		out := ce.runLive(ctx, query, items)
+		RecordSuccess(ctx, ce.Name())
+		return out, nil
+	}
+
+	// Walk non-anchor items collecting cached scores. Any miss → live.
+	cachedScores := make([]float32, len(items))
+	cachedScores[0] = 1.0 // anchor self-score by convention
+	for i := 1; i < len(items); i++ {
+		id := items[i].ID()
+		if id == "" {
+			ce.fireOnPrecompute(ctx, "miss")
+			out := ce.runLive(ctx, query, items)
+			RecordSuccess(ctx, ce.Name())
+			return out, nil
+		}
+		s, ok := scoreByID[id]
+		if !ok {
+			ce.fireOnPrecompute(ctx, "miss")
+			out := ce.runLive(ctx, query, items)
+			RecordSuccess(ctx, ce.Name())
+			return out, nil
+		}
+		cachedScores[i] = s
+	}
+
+	// All items had cached scores. Reorder DESC, anchor stays at 0.
+	type indexed struct {
+		score float32
+		item  Item
+	}
+	rest := make([]indexed, 0, len(items)-1)
+	for i := 1; i < len(items); i++ {
+		rest = append(rest, indexed{score: cachedScores[i], item: items[i]})
+	}
+	for i := 1; i < len(rest); i++ {
+		j := i
+		for j > 0 && rest[j-1].score < rest[j].score {
+			rest[j-1], rest[j] = rest[j], rest[j-1]
+			j--
+		}
+	}
+
+	out := make([]Item, 0, len(items))
+	out = append(out, items[0])
+	items[0].SetMeta("cross_encoder_reranked", true)
+	for _, r := range rest {
+		r.item.SetScore(float64(r.score))
+		r.item.SetMeta("cross_encoder_reranked", true)
+		out = append(out, r.item)
+	}
+
+	ce.fireOnPrecompute(ctx, "hit")
+	RecordSuccess(ctx, ce.Name())
+	return out, nil
+}
+
+// runLive performs the live HTTP rerank call. Mirrors rerankMemoryItems
+// from the legacy adapter.
+func (ce CrossEncoder) runLive(ctx context.Context, query string, items []Item) []Item {
+	if len(items) == 0 {
+		return items
+	}
+	docs := make([]rerank.Doc, 0, len(items))
+	idxByID := make(map[string]int, len(items))
+	for i, it := range items {
+		text := it.EmbeddingText()
+		if text == "" {
+			continue
+		}
+		id := fmt.Sprintf("%d", i)
+		docs = append(docs, rerank.Doc{ID: id, Text: text})
+		idxByID[id] = i
+	}
+	if len(docs) == 0 {
+		return items
+	}
+
+	if ce.OnLiveCall != nil {
+		ce.OnLiveCall(ctx)
+	}
+	scored := ce.Client.Rerank(ctx, query, docs)
+
+	seen := make(map[int]bool, len(scored))
+	out := make([]Item, 0, len(items))
+	for _, s := range scored {
+		origIdx, ok := idxByID[s.ID]
+		if !ok {
+			continue
+		}
+		items[origIdx].SetScore(float64(s.Score))
+		items[origIdx].SetMeta("cross_encoder_reranked", true)
+		out = append(out, items[origIdx])
+		seen[origIdx] = true
+	}
+	for i, it := range items {
+		if !seen[i] {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
+func (ce CrossEncoder) fireOnPrecompute(ctx context.Context, outcome string) {
+	if ce.OnPrecompute != nil {
+		ce.OnPrecompute(ctx, outcome)
+	}
+}
+
+// cePrecomputeEnabled gates the lookup-first path. Default TRUE.
+// Set MEMDB_CE_PRECOMPUTE=false to force live every time (used for A/B).
+func cePrecomputeEnabled() bool {
+	return os.Getenv("MEMDB_CE_PRECOMPUTE") != "false"
+}
+
+// extractCEScoreTopK pulls the cached neighbour map out of an item's
+// ce_score_topk metadata field. Returns (nil, false) when absent;
+// (nil, true) when present but every entry malformed; (scores, true)
+// for partial parse; (scores, false) when fully clean.
+//
+// Tolerates float64 / float32 / json.Number for the score field — covers
+// in-process map[string]any and JSON-decoded paths.
+func extractCEScoreTopK(item Item) (map[string]float32, bool) {
+	raw, ok := item.GetMeta("ce_score_topk")
+	if !ok || raw == nil {
+		return nil, false
+	}
+	var entries []map[string]any
+	switch v := raw.(type) {
+	case []any:
+		entries = make([]map[string]any, 0, len(v))
+		for _, e := range v {
+			if m, ok := e.(map[string]any); ok {
+				entries = append(entries, m)
+			}
+		}
+	case []map[string]any:
+		entries = v
+	case string:
+		if v == "" {
+			return nil, false
+		}
+		_ = json.Unmarshal([]byte(v), &entries)
+	default:
+		return nil, false
+	}
+
+	if len(entries) == 0 {
+		return nil, false
+	}
+	out := make(map[string]float32, len(entries))
+	hasInvalid := false
+	for _, e := range entries {
+		nid, _ := e["neighbor_id"].(string)
+		if nid == "" {
+			hasInvalid = true
+			continue
+		}
+		switch s := e["score"].(type) {
+		case float64:
+			out[nid] = float32(s)
+		case float32:
+			out[nid] = s
+		case json.Number:
+			f, err := s.Float64()
+			if err == nil {
+				out[nid] = float32(f)
+			} else {
+				hasInvalid = true
+			}
+		default:
+			hasInvalid = true
+		}
+	}
+	if len(out) == 0 {
+		return nil, hasInvalid
+	}
+	return out, hasInvalid
+}

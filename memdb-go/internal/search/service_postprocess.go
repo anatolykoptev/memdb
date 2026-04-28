@@ -8,6 +8,8 @@ import (
 	"os"
 	"slices"
 	"time"
+
+	rerankpkg "github.com/anatolykoptev/memdb/memdb-go/internal/search/rerank"
 )
 
 // postProcessResults runs steps 6–11 of the search pipeline:
@@ -23,51 +25,50 @@ func (s *SearchService) postProcessResults(
 	text, skill, tool, pref []map[string]any,
 	p SearchParams,
 ) (retText, retSkill, retTool, retPref []map[string]any, llmRerankDur, iterativeDur, ceRerankDur time.Duration) {
-	// Step 6: Cosine rerank
-	text = ReRankByCosine(queryVec, text, textEmbByID)
+	// Steps 6 → 6.15: rerank pipeline, split in two phases.
+	//
+	// Phase 1 — prefix chain [Cosine, CrossEncoder?]: rescore items into a
+	// stable post-cosine/CE distribution. This is the input the rerank
+	// gate (rerankStrategy) MUST evaluate against — pre-R3 main called the
+	// gate after cosine + CE, and the thresholds (rerankTopCosineThreshold
+	// = 0.93, rerankClusteredSpread, rerankWideSpread) were tuned for the
+	// post-rescore score distribution, not the raw PolarDB-compressed band.
+	//
+	// Phase 2 — suffix chain [LLMJudge?, Staged]: gated rerankers that act
+	// on the rescored items. LLMJudge inclusion is decided by the gate; its
+	// Cap (TopK) comes from the same decision. Staged self-skips when its
+	// env flag is unset.
+	//
+	// skill and tool stay cosine-only — CE / LLM / staged are text-only by
+	// design (skill/tool are too low-value to warrant the extra cost).
+	prefix := buildTextRerankPrefix(s, queryVec, textEmbByID, len(text))
+	prefixResult := runRerankChainWithTimings(ctx, prefix, p.Query, text)
+	text = prefixResult.items
+
+	// Gate evaluates POST-cosine/CE scores — see comment above.
+	llmDecision := rerankStrategy(text)
+	llmEnabled := p.LLMRerank && s.LLMReranker.APIURL != "" && llmDecision.ShouldRerank
+
+	suffix := buildTextRerankSuffix(s, llmEnabled, llmDecision.TopK)
+	suffixResult := runRerankChainWithTimings(ctx, suffix, p.Query, text)
+	text = suffixResult.items
+
+	// Per-strategy durations from both phases — strategy names are stable
+	// constants matching the rerank package (cosine, cross_encoder,
+	// llm_judge, staged). Missing entries (strategy not in chain) default
+	// to zero. Operators reading the slog "search pipeline timing" line
+	// see CE cost (prefix) separated from LLM cost (suffix) — no more
+	// double-counting against chainDur as in the pre-fix R3 path.
+	if d, ok := prefixResult.durations["cross_encoder"]; ok {
+		ceRerankDur = d
+	}
+	if d, ok := suffixResult.durations["llm_judge"]; ok {
+		llmRerankDur = d
+	}
+
+	// Skill / tool: cosine-only.
 	skill = ReRankByCosine(queryVec, skill, skillEmbByID)
 	tool = ReRankByCosine(queryVec, tool, toolEmbByID)
-
-	// Step 6.05: Cross-encoder rerank (best-effort, runs before LLM rerank).
-	// Only applied to text_mem — skill/tool/pref are too low-value to warrant
-	// the extra HTTP round-trip. Zero-value config.URL disables.
-	if s.RerankClient.Available() && len(text) > 1 {
-		t0 := time.Now()
-		// M10 Stream 6: lookup-first via precomputed pairwise scores,
-		// with fallback to live CE on any miss. Disabled (skip lookup)
-		// when MEMDB_CE_PRECOMPUTE=false.
-		text = rerankMemoryItemsPrecomputed(ctx, s.RerankClient, p.Query, text)
-		ceRerankDur = time.Since(t0)
-	}
-
-	// Step 6.1: LLM rerank of text_mem (adaptive strategy)
-	if decision := rerankStrategy(text); p.LLMRerank && s.LLMReranker.APIURL != "" && decision.ShouldRerank {
-		t0 := time.Now()
-		rerankInput := text
-		if decision.TopK > 0 && decision.TopK < len(text) {
-			rerankInput = text[:decision.TopK]
-		}
-		reranked := LLMRerank(ctx, p.Query, rerankInput, s.LLMReranker)
-		if decision.TopK > 0 && decision.TopK < len(text) {
-			text = append(reranked, text[decision.TopK:]...)
-		} else {
-			text = reranked
-		}
-		llmRerankDur = time.Since(t0)
-	}
-
-	// Step 6.15: D5 staged retrieval (coarse→refine→justify).
-	// Env-gated by MEMDB_SEARCH_STAGED=true (default off). Runs AFTER
-	// existing LLM rerank so it consumes whatever order that step (if
-	// enabled) produced. Reuses LLMReranker credentials. Graceful
-	// degrade on any LLM error — `text` is returned unchanged.
-	if stagedRetrievalEnabled() {
-		text = RunStagedRetrieval(ctx, s.logger, p.Query, text, StagedRetrievalConfig{
-			APIURL: s.LLMReranker.APIURL,
-			APIKey: s.LLMReranker.APIKey,
-			Model:  s.LLMReranker.Model,
-		})
-	}
 
 	// Step 6.2: Iterative multi-stage retrieval expansion
 	t0 := time.Now()
@@ -111,6 +112,88 @@ func (s *SearchService) postProcessResults(
 	StripEmbeddings(pref)
 
 	return text, skill, tool, pref, llmRerankDur, iterativeDur, ceRerankDur
+}
+
+// buildTextRerankPrefix composes the pre-gate rerank chain applied to
+// text_mem: [Cosine, CrossEncoder?]. Cosine always runs (cheap,
+// in-process). CrossEncoder is included only when a non-nil RerankClient
+// is configured AND len(text) > 1 (parity with the legacy postprocess
+// guard — single-item batches don't benefit from CE rerank).
+//
+// The prefix output feeds rerankStrategy() so the LLM-judge gate sees
+// post-cosine/CE scores — same ordering as pre-R3 main.
+func buildTextRerankPrefix(s *SearchService, queryVec []float32, embByID map[string][]float32, textLen int) rerankpkg.Chain {
+	chain := rerankpkg.Chain{
+		rerankpkg.Cosine{QueryVec: queryVec, EmbeddingsByID: embByID},
+	}
+	if s.RerankClient.Available() && textLen > 1 {
+		chain = append(chain, rerankpkg.CrossEncoder{
+			Client:       s.RerankClient,
+			OnLiveCall:   ceLiveHook,
+			OnPrecompute: cePrecomputeHook,
+		})
+	}
+	return chain
+}
+
+// buildTextRerankSuffix composes the post-gate rerank chain applied to
+// text_mem: [LLMJudge?, Staged]. LLMJudge is included only when the
+// rerank gate (rerankStrategy on prefix output) said ShouldRerank —
+// keeps the existing gate semantics. Staged is always included; the
+// strategy self-skips when MEMDB_SEARCH_STAGED is unset.
+//
+// Adding a new reranker is strictly additive: write a Reranker, append
+// here, never touch postProcessResults again.
+func buildTextRerankSuffix(s *SearchService, llmEnabled bool, llmCap int) rerankpkg.Chain {
+	chain := rerankpkg.Chain{}
+	if llmEnabled {
+		chain = append(chain, rerankpkg.LLMJudge{
+			Config: rerankpkg.LLMConfig{
+				APIURL: s.LLMReranker.APIURL,
+				APIKey: s.LLMReranker.APIKey,
+				Model:  s.LLMReranker.Model,
+			},
+			Cap: llmCap,
+		})
+	}
+	chain = append(chain, rerankpkg.Staged{
+		Config: rerankpkg.LLMConfig{
+			APIURL: s.LLMReranker.APIURL,
+			APIKey: s.LLMReranker.APIKey,
+			Model:  s.LLMReranker.Model,
+		},
+		Logger:        s.logger,
+		ShortlistSize: stagedShortlistSize(),
+		MaxInputSize:  stagedMaxInputSize(),
+		OnStage:       stagedStageHook,
+		OnJustified:   stagedJustifiedHook,
+	})
+	return chain
+}
+
+// rerankPhaseResult captures the unadapted slice + per-strategy timings
+// for one chain invocation. Used by postProcessResults to populate
+// ceRerankDur / llmRerankDur from the appropriate phase.
+type rerankPhaseResult struct {
+	items     []map[string]any
+	durations map[string]time.Duration
+}
+
+// runRerankChainWithTimings wraps the chain call in the slice adaptation
+// and propagates per-strategy timings. Returned slice shares maps with
+// the input — strategies mutate metadata in place, the slice ordering
+// reflects the chain's final output. Empty input short-circuits with a
+// zero-duration map.
+func runRerankChainWithTimings(ctx context.Context, chain rerankpkg.Chain, query string, items []map[string]any) rerankPhaseResult {
+	if len(items) == 0 {
+		return rerankPhaseResult{items: items, durations: map[string]time.Duration{}}
+	}
+	adapted := adaptItems(items)
+	res, _ := chain.RerankWithTimings(ctx, query, adapted)
+	if res == nil {
+		return rerankPhaseResult{items: items, durations: map[string]time.Duration{}}
+	}
+	return rerankPhaseResult{items: unadaptItems(res.Items), durations: res.Durations}
 }
 
 // runIterativeExpansion applies iterative multi-stage retrieval if configured.
