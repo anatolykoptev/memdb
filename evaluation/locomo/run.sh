@@ -83,6 +83,12 @@ fi
 if [[ -z "${LLM_URL:-}" || -z "${LLM_API_KEY:-}" ]]; then
     SCORE_ARGS+=("--no-embed")
 fi
+# LLM Judge headline (Memobase / mem0-comparable) is opt-in via LOCOMO_LLM_JUDGE=1.
+# Requires LLM_URL + LLM_API_KEY to be set. Defaults to off because the judge
+# itself costs N extra LLM calls (~$0.05–0.20 on full corpus).
+if [[ "${LOCOMO_LLM_JUDGE:-0}" == "1" && -n "${LLM_URL:-}" && -n "${LLM_API_KEY:-}" ]]; then
+    SCORE_ARGS+=("--llm-judge")
+fi
 python3 "$EVAL_DIR/score.py" \
     --predictions "$PREDS_OUT" \
     --out "$SCORE_OUT" \
