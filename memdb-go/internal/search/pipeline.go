@@ -183,6 +183,7 @@ var stageNames = []string{
 	"bfs_expand",
 	"internet_embed",
 	"merge_candidates",
+	"temporal_augment",
 	"d2_graph_expand",
 	"contradicts_penalty",
 	"format_items",

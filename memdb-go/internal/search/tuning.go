@@ -22,7 +22,9 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -207,4 +209,33 @@ const defaultCat2Threshold = 0.05
 // applyCat2Threshold only lowers a non-zero Relativity (zero = no filter).
 func cat2Threshold() float64 {
 	return parseEnvFloat("MEMDB_CAT2_THRESHOLD", 0, 0.5, defaultCat2Threshold)
+}
+
+// ---- F7 — cat-4 temporal-extent heuristic ----------------------------------
+
+// cat4QueryRe matches the LoCoMo category-4 question shapes the F7 temporal
+// augmentation stage targets — questions that ask about time elapsed,
+// historical year, or temporal extent. These queries benefit most from the
+// event_dates GIN index because the right answer is usually pinned to a
+// specific day or year that the user explicitly references.
+//
+// Patterns:
+//
+//	"How long ago ...", "How many years/months/weeks/days ago ...",
+//	"What year ...", "What month ...", "When did ...",
+//	"In what year ...", "Since when ...".
+//
+// Deliberately overlaps with cat2QueryRe — F7 boosts a strict superset of
+// cat-2 plus pure-cat-4 phrasings ("Since when", "How long ago"). False
+// positives (non-temporal "When did the meeting end?") still trigger the
+// augmentation but the DB query returns empty matches and the boost is a
+// no-op — bounded extra latency, no correctness impact.
+var cat4QueryRe = regexp.MustCompile(
+	`(?i)\b(how long ago|how many (years|months|weeks|days) ago|what (year|month|day|date)|when did|in what year|since when)\b`,
+)
+
+// isCat4Query returns true when q matches the cat-4 temporal-extent heuristic.
+// Used by F7 metrics tagging and by future cat-4-only tuning paths.
+func isCat4Query(q string) bool {
+	return cat4QueryRe.MatchString(strings.TrimSpace(q))
 }
