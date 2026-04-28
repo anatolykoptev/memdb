@@ -81,73 +81,51 @@ func PageRankBoostWeight() float64 {
 	return v
 }
 
-// runPageRankLoop is started as a background goroutine by Worker.Run when
+// startPageRankLoop is started as a background goroutine by Worker.Run when
 // pageRankEnabled() is true and a Postgres client is available.
-// It staggered by half the interval on startup (same pattern as periodicReorgLoop).
-func (w *Worker) runPageRankLoop(ctx context.Context, pg *db.Postgres) {
+// Delegates to periodicLoop for stagger/tick/metrics; advisory lock is
+// handled per-iteration via acquireLock/releaseLock.
+func (w *Worker) startPageRankLoop(ctx context.Context, pg *db.Postgres) {
 	if pg == nil {
 		return
 	}
 	interval := pageRankInterval()
-	// Stagger first run so it doesn't overlap with periodicReorgLoop startup.
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(interval / 3):
-	}
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		w.runPageRankForAllCubes(ctx, pg)
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-w.stopCh:
-			return
-		case <-ticker.C:
-		}
-	}
+	(&periodicLoop{
+		name:     "pagerank",
+		interval: interval,
+		stagger:  interval / 3,
+		acquireLock: func(ctx context.Context) (bool, error) {
+			return tryAcquirePagerankAdvisoryLock(ctx, pg)
+		},
+		releaseLock: func(ctx context.Context) {
+			_ = releasePagerankAdvisoryLock(ctx, pg)
+		},
+		runOnce: func(ctx context.Context) error {
+			return w.runPageRankOnce(ctx, pg)
+		},
+	}).Start(ctx, w.stopCh)
 }
 
-// runPageRankForAllCubes discovers active cubes (reusing the Worker's existing
-// scanVSetCubeIDs / scanStreamCubeIDs methods) and runs PageRank for each.
-//
-// HA gate: in multi-replica deployments only one replica executes the PageRank
-// pass per cycle. The session advisory lock is acquired non-blocking; replicas
-// that do not win skip with outcome=skipped_other_leader. The lock is released
-// at function exit (or auto-released on session close if the pod crashes).
-func (w *Worker) runPageRankForAllCubes(ctx context.Context, pg *db.Postgres) {
+// runPageRankOnce is called by periodicLoop on each tick (after the advisory
+// lock has already been acquired by the loop's acquireLock callback).
+// It discovers active cubes and runs PageRank for each, emitting per-cube
+// outcome metrics via schedMx().PageRankRuns.
+func (w *Worker) runPageRankOnce(ctx context.Context, pg *db.Postgres) error {
 	mx := schedMx()
 	start := time.Now()
-
-	locked, err := tryAcquirePagerankAdvisoryLock(ctx, pg)
-	if err != nil {
-		mx.PageRankRuns.Add(ctx, 1, labelPageRankOutcome("db_error"))
-		w.logger.Debug("pagerank: advisory lock acquire failed", "err", err)
-		return
-	}
-	if !locked {
-		mx.PageRankRuns.Add(ctx, 1, labelPageRankOutcome("skipped_other_leader"))
-		w.logger.Debug("pagerank: another replica holds the lock, skipping")
-		return
-	}
-	defer func() { _ = releasePagerankAdvisoryLock(ctx, pg) }()
 
 	cubes := w.getActiveCubes(ctx)
 	if len(cubes) == 0 {
 		w.logger.Debug("pagerank: no active cubes found")
 		mx.PageRankRuns.Add(ctx, 1, labelPageRankOutcome("empty"))
 		mx.PageRankLastRun.Record(ctx, time.Since(start).Seconds())
-		return
+		return nil
 	}
 
 	success := 0
 	for _, cubeID := range cubes {
 		if ctx.Err() != nil {
-			return
+			return ctx.Err()
 		}
 		if err := w.runPageRankForCube(ctx, pg, cubeID); err != nil {
 			w.logger.Warn("pagerank: cube failed",
@@ -171,6 +149,7 @@ func (w *Worker) runPageRankForAllCubes(ctx context.Context, pg *db.Postgres) {
 		slog.Int("cubes_ok", success),
 		slog.Duration("elapsed", time.Since(start)),
 	)
+	return nil
 }
 
 // runPageRankForCube fetches all valid edges for a cube, computes PageRank,

@@ -47,34 +47,23 @@ func (w *Worker) moveToDLQ(ctx context.Context, msg ScheduleMessage, reason stri
 
 // ---- periodicReorgLoop ------------------------------------------------------
 
-// periodicReorgLoop runs the Memory Reorganizer for every active cube on a
+// startPeriodicReorgLoop runs the Memory Reorganizer for every active cube on a
 // fixed timer, independent of incoming stream messages.
 //
 // "Active cubes" are discovered by scanning VSET keys (wm:v:*) — any cube
 // that has WorkingMemory in the hot cache is considered active.
 // This mirrors MemOS RedisStreamsScheduler periodic timer pattern.
-func (w *Worker) periodicReorgLoop(ctx context.Context) {
-	// Stagger first run by half the interval so it doesn't overlap with startup.
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(periodicReorgInterval / 2):
-	}
-
-	ticker := time.NewTicker(periodicReorgInterval)
-	defer ticker.Stop()
-
-	for {
-		w.runPeriodicReorg(ctx)
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-w.stopCh:
-			return
-		case <-ticker.C:
-		}
-	}
+// Delegates to periodicLoop for stagger/tick/metrics (no advisory lock needed).
+func (w *Worker) startPeriodicReorgLoop(ctx context.Context) {
+	(&periodicLoop{
+		name:     "periodic_reorg",
+		interval: periodicReorgInterval,
+		stagger:  periodicReorgInterval / 2,
+		runOnce: func(ctx context.Context) error {
+			w.runPeriodicReorg(ctx)
+			return nil
+		},
+	}).Start(ctx, w.stopCh)
 }
 
 // runPeriodicReorg discovers active cubes and runs reorganizer for each.
