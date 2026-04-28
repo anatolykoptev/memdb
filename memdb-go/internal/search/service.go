@@ -51,6 +51,17 @@ type SearchService struct {
 	// Wire in via SetPPRScorer (ppr_scorer.go). The concrete type is *scheduler.Worker
 	// but we hold the interface to avoid import cycles.
 	pprScorer PPRScorer
+	// Reflection is the F2 reflection-loop deep-search agent. nil = disabled
+	// (also disabled if MEMDB_F2_REFLECTION env is unset/false). Wired via
+	// SetReflectionAgent so server_init_search.go can construct it lazily
+	// from the same llm.Client used by the rest of the search service.
+	Reflection *ReflectionAgent
+}
+
+// SetReflectionAgent installs the F2 reflection agent. Pass nil to disable.
+// Safe to call once at startup before Search is invoked.
+func (s *SearchService) SetReflectionAgent(a *ReflectionAgent) {
+	s.Reflection = a
 }
 
 // NewSearchService creates a SearchService. Any dependency may be nil (caller
@@ -136,6 +147,7 @@ func (s *SearchService) defaultStages() []stage {
 		funcStage{"contradicts_penalty", s.stageContradictsPenalty},
 		funcStage{"format_items", s.stageFormatItems},
 		funcStage{"post_process", s.stagePostProcess},
+		funcStage{"reflect", s.stageReflect},
 		funcStage{"working_mem_format", s.stageWorkingMemFormat},
 		funcStage{"build_response", s.stageBuildResponse},
 		funcStage{"profile_inject", s.stageProfileInject},

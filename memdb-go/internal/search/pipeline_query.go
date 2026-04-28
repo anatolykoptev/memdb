@@ -105,3 +105,6 @@ func (s *SearchService) stageD11CoTDecompose(ctx context.Context, st *pipelineSt
 	st.D11Subqueries = s.applyCoTDecomposition(ctx, st.PSR, st.Params.Query, st.Params, st.Budget)
 	return nil
 }
+
+// Note: stageReflect (F2 reflection-loop) lives in pipeline_reflect.go —
+// kept separate to honour the file-size concern boundary on this package.
