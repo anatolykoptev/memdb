@@ -145,6 +145,7 @@ func (s *SearchService) defaultStages() []stage {
 		funcStage{"merge_candidates", s.stageMergeCandidates},
 		funcStage{"temporal_augment", s.stageTemporalAugment},
 		funcStage{"inject_events", s.stageInjectEvents},
+		funcStage{"linked_expand", s.stageLinkedExpand},
 		funcStage{"d2_graph_expand", s.stageD2GraphExpand},
 		funcStage{"contradicts_penalty", s.stageContradictsPenalty},
 		funcStage{"format_items", s.stageFormatItems},

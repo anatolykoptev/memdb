@@ -185,6 +185,7 @@ var stageNames = []string{
 	"merge_candidates",
 	"temporal_augment",
 	"inject_events",
+	"linked_expand",
 	"d2_graph_expand",
 	"contradicts_penalty",
 	"format_items",

@@ -207,6 +207,11 @@ func (h *Handler) runAtomicFineForCube(ctx context.Context, req *fullAddRequest,
 		Conversation: conversation, Now: now,
 		FactCount: len(extracted), MessageCount: len(req.Messages),
 	})
+	// Stage 5b: F12 linked_memory_ids resolver — fire-and-forget. Runs only
+	// for atomic facts (the legacy paragraph path doesn't carry the
+	// linked_memory_ids slot). Lives after triggerBackgroundExtractors so
+	// existing fanout latency stays unchanged when MEMDB_F12_LINKED is off.
+	h.triggerLinkedIDsResolver(atomicFacts, embedded, cubeID, *req.UserID, stringOrEmpty(req.AgentID))
 	recordStageDuration(ctx, "fanout", t)
 	return items, nil
 }

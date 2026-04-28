@@ -163,6 +163,41 @@ func (s *SearchService) stageD2GraphExpand(ctx context.Context, st *pipelineStat
 	return nil
 }
 
+// stageLinkedExpand performs the F12 1-hop GIN expansion: for each top-K
+// text-merged seed, surface memories whose top-level linked_memory_ids
+// array references it (reverse direction) — i.e. memories causally /
+// temporally linked TO the seed by the F12 resolver. Uses migration 0022's
+// idx_memory_linked_ids GIN index via the ?| jsonb_exists_any operator.
+//
+// Why before merge_candidates / before D2: the linked-by edges encode
+// extract-time AND post-extract LLM-judged causality (richer signal than
+// memory_edges, which only stores entity-level CAUSES/CONTRADICTS), and
+// the GIN-index path is cheap (single round-trip, no recursion). 1-hop
+// only — multi-hop is left to D2.
+//
+// Env-gate: MEMDB_F12_LINKED — default ON. Set to "0"/"false"/"no"/"off"
+// to disable.  Soft-fails on DB error (logs Debug, returns input).
+//
+// Latency budget: +50ms p95 — single index-bound query, scored on cosine
+// against the query vector when the linked memory carries an embedding
+// (which all post-F8 atomic facts do).
+func (s *SearchService) stageLinkedExpand(ctx context.Context, st *pipelineState) error {
+	if !linkedExpandEnabled() {
+		st.skip("linked_expand")
+		return nil
+	}
+	if st.PSR == nil || len(st.TextMerged) == 0 || s.postgres == nil {
+		st.skip("linked_expand")
+		return nil
+	}
+	st.TextMerged = expandViaLinkedIDs(
+		ctx, s.postgres, s.logger,
+		st.TextMerged, st.QueryVec,
+		st.Params.CubeID, st.Params.UserName, st.Params.AgentID,
+	)
+	return nil
+}
+
 // stageContradictsPenalty applies the CONTRADICTS edge penalty to text
 // candidates. Pulls top-N seed IDs and queries CONTRADICTS edges; matches
 // get a score multiplier reduction. Soft-fails on DB error (returns the
