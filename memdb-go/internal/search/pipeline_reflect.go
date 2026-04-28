@@ -6,9 +6,9 @@
 // trigger one of two follow-up actions:
 //
 //   - "needs_raw"    — re-fetch top-K vector candidates without rerank trim,
-//                      append previously-unseen IDs.
+//     append previously-unseen IDs.
 //   - "missing_info" — embed each missing-aspect phrase, run a fresh
-//                      VectorSearch, append previously-unseen IDs.
+//     VectorSearch, append previously-unseen IDs.
 //
 // Loop is bounded by reflectionMaxIter (=2) so the worst case is
 // "first judge + extra fetch + confirm". Each step emits the
@@ -75,15 +75,18 @@ func (s *SearchService) stageReflect(ctx context.Context, st *pipelineState) err
 // wired, complex-only heuristic, non-empty candidate set. Each failure
 // records the appropriate outcome label and marks the stage skipped.
 // Returns true when the loop body should run.
+//
+// Fast path (F2 I1 followup): when MEMDB_F2_REFLECTION is disabled the
+// gate returns immediately without touching reflectionMx() — saves the
+// sync.Once init + counter.Add allocation per query on the hot path
+// since reflection defaults to off.
 func (s *SearchService) reflectGatesPass(ctx context.Context, st *pipelineState) bool {
+	if !reflectionEnabled() {
+		st.skip("reflect")
+		return false
+	}
 	mx := reflectionMx()
 	switch {
-	case !reflectionEnabled():
-		st.skip("reflect")
-		mx.Iterations.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("outcome", reflectionOutcomeDisabled),
-		))
-		return false
 	case s.Reflection == nil:
 		st.skip("reflect")
 		mx.Iterations.Add(ctx, 1, metric.WithAttributes(
@@ -129,8 +132,13 @@ func (s *SearchService) applyReflectNeedsRaw(ctx context.Context, st *pipelineSt
 // search per phrase, and appends previously-unseen items. The phrase list
 // is pre-capped at reflectionMaxAspects in the agent.
 //
-// Soft-fail per phrase: an embed or DB failure on one aspect does not stop
-// the others.
+// F2 I5 followup: aspect phrases are batched into a single Embed call
+// (the embedder interface ships a native batch method). Falls back to
+// per-phrase EmbedQuery on batch failure so a single backend hiccup
+// doesn't abort the whole missing-info branch.
+//
+// Soft-fail per phrase: a DB failure on one aspect does not stop the
+// others.
 func (s *SearchService) applyReflectMissingInfo(ctx context.Context, st *pipelineState, aspects []string) {
 	if len(aspects) == 0 || s.embedder == nil || s.postgres == nil {
 		return
@@ -140,11 +148,30 @@ func (s *SearchService) applyReflectMissingInfo(ctx context.Context, st *pipelin
 	if subK <= 0 {
 		return
 	}
-	for _, phrase := range aspects {
-		vec, err := s.embedder.EmbedQuery(ctx, phrase)
+
+	// Try batch embed first — single round-trip for up to reflectionMaxAspects.
+	vecs, err := s.embedder.Embed(ctx, aspects)
+	if err != nil || len(vecs) != len(aspects) {
+		// Fallback to per-phrase EmbedQuery.
 		if err != nil {
-			s.logger.Debug("reflect missing_info embed failed",
-				slog.String("phrase", phrase), slog.Any("error", err))
+			s.logger.Debug("reflect missing_info batch embed failed, falling back to per-phrase",
+				slog.Any("error", err))
+		}
+		vecs = make([][]float32, len(aspects))
+		for i, phrase := range aspects {
+			vec, err := s.embedder.EmbedQuery(ctx, phrase)
+			if err != nil {
+				s.logger.Debug("reflect missing_info embed failed",
+					slog.String("phrase", phrase), slog.Any("error", err))
+				continue
+			}
+			vecs[i] = vec
+		}
+	}
+
+	for i, phrase := range aspects {
+		vec := vecs[i]
+		if len(vec) == 0 {
 			continue
 		}
 		mx.ExtraEmbeddings.Add(ctx, 1)
