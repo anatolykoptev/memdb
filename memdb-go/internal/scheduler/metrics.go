@@ -25,10 +25,20 @@ type schedMetricsStruct struct {
 	// D3ClusterSize (Q5) — number of members in each cluster at promotion time.
 	// tier ∈ {episodic, semantic}.
 	D3ClusterSize metric.Int64Histogram
+	// F14 Personalized PageRank metrics.
+	PPRRuns       metric.Int64Counter   // outcome: success|empty_seed|cache_hit|fallback_global
+	PPRCacheHits  metric.Int64Counter   // numerator for cache-hit ratio
+	PPRCacheTotal metric.Int64Counter   // denominator for cache-hit ratio
+	PPRIterCount  metric.Int64Histogram // convergence speed (iterations per PPR call)
 }
 
 // labelPageRankOutcome returns an OTel attribute option for pagerank outcome labels.
 func labelPageRankOutcome(outcome string) metric.MeasurementOption {
+	return metric.WithAttributes(attribute.String("outcome", outcome))
+}
+
+// labelPPROutcome returns an OTel attribute option for PPR outcome labels.
+func labelPPROutcome(outcome string) metric.MeasurementOption {
 	return metric.WithAttributes(attribute.String("outcome", outcome))
 }
 
@@ -60,6 +70,19 @@ func schedMx() *schedMetricsStruct {
 			metric.WithDescription("D3 reorganizer: member count of each cluster at promotion (tier=episodic|semantic)"),
 			metric.WithExplicitBucketBoundaries(2, 3, 5, 10, 20, 50),
 		)
+		pprRuns, _ := meter.Int64Counter("memdb.scheduler.ppr_compute_total",
+			metric.WithDescription("Personalized PageRank compute outcomes (outcome in success|empty_seed|cache_hit|fallback_global)"),
+		)
+		pprCacheHits, _ := meter.Int64Counter("memdb.scheduler.ppr_cache_hits_total",
+			metric.WithDescription("Personalized PageRank Redis cache hits (numerator for hit ratio)"),
+		)
+		pprCacheTotal, _ := meter.Int64Counter("memdb.scheduler.ppr_cache_requests_total",
+			metric.WithDescription("Personalized PageRank Redis cache requests (denominator for hit ratio)"),
+		)
+		pprIterCount, _ := meter.Int64Histogram("memdb.scheduler.ppr_iter_count",
+			metric.WithDescription("Personalized PageRank power-iteration convergence count per call"),
+			metric.WithExplicitBucketBoundaries(1, 5, 10, 20, 30, 40, 50),
+		)
 		schedMetricsInstruments = &schedMetricsStruct{
 			Messages:        msgs,
 			Duration:        dur,
@@ -68,6 +91,10 @@ func schedMx() *schedMetricsStruct {
 			PageRankRuns:    prRuns,
 			PageRankLastRun: prLast,
 			D3ClusterSize:   d3cs,
+			PPRRuns:         pprRuns,
+			PPRCacheHits:    pprCacheHits,
+			PPRCacheTotal:   pprCacheTotal,
+			PPRIterCount:    pprIterCount,
 		}
 		// Pre-register TreeReorg at zero so Prometheus scrapers see the
 		// series immediately (matches db/metrics.go pattern).
@@ -86,6 +113,12 @@ func schedMx() *schedMetricsStruct {
 		for _, tier := range []string{"episodic", "semantic"} {
 			d3cs.Record(context.Background(), 0, metric.WithAttributes(
 				attribute.String("tier", tier),
+			))
+		}
+		// Pre-register PPR outcome counters so Prometheus sees all series from start.
+		for _, outcome := range []string{"success", "empty_seed", "cache_hit", "fallback_global"} {
+			pprRuns.Add(context.Background(), 0, metric.WithAttributes(
+				attribute.String("outcome", outcome),
 			))
 		}
 	})
