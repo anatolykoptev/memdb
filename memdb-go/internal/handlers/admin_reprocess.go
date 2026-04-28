@@ -218,7 +218,10 @@ func (h *Handler) applyReprocessActions(ctx context.Context, embedded []embedded
 		case llm.MemDelete:
 			h.applyDeleteAction(ctx, f.TargetID, cubeID)
 		case llm.MemUpdate:
-			h.applyUpdateAction(ctx, f.TargetID, f.Memory, ef.embVec, now)
+			h.applyUpdateAction(ctx, updateActionArgs{
+				TargetID: f.TargetID, Memory: f.Memory,
+				EmbVec: ef.embVec, Now: now,
+			})
 		default: // llm.MemAdd
 			if node := buildReprocessLTMNode(f, ef.embVec, cubeID, now); node != nil {
 				allNodes = append(allNodes, *node)
