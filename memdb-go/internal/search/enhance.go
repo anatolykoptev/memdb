@@ -13,18 +13,16 @@ package search
 // pronouns and relative times from their original conversation context.
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 const enhancePrompt = `You are a memory enhancement assistant. Given a user query and a list of retrieved memory fragments, your task is to produce a CLEANED version of each memory that is useful for answering the query.
@@ -151,57 +149,17 @@ func EnhanceMemories(
 
 // callEnhanceLLM makes the LLM call for memory enhancement.
 func callEnhanceLLM(ctx context.Context, userMsg string, cfg EnhanceConfig) ([]enhancedMemory, error) {
-	payload := map[string]any{
-		"model":       cfg.Model,
-		"temperature": 0.0,
-		"max_tokens":  enhanceMaxTokens,
-		"messages": []map[string]string{
-			{"role": "system", "content": enhancePrompt},
-			{"role": "user", "content": userMsg},
-		},
-	}
-	body, _ := json.Marshal(payload)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		cfg.APIURL+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	}
-
-	client := &http.Client{Timeout: 20 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, enhanceRespLimit))
-	if err != nil {
-		return nil, err
-	}
-
-	var chatResp struct {
-		Choices []struct {
-			Message struct{ Content string `json:"content"` } `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(respBody, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return nil, errors.New("enhance: bad LLM response")
-	}
-
-	content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
-	content = strings.TrimPrefix(content, "```json")
-	content = strings.TrimPrefix(content, "```")
-	content = strings.TrimSuffix(content, "```")
-	content = strings.TrimSpace(content)
-
 	var result []enhancedMemory
-	if err := json.Unmarshal([]byte(content), &result); err != nil {
-		return nil, fmt.Errorf("enhance: parse failed: %w", err)
+	client := llm.NewSimpleClient(cfg.APIURL, cfg.APIKey, cfg.Model)
+	if err := llm.ChatStructured(ctx, client, "d10_enhance_legacy", []llm.Message{
+		{Role: "system", Content: enhancePrompt},
+		{Role: "user", Content: userMsg},
+	}, &result,
+		llm.WithMaxTokens(enhanceMaxTokens),
+		llm.WithTimeout(20*time.Second),
+		llm.WithRespBodyLimit(enhanceRespLimit),
+	); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

@@ -17,14 +17,9 @@ package search
 //   - Temperature = 0 for determinism.
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -116,63 +111,21 @@ func RewriteQueryForRetrieval(ctx context.Context, query, nowISO string, cfg Que
 }
 
 func callRewriteLLM(ctx context.Context, userMsg string, cfg QueryRewriteConfig) (string, float64, error) {
-	payload := map[string]any{
-		"model":       cfg.Model,
-		"temperature": 0.0,
-		"max_tokens":  queryRewriteMaxTokens,
-		"messages": []map[string]string{
-			{"role": "system", "content": queryRewriteSystemPrompt},
-			{"role": "user", "content": userMsg},
-		},
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", 0, err
-	}
-
-	reqCtx, cancel := context.WithTimeout(ctx, queryRewriteTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
-		cfg.APIURL+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", 0, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	}
-	client := &http.Client{Timeout: queryRewriteTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", 0, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", 0, fmt.Errorf("query rewrite llm: status %d", resp.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, queryRewriteRespBodyLimit))
-	if err != nil {
-		return "", 0, err
-	}
-	var chatResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(raw, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return "", 0, errors.New("query rewrite llm: bad response")
-	}
-
 	var parsed struct {
 		Rewritten  string  `json:"rewritten"`
 		Confidence float64 `json:"confidence"`
 	}
-	content := chatResp.Choices[0].Message.Content
-	if err := json.Unmarshal(llm.StripJSONFence([]byte(content)), &parsed); err != nil {
-		return "", 0, fmt.Errorf("query rewrite parse: %w", err)
+	client := llm.NewSimpleClient(cfg.APIURL, cfg.APIKey, cfg.Model)
+	err := llm.ChatStructured(ctx, client, "d4_rewrite", []llm.Message{
+		{Role: "system", Content: queryRewriteSystemPrompt},
+		{Role: "user", Content: userMsg},
+	}, &parsed,
+		llm.WithMaxTokens(queryRewriteMaxTokens),
+		llm.WithTimeout(queryRewriteTimeout),
+		llm.WithRespBodyLimit(queryRewriteRespBodyLimit),
+	)
+	if err != nil {
+		return "", 0, err
 	}
 	return parsed.Rewritten, parsed.Confidence, nil
 }

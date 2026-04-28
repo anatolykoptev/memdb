@@ -21,17 +21,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"strings"
 	"time"
-
-	"bytes"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"go.opentelemetry.io/otel/attribute"
@@ -128,17 +122,9 @@ func EnhanceRetrievalAnswer(
 		query, memBlock.String(),
 	)
 
-	callCtx, cancel := context.WithTimeout(ctx, answerEnhanceTimeout)
-	defer cancel()
-
-	content, err := callAnswerEnhanceLLM(callCtx, userMsg, cfg)
-	if err != nil {
-		return answerEnhanceUnknownAnswer, nil, 0, fmt.Errorf("enhance llm: %w", err)
-	}
-
 	var parsed AnswerEnhanceResponse
-	if err := json.Unmarshal(llm.StripJSONFence([]byte(content)), &parsed); err != nil {
-		return answerEnhanceUnknownAnswer, nil, 0, fmt.Errorf("enhance parse: %w", err)
+	if err := callAnswerEnhanceLLM(ctx, userMsg, cfg, &parsed); err != nil {
+		return answerEnhanceUnknownAnswer, nil, 0, fmt.Errorf("enhance llm: %w", err)
 	}
 	if strings.TrimSpace(parsed.Answer) == "" {
 		return answerEnhanceUnknownAnswer, nil, 0, nil
@@ -146,57 +132,20 @@ func EnhanceRetrievalAnswer(
 	return parsed.Answer, parsed.SourceIDs, parsed.Confidence, nil
 }
 
-// callAnswerEnhanceLLM performs the single chat-completion round trip for D10.
-// Kept separate (not via *llm.Client) so we can enforce a tight 10s timeout
+// callAnswerEnhanceLLM performs the single chat-completion round trip for D10
+// and unmarshals the response into target. Kept separate (not via the shared
+// *llm.Client retrying global) so we can enforce the tight 10s D10 timeout
 // without interfering with the shared 90s-timeout LLM client used elsewhere.
-func callAnswerEnhanceLLM(ctx context.Context, userMsg string, cfg AnswerEnhanceConfig) (string, error) {
-	payload := map[string]any{
-		"model":       cfg.Model,
-		"temperature": 0.0,
-		"max_tokens":  answerEnhanceMaxTokens,
-		"messages": []map[string]string{
-			{"role": "system", "content": answerEnhanceSystemPrompt},
-			{"role": "user", "content": userMsg},
-		},
-	}
-	body, _ := json.Marshal(payload)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		cfg.APIURL+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	}
-
-	client := &http.Client{Timeout: answerEnhanceTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, answerEnhanceRespBodyLimit))
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("enhance llm: status %d", resp.StatusCode)
-	}
-
-	var chatResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(respBody, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return "", errors.New("enhance llm: bad response")
-	}
-	return chatResp.Choices[0].Message.Content, nil
+func callAnswerEnhanceLLM(ctx context.Context, userMsg string, cfg AnswerEnhanceConfig, target *AnswerEnhanceResponse) error {
+	client := llm.NewSimpleClient(cfg.APIURL, cfg.APIKey, cfg.Model)
+	return llm.ChatStructured(ctx, client, "d10_enhance", []llm.Message{
+		{Role: "system", Content: answerEnhanceSystemPrompt},
+		{Role: "user", Content: userMsg},
+	}, target,
+		llm.WithMaxTokens(answerEnhanceMaxTokens),
+		llm.WithTimeout(answerEnhanceTimeout),
+		llm.WithRespBodyLimit(answerEnhanceRespBodyLimit),
+	)
 }
 
 // prependEnhancedAnswer inserts a synthetic EnhancedAnswer item at position 0

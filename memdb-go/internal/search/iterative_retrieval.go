@@ -18,18 +18,15 @@ package search
 //   - Results cached per (query+stage+node_ids) with 2-min TTL
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 const (
@@ -251,56 +248,17 @@ Respond ONLY with valid JSON matching this schema:
 		userMsg = fmt.Sprintf("Query: %s\n\nExpansion stage %d. Retrieved memories so far:\n%s\n\nJSON:", query, stage+1, memCtx)
 	}
 
-	payload := map[string]any{
-		"model":       cfg.Model,
-		"temperature": 0.0,
-		"max_tokens":  256,
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": userMsg},
-		},
-	}
-	body, _ := json.Marshal(payload)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.APIURL+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return stageDecision{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	}
-
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return stageDecision{}, err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, iterativeRespBodyLimit))
-	if err != nil {
-		return stageDecision{}, err
-	}
-
-	var chatResp struct {
-		Choices []struct {
-			Message struct{ Content string `json:"content"` } `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(respBody, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return stageDecision{}, errors.New("iterative: bad LLM response")
-	}
-
-	content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
-	content = strings.TrimPrefix(content, "```json")
-	content = strings.TrimPrefix(content, "```")
-	content = strings.TrimSuffix(content, "```")
-	content = strings.TrimSpace(content)
-
 	var decision stageDecision
-	if err := json.Unmarshal([]byte(content), &decision); err != nil {
-		return stageDecision{}, fmt.Errorf("iterative: parse failed: %w", err)
+	client := llm.NewSimpleClient(cfg.APIURL, cfg.APIKey, cfg.Model)
+	if err := llm.ChatStructured(ctx, client, "d6_iterative", []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userMsg},
+	}, &decision,
+		llm.WithMaxTokens(256),
+		llm.WithTimeout(15*time.Second),
+		llm.WithRespBodyLimit(iterativeRespBodyLimit),
+	); err != nil {
+		return stageDecision{}, err
 	}
 	return decision, nil
 }
