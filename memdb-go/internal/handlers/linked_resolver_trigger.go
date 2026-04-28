@@ -138,7 +138,11 @@ func (h *Handler) runLinkedResolverForFact(
 
 	select {
 	case sem <- struct{}{}:
-		defer func() { <-sem }()
+		recordLinkedInflightDelta(ctx, 1)
+		defer func() {
+			<-sem
+			recordLinkedInflightDelta(ctx, -1)
+		}()
 	case <-ctx.Done():
 		recordLinkedFactProcessed(ctx, linkedOutcomeLLMError)
 		return
@@ -178,6 +182,11 @@ func (h *Handler) runLinkedResolverForFact(
 	if len(merged) == 0 {
 		recordLinkedFactProcessed(ctx, linkedOutcomeEmpty)
 		return
+	}
+	if len(merged) >= linkedResolverMaxLinks {
+		// Truncated at the per-fact cap — bump cap_hit so we can detect when
+		// the LLM is finding more real relations than we persist.
+		recordLinkedCapHit(ctx)
 	}
 	if err := h.postgres.SetLinkedMemoryIDs(ctx, ef.ltmID, cubeID, merged); err != nil {
 		recordLinkedFactProcessed(ctx, linkedOutcomePersistError)
