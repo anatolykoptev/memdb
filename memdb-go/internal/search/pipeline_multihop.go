@@ -38,6 +38,27 @@ func isCat2Query(q string) bool {
 	return cat2QueryRe.MatchString(strings.TrimSpace(q))
 }
 
+// cat3QueryRe matches LoCoMo category-3 (multi-hop / aggregation /
+// comparison) starters: "Compare ...", "Which one ...", "How does X
+// relate to Y ...", "What's the difference ...", "List all ...",
+// "Summarise ...". Used by the F2 reflection-loop gate to decide whether
+// a query is "complex enough" to spend an extra LLM judgement on.
+//
+// The pattern is deliberately broad — false positives here only mean a
+// reflection LLM call fires on a slightly-easier-than-expected query,
+// which is recoverable (the LLM returns "sufficient" and the loop exits).
+// False negatives push the query to the default path with no extra cost.
+var cat3QueryRe = regexp.MustCompile(
+	`(?i)^(compare |which (one|of) |how does .+ relate |what(?:'s| is) the difference|list all |summari[sz]e |across all |between .+ and )`,
+)
+
+// isCat3Query returns true when q matches the cat-3 multi-hop / aggregation
+// heuristic. Pair with isCat2Query for the F2 reflection-loop "complex
+// query" gate (MEMDB_REFLECTION_ON_COMPLEX_ONLY).
+func isCat3Query(q string) bool {
+	return cat3QueryRe.MatchString(strings.TrimSpace(q))
+}
+
 // applyCat2Threshold lowers st.Params.Relativity to thr when the query is a
 // cat-2 temporal multi-hop question and thr is strictly less than the current
 // value.

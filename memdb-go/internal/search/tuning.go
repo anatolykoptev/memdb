@@ -23,6 +23,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -195,6 +196,55 @@ func d1DecayAlpha() float64 {
 // to 0.05 to let weak bridging hops survive — they would otherwise be
 // filtered out before reaching the reranker.
 const defaultCat2Threshold = 0.05
+
+// ---- F2 — reflection-loop deep search --------------------------------------
+
+const (
+	defaultReflectionEnabled        = false
+	defaultReflectionOnComplexOnly  = true
+)
+
+// reflectionEnabled reports whether the F2 reflection-loop stage should run
+// at all. Default OFF (opt-in for measurement).
+//
+// Env: MEMDB_F2_REFLECTION = "1" | "true" | "yes" enables; anything else (or
+// unset) disables.
+func reflectionEnabled() bool {
+	return parseEnvBool("MEMDB_F2_REFLECTION", defaultReflectionEnabled)
+}
+
+// reflectionOnComplexOnly reports whether the F2 reflection stage should
+// gate itself on the complexity heuristic (isCat2Query OR isCat3Query).
+// Default ON — running reflection on every query blows the latency budget.
+//
+// Env: MEMDB_REFLECTION_ON_COMPLEX_ONLY = "0" | "false" | "no" disables the
+// gate (run on every query); default and any other value keeps it ON.
+func reflectionOnComplexOnly() bool {
+	return parseEnvBool("MEMDB_REFLECTION_ON_COMPLEX_ONLY", defaultReflectionOnComplexOnly)
+}
+
+// parseEnvBool parses an env var as a boolean. "1"/"true"/"yes" (case
+// insensitive) → true; "0"/"false"/"no" → false; anything else → def.
+// Records the override only when the value diverges from the default.
+func parseEnvBool(name string, def bool) bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(name)))
+	if raw == "" {
+		return def
+	}
+	var v bool
+	switch raw {
+	case "1", "true", "yes", "on":
+		v = true
+	case "0", "false", "no", "off":
+		v = false
+	default:
+		return def
+	}
+	if v != def {
+		recordOverride(name, raw)
+	}
+	return v
+}
 
 // cat2Threshold reads MEMDB_CAT2_THRESHOLD and returns the similarity
 // threshold used for cat-2 (temporal multi-hop) queries detected by
