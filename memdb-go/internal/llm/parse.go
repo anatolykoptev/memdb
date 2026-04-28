@@ -1,7 +1,7 @@
 // Package llm — parse.go: generic structured chat helper.
 //
 // ChatStructured collapses the marshal+POST+status+limitReader+unmarshal+fence
-// boilerplate that 9 ad-hoc callers inside MemDB had each open-coded into a
+// boilerplate that 10 ad-hoc callers inside MemDB had each open-coded into a
 // single typed call. It is the typed companion of ChatText (plain text).
 //
 // Behaviour preserved across the original callsites:
@@ -16,6 +16,9 @@
 // New behaviour added by this helper (per M11 R0 spec):
 //   - On parse failure the helper retries once with a short reminder appended
 //     to the user message ("Respond with strict JSON only, no prose.").
+//     Behaviour delta vs legacy callers: all 10 migrated callsites previously
+//     failed immediately on bad JSON; ChatStructured retries and self-corrects
+//     — a strict improvement. To opt out, pass WithMaxRetries(0).
 //   - On HTTP 429 (Too Many Requests) the helper retries once after a short
 //     fixed delay. 5xx and other transport errors are NOT retried — the
 //     original callsites treated them as terminal and graceful-degraded, and
@@ -41,7 +44,7 @@ import (
 )
 
 // Default tunables for ChatStructured. Picked to match the median of the
-// 9 migrated callsites — individual callsites override via opts.
+// 10 migrated callsites — individual callsites override via opts.
 const (
 	defaultStructuredTimeout      = 15 * time.Second
 	defaultStructuredMaxTokens    = 1024
@@ -224,6 +227,7 @@ func ChatStructured[T any](
 		if err := json.Unmarshal(stripped, target); err != nil {
 			lastErr = fmt.Errorf("llm.ChatStructured[%s]: parse: %w", promptID, err)
 			if attempt < o.maxRetries {
+				// retried label fires whether the second attempt succeeded or not — it is independent of the terminal outcome.
 				mx.Calls.Add(ctx, 1, metric.WithAttributes(
 					attribute.String("prompt_id", promptID),
 					attribute.String("outcome", outcomeRetried),

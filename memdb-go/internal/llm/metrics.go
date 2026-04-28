@@ -71,6 +71,12 @@ var preregisteredStructuredPromptIDs = []string{
 // preregisteredStructuredOutcomes are the outcome label values emitted by
 // ChatStructured / ChatText. Pre-registering each for the prompt-IDs above
 // gives a complete grid of {prompt_id, outcome} series at scrape time.
+//
+// Outcome label semantics: success, parse_error, http_error, and timeout are
+// mutually-exclusive terminal outcomes (their sum equals total calls). retried
+// is INDEPENDENT — it fires whenever a parse-retry was attempted, regardless
+// of whether the second attempt succeeded or failed. Dashboards must NOT sum
+// all five labels as a total.
 var preregisteredStructuredOutcomes = []string{
 	"success",
 	"parse_error",
