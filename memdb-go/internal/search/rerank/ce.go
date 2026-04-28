@@ -36,6 +36,16 @@ type CrossEncoder struct {
 	OnLiveCall func(ctx context.Context)
 	// OnPrecompute fires for every lookup outcome (hit | miss | stale).
 	OnPrecompute func(ctx context.Context, outcome string)
+	// QueryUserID, QuerySessionID, QueryTags carry the query-time identity
+	// context used by the metadata boost post-step (Q3 stream). Empty
+	// strings / nil slice = no boost for that factor.
+	QueryUserID    string
+	QuerySessionID string
+	QueryTags      []string
+	// BoostWeights configures the per-factor multipliers. Zero value
+	// (all fields = 0) disables all boosting silently. Use
+	// DefaultBoostWeights() for MemOS-parity defaults.
+	BoostWeights BoostWeights
 }
 
 // Name implements Reranker.
@@ -49,7 +59,22 @@ func (CrossEncoder) Name() string { return "cross_encoder" }
 // stale cache, or any per-neighbour cache miss.
 // Lookup hit → all neighbours present in cache; reorder by cached scores
 // and skip the live HTTP call entirely.
+//
+// After CE scoring (whichever path), applyMetadataBoost multiplies scores
+// by (1 + matched weight factors) per the Q3 spec. Zero BoostWeights or
+// empty query identity strings produce no-ops without branches.
 func (ce CrossEncoder) Rerank(ctx context.Context, query string, items []Item) ([]Item, error) {
+	out, err := ce.rerank(ctx, query, items)
+	if err != nil || out == nil {
+		return out, err
+	}
+	applyMetadataBoost(ctx, out, ce.QueryUserID, ce.QuerySessionID, ce.QueryTags, ce.BoostWeights)
+	return out, nil
+}
+
+// rerank is the inner CE scoring logic (precompute lookup + live fallback).
+// applyMetadataBoost is applied by the public Rerank wrapper above.
+func (ce CrossEncoder) rerank(ctx context.Context, query string, items []Item) ([]Item, error) {
 	if ce.Client == nil || !ce.Client.Available() || len(items) == 0 {
 		RecordSkipped(ctx, ce.Name())
 		return items, nil

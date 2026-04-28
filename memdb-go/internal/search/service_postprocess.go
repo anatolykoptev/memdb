@@ -41,7 +41,7 @@ func (s *SearchService) postProcessResults(
 	//
 	// skill and tool stay cosine-only — CE / LLM / staged are text-only by
 	// design (skill/tool are too low-value to warrant the extra cost).
-	prefix := buildTextRerankPrefix(s, queryVec, textEmbByID, len(text))
+	prefix := buildTextRerankPrefix(s, queryVec, textEmbByID, len(text), p)
 	prefixResult := runRerankChainWithTimings(ctx, prefix, p.Query, text)
 	text = prefixResult.items
 
@@ -122,15 +122,24 @@ func (s *SearchService) postProcessResults(
 //
 // The prefix output feeds rerankStrategy() so the LLM-judge gate sees
 // post-cosine/CE scores — same ordering as pre-R3 main.
-func buildTextRerankPrefix(s *SearchService, queryVec []float32, embByID map[string][]float32, textLen int) rerankpkg.Chain {
+//
+// Q3: CrossEncoder is constructed with QueryMeta fields so the metadata
+// boost post-step (applyMetadataBoost inside CE.Rerank) can match items
+// by user_id / session_id / tags. SearchParams.UserName serves as the
+// user_id key (it is the cube/user identifier used throughout the stack).
+// AgentID maps to session_id for session-scoped boosts.
+func buildTextRerankPrefix(s *SearchService, queryVec []float32, embByID map[string][]float32, textLen int, p SearchParams) rerankpkg.Chain {
 	chain := rerankpkg.Chain{
 		rerankpkg.Cosine{QueryVec: queryVec, EmbeddingsByID: embByID},
 	}
 	if s.RerankClient.Available() && textLen > 1 {
 		chain = append(chain, rerankpkg.CrossEncoder{
-			Client:       s.RerankClient,
-			OnLiveCall:   ceLiveHook,
-			OnPrecompute: cePrecomputeHook,
+			Client:         s.RerankClient,
+			OnLiveCall:     ceLiveHook,
+			OnPrecompute:   cePrecomputeHook,
+			QueryUserID:    p.UserName,
+			QuerySessionID: p.AgentID,
+			BoostWeights:   rerankpkg.DefaultBoostWeights(),
 		})
 	}
 	return chain
