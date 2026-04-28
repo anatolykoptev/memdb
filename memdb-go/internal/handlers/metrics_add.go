@@ -76,10 +76,29 @@ func addMx() *addMetricsStruct {
 // Kept in sync with the orchestrator in add_fine.go (nativeFineAddForCube).
 var fineStages = []string{"classify", "extract", "embed", "apply", "fanout"}
 
+// fineStagesSet mirrors fineStages as a lookup for closed-set validation in
+// recordStageDuration. Keeps the source of truth in fineStages while
+// avoiding O(n) on every record.
+var fineStagesSet = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(fineStages))
+	for _, s := range fineStages {
+		m[s] = struct{}{}
+	}
+	return m
+}()
+
 // recordStageDuration writes time.Since(start) to memdb.add.stage_duration_ms
 // under the given stage label. Use as the final step of each pipeline stage
 // so per-stage p50/p95 land in Prometheus alongside the total request timer.
+//
+// Q5 followup: the stage value is validated against fineStagesSet — labels
+// outside the closed set are dropped (no record) so a typo or stray caller
+// never opens a free-form label dimension in Prometheus. The pre-registered
+// time-series matrix in addMx() always covers the canonical fineStages.
 func recordStageDuration(ctx context.Context, stage string, start time.Time) {
+	if _, ok := fineStagesSet[stage]; !ok {
+		return
+	}
 	mx := addMx()
 	if mx.StageDuration == nil {
 		return

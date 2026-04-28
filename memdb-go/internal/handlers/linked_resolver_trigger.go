@@ -6,15 +6,15 @@
 // burst of /add traffic doesn't fan out N×M LLM calls in one shot.
 //
 // For each persisted atomic fact:
-//   1. Skip if the fact text or ltmID is empty.
-//   2. Pull top-N (linkedResolverTopN, default 20) cosine-similar memories
-//      via Postgres VectorSearch — the wider candidate window the
-//      extract-time pass never saw.
-//   3. Filter out the fact itself (a fact cannot link to its own UUID).
-//   4. Call LinkedIDsResolver.Resolve to ask the LLM which candidates are
-//      causally / temporally linked.
-//   5. Merge with the extract-time linked_memory_ids and persist via
-//      Postgres.SetLinkedMemoryIDs.
+//  1. Skip if the fact text or ltmID is empty.
+//  2. Pull top-N (linkedResolverTopN, default 20) cosine-similar memories
+//     via Postgres VectorSearch — the wider candidate window the
+//     extract-time pass never saw.
+//  3. Filter out the fact itself (a fact cannot link to its own UUID).
+//  4. Call LinkedIDsResolver.Resolve to ask the LLM which candidates are
+//     causally / temporally linked.
+//  5. Merge with the extract-time linked_memory_ids and persist via
+//     Postgres.SetLinkedMemoryIDs.
 //
 // Errors at any step bump a metric outcome and continue with the next fact;
 // the resolver is best-effort signal enrichment, never load-bearing.
@@ -144,7 +144,20 @@ func (h *Handler) runLinkedResolverForFact(
 			recordLinkedInflightDelta(ctx, -1)
 		}()
 	case <-ctx.Done():
-		recordLinkedFactProcessed(ctx, linkedOutcomeLLMError)
+		// F12 followup: was previously mislabelled as linkedOutcomeLLMError —
+		// the per-fact budget expired waiting for a semaphore slot, which is
+		// admission-control overload, not an LLM call failure.
+		recordLinkedFactProcessed(ctx, linkedOutcomeOverloaded)
+		return
+	}
+
+	// F12 followup: short-circuit when the fact carries no embedding —
+	// VectorSearch would otherwise return zero rows and the outcome would
+	// be misclassified as linkedOutcomeNoCandidates. Distinguishing the
+	// two cases lets operators tell "embedder fault" from "isolated fact"
+	// at a glance.
+	if len(ef.embedding) == 0 {
+		recordLinkedFactProcessed(ctx, linkedOutcomeNoEmbedding)
 		return
 	}
 
