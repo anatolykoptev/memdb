@@ -27,14 +27,9 @@ package search
 //     input set.
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -166,15 +161,11 @@ func stagedStage2Refine(ctx context.Context, query string, items []map[string]an
 	}
 	userMsg := fmt.Sprintf("Query: %s\n\nCandidates:\n%s\n\nReturn JSON {\"ids\":[...]} — top 10 ids, most relevant first.", query, b.String())
 
-	content, err := callStagedLLM(ctx, stagedStage2SystemPrompt, userMsg, cfg)
-	if err != nil {
-		return nil, err
-	}
 	var parsed struct {
 		IDs []string `json:"ids"`
 	}
-	if err := json.Unmarshal(llm.StripJSONFence([]byte(content)), &parsed); err != nil {
-		return nil, fmt.Errorf("stage2 parse: %w", err)
+	if err := callStagedLLM(ctx, stagedStage2SystemPrompt, userMsg, cfg, "d5_staged", &parsed); err != nil {
+		return nil, fmt.Errorf("stage2: %w", err)
 	}
 	// Cap to shortlist size
 	shortlistCap := stagedShortlistSize()
@@ -213,70 +204,28 @@ func stagedStage3Justify(ctx context.Context, query string, shortlist []string, 
 	}
 	userMsg := fmt.Sprintf("Query: %s\n\nShortlisted memories:\n%s\n\nReturn JSON {\"items\":[{\"id\",\"justification\",\"relevant\"}...]}", query, b.String())
 
-	content, err := callStagedLLM(ctx, stagedStage3SystemPrompt, userMsg, cfg)
-	if err != nil {
-		return nil, err
-	}
 	var parsed struct {
 		Items []stagedJustifiedItem `json:"items"`
 	}
-	if err := json.Unmarshal(llm.StripJSONFence([]byte(content)), &parsed); err != nil {
-		return nil, fmt.Errorf("stage3 parse: %w", err)
+	if err := callStagedLLM(ctx, stagedStage3SystemPrompt, userMsg, cfg, "d5_staged", &parsed); err != nil {
+		return nil, fmt.Errorf("stage3: %w", err)
 	}
 	return parsed.Items, nil
 }
 
-func callStagedLLM(ctx context.Context, systemPrompt, userMsg string, cfg StagedRetrievalConfig) (string, error) {
-	payload := map[string]any{
-		"model":       cfg.Model,
-		"temperature": 0.0,
-		"max_tokens":  stagedMaxTokens,
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": userMsg},
-		},
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-
-	reqCtx, cancel := context.WithTimeout(ctx, stagedTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
-		cfg.APIURL+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
-	}
-	client := &http.Client{Timeout: stagedTimeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("staged llm: status %d", resp.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, stagedRespBodyLimit))
-	if err != nil {
-		return "", err
-	}
-	var chatResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(raw, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return "", errors.New("staged llm: bad response")
-	}
-	return chatResp.Choices[0].Message.Content, nil
+// callStagedLLM dispatches a single chat-completion to the configured proxy
+// and unmarshals the response into target via llm.ChatStructured. promptID
+// labels per-prompt metrics.
+func callStagedLLM[T any](ctx context.Context, systemPrompt, userMsg string, cfg StagedRetrievalConfig, promptID string, target *T) error {
+	client := llm.NewSimpleClient(cfg.APIURL, cfg.APIKey, cfg.Model)
+	return llm.ChatStructured(ctx, client, promptID, []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userMsg},
+	}, target,
+		llm.WithMaxTokens(stagedMaxTokens),
+		llm.WithTimeout(stagedTimeout),
+		llm.WithRespBodyLimit(stagedRespBodyLimit),
+	)
 }
 
 // reorderByIDs places items with IDs in `order` first (in that order),

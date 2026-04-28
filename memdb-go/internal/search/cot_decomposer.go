@@ -26,14 +26,9 @@ package search
 // Cache, key, and normalize helpers live in cot_decomposer_cache.go.
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 	"time"
 	"unicode"
@@ -240,56 +235,17 @@ Output ONLY the JSON array, no prose. Example:
 ["When did Caroline meet Emma?", "What did Caroline do in Boston?"]`
 
 func (d *CoTDecomposer) callLLM(ctx context.Context, query string) ([]string, error) {
-	payload := map[string]any{
-		"model":       d.cfg.Model,
-		"temperature": 0.0,
-		"max_tokens":  cotDecomposerMaxTokens,
-		"messages": []map[string]string{
-			{"role": "user", "content": fmt.Sprintf(cotDecomposerPrompt, query, d.cfg.MaxSubQueries)},
-		},
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	reqCtx, cancel := context.WithTimeout(ctx, d.cfg.Timeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost,
-		d.cfg.APIURL+"/v1/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if d.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+d.cfg.APIKey)
-	}
-	client := &http.Client{Timeout: d.cfg.Timeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("cot decomposer: status %d", resp.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, cotDecomposerRespBodyMax))
-	if err != nil {
-		return nil, err
-	}
-	var chatResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(raw, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return nil, errors.New("cot decomposer: bad response")
-	}
-	content := llm.StripJSONFence([]byte(chatResp.Choices[0].Message.Content))
 	var arr []string
-	if err := json.Unmarshal(content, &arr); err != nil {
-		return nil, fmt.Errorf("cot decomposer: parse: %w", err)
+	client := llm.NewSimpleClient(d.cfg.APIURL, d.cfg.APIKey, d.cfg.Model)
+	err := llm.ChatStructured(ctx, client, "d11_cot", []llm.Message{
+		{Role: "user", Content: fmt.Sprintf(cotDecomposerPrompt, query, d.cfg.MaxSubQueries)},
+	}, &arr,
+		llm.WithMaxTokens(cotDecomposerMaxTokens),
+		llm.WithTimeout(d.cfg.Timeout),
+		llm.WithRespBodyLimit(cotDecomposerRespBodyMax),
+	)
+	if err != nil {
+		return nil, err
 	}
 	return arr, nil
 }

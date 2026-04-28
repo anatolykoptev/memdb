@@ -15,19 +15,15 @@ package scheduler
 //   - SearchService reads from Redis and injects into search response as profile_mem
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 const (
@@ -151,57 +147,33 @@ func (p *Profiler) refresh(ctx context.Context, cubeID string) error {
 }
 
 // callProfileLLM asks the LLM to synthesize a structured user profile paragraph.
+//
+// Uses llm.ChatText (plain string output, no JSON unmarshal) — the profile is
+// a free-form paragraph stored verbatim in Redis. Per-prompt metrics under
+// memdb.llm.structured_call_total{prompt_id="profiler"}.
 func (p *Profiler) callProfileLLM(ctx context.Context, facts string) (string, error) {
 	if len(facts) > profileFactsMaxChars {
 		facts = facts[:profileFactsMaxChars] + "\n[truncated]"
 	}
 
-	payload := map[string]any{
-		"model":       p.llmModel,
-		"temperature": 0.1,
-		"max_tokens":  400,
-		"messages": []map[string]string{
-			{
-				"role":    "system",
-				"content": "You are a personal assistant creating a user profile. From the memory facts provided, write a 3-6 sentence profile paragraph in third person covering: name, age, occupation, location, major interests/hobbies, and any other notable stable facts. Be concrete and specific. Do not make things up. If information is unavailable, omit that field.",
-			},
-			{
-				"role":    "user",
-				"content": "User memory facts:\n" + facts + "\n\nProfile:",
-			},
+	client := llm.NewSimpleClient(p.llmProxyURL, p.llmProxyKey, p.llmModel)
+	content, err := llm.ChatText(ctx, client, "profiler", []llm.Message{
+		{
+			Role:    "system",
+			Content: "You are a personal assistant creating a user profile. From the memory facts provided, write a 3-6 sentence profile paragraph in third person covering: name, age, occupation, location, major interests/hobbies, and any other notable stable facts. Be concrete and specific. Do not make things up. If information is unavailable, omit that field.",
 		},
-	}
-	body, _ := json.Marshal(payload)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.llmProxyURL+"/v1/chat/completions", bytes.NewReader(body))
+		{
+			Role:    "user",
+			Content: "User memory facts:\n" + facts + "\n\nProfile:",
+		},
+	},
+		llm.WithMaxTokens(400),
+		llm.WithTemperature(0.1),
+		llm.WithTimeout(30*time.Second),
+		llm.WithRespBodyLimit(profileRespBodyLimit),
+	)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("profile: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if p.llmProxyKey != "" {
-		req.Header.Set("Authorization", "Bearer "+p.llmProxyKey)
-	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, profileRespBodyLimit))
-	if err != nil {
-		return "", err
-	}
-
-	var chatResp struct {
-		Choices []struct {
-			Message struct{ Content string `json:"content"` } `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(respBody, &chatResp); err != nil || len(chatResp.Choices) == 0 {
-		return "", errors.New("profile: bad LLM response")
-	}
-
-	return strings.TrimSpace(chatResp.Choices[0].Message.Content), nil
+	return strings.TrimSpace(content), nil
 }
