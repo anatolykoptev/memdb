@@ -48,7 +48,7 @@ return nil
 return props
 }
 
-// FilterByRelativity filters formatted items by their metadata.relativity score.
+// FilterByRelativity filters formatted items by their relativity score.
 func FilterByRelativity(items []map[string]any, threshold float64) []map[string]any {
 filtered := make([]map[string]any, 0, len(items))
 for _, item := range items {
@@ -197,8 +197,8 @@ meta["embedding"] = []any{}
 }
 }
 
-// CapWorkingMemScores caps metadata.relativity for WorkingMemory items to
-// prevent them from dominating text results with a perfect 1.00 score.
+// CapWorkingMemScores caps the relativity score for WorkingMemory items
+// to prevent them from dominating text results with a perfect 1.00 score.
 func CapWorkingMemScores(items []map[string]any) {
 for _, item := range items {
 meta, _ := item["metadata"].(map[string]any)
