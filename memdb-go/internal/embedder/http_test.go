@@ -8,6 +8,23 @@ import (
 	"testing"
 )
 
+// testEmbedRequest / testEmbedResponse are wire types for the fake embed-server
+// used in tests. The internal request/response types now live in go-kit/embed,
+// so we define equivalent local structs for test assertions only.
+type testEmbedRequest struct {
+	Input []string `json:"input"`
+	Model string   `json:"model"`
+}
+
+type testEmbedResponse struct {
+	Data []testEmbedData `json:"data"`
+}
+
+type testEmbedData struct {
+	Embedding []float32 `json:"embedding"`
+	Index     int       `json:"index"`
+}
+
 // TestHTTPEmbedder_Embed verifies the happy path: batch embed returns correct vectors.
 func TestHTTPEmbedder_Embed(t *testing.T) {
 	want := [][]float32{
@@ -22,7 +39,7 @@ func TestHTTPEmbedder_Embed(t *testing.T) {
 		if r.URL.Path != "/v1/embeddings" {
 			t.Errorf("expected /v1/embeddings, got %s", r.URL.Path)
 		}
-		var req httpEmbedRequest
+		var req testEmbedRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
@@ -32,8 +49,8 @@ func TestHTTPEmbedder_Embed(t *testing.T) {
 		if req.Model != "test-model" {
 			t.Errorf("expected model test-model, got %s", req.Model)
 		}
-		resp := httpEmbedResponse{
-			Data: []httpEmbedData{
+		resp := testEmbedResponse{
+			Data: []testEmbedData{
 				{Embedding: want[0], Index: 0},
 				{Embedding: want[1], Index: 1},
 			},
@@ -119,5 +136,49 @@ func TestHTTPEmbedder_TrailingSlash(t *testing.T) {
 	e := NewHTTPEmbedder("http://embed:8080/", "m", 1024, testLogger())
 	if e.baseURL != "http://embed:8080" {
 		t.Errorf("trailing slash not stripped: %q", e.baseURL)
+	}
+}
+
+// TestHTTPEmbedder_Migration_Parity verifies that the go-kit/embed delegate produces
+// the same output as the previous direct implementation for a known embed response.
+// This is the parity test ensuring the foundation migration is behaviour-equivalent.
+func TestHTTPEmbedder_Migration_Parity(t *testing.T) {
+	want := [][]float32{
+		{0.1, 0.2, 0.3},
+		{0.4, 0.5, 0.6},
+		{0.7, 0.8, 0.9},
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := testEmbedResponse{
+			Data: []testEmbedData{
+				{Embedding: want[0], Index: 0},
+				{Embedding: want[1], Index: 1},
+				{Embedding: want[2], Index: 2},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	e := NewHTTPEmbedder(srv.URL, "multilingual-e5-large", 3, testLogger())
+	got, err := e.Embed(context.Background(), []string{"a", "b", "c"})
+	if err != nil {
+		t.Fatalf("parity: Embed error: %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parity: len mismatch: want %d, got %d", len(want), len(got))
+	}
+	for i := range want {
+		if len(got[i]) != len(want[i]) {
+			t.Errorf("parity: [%d] dim mismatch: want %d, got %d", i, len(want[i]), len(got[i]))
+			continue
+		}
+		for j := range want[i] {
+			if got[i][j] != want[i][j] {
+				t.Errorf("parity: [%d][%d] = %f, want %f", i, j, got[i][j], want[i][j])
+			}
+		}
 	}
 }
