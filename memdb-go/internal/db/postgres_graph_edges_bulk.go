@@ -72,7 +72,7 @@ func (p *Postgres) BulkInsertMemoryEdges(ctx context.Context, rows []MemoryEdgeR
 	if len(fromIDs) == 0 {
 		return nil
 	}
-	_, err := p.pool.Exec(ctx, queries.BulkInsertMemoryEdges,
+	_, err := p.pool.Exec(ctx, fmt.Sprintf(queries.BulkInsertMemoryEdges, graphName),
 		fromIDs, toIDs, relations, createdAt, confidences, rationales)
 	if err != nil {
 		return fmt.Errorf("bulk insert %d memory edges: %w", len(fromIDs), err)

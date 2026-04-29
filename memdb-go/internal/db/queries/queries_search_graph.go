@@ -193,7 +193,7 @@ WITH RECURSIVE walk(node_id, seed_id, hop) AS (
          w.seed_id,
          w.hop + 1
   FROM walk w
-  JOIN memory_edges e
+  JOIN %[1]s.memory_edges e
     ON (e.from_id = w.node_id OR e.to_id = w.node_id)
    AND e.invalid_at IS NULL
   WHERE w.hop < $4
