@@ -73,20 +73,19 @@ func TestBuildTextRerankPrefix_QueryTagsWired(t *testing.T) {
 // raw PolarDB-compressed input band.
 //
 // Construction: input items carry pre-cosine relativities tightly
-// clustered in [0.85, 0.92] (PolarDB band) — rerankStrategy on this
-// raw input would label them "clustered" (spread < 0.05) and trigger
-// LLM rerank. After cosine rescores against orthogonal embeddings, the
-// distribution widens to ~[0, 1] — the SAME gate then sees clearly
-// separated items and chooses "wide-spread" → skip LLM. This is the
-// pre-R3 behaviour we must preserve.
+// clustered just below the high-confidence threshold (0.85) — raw input
+// labels this "clustered" (spread < defaultRerankClusteredSpread = 0.10).
+// After cosine rescores against orthogonal embeddings, the distribution
+// widens to ~[0.5, 1.0] — the SAME gate then sees a top above 0.85 →
+// high-confidence skip. This is the pre-R3 behaviour we must preserve.
 func TestRerankGate_PostCosineOrdering(t *testing.T) {
-	// 4 items in a tight PolarDB band — would be "clustered" pre-cosine
-	// (spread < 0.05 → rerankClusteredSpread).
+	// 4 items tight just below the high-conf threshold — raw input is
+	// "clustered" (top ≤ 0.85 AND spread < 0.10). With M12.7 thresholds.
 	items := []map[string]any{
-		{"id": "a", "memory": "alpha", "metadata": map[string]any{"relativity": 0.890}},
-		{"id": "b", "memory": "beta", "metadata": map[string]any{"relativity": 0.880}},
-		{"id": "c", "memory": "gamma", "metadata": map[string]any{"relativity": 0.870}},
-		{"id": "d", "memory": "delta", "metadata": map[string]any{"relativity": 0.860}},
+		{"id": "a", "memory": "alpha", "metadata": map[string]any{"relativity": 0.840}},
+		{"id": "b", "memory": "beta", "metadata": map[string]any{"relativity": 0.830}},
+		{"id": "c", "memory": "gamma", "metadata": map[string]any{"relativity": 0.820}},
+		{"id": "d", "memory": "delta", "metadata": map[string]any{"relativity": 0.810}},
 	}
 
 	// Sanity: gate on the raw PolarDB band labels this clustered.

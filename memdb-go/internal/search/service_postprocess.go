@@ -30,9 +30,10 @@ func (s *SearchService) postProcessResults(
 	// Phase 1 — prefix chain [Cosine, CrossEncoder?]: rescore items into a
 	// stable post-cosine/CE distribution. This is the input the rerank
 	// gate (rerankStrategy) MUST evaluate against — pre-R3 main called the
-	// gate after cosine + CE, and the thresholds (rerankTopCosineThreshold
-	// = 0.93, rerankClusteredSpread, rerankWideSpread) were tuned for the
-	// post-rescore score distribution, not the raw PolarDB-compressed band.
+	// gate after cosine + CE, and the thresholds (defaultRerankTopCosineThreshold
+	// = 0.85, defaultRerankClusteredSpread = 0.10, defaultRerankWideSpread = 0.30,
+	// all env-overridable as of M12.7) are tuned for the post-rescore score
+	// distribution, not the raw PolarDB-compressed band.
 	//
 	// Phase 2 — suffix chain [LLMJudge?, Staged]: gated rerankers that act
 	// on the rescored items. LLMJudge inclusion is decided by the gate; its
