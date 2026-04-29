@@ -58,14 +58,15 @@ func TestTextHash_Length(t *testing.T) {
 
 func TestBuildNodeProps_ImportanceScoreDefault(t *testing.T) {
 	props := buildNodeProps(memoryNodeProps{
-		ID:         "test-id",
-		Memory:     "test memory",
-		MemoryType: "LongTermMemory",
-		UserName:   "user1",
-		Mode:       "fast",
-		Now:        "2026-01-01T00:00:00",
-		CreatedAt:  "2026-01-01T00:00:00",
-		Info:       map[string]any{},
+		ID:              "test-id",
+		Memory:          "test memory",
+		MemoryType:      "LongTermMemory",
+		UserName:        "user1",
+		Mode:            "fast",
+		Now:             "2026-01-01T00:00:00",
+		CreatedAt:       "2026-01-01T00:00:00",
+		Info:            map[string]any{},
+		ExtractionState: extractionStateExtracted,
 	})
 
 	score, ok := props["importance_score"]
@@ -151,7 +152,8 @@ func TestBuildMemoryProperties_InfoNotMutated(t *testing.T) {
 	memInfo["content_hash"] = "abc123"
 
 	buildMemoryProperties("id1", "text", "LongTermMemory", "user", "user", "", "sess",
-		"2026-01-01T00:00:00", memInfo, nil, nil, "")
+		"2026-01-01T00:00:00", memInfo, nil, nil, "",
+		extractionStateExtracted, "", "")
 
 	if sharedInfo["key"] != original {
 		t.Fatal("sharedInfo was mutated by per-memory copy")
@@ -176,6 +178,7 @@ func TestBuildNodeProps_RawTextAndPreferenceCategory(t *testing.T) {
 		Info:               map[string]any{},
 		RawText:            "I'm vegetarian",
 		PreferenceCategory: "food",
+		ExtractionState:    extractionStateExtracted,
 	})
 	if props["raw_text"] != "I'm vegetarian" {
 		t.Errorf("expected raw_text=%q, got %v", "I'm vegetarian", props["raw_text"])
@@ -190,14 +193,15 @@ func TestBuildNodeProps_NewFieldsOmittedWhenEmpty(t *testing.T) {
 	// produce properties without those keys (keeps payload lean and
 	// non-breaking for downstream JSON consumers).
 	props := buildNodeProps(memoryNodeProps{
-		ID:         "id1",
-		Memory:     "regular fact",
-		MemoryType: "LongTermMemory",
-		UserName:   "cube1",
-		Mode:       modeFast,
-		Now:        "2026-04-23T00:00:00",
-		CreatedAt:  "2026-04-23T00:00:00",
-		Info:       map[string]any{},
+		ID:              "id1",
+		Memory:          "regular fact",
+		MemoryType:      "LongTermMemory",
+		UserName:        "cube1",
+		Mode:            modeFast,
+		Now:             "2026-04-23T00:00:00",
+		CreatedAt:       "2026-04-23T00:00:00",
+		Info:            map[string]any{},
+		ExtractionState: extractionStateExtracted,
 	})
 	if _, ok := props["raw_text"]; ok {
 		t.Error("raw_text must be absent when RawText is empty")

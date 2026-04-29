@@ -560,6 +560,10 @@ def extract_memory_items(payload) -> list[dict]:
         )
         score = m.get("score") or m.get("relativity") or metadata.get("relativity")
         ts = _extract_ts(metadata)
+        # M9 server-side dual-speaker stamps metadata.speaker_label so the
+        # harness can split the merged result back into per-speaker buckets
+        # for prompt assembly. Falls through to "" when single-speaker.
+        speaker_label = metadata.get("speaker_label", "") if isinstance(metadata, dict) else ""
         items.append(
             {
                 "content": content,
@@ -567,6 +571,7 @@ def extract_memory_items(payload) -> list[dict]:
                 "id": m.get("id") or m.get("memory_id") or metadata.get("id") or "",
                 "type": memory_type,
                 "ts": ts,
+                "speaker_label": speaker_label,
             }
         )
 
@@ -736,32 +741,70 @@ def query_search_dual(
     timeout: int = 60,
     top_k_per_speaker: int = 30,
 ) -> tuple[list[dict], list[dict], list[dict], int]:
-    """Dual-speaker fan-out of `query_search`.
+    """Dual-speaker fan-out via server-side M9 path (single POST).
 
-    Issues two parallel `/product/search` calls — one for `<conv>__speaker_a`
-    and one for `<conv>__speaker_b` — using a 2-worker thread pool, then
-    returns `(speaker_a_items, speaker_b_items, merged_items, elapsed_ms)`.
-    The merged list is bounded to `top_k` by `_merge_dual_results`.
+    Sets `speakers: [<a>, <b>]` + `top_k_per_speaker` so memdb-go runs the
+    fan-out / per-speaker tagging / merge pipeline server-side
+    (internal/handlers/chat_dual_speaker.go::handleDualSpeakerSearch).
+    Each returned memory carries `metadata.speaker_label` which we use to
+    split the merged list back into per-speaker buckets for downstream
+    prompt assembly.
 
-    F9: each speaker is queried with `top_k_per_speaker` (default 30, matching
-    the mem0 eval harness: 30 per speaker × 2 = 60 candidates).  Merged list
-    is still capped at `top_k` so downstream callers see the same budget.
+    LOCOMO_DUAL_CLIENT=1 forces the legacy two-thread client-side fan-out
+    (kept as a safety toggle while we observe the server path under load).
 
-    Network errors propagate (caller handles `requests.RequestException`).
+    Returns `(speaker_a_items, speaker_b_items, merged_items, elapsed_ms)`.
     """
     uid_a, uid_b = _speaker_user_ids(conv_id)
     start = time.time()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-        fut_a = pool.submit(
-            query_search, memdb_url, uid_a, query, top_k_per_speaker, session_id, timeout
-        )
-        fut_b = pool.submit(
-            query_search, memdb_url, uid_b, query, top_k_per_speaker, session_id, timeout
-        )
-        items_a, _ = fut_a.result()
-        items_b, _ = fut_b.result()
+
+    if os.getenv("LOCOMO_DUAL_CLIENT", "").lower() in ("1", "true", "yes"):
+        # Legacy client-side fan-out path.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            fut_a = pool.submit(
+                query_search, memdb_url, uid_a, query, top_k_per_speaker, session_id, timeout
+            )
+            fut_b = pool.submit(
+                query_search, memdb_url, uid_b, query, top_k_per_speaker, session_id, timeout
+            )
+            items_a, _ = fut_a.result()
+            items_b, _ = fut_b.result()
+        elapsed_ms = int((time.time() - start) * 1000)
+        merged = _merge_dual_results(items_a, items_b, top_k)
+        return items_a, items_b, merged, elapsed_ms
+
+    # Server-side M9: single POST with speakers fan-out.
+    payload = {
+        "query": query,
+        "top_k": top_k,
+        "mode": "fast",
+        "include_preference": False,
+        "search_tool_memory": False,
+        "include_skill_memory": False,
+        "relativity": LOCOMO_RETRIEVAL_THRESHOLD,
+        "speakers": [uid_a, uid_b],
+        "top_k_per_speaker": top_k_per_speaker,
+        "merge_strategy": "interleave",
+    }
+    if session_id:
+        payload["session_id"] = session_id
+    resp = requests.post(
+        f"{memdb_url.rstrip('/')}/product/search",
+        json=payload,
+        headers=build_headers(),
+        timeout=timeout,
+    )
     elapsed_ms = int((time.time() - start) * 1000)
-    merged = _merge_dual_results(items_a, items_b, top_k)
+    resp.raise_for_status()
+    merged = extract_memory_items(resp.json())
+    items_a: list[dict] = []
+    items_b: list[dict] = []
+    for it in merged:
+        label = it.get("speaker_label", "")
+        if label == uid_a:
+            items_a.append(it)
+        elif label == uid_b:
+            items_b.append(it)
     return items_a, items_b, merged, elapsed_ms
 
 

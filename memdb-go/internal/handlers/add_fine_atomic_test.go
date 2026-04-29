@@ -134,14 +134,15 @@ func TestAtomicProperties_KindAtTopLevel(t *testing.T) {
 	}
 	factInfo := atomicInfoFromFact(fact)
 	props := buildNodeProps(memoryNodeProps{
-		ID:         "11111111-1111-1111-1111-111111111111",
-		Memory:     fact.Text,
-		MemoryType: "LongTermMemory",
-		UserName:   "test_cube",
-		Mode:       modeFine,
-		Now:        "2026-04-27T00:00:00Z",
-		CreatedAt:  "2026-04-27T00:00:00Z",
-		Info:       factInfo,
+		ID:              "11111111-1111-1111-1111-111111111111",
+		Memory:          fact.Text,
+		MemoryType:      "LongTermMemory",
+		UserName:        "test_cube",
+		Mode:            modeFine,
+		Now:             "2026-04-27T00:00:00Z",
+		CreatedAt:       "2026-04-27T00:00:00Z",
+		Info:            factInfo,
+		ExtractionState: extractionStateExtracted,
 	})
 	// Mirror what applyAtomicAndPersist does after buildNodeProps.
 	liftAtomicDiscriminators(props, factInfo)
@@ -214,23 +215,25 @@ func TestLiftAtomicDiscriminators_NoOpOnNonAtomic(t *testing.T) {
 // kind values at query time.
 func TestAtomicAndLegacyCoexistInProperties(t *testing.T) {
 	atomicProps := buildNodeProps(memoryNodeProps{
-		ID:         "11111111-1111-1111-1111-111111111111",
-		Memory:     "Atomic fact memory",
-		MemoryType: "LongTermMemory",
-		UserName:   "test_cube",
-		Mode:       modeFine,
-		Now:        "2026-04-27T00:00:00Z",
-		CreatedAt:  "2026-04-27T00:00:00Z",
-		Info:       atomicInfoFromFact(llm.AtomicFact{Text: "x", AttributedTo: "user"}),
+		ID:              "11111111-1111-1111-1111-111111111111",
+		Memory:          "Atomic fact memory",
+		MemoryType:      "LongTermMemory",
+		UserName:        "test_cube",
+		Mode:            modeFine,
+		Now:             "2026-04-27T00:00:00Z",
+		CreatedAt:       "2026-04-27T00:00:00Z",
+		Info:            atomicInfoFromFact(llm.AtomicFact{Text: "x", AttributedTo: "user"}),
+		ExtractionState: extractionStateExtracted,
 	})
 	legacyProps := buildNodeProps(memoryNodeProps{
-		ID:         "22222222-2222-2222-2222-222222222222",
-		Memory:     "Legacy paragraph memory",
-		MemoryType: "LongTermMemory",
-		UserName:   "test_cube",
-		Mode:       modeFine,
-		Now:        "2026-04-27T00:00:00Z",
-		CreatedAt:  "2026-04-27T00:00:00Z",
+		ID:              "22222222-2222-2222-2222-222222222222",
+		Memory:          "Legacy paragraph memory",
+		MemoryType:      "LongTermMemory",
+		UserName:        "test_cube",
+		Mode:            modeFine,
+		Now:             "2026-04-27T00:00:00Z",
+		CreatedAt:       "2026-04-27T00:00:00Z",
+		ExtractionState: extractionStateExtracted,
 	})
 
 	atomicInfo, _ := atomicProps["info"].(map[string]any)
