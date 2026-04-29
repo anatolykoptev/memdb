@@ -98,6 +98,22 @@ func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutp
 	pipelineStart := time.Now()
 	st := &pipelineState{Params: p, EmbedQuery: p.Query}
 
+	// M14.Y4.1 empty-cube fast-fail: skip the entire pipeline (d4_query_rewrite
+	// ~781ms, embed_query, parallel DB fanout, etc.) when the cube has 0 activated
+	// entries. New users / fresh cubes get an instant empty response instead of a
+	// 2-3s wait driven by LLM rewrite with zero-result payoff.
+	// Evidence: 3 search calls on empty cube → 6560ms total wasted (2187ms avg).
+	if s.postgres != nil && p.CubeID != "" {
+		if has, err := s.postgres.CubeHasEntries(ctx, p.CubeID); err == nil && !has {
+			recordFastFail(ctx, "empty_cube")
+			s.logger.Debug("search fast-fail: empty cube",
+				slog.String("cube_id", p.CubeID),
+				slog.Duration("total", time.Since(pipelineStart)))
+			return &SearchOutput{Result: NewEmptySearchResult()}, nil
+		}
+		// On error: fall through to normal pipeline (safe degradation).
+	}
+
 	// M14.Y4 fast-path: skip d4_query_rewrite + d7_cot_decompose for simple
 	// factual queries when MEMDB_SEARCH_FAST_PATH=1. Default OFF.
 	var stages []stage

@@ -29,6 +29,9 @@ type postgresClient interface {
 	FindEntitiesByNormalizedID(ctx context.Context, normalizedIDs []string, cubeID, personID string) ([]string, error)
 	GetMemoriesByEntityIDs(ctx context.Context, entityIDs []string, cubeID, personID string, limit int) ([]db.GraphRecallResult, error)
 	IncrRetrievalCount(ctx context.Context, ids []string, now string) error
+	// CubeHasEntries reports whether the cube identified by cubeID has at least
+	// one activated Memory row. Used by the empty-cube fast-fail gate in Search.
+	CubeHasEntries(ctx context.Context, cubeID string) (bool, error)
 }
 
 // contradictsEdgeSeedN is the number of top results used as seed IDs

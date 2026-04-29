@@ -37,7 +37,7 @@ func (h *Handler) nativeRawAddForCube(ctx context.Context, req *fullAddRequest, 
 		info:            mapOrEmpty(req.Info),
 		customTags:      req.CustomTags,
 		key:             stringOrEmpty(req.Key),
-		observationDate: observationDateFromMessages(req.Messages),
+		observationDate: h.resolveObservationDate(ctx, req.Messages),
 	}
 
 	hashes := hashRawTexts(texts)

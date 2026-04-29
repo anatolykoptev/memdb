@@ -13,8 +13,12 @@ import (
 // mockRewriteServer returns an httptest server that replies with a chat
 // completion whose "content" field is `content` verbatim. Status defaults
 // to 200 unless a non-zero override is passed.
+//
+// Also resets the global rewriteCache singleton for the test so cache state
+// from a previous test cannot cause a false hit.
 func mockRewriteServer(t *testing.T, content string, status int) *httptest.Server {
 	t.Helper()
+	resetGlobalRewriteCache(t)
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if status != 0 && status != http.StatusOK {
 			w.WriteHeader(status)

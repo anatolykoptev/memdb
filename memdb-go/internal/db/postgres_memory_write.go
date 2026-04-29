@@ -139,9 +139,15 @@ func (p *Postgres) ClearCEScoresTopKForNeighbor(ctx context.Context, neighborID 
 // Weight is taken from the confidence column; NULL confidence maps to 0
 // (the PageRank engine treats 0 as uniform weight 1.0).
 func (p *Postgres) FetchEdgesForPageRank(ctx context.Context, cubeID string) ([]PageRankEdge, error) {
+	// NOTE: memory_edges must be schema-qualified as %[1]s.memory_edges.
+	// ag_catalog is first in search_path and may contain a stale duplicate of
+	// memory_edges (created before migration 0012 moved the table to memos_graph).
+	// Without qualification the query hits ag_catalog.memory_edges — which lacks
+	// the confidence column and causes a SQL error that silently returns 0 edges,
+	// collapsing all PageRank scores to stale/uniform values.
 	const q = `
 SELECT e.from_id, e.to_id, COALESCE(e.confidence, 0)
-FROM memory_edges e
+FROM %[1]s.memory_edges e
 WHERE e.invalid_at IS NULL
   AND EXISTS (
       SELECT 1 FROM %[1]s."Memory" m

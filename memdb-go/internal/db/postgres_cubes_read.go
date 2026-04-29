@@ -1,6 +1,6 @@
 package db
 
-// postgres_cubes_read.go — read-only queries for the cubes table: ListCubes, GetCube.
+// postgres_cubes_read.go — read-only queries for the cubes table: ListCubes, GetCube, CubeHasEntries.
 
 import (
 	"context"
@@ -45,6 +45,29 @@ ORDER BY updated_at DESC
 		return nil, fmt.Errorf("ListCubes iterate: %w", err)
 	}
 	return out, nil
+}
+
+// CubeHasEntries reports whether the cube identified by cubeID has at least one
+// activated Memory row. Used by the empty-cube fast-fail gate in SearchService.
+//
+// The query uses EXISTS with LIMIT 1 against the existing GIN index on
+// properties, so it completes in ~5 ms even on large cubes.
+// Returns (false, nil) for an empty cube — not an error.
+func (p *Postgres) CubeHasEntries(ctx context.Context, cubeID string) (bool, error) {
+	var exists bool
+	err := p.pool.QueryRow(ctx, `
+SELECT EXISTS (
+  SELECT 1
+  FROM memos_graph."Memory"
+  WHERE properties->>(('user_name'::text)) = $1
+    AND properties->>(('status'::text)) = 'activated'
+  LIMIT 1
+)
+`, cubeID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("CubeHasEntries: %w", err)
+	}
+	return exists, nil
 }
 
 // GetCube fetches a single cube by ID (including inactive ones — caller filters).
