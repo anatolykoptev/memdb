@@ -11,7 +11,9 @@
 // and provides three implementations:
 //
 //   - LLMBackend  — original behaviour (preserved exactly).
-//   - CEBackend   — both stages via embed-server bge-reranker-v2-m3.
+//   - CEBackend   — both stages via embed-server cross-encoder (currently
+//                     gte-multi-rerank; model is wired via CROSS_ENCODER_MODEL
+//                     env on embed-server — no code change needed to swap).
 //   - HybridBackend — stage 2 via CE (cheap top-K), stage 3 via LLM
 //                     (keeps the structured judgement path for cases
 //                     where a CE threshold is too coarse).
@@ -90,7 +92,8 @@ type CEBackend struct {
 	// considered relevant in stage 3. Default 0.0 (above-neutral).
 	// Override via MEMDB_STAGED_CE_THRESHOLD. Tune by inspecting
 	// the score distribution on your corpus — gte-multi-rerank
-	// scores cluster differently from bge-reranker-v2-m3.
+	// scores cluster differently across models — inspect the distribution on
+	// your corpus when switching the CE model on embed-server.
 	CEThreshold float32
 }
 
@@ -179,7 +182,7 @@ func (b HybridBackend) Stage3Justify(ctx context.Context, query string, shortlis
 	return llmStage3Justify(ctx, b.Config, query, shortlist, allItems)
 }
 
-// ceScored holds (id, raw bge score) for a single doc, in CE-ranked
+// ceScored holds (id, raw CE score) for a single doc, in CE-ranked
 // order. Used internally by both CE backends.
 type ceScored struct {
 	id    string
@@ -243,9 +246,10 @@ func stagedBackendName() string {
 }
 
 
-// stagedCEThreshold parses MEMDB_STAGED_CE_THRESHOLD. Default 0.0 — the
-// bge-reranker-v2-m3 sigmoid-0.5 boundary in raw-logit space (the model
-// was trained with binary cross-entropy so logit > 0 ≈ "relevant").
+// stagedCEThreshold parses MEMDB_STAGED_CE_THRESHOLD. Default 0.0 — a
+// conservative above-neutral cutoff. Tune by inspecting the score
+// distribution of the loaded CE model on your corpus; different models
+// use different score ranges (logit, sigmoid, cosine-based, etc.).
 func stagedCEThreshold() float32 {
 	raw := os.Getenv("MEMDB_STAGED_CE_THRESHOLD")
 	if raw == "" {
