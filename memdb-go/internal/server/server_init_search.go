@@ -6,6 +6,7 @@ package server
 import (
 	"log/slog"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/anatolykoptev/go-kit/rerank"
@@ -97,14 +98,37 @@ func initSearchService(
 	// APIKey supports hosted providers (Cohere/Jina/Voyage/Mixedbread);
 	// leave empty for self-hosted TEI/embed-server. MaxCharsPerDoc caps
 	// per-doc length (rune-aware) to bound O(seq²) attention compute.
-	svc.RerankClient = rerank.New(rerank.Config{
-		URL:            cfg.CrossEncoderURL,
-		Model:          cfg.CrossEncoderModel,
-		APIKey:         cfg.CrossEncoderAPIKey,
-		Timeout:        cfg.CrossEncoderTimeout,
-		MaxDocs:        cfg.CrossEncoderMaxDocs,
-		MaxCharsPerDoc: cfg.CrossEncoderMaxCharsPerDoc,
-	}, logger)
+	//
+	// M15: optional CircuitBreaker — enabled by MEMDB_RERANK_CIRCUIT=1 (default OFF).
+	// When enabled, after MEMDB_RERANK_CIRCUIT_FAIL_THRESHOLD consecutive failures
+	// the circuit opens for MEMDB_RERANK_CIRCUIT_OPEN_DURATION_S seconds, then
+	// allows MEMDB_RERANK_CIRCUIT_HALF_OPEN_PROBES probe(s) before re-closing.
+	// Fail-rate window is MEMDB_RERANK_CIRCUIT_FAIL_WINDOW_S seconds.
+	// Circuit-open results in pass-through (input order, Score=0) — search degrades
+	// gracefully instead of piling up retries against a dead embed-server.
+	rerankOpts := []rerank.Opt{
+		rerank.WithModel(cfg.CrossEncoderModel),
+		rerank.WithAPIKey(cfg.CrossEncoderAPIKey),
+		rerank.WithTimeout(cfg.CrossEncoderTimeout),
+		rerank.WithMaxDocs(cfg.CrossEncoderMaxDocs),
+		rerank.WithMaxCharsPerDoc(cfg.CrossEncoderMaxCharsPerDoc),
+	}
+	if circuitEnabled() {
+		cbCfg := rerank.CircuitConfig{
+			FailThreshold:  envIntCB("MEMDB_RERANK_CIRCUIT_FAIL_THRESHOLD", 5),
+			OpenDuration:   time.Duration(envIntCB("MEMDB_RERANK_CIRCUIT_OPEN_DURATION_S", 30)) * time.Second,
+			HalfOpenProbes: envIntCB("MEMDB_RERANK_CIRCUIT_HALF_OPEN_PROBES", 1),
+			FailRateWindow: time.Duration(envIntCB("MEMDB_RERANK_CIRCUIT_FAIL_WINDOW_S", 60)) * time.Second,
+		}
+		rerankOpts = append(rerankOpts, rerank.WithCircuit(cbCfg))
+		logger.Info("rerank circuit breaker enabled",
+			slog.Int("fail_threshold", cbCfg.FailThreshold),
+			slog.Duration("open_duration", cbCfg.OpenDuration),
+			slog.Int("half_open_probes", cbCfg.HalfOpenProbes),
+			slog.Duration("fail_rate_window", cbCfg.FailRateWindow),
+		)
+	}
+	svc.RerankClient = rerank.NewClient(cfg.CrossEncoderURL, rerankOpts...)
 	if svc.RerankClient.Available() {
 		logger.Info("cross_encoder rerank enabled",
 			slog.String("url", cfg.CrossEncoderURL),
@@ -187,6 +211,26 @@ func initSearchService(
 	}
 
 	return svc, profiler
+}
+
+// circuitEnabled reports whether the rerank circuit breaker is enabled.
+// Controlled by MEMDB_RERANK_CIRCUIT=1; default OFF.
+func circuitEnabled() bool {
+	return os.Getenv("MEMDB_RERANK_CIRCUIT") == "1"
+}
+
+// envIntCB reads an int env var for circuit breaker config.
+// Returns def if the variable is unset, empty, unparseable, or non-positive.
+func envIntCB(key string, def int) int {
+	s := os.Getenv(key)
+	if s == "" {
+		return def
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil || v <= 0 {
+		return def
+	}
+	return v
 }
 
 // initLLMExtractor creates the LLM extractor for fine-mode native add (non-fatal if URL not set).
