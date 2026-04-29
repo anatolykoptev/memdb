@@ -133,6 +133,12 @@ func buildTextRerankPrefix(s *SearchService, queryVec []float32, embByID map[str
 	chain := rerankpkg.Chain{
 		rerankpkg.Cosine{QueryVec: queryVec, EmbeddingsByID: embByID},
 	}
+	// M14 A1: Stage-0 pre-CE diversity prefilter. Runs after cosine sort but
+	// before CrossEncoder so CE receives a diversity-aware top-K instead of
+	// plain cosine order. Disabled by default (MEMDB_RERANK_MATH_PREFILTER=0).
+	if mpf, ok := rerankpkg.NewMathPrefilterFromEnv(embByID, queryVec); ok {
+		chain = append(chain, mpf)
+	}
 	if s.RerankClient.Available() && textLen > 1 {
 		chain = append(chain, rerankpkg.CrossEncoder{
 			Client:         s.RerankClient,
