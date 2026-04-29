@@ -165,7 +165,7 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
 	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID), profileCubeIDForRequest(&req))
 	prompt, decision := buildSystemPromptWithDecision(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
-	recordChatPromptUsed(ctx, basePrompt, answerStyle)
+	recordChatPromptUsed(ctx, basePrompt, answerStyle, decision)
 	recordFactualPromptDecision(ctx, w, decision)
 	// M12.5: chat-path observability — top-1 cosine, context tokens. Recorded
 	// pre-LLM so even chats that fail downstream surface their input shape.
@@ -173,7 +173,8 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	if emitStyle == "" {
 		emitStyle = answerStyleConversational
 	}
-	observability.RecordChatTop1Cosine(ctx, chatTopRelativity(memories))
+	top1Score := chatTopRelativity(memories)
+	observability.RecordChatTop1Cosine(ctx, top1Score)
 	observability.RecordChatContextTokens(ctx, prompt, profileCubeIDForRequest(&req), emitStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
 
@@ -243,7 +244,7 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
 	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID), profileCubeIDForRequest(&req))
 	prompt, decision := buildSystemPromptWithDecision(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
-	recordChatPromptUsed(ctx, basePrompt, answerStyle)
+	recordChatPromptUsed(ctx, basePrompt, answerStyle, decision)
 	// Set debug header BEFORE rpc.SSEHeaders writes response status — once
 	// SSEHeaders fires the header set is frozen.
 	recordFactualPromptDecision(ctx, w, decision)

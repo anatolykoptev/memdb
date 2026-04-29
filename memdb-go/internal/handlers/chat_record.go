@@ -19,23 +19,43 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// promptTemplateLabel maps the (basePrompt, answerStyle) pair to the metric label
-// emitted by chat handlers. "custom" wins when basePrompt is non-empty (backward-compat).
-func promptTemplateLabel(basePrompt, answerStyle string) string {
+// promptTemplateLabel maps the (basePrompt, answerStyle, decision) triplet to
+// the metric label emitted by chat handlers.
+//
+// Label hierarchy (highest precedence first):
+//   - "custom"          — non-empty basePrompt wins; backward-compat path.
+//   - "factual_high"    — factual branch, top-1 score >= confidence threshold.
+//   - "factual_low"     — factual branch, memories present but all below threshold.
+//   - "factual_zero"    — factual branch, no memories retrieved.
+//   - "conversational"  — default branch (empty answerStyle or non-factual).
+func promptTemplateLabel(basePrompt, answerStyle string, decision factualPromptDecision) string {
 	if basePrompt != "" {
 		return "custom"
 	}
 	if answerStyle == answerStyleFactual {
-		return answerStyleFactual
+		switch decision.Variant {
+		case factualVariantHigh:
+			return "factual_high"
+		case factualVariantLow:
+			return "factual_low"
+		case factualVariantZero:
+			return "factual_zero"
+		default:
+			// factualVariantNone or unknown — shouldn't happen on the factual
+			// path but fall back gracefully to the coarse label.
+			return answerStyleFactual
+		}
 	}
 	return answerStyleConversational
 }
 
 // recordChatPromptUsed bumps memdb.chat.prompt_template_used_total{template=...}.
-// Called once per chat request right after buildSystemPrompt returns.
-func recordChatPromptUsed(ctx context.Context, basePrompt, answerStyle string) {
+// Called once per chat request right after buildSystemPromptWithDecision returns.
+// `decision` carries the variant (high/low/zero/none) so the label is granular:
+// factual_high | factual_low | factual_zero | conversational | custom.
+func recordChatPromptUsed(ctx context.Context, basePrompt, answerStyle string, decision factualPromptDecision) {
 	chatPromptMx().TemplateUsed.Add(ctx, 1,
-		metric.WithAttributes(attribute.String("template", promptTemplateLabel(basePrompt, answerStyle))),
+		metric.WithAttributes(attribute.String("template", promptTemplateLabel(basePrompt, answerStyle, decision))),
 	)
 }
 
