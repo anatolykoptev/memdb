@@ -23,14 +23,18 @@ import (
 	"math"
 	"os"
 	"sort"
-	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
-// linkedExpandEnvVar gates stageLinkedExpand. Default ON per the M11 spec.
-const linkedExpandEnvVar = "MEMDB_F12_LINKED"
+// linkedExpandEnvVar gates stageLinkedExpand. Default OFF (M14.Y1): F12 is
+// wired correctly but production ingest goes through Python mode=raw, so the
+// atomic resolver never fires and linked_memory_ids is always empty.
+// Running the GIN-index query on every search costs ~5ms × 123 calls = pure
+// overhead with zero benefit until the atomic ingest path is live.
+// Set MEMDB_F12_LINKED_EXPAND=1 to enable.
+const linkedExpandEnvVar = "MEMDB_F12_LINKED_EXPAND"
 
 // linkedExpandFactor caps the post-expansion pool relative to the original
 // seed set. 1.5× balances recall (we want the linked-by neighbours visible
@@ -56,17 +60,14 @@ const linkedExpandLimit = 100
 // keeps ranking semantics consistent.
 const linkedExpandDecay = 0.85
 
-// linkedExpandEnabled reads MEMDB_F12_LINKED. Default ON: unset / empty /
-// truthy => true. Mirrors linkedResolverEnabled but lives in the search
-// package (the package boundary forbids cross-import to handlers).
+// linkedExpandEnabled reads MEMDB_F12_LINKED_EXPAND. Default OFF: only
+// "1" enables. Mirrors linkedResolverEnabled but lives in the search package
+// (the package boundary forbids cross-import to handlers).
+// Default OFF rationale: production ingest uses Python mode=raw, so the
+// atomic resolver never populates linked_memory_ids. Running the DB query on
+// every search yields zero results at ~5ms cost per call (M14.Y1 audit).
 func linkedExpandEnabled() bool {
-	v := strings.ToLower(strings.TrimSpace(os.Getenv(linkedExpandEnvVar)))
-	switch v {
-	case "0", "false", "no", "off":
-		return false
-	default:
-		return true
-	}
+	return os.Getenv(linkedExpandEnvVar) == "1"
 }
 
 // expandViaLinkedIDs is the F12 search-side 1-hop expansion. For each of
