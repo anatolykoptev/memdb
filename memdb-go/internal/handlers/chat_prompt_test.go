@@ -225,3 +225,134 @@ func TestFilterMemoriesByThreshold_Empty(t *testing.T) {
 		t.Errorf("expected nil for empty input, got %v", result)
 	}
 }
+
+// M12.1 — chatPromptNow honours MEMDB_CHAT_NOW_OVERRIDE so harnesses can
+// pin the "Current Time" baseline against historic conversation dates.
+
+func TestChatPromptNow_NoOverrideUsesWallClock(t *testing.T) {
+	t.Setenv(chatNowOverrideEnvVar, "")
+	got := chatPromptNow()
+	// We can't pin the actual value (clock moves), but format is fixed.
+	// "2006-01-02 15:04 (Monday)" → 23 chars including the day name.
+	if len(got) < len("2006-01-02 15:04 (Mon)") {
+		t.Fatalf("chatPromptNow() = %q, format too short for %%Y-%%m-%%d %%H:%%M (%%A)", got)
+	}
+	// Sanity — must contain at least one digit and a paren for the weekday.
+	if !strings.ContainsAny(got, "0123456789") || !strings.Contains(got, "(") {
+		t.Errorf("chatPromptNow() = %q, expected wall-clock format", got)
+	}
+}
+
+func TestChatPromptNow_OverrideWins(t *testing.T) {
+	t.Setenv(chatNowOverrideEnvVar, "2023-05-08")
+	if got := chatPromptNow(); got != "2023-05-08" {
+		t.Errorf("chatPromptNow() = %q, want %q", got, "2023-05-08")
+	}
+}
+
+func TestChatPromptNow_WhitespaceIsTrimmed(t *testing.T) {
+	t.Setenv(chatNowOverrideEnvVar, "  2023-05-08  ")
+	if got := chatPromptNow(); got != "2023-05-08" {
+		t.Errorf("chatPromptNow() = %q, want trimmed %q", got, "2023-05-08")
+	}
+}
+
+func TestChatPromptNow_BlankOverrideFallsBackToWallClock(t *testing.T) {
+	// An override of just whitespace must NOT inject an empty header —
+	// fall back to wall-clock (legacy behaviour).
+	t.Setenv(chatNowOverrideEnvVar, "   ")
+	got := chatPromptNow()
+	if got == "" || got == "   " {
+		t.Errorf("chatPromptNow() = %q, want wall-clock fallback when override is blank", got)
+	}
+}
+
+func TestBuildSystemPrompt_FactualHonoursNowOverride(t *testing.T) {
+	t.Setenv(chatNowOverrideEnvVar, "2023-05-08 12:00 (Monday)")
+	memories := []map[string]any{{"memory": "fact"}}
+	prompt := buildSystemPrompt("test", memories, "", "", answerStyleFactual)
+	if !strings.Contains(prompt, "Current Time: 2023-05-08 12:00 (Monday)") {
+		t.Errorf("factual prompt did not honour MEMDB_CHAT_NOW_OVERRIDE: %q", prompt)
+	}
+}
+
+// M12.1 — observation_date is emitted only when ObservationDate is set, and
+// (as a top-level prop) survives the sources-strip in search/response.go so
+// retrieval clients can read it from metadata.
+
+func TestBuildNodeProps_ObservationDateEmittedWhenSet(t *testing.T) {
+	props := buildNodeProps(memoryNodeProps{
+		ID:              "id1",
+		Memory:          "Marcus got promoted",
+		MemoryType:      "LongTermMemory",
+		UserName:        "cube1",
+		Mode:            modeRaw,
+		Now:             "2026-04-26T12:00:00",
+		CreatedAt:       "2026-04-26T12:00:00",
+		Info:            map[string]any{},
+		ObservationDate: "2023-05-08",
+	})
+	if got, ok := props["observation_date"].(string); !ok || got != "2023-05-08" {
+		t.Errorf("observation_date = %v, want \"2023-05-08\"", props["observation_date"])
+	}
+}
+
+func TestBuildNodeProps_ObservationDateOmittedWhenEmpty(t *testing.T) {
+	// Back-compat: callers that don't set ObservationDate must not introduce
+	// the field. Keeps payload lean and prevents downstream consumers from
+	// reading "" as a sentinel.
+	props := buildNodeProps(memoryNodeProps{
+		ID:         "id1",
+		Memory:     "fact",
+		MemoryType: "LongTermMemory",
+		UserName:   "cube1",
+		Mode:       modeFast,
+		Now:        "2026-04-26T12:00:00",
+		CreatedAt:  "2026-04-26T12:00:00",
+		Info:       map[string]any{},
+	})
+	if _, ok := props["observation_date"]; ok {
+		t.Errorf("observation_date must be absent when ObservationDate is empty, got %v", props["observation_date"])
+	}
+}
+
+// observationDateFromMessages picks the LATEST chat_time and tolerates
+// missing/short values.
+
+func TestObservationDateFromMessages_LatestWins(t *testing.T) {
+	msgs := []chatMessage{
+		{Role: "user", Content: "a", ChatTime: "2023-05-08T13:56:00"},
+		{Role: "assistant", Content: "b", ChatTime: "2023-05-09T09:00:00"},
+		{Role: "user", Content: "c", ChatTime: "2023-05-09T18:00:00"},
+	}
+	if got := observationDateFromMessages(msgs); got != "2023-05-09" {
+		t.Errorf("observationDateFromMessages = %q, want 2023-05-09", got)
+	}
+}
+
+func TestObservationDateFromMessages_SkipsShortValues(t *testing.T) {
+	// Short strings (<10 chars) must be skipped — fall through to a usable one.
+	msgs := []chatMessage{
+		{Role: "user", Content: "a", ChatTime: "2023-05-08T13:56:00"},
+		{Role: "user", Content: "b", ChatTime: "bad"},
+	}
+	if got := observationDateFromMessages(msgs); got != "2023-05-08" {
+		t.Errorf("observationDateFromMessages = %q, want 2023-05-08 (skipped \"bad\")", got)
+	}
+}
+
+func TestObservationDateFromMessages_AllEmptyReturnsBlank(t *testing.T) {
+	msgs := []chatMessage{
+		{Role: "user", Content: "a"},
+		{Role: "assistant", Content: "b"},
+	}
+	if got := observationDateFromMessages(msgs); got != "" {
+		t.Errorf("observationDateFromMessages = %q, want \"\"", got)
+	}
+}
+
+func TestObservationDateFromMessages_NilSliceReturnsBlank(t *testing.T) {
+	if got := observationDateFromMessages(nil); got != "" {
+		t.Errorf("observationDateFromMessages(nil) = %q, want \"\"", got)
+	}
+}

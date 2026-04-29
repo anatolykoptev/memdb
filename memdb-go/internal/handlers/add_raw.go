@@ -29,14 +29,15 @@ func (h *Handler) nativeRawAddForCube(ctx context.Context, req *fullAddRequest, 
 	}
 
 	fac := fastAddContext{
-		cubeID:     cubeID,
-		userID:     *req.UserID, // Phase 2: person identity threaded into raw write path
-		agentID:    stringOrEmpty(req.AgentID),
-		sessionID:  stringOrEmpty(req.SessionID),
-		now:        nowTimestamp(),
-		info:       mapOrEmpty(req.Info),
-		customTags: req.CustomTags,
-		key:        stringOrEmpty(req.Key),
+		cubeID:          cubeID,
+		userID:          *req.UserID, // Phase 2: person identity threaded into raw write path
+		agentID:         stringOrEmpty(req.AgentID),
+		sessionID:       stringOrEmpty(req.SessionID),
+		now:             nowTimestamp(),
+		info:            mapOrEmpty(req.Info),
+		customTags:      req.CustomTags,
+		key:             stringOrEmpty(req.Key),
+		observationDate: observationDateFromMessages(req.Messages),
 	}
 
 	hashes := hashRawTexts(texts)
@@ -153,21 +154,22 @@ func buildRawNode(
 ) (db.MemoryInsertNode, addResponseItem, error) {
 	id := uuid.New().String()
 	props := buildNodeProps(memoryNodeProps{
-		ID:         id,
-		Memory:     text,
-		MemoryType: memTypeLongTerm,
-		UserName:   fac.cubeID,
-		UserID:     fac.userID, // Phase 2: person identity slot
-		AgentID:    fac.agentID,
-		SessionID:  fac.sessionID,
-		Mode:       modeRaw,
-		Now:        fac.now,
-		CreatedAt:  fac.now,
-		Info:       info,
-		CustomTags: fac.customTags,
-		Sources:    nil,
-		Background: "",
-		Key:        fac.key,
+		ID:              id,
+		Memory:          text,
+		MemoryType:      memTypeLongTerm,
+		UserName:        fac.cubeID,
+		UserID:          fac.userID, // Phase 2: person identity slot
+		AgentID:         fac.agentID,
+		SessionID:       fac.sessionID,
+		Mode:            modeRaw,
+		Now:             fac.now,
+		CreatedAt:       fac.now,
+		Info:            info,
+		CustomTags:      fac.customTags,
+		Sources:         nil,
+		Background:      "",
+		Key:             fac.key,
+		ObservationDate: fac.observationDate,
 	})
 
 	propsJSON, err := marshalProps(props)

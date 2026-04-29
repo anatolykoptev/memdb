@@ -316,6 +316,26 @@ func nowTimestamp() string {
 	return time.Now().UTC().Format("2006-01-02T15:04:05.000000")
 }
 
+// observationDateFromMessages returns the latest message's chat_time truncated
+// to "YYYY-MM-DD", or "" when no message carries a usable chat_time.
+//
+// This is the in-conversation date — distinct from server wall-clock at ingest.
+// Used by the add pipeline (fast / raw / fine) to stamp memory rows with the
+// real conversation timestamp so retrieval clients can prefix candidates with
+// the date the fact actually originated, not the date we happened to ingest.
+//
+// Iterates from the END so the most recent message wins; tolerates messages
+// with empty/short chat_time by skipping over them.
+func observationDateFromMessages(messages []chatMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		ct := messages[i].ChatTime
+		if len(ct) >= 10 {
+			return ct[:10]
+		}
+	}
+	return ""
+}
+
 // nowUnix returns the current Unix timestamp in seconds.
 func nowUnix() int64 {
 	return time.Now().Unix()

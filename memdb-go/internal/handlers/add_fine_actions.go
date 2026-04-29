@@ -26,6 +26,11 @@ type factContext struct {
 	CustomTags []string
 	Sources    []map[string]any
 	Key        string
+
+	// ObservationDate is the in-conversation date (YYYY-MM-DD) of the latest
+	// message in the source batch. Distinct from Now (server wall-clock at
+	// ingest). Empty when no message carried a chat_time. M12.1.
+	ObservationDate string
 }
 
 // applyFineActionsCtx routes each embeddedFact through the matching action
@@ -57,14 +62,14 @@ func (h *Handler) applyFineActionsCtx(
 			embedded[i].ltmID = f.TargetID
 			if node, vsi, ok := buildUpdateWMNode(f, ef,
 				fc.CubeID, fc.UserID, fc.AgentID, fc.SessionID, fc.Now,
-				fc.Info, fc.CustomTags, fc.Sources, fc.Key); ok {
+				fc.Info, fc.CustomTags, fc.Sources, fc.Key, fc.ObservationDate); ok {
 				allNodes = append(allNodes, node)
 				vsetInserts = append(vsetInserts, vsi)
 			}
 		default: // llm.MemAdd
 			nodes, item := buildAddNodes(f, ef.embVec, ef.embedding,
 				fc.CubeID, fc.UserID, fc.AgentID, fc.SessionID, fc.Now,
-				fc.Info, fc.CustomTags, fc.Sources, fc.Key)
+				fc.Info, fc.CustomTags, fc.Sources, fc.Key, fc.ObservationDate)
 			allNodes = append(allNodes, nodes...)
 			if item != nil {
 				items = append(items, *item)
