@@ -192,7 +192,7 @@ func (h *Handler) runAtomicFineForCube(ctx context.Context, req *fullAddRequest,
 		CustomTags:      req.CustomTags,
 		Sources:         buildSourcesFromMessages(req.Messages),
 		Key:             stringOrEmpty(req.Key),
-		ObservationDate: observationDateFromMessages(req.Messages),
+		ObservationDate: h.resolveObservationDate(ctx, req.Messages),
 	}
 	items, err := h.applyAtomicAndPersist(ctx, embedded, perFactInfo, fc)
 	recordStageDuration(ctx, "apply", t)
@@ -237,7 +237,7 @@ func (h *Handler) runAtomicFineExtractionFull(
 		return nil, nil, false, nil
 	}
 
-	obs := observationDateFromRequest(req)
+	obs := h.resolveObservationDate(ctx, req.Messages)
 	atomicFacts, err := ext.ExtractAtomicFacts(ctx, conversation, candidates, obs)
 	if err != nil {
 		recordAtomicExtractOutcome(ctx, atomicOutcomeLLMError)
