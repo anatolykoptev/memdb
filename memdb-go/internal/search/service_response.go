@@ -3,18 +3,20 @@
 package search
 
 import (
+	"context"
+
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
 // formatWorkingMem converts working memory items to formatted act_mem entries.
-func (s *SearchService) formatWorkingMem(queryVec []float32, items []db.VectorSearchResult, p SearchParams) []map[string]any {
+func (s *SearchService) formatWorkingMem(ctx context.Context, queryVec []float32, items []db.VectorSearchResult, p SearchParams) []map[string]any {
 	if len(items) == 0 {
 		return nil
 	}
 	// Same attribution filter as mergeSearchResults — keep act_mem coherent
 	// with text_mem when caller scopes a single-speaker perspective.
 	if p.AttributedTo != "" {
-		items = filterByAttribution(items, p.AttributedTo)
+		items = filterByAttribution(ctx, items, p.AttributedTo)
 		if len(items) == 0 {
 			return nil
 		}
