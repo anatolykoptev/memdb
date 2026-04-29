@@ -6,7 +6,7 @@ package server
 // so we can't inspect it directly. Instead we use two complementary approaches:
 //
 //  1. Env-gate unit tests (DisabledByEnv, EnabledByEnv, BadEnv) — verify helper
-//     behaviour via circuitEnabled() / envIntCB() which are the gate functions.
+//     behaviour via circuitEnabled() / envcfg.IntRange() which are the gate functions.
 //  2. Smoke / integration test (CircuitTrips) — spin up a fake CE HTTP server
 //     that always returns 503. With circuit enabled, after FailThreshold
 //     consecutive failures the (N+1)th call must return the pass-through result
@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-kit/rerank"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
 // ── Helper function tests ────────────────────────────────────────────────────
@@ -42,35 +44,35 @@ func TestRerankCircuit_DisabledByEnv_NoOpt(t *testing.T) {
 }
 
 // TestRerankCircuit_EnabledByEnv_OptPresent verifies circuitEnabled() returns
-// true with MEMDB_RERANK_CIRCUIT=1, and that envIntCB parses values correctly.
+// true with MEMDB_RERANK_CIRCUIT=1, and that envcfg.IntRange parses values correctly.
 func TestRerankCircuit_EnabledByEnv_OptPresent(t *testing.T) {
 	t.Setenv("MEMDB_RERANK_CIRCUIT", "1")
 	if !circuitEnabled() {
 		t.Fatal("circuitEnabled() = false with MEMDB_RERANK_CIRCUIT=1; want true")
 	}
 
-	// Verify envIntCB picks up parsed values.
+	// Verify envcfg.IntRange picks up parsed values for circuit breaker params.
 	t.Setenv("MEMDB_RERANK_CIRCUIT_FAIL_THRESHOLD", "7")
 	t.Setenv("MEMDB_RERANK_CIRCUIT_OPEN_DURATION_S", "45")
 	t.Setenv("MEMDB_RERANK_CIRCUIT_HALF_OPEN_PROBES", "2")
 	t.Setenv("MEMDB_RERANK_CIRCUIT_FAIL_WINDOW_S", "120")
 
-	if got := envIntCB("MEMDB_RERANK_CIRCUIT_FAIL_THRESHOLD", 5); got != 7 {
-		t.Fatalf("envIntCB FAIL_THRESHOLD = %d; want 7", got)
+	if got := envcfg.IntRange("MEMDB_RERANK_CIRCUIT_FAIL_THRESHOLD", 5, 1, 1<<30); got != 7 {
+		t.Fatalf("envcfg.IntRange FAIL_THRESHOLD = %d; want 7", got)
 	}
-	if got := envIntCB("MEMDB_RERANK_CIRCUIT_OPEN_DURATION_S", 30); got != 45 {
-		t.Fatalf("envIntCB OPEN_DURATION_S = %d; want 45", got)
+	if got := envcfg.IntRange("MEMDB_RERANK_CIRCUIT_OPEN_DURATION_S", 30, 1, 1<<30); got != 45 {
+		t.Fatalf("envcfg.IntRange OPEN_DURATION_S = %d; want 45", got)
 	}
-	if got := envIntCB("MEMDB_RERANK_CIRCUIT_HALF_OPEN_PROBES", 1); got != 2 {
-		t.Fatalf("envIntCB HALF_OPEN_PROBES = %d; want 2", got)
+	if got := envcfg.IntRange("MEMDB_RERANK_CIRCUIT_HALF_OPEN_PROBES", 1, 1, 1<<30); got != 2 {
+		t.Fatalf("envcfg.IntRange HALF_OPEN_PROBES = %d; want 2", got)
 	}
-	if got := envIntCB("MEMDB_RERANK_CIRCUIT_FAIL_WINDOW_S", 60); got != 120 {
-		t.Fatalf("envIntCB FAIL_WINDOW_S = %d; want 120", got)
+	if got := envcfg.IntRange("MEMDB_RERANK_CIRCUIT_FAIL_WINDOW_S", 60, 1, 1<<30); got != 120 {
+		t.Fatalf("envcfg.IntRange FAIL_WINDOW_S = %d; want 120", got)
 	}
 }
 
-// TestRerankCircuit_BadEnv_DefaultsApplied verifies that envIntCB falls back
-// to defaults for unparseable or non-positive values — no panic.
+// TestRerankCircuit_BadEnv_DefaultsApplied verifies that envcfg.IntRange falls
+// back to defaults for unparseable or non-positive values — no panic.
 func TestRerankCircuit_BadEnv_DefaultsApplied(t *testing.T) {
 	t.Setenv("MEMDB_RERANK_CIRCUIT", "1")
 
@@ -87,9 +89,9 @@ func TestRerankCircuit_BadEnv_DefaultsApplied(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Setenv(tc.key, tc.val)
-		got := envIntCB(tc.key, tc.def)
+		got := envcfg.IntRange(tc.key, tc.def, 1, 1<<30)
 		if got != tc.def {
-			t.Errorf("envIntCB(%q, %q) = %d; want default %d", tc.key, tc.val, got, tc.def)
+			t.Errorf("envcfg.IntRange(%q, %q) = %d; want default %d", tc.key, tc.val, got, tc.def)
 		}
 	}
 }

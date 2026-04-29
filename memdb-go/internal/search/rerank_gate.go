@@ -21,10 +21,12 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
-// Default thresholds. Override via env (see envFloatSearch / envIntSearch
-// below). Names are stable so dashboards / alerts can reference them.
+// Default thresholds. Override via env (envcfg.Float / envcfg.Int).
+// Names are stable so dashboards / alerts can reference them.
 const (
 	defaultRerankTopCosineThreshold = 0.85 // skip if top result is already high-confidence
 	defaultRerankClusteredSpread    = 0.10 // spread below this → clustered, rerank all
@@ -47,10 +49,10 @@ type rerankGateThresholds struct {
 
 func loadRerankGateThresholds() rerankGateThresholds {
 	return rerankGateThresholds{
-		TopCosine:       envFloatSearch("MEMDB_RERANK_TOP_COSINE_THRESHOLD", defaultRerankTopCosineThreshold),
-		ClusteredSpread: envFloatSearch("MEMDB_RERANK_CLUSTERED_SPREAD", defaultRerankClusteredSpread),
-		WideSpread:      envFloatSearch("MEMDB_RERANK_WIDE_SPREAD", defaultRerankWideSpread),
-		TopKCap:         envIntSearchDefault("MEMDB_RERANK_TOPK_CAP", defaultRerankTopKCap),
+		TopCosine:       envcfg.Float("MEMDB_RERANK_TOP_COSINE_THRESHOLD", defaultRerankTopCosineThreshold),
+		ClusteredSpread: envcfg.Float("MEMDB_RERANK_CLUSTERED_SPREAD", defaultRerankClusteredSpread),
+		WideSpread:      envcfg.Float("MEMDB_RERANK_WIDE_SPREAD", defaultRerankWideSpread),
+		TopKCap:         envcfg.Int("MEMDB_RERANK_TOPK_CAP", defaultRerankTopKCap),
 	}
 }
 
