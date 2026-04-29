@@ -209,6 +209,7 @@ func buildRawNode(
 		Background:      "",
 		Key:             fac.key,
 		ObservationDate: fac.observationDate,
+		ExtractionState: extractionStateExtracted,
 	})
 
 	propsJSON, err := marshalProps(props)

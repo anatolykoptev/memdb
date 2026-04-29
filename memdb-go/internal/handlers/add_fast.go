@@ -212,6 +212,7 @@ func (h *Handler) buildFastNodes(
 		Info: memInfo, CustomTags: fac.customTags, Sources: mem.Sources, Background: "",
 		Key:             fac.key,
 		ObservationDate: fac.observationDate,
+		ExtractionState: extractionStateExtracted,
 	}))
 	if err != nil {
 		return nil, addResponseItem{}, fmt.Errorf("marshal wm properties: %w", err)
@@ -225,6 +226,7 @@ func (h *Handler) buildFastNodes(
 		Info: memInfo, CustomTags: fac.customTags, Sources: mem.Sources, Background: workingBinding(wmID),
 		Key:             fac.key,
 		ObservationDate: fac.observationDate,
+		ExtractionState: extractionStateExtracted,
 	}))
 	if err != nil {
 		return nil, addResponseItem{}, fmt.Errorf("marshal lt properties: %w", err)

@@ -80,7 +80,8 @@ func (h *Handler) applyAtomicAndPersist(
 			Mode: modeFine, Now: fc.Now, CreatedAt: createdAt,
 			Info: factInfo, CustomTags: allTags, Sources: fc.Sources, Background: "",
 			RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
-			Key: fc.Key,
+			Key:             fc.Key,
+			ExtractionState: extractionStateExtracted,
 		})
 		ltProps := buildNodeProps(memoryNodeProps{
 			ID: ltID, Memory: f.Memory, MemoryType: f.Type,
@@ -88,7 +89,8 @@ func (h *Handler) applyAtomicAndPersist(
 			Mode: modeFine, Now: fc.Now, CreatedAt: createdAt,
 			Info: factInfo, CustomTags: allTags, Sources: fc.Sources, Background: background,
 			RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
-			Key: fc.Key,
+			Key:             fc.Key,
+			ExtractionState: extractionStateExtracted,
 		})
 		// Critical: lift atomic-fact discriminator keys to TOP-LEVEL properties.
 		// Migration 0022's GENERATED `kind` column reads properties->>'kind'

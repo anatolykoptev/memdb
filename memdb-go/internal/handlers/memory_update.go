@@ -115,6 +115,9 @@ func (h *Handler) NativeUpdateMemory(w http.ResponseWriter, r *http.Request) {
 		CustomTags: nil,
 		Sources:    nil,
 		Background: "",
+		// Update path re-builds the full properties map — stamp as extracted
+		// since the content is available at update time (no pending enrichment).
+		ExtractionState: extractionStateExtracted,
 	})
 
 	propsJSON, err := marshalProps(props)

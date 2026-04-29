@@ -16,3 +16,13 @@ Forbidden without explicit approval (must ask, must wait):
 - Mass re-extraction/backfill jobs
 
 If a fix or sweep result strongly suggests a full run is the right next step, say so in plain text and wait. Do not pre-emptively start it "in the background to save time."
+
+## Add-mode contract
+
+| Mode | Use case | LLM |
+|------|----------|-----|
+| **raw** | Pre-structured payloads (JSON, logs, per-message traces) — preserve verbatim | NEVER |
+| **fast** | Conversation batches, windowed chunks, no graph | NEVER |
+| **fine** | New turns, full graph (entities, atomic facts, edges) | sync |
+
+`raw` = no-LLM zone (`a82c99f7`, 2026-04-10). Need atomic / graph enrichment? Switch to `fine` (or `fast`). Don't add background fillers / async extractors / "lazy fine on raw" — that breaks the contract. Opt-in via per-request flag only, never default-on.

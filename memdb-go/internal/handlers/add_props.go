@@ -11,6 +11,16 @@ import (
 	"github.com/google/uuid"
 )
 
+// Extraction state values written to every Memory row (migration 0028). The
+// partial index on state='pending' keeps any future filler batch SELECT cheap
+// on multi-million-row cubes.
+const (
+	extractionStatePending    = "pending"
+	extractionStateExtracting = "extracting"
+	extractionStateExtracted  = "extracted"
+	extractionStateFailed     = "failed"
+)
+
 // memoryNodeProps holds the parameters for building a memory node's property map.
 // All fields correspond 1:1 to Python's memory properties format.
 type memoryNodeProps struct {
@@ -64,6 +74,20 @@ type memoryNodeProps struct {
 	// own calendar references. Empty/nil omits the field entirely (keeps
 	// JSONB compact for facts with no temporal anchor).
 	EventDates []string
+
+	// ExtractionState (migration 0028): one of the extractionState* constants.
+	// Always written by buildNodeProps. Callers must pass one of the
+	// extractionState* constants — passing an empty string lands an empty value
+	// in JSONB and is treated as a programming bug; not enforced at runtime.
+	ExtractionState string
+	// ExtractionAttemptedAt is the ISO-8601 timestamp of the last asynchronous
+	// enrichment attempt, when one is wired in. Written only when non-empty
+	// (absent when no async enrichment ran).
+	ExtractionAttemptedAt string
+	// ExtractionCompletedAt is the ISO-8601 timestamp of the last successful
+	// asynchronous enrichment completion, when one is wired in. Written only
+	// when non-empty (absent when no async enrichment ran).
+	ExtractionCompletedAt string
 }
 
 // buildNodeProps constructs the JSONB properties dict matching the Python format.
@@ -132,57 +156,48 @@ func buildNodeProps(p memoryNodeProps) map[string]any {
 		}
 		props["event_dates"] = dates
 	}
+	// Migration 0028: extraction_state is ALWAYS written so any future filler
+	// SELECT on state='pending' hits the partial index rather than table-scanning.
+	// The two timing fields are optional — absent on initial insert, set when
+	// an async enrichment pass runs.
+	props["extraction_state"] = p.ExtractionState
+	if p.ExtractionAttemptedAt != "" {
+		props["extraction_attempted_at"] = p.ExtractionAttemptedAt
+	}
+	if p.ExtractionCompletedAt != "" {
+		props["extraction_completed_at"] = p.ExtractionCompletedAt
+	}
 	return props
 }
 
 // buildMemoryProperties is a convenience wrapper for fast-mode (created_at == updated_at).
 // userName is the cube partition key; userID is the person identity (Phase 2 split).
+// state must be one of the extractionState* constants (migration 0028).
+// attemptedAt and completedAt are optional ISO-8601 timestamps; empty means "not yet".
 func buildMemoryProperties(
 	id, memory, memoryType, userName, userID, agentID, sessionID, timestamp string,
 	info map[string]any, customTags []string,
 	sources []map[string]any, background string,
+	state, attemptedAt, completedAt string,
 ) map[string]any {
 	return buildNodeProps(memoryNodeProps{
-		ID:         id,
-		Memory:     memory,
-		MemoryType: memoryType,
-		UserName:   userName,
-		UserID:     userID,
-		AgentID:    agentID,
-		SessionID:  sessionID,
-		Mode:       modeFast,
-		Now:        timestamp,
-		CreatedAt:  timestamp,
-		Info:       info,
-		CustomTags: customTags,
-		Sources:    sources,
-		Background: background,
-	})
-}
-
-// buildMemoryPropertiesAt is a convenience wrapper for fine-mode with a separate
-// createdAt (from LLM-provided valid_at) and now (actual insert time).
-// userName is the cube partition key; userID is the person identity (Phase 2 split).
-func buildMemoryPropertiesAt(
-	id, memory, memoryType, userName, userID, agentID, sessionID, now, createdAt string,
-	info map[string]any, customTags []string,
-	sources []map[string]any, background string,
-) map[string]any {
-	return buildNodeProps(memoryNodeProps{
-		ID:         id,
-		Memory:     memory,
-		MemoryType: memoryType,
-		UserName:   userName,
-		UserID:     userID,
-		AgentID:    agentID,
-		SessionID:  sessionID,
-		Mode:       modeFine,
-		Now:        now,
-		CreatedAt:  createdAt,
-		Info:       info,
-		CustomTags: customTags,
-		Sources:    sources,
-		Background: background,
+		ID:                    id,
+		Memory:                memory,
+		MemoryType:            memoryType,
+		UserName:              userName,
+		UserID:                userID,
+		AgentID:               agentID,
+		SessionID:             sessionID,
+		Mode:                  modeFast,
+		Now:                   timestamp,
+		CreatedAt:             timestamp,
+		Info:                  info,
+		CustomTags:            customTags,
+		Sources:               sources,
+		Background:            background,
+		ExtractionState:       state,
+		ExtractionAttemptedAt: attemptedAt,
+		ExtractionCompletedAt: completedAt,
 	})
 }
 

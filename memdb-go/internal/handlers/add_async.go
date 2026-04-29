@@ -67,6 +67,7 @@ func (h *Handler) nativeAsyncAddForCube(ctx context.Context, req *fullAddRequest
 		wmJSON, err := marshalProps(buildMemoryProperties(
 			wmID, mem.Text, "WorkingMemory", cubeID, userID, stringOrEmpty(req.AgentID),
 			sessionID, now, memInfo, req.CustomTags, mem.Sources, "",
+			extractionStateExtracted, "", "",
 		))
 		if err != nil {
 			return nil, fmt.Errorf("async: marshal wm props: %w", err)

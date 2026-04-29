@@ -94,6 +94,7 @@ func buildUpdateWMNode(
 		Key:             key,
 		ObservationDate: observationDate,
 		EventDates:      f.EventDates,
+		ExtractionState: extractionStateExtracted,
 	}))
 	if err != nil {
 		return db.MemoryInsertNode{}, wmVSetInsert{}, false
@@ -151,6 +152,7 @@ func buildAddNodes(
 		Key:             key,
 		ObservationDate: observationDate,
 		EventDates:      f.EventDates,
+		ExtractionState: extractionStateExtracted,
 	}))
 	ltJSON, err2 := marshalProps(buildNodeProps(memoryNodeProps{
 		ID: ltID, Memory: f.Memory, MemoryType: f.Type,
@@ -161,6 +163,7 @@ func buildAddNodes(
 		Key:             key,
 		ObservationDate: observationDate,
 		EventDates:      f.EventDates,
+		ExtractionState: extractionStateExtracted,
 	}))
 	if err1 != nil || err2 != nil {
 		return nil, nil
