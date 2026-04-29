@@ -25,15 +25,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
-	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
 // pprSingleflight deduplicates concurrent ComputePersonalizedPR calls for the
@@ -72,22 +72,9 @@ const (
 // PPRBlendWeights returns the (pprWeight, globalWeight) for the final score blend.
 // Env: MEMDB_PPR_BLEND_PPR / MEMDB_PPR_BLEND_GLOBAL. Defaults 0.7 / 0.3.
 func PPRBlendWeights() (pprW, globalW float64) {
-	pprW = envFloatScheduler("MEMDB_PPR_BLEND_PPR", defaultPPRBlendPPR)
-	globalW = envFloatScheduler("MEMDB_PPR_BLEND_GLOBAL", defaultPPRBlendGlobal)
+	pprW = envcfg.Float("MEMDB_PPR_BLEND_PPR", defaultPPRBlendPPR)
+	globalW = envcfg.Float("MEMDB_PPR_BLEND_GLOBAL", defaultPPRBlendGlobal)
 	return
-}
-
-// envFloatScheduler reads an env key as float64; returns def on missing/parse error.
-func envFloatScheduler(key string, def float64) float64 {
-	s := os.Getenv(key)
-	if s == "" {
-		return def
-	}
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return def
-	}
-	return v
 }
 
 // pprCacheKey returns the Redis cache key for a (cubeID, seedEntityIDs) pair.

@@ -11,9 +11,10 @@ package rerank
 import (
 	"context"
 	"os"
-	"strconv"
 
 	gokitrerank "github.com/anatolykoptev/go-kit/rerank"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
 // MathPrefilter is a Stage-0 diversity-aware prefilter. It wraps
@@ -117,7 +118,7 @@ func NewMathPrefilterFromEnv(embByID map[string][]float32, queryVec []float32) (
 	if os.Getenv("MEMDB_RERANK_MATH_PREFILTER") != "1" {
 		return MathPrefilter{}, false
 	}
-	lambda := envFloatMathPrefilter("MEMDB_RERANK_MATH_LAMBDA", 0.5)
+	lambda := envcfg.Float("MEMDB_RERANK_MATH_LAMBDA", 0.5)
 	return MathPrefilter{
 		EmbeddingsByID: embByID,
 		QueryVector:    queryVec,
@@ -125,16 +126,3 @@ func NewMathPrefilterFromEnv(embByID map[string][]float32, queryVec []float32) (
 	}, true
 }
 
-// envFloatMathPrefilter reads an env variable and parses it as float64.
-// Returns def when the variable is unset or unparseable.
-func envFloatMathPrefilter(key string, def float64) float64 {
-	s := os.Getenv(key)
-	if s == "" {
-		return def
-	}
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return def
-	}
-	return v
-}
