@@ -41,11 +41,14 @@ from pathlib import Path
 
 import requests
 
-# LoCoMo is a factual QA benchmark; per-message granularity (raw) lets question
-# embeddings match atomic facts instead of 4096-char aggregated windows that
-# collapse 58 messages into ~3 coarse chunks, killing per-question cosine match.
-# Env LOCOMO_INGEST_MODE overrides for experiments (e.g. "fast" to compare).
-INGEST_MODE = os.getenv("LOCOMO_INGEST_MODE", "raw")
+# Default = fast (windowing) so LoCoMo runs benefit from the full M14 rerank +
+# F12 linked-expand stack which is keyed off atomic-fact properties absent in
+# raw rows. Set LOCOMO_INGEST_MODE=raw to reproduce the M7 baseline (one
+# memory per message; no LLM extract; no atomic facts → F12/F8 stay dark).
+# raw remains the right choice for structured payloads (JSON experience
+# records from go-wowa intelligence layer) where windowing would corrupt the
+# blob. LoCoMo conversations are plain dialogue — windowing does not corrupt.
+INGEST_MODE = os.getenv("LOCOMO_INGEST_MODE", "fast")
 
 
 def build_headers() -> dict:
