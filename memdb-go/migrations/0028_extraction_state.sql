@@ -1,19 +1,15 @@
--- MemDB migration 0028: extraction_state on Memory.properties (uniform pipeline).
+-- MemDB migration 0028: extraction_state on Memory.properties.
 -- Date: 2026-04-29
 --
--- Adds three property keys read by the new extraction_filler scheduler loop:
---   extraction_state           : 'pending'|'extracting'|'extracted'|'failed'
---   extraction_attempted_at    : ISO-8601 timestamp of the last filler attempt
---   extraction_completed_at    : ISO-8601 timestamp of the successful fill
+-- Adds the `extraction_state` property key to every Memory row. Default is
+-- 'extracted' — this migration backfills existing rows. Future code that wants
+-- to defer LLM-driven enrichment can flip selected rows to 'pending'; a partial
+-- index keeps the SELECT cheap, but no scheduler loop reads from it today
+-- (cancelled — see CLAUDE.md `Add-mode contract`).
 --
--- Memory.properties is agtype (Apache AGE), so the keys are written by the Go
--- handler when the row is inserted (see add_props.go::BuildMemoryProperties).
--- This SQL only:
---   1) backfills every existing row to extraction_state='extracted' (legacy
---      assumption — see plan Task 1 for rationale; opt-in re-extraction lives
---      in Task 5).
---   2) creates a partial index on extraction_state='pending' so the filler
---      loop's batch SELECT does not table-scan in steady state.
+-- The key is written by the Go handler at insert time via
+-- add_props.go::buildMemoryProperties. State constants (pending | extracting |
+-- extracted | failed) are defined as extractionState* in add_props.go.
 --
 -- Idempotent: IF NOT EXISTS on the index, UPDATE skipped when key already set.
 --

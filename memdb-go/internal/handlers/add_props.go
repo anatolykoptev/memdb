@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Extraction state values for the uniform-pipeline filler loop. The state
-// drives a partial index (migration 0028) so SELECT WHERE state='pending'
-// is a cheap index seek even on multi-million-row cubes.
+// Extraction state values written to every Memory row (migration 0028). The
+// partial index on state='pending' keeps any future filler batch SELECT cheap
+// on multi-million-row cubes.
 const (
 	extractionStatePending    = "pending"
 	extractionStateExtracting = "extracting"
@@ -76,16 +76,17 @@ type memoryNodeProps struct {
 	EventDates []string
 
 	// ExtractionState (migration 0028): one of the extractionState* constants.
-	// Always written by buildNodeProps; drives the partial index on
-	// extraction_state='pending' so the filler-loop batch SELECT is a cheap
-	// index seek in steady state. Empty value is rejected by buildNodeProps —
-	// callers MUST supply a non-empty state.
+	// Always written by buildNodeProps. Callers must pass one of the
+	// extractionState* constants — passing an empty string lands an empty value
+	// in JSONB and is treated as a programming bug; not enforced at runtime.
 	ExtractionState string
-	// ExtractionAttemptedAt is the ISO-8601 timestamp of the last filler
-	// attempt. Written only when non-empty (absent on initial insert).
+	// ExtractionAttemptedAt is the ISO-8601 timestamp of the last asynchronous
+	// enrichment attempt, when one is wired in. Written only when non-empty
+	// (absent when no async enrichment ran).
 	ExtractionAttemptedAt string
-	// ExtractionCompletedAt is the ISO-8601 timestamp of a successful fill.
-	// Written only when non-empty (absent until the filler completes).
+	// ExtractionCompletedAt is the ISO-8601 timestamp of the last successful
+	// asynchronous enrichment completion, when one is wired in. Written only
+	// when non-empty (absent when no async enrichment ran).
 	ExtractionCompletedAt string
 }
 
@@ -155,10 +156,10 @@ func buildNodeProps(p memoryNodeProps) map[string]any {
 		}
 		props["event_dates"] = dates
 	}
-	// Migration 0028: extraction_state is ALWAYS written so the partial index
-	// on state='pending' (filler-loop SELECT) functions correctly. The two
-	// timing fields are optional — absent on initial insert, filled in by the
-	// filler loop on first attempt and on completion respectively.
+	// Migration 0028: extraction_state is ALWAYS written so any future filler
+	// SELECT on state='pending' hits the partial index rather than table-scanning.
+	// The two timing fields are optional — absent on initial insert, set when
+	// an async enrichment pass runs.
 	props["extraction_state"] = p.ExtractionState
 	if p.ExtractionAttemptedAt != "" {
 		props["extraction_attempted_at"] = p.ExtractionAttemptedAt
@@ -190,38 +191,6 @@ func buildMemoryProperties(
 		Mode:                  modeFast,
 		Now:                   timestamp,
 		CreatedAt:             timestamp,
-		Info:                  info,
-		CustomTags:            customTags,
-		Sources:               sources,
-		Background:            background,
-		ExtractionState:       state,
-		ExtractionAttemptedAt: attemptedAt,
-		ExtractionCompletedAt: completedAt,
-	})
-}
-
-// buildMemoryPropertiesAt is a convenience wrapper for fine-mode with a separate
-// createdAt (from LLM-provided valid_at) and now (actual insert time).
-// userName is the cube partition key; userID is the person identity (Phase 2 split).
-// state must be one of the extractionState* constants (migration 0028).
-// attemptedAt and completedAt are optional ISO-8601 timestamps; empty means "not yet".
-func buildMemoryPropertiesAt(
-	id, memory, memoryType, userName, userID, agentID, sessionID, now, createdAt string,
-	info map[string]any, customTags []string,
-	sources []map[string]any, background string,
-	state, attemptedAt, completedAt string,
-) map[string]any {
-	return buildNodeProps(memoryNodeProps{
-		ID:                    id,
-		Memory:                memory,
-		MemoryType:            memoryType,
-		UserName:              userName,
-		UserID:                userID,
-		AgentID:               agentID,
-		SessionID:             sessionID,
-		Mode:                  modeFine,
-		Now:                   now,
-		CreatedAt:             createdAt,
 		Info:                  info,
 		CustomTags:            customTags,
 		Sources:               sources,
