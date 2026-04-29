@@ -408,8 +408,18 @@ def main() -> int:
         from llm_judge import get_shared_cache, judge  # noqa: PLC0415
 
         judge_cache = get_shared_cache()
-        judge_api_base = os.getenv("LLM_API_BASE", "http://127.0.0.1:8317/v1")
-        judge_api_key = os.getenv("CLI_PROXY_API_KEY") or os.getenv("LLM_API_KEY") or ""
+        # CLI flags win over env: --llm-url and --llm-api-key are explicit user intent.
+        # Falling back to env was the pre-CLI-flag default and caused 401 cascades when
+        # the runner did not export CLI_PROXY_API_KEY/LLM_API_KEY into the python subshell.
+        judge_api_base = (
+            args.llm_url or os.getenv("LLM_API_BASE") or "http://127.0.0.1:8317/v1"
+        )
+        judge_api_key = (
+            args.llm_api_key
+            or os.getenv("CLI_PROXY_API_KEY")
+            or os.getenv("LLM_API_KEY")
+            or ""
+        )
 
         print(
             f"Running LLM Judge ({args.llm_judge_model}, "
