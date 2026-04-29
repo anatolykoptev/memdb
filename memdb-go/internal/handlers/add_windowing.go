@@ -91,6 +91,10 @@ type formattedMsg struct {
 }
 
 // formatMessages converts raw chatMessages into formattedMsgs with pre-built source maps.
+// Per-message uuid and agent_id propagate into the source map when supplied so
+// downstream consumers (and future per-msg dedup) can address the original
+// message. Mirror of buildSourcesFromMessages in add_props.go — keep both
+// in sync when extending chatMessage with new optional passthrough fields.
 func formatMessages(messages []chatMessage) []formattedMsg {
 	out := make([]formattedMsg, 0, len(messages))
 	for _, msg := range messages {
@@ -98,14 +102,21 @@ func formatMessages(messages []chatMessage) []formattedMsg {
 		if chatTime == "" {
 			chatTime = time.Now().UTC().Format("2006-01-02T15:04:05")
 		}
+		src := map[string]any{
+			"role":      msg.Role,
+			"content":   msg.Content,
+			"chat_time": chatTime,
+		}
+		if msg.UUID != "" {
+			src["uuid"] = msg.UUID
+		}
+		if msg.AgentID != "" {
+			src["agent_id"] = msg.AgentID
+		}
 		out = append(out, formattedMsg{
-			text: fmt.Sprintf("%s: [%s]: %s", msg.Role, chatTime, msg.Content),
-			role: msg.Role,
-			source: map[string]any{
-				"role":      msg.Role,
-				"content":   msg.Content,
-				"chat_time": chatTime,
-			},
+			text:   fmt.Sprintf("%s: [%s]: %s", msg.Role, chatTime, msg.Content),
+			role:   msg.Role,
+			source: src,
 		})
 	}
 	return out
