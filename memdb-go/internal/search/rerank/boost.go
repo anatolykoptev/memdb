@@ -16,13 +16,13 @@ package rerank
 import (
 	"context"
 	"math"
-	"os"
-	"strconv"
 	"sync"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
 // BoostWeights holds the per-factor multiplier configuration.
@@ -47,10 +47,10 @@ type BoostWeights struct {
 //	MEMDB_RERANK_BOOST_TAGS_CAP   → TagsCap   (default 0.6)
 func DefaultBoostWeights() BoostWeights {
 	return BoostWeights{
-		UserID:    envFloat("MEMDB_RERANK_BOOST_USER_ID", 0.5),
-		SessionID: envFloat("MEMDB_RERANK_BOOST_SESSION_ID", 0.3),
-		TagsEach:  envFloat("MEMDB_RERANK_BOOST_TAGS", 0.2),
-		TagsCap:   envFloat("MEMDB_RERANK_BOOST_TAGS_CAP", 0.6),
+		UserID:    envcfg.Float("MEMDB_RERANK_BOOST_USER_ID", 0.5),
+		SessionID: envcfg.Float("MEMDB_RERANK_BOOST_SESSION_ID", 0.3),
+		TagsEach:  envcfg.Float("MEMDB_RERANK_BOOST_TAGS", 0.2),
+		TagsCap:   envcfg.Float("MEMDB_RERANK_BOOST_TAGS_CAP", 0.6),
 	}
 }
 
@@ -149,20 +149,6 @@ func countTagOverlap(itemTags any, queryTags []string) int {
 		}
 	}
 	return count
-}
-
-// envFloat reads key from env as float64; returns def on missing or parse error.
-// Also used by mmr.go in this package (see comment there).
-func envFloat(key string, def float64) float64 {
-	s := os.Getenv(key)
-	if s == "" {
-		return def
-	}
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return def
-	}
-	return v
 }
 
 // boostMetricsInstruments holds OTel counters for the boost step.
