@@ -143,7 +143,8 @@ var (
 )
 
 type fastPathMetrics struct {
-	Engaged metric.Int64Counter
+	Engaged  metric.Int64Counter
+	FastFail metric.Int64Counter
 }
 
 func fastPathMx() *fastPathMetrics {
@@ -151,14 +152,17 @@ func fastPathMx() *fastPathMetrics {
 		m := otel.Meter("memdb-go/search")
 		eng, _ := m.Int64Counter("memdb.search.fast_path_engaged_total",
 			metric.WithDescription("M14.Y4 fast-path gate outcomes: enabled=fast-path took effect, disabled=env off, complex_query=env on but query too complex"))
-		fastPathMxInst = &fastPathMetrics{Engaged: eng}
+		ff, _ := m.Int64Counter("memdb.search.fast_fail_total",
+			metric.WithDescription("M14.Y4.1 early-return before pipeline assembly: reason=empty_cube means cube has 0 activated entries, skipping all LLM stages (~2s savings per call)"))
+		fastPathMxInst = &fastPathMetrics{Engaged: eng, FastFail: ff}
 
-		// Pre-register all three outcome labels at zero so dashboards see
+		// Pre-register all outcome labels at zero so dashboards see
 		// every series from container start before the first search fires.
 		ctx := context.Background()
 		for _, oc := range []string{"enabled", "disabled", "complex_query"} {
 			eng.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
 		}
+		ff.Add(ctx, 0, metric.WithAttributes(attribute.String("reason", "empty_cube")))
 	})
 	return fastPathMxInst
 }
@@ -168,4 +172,11 @@ func fastPathMx() *fastPathMetrics {
 func recordFastPathOutcome(ctx context.Context, outcome string) {
 	fastPathMx().Engaged.Add(ctx, 1,
 		metric.WithAttributes(attribute.String("outcome", outcome)))
+}
+
+// recordFastFail emits the fast_fail_total counter with the given reason label.
+// Currently the only reason is "empty_cube".
+func recordFastFail(ctx context.Context, reason string) {
+	fastPathMx().FastFail.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("reason", reason)))
 }

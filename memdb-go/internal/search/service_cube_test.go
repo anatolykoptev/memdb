@@ -158,6 +158,13 @@ func (m *mockPostgres) IncrRetrievalCount(_ context.Context, _ []string, _ strin
 	return nil
 }
 
+func (m *mockPostgres) CubeHasEntries(_ context.Context, _ string) (bool, error) {
+	// Default: return true so existing tests bypass the fast-fail and reach
+	// VectorSearch. Tests that specifically exercise empty-cube behaviour use
+	// emptyAwareMockPG (empty_cube_test.go).
+	return true, nil
+}
+
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
