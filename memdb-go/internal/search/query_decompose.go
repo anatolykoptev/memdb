@@ -65,6 +65,11 @@ func cotDecomposeEnabled() bool {
 // DecomposeQuery returns a list of atomic sub-questions. If decomposition
 // doesn't apply (env off, short query, LLM error, atomic), returns [query].
 // The returned slice always has at least one element.
+//
+// Cache: results are stored in the process-global rewriteCache (keyed on
+// query + model). On a cache hit the LLM is bypassed entirely; on miss the
+// result is written back. When MEMDB_REWRITE_CACHE_SIZE=0 the cache is nil
+// and every call always reaches the LLM — D7 functionality is NOT disabled.
 func DecomposeQuery(ctx context.Context, logger *slog.Logger, query string, cfg CoTConfig) []string {
 	original := []string{query}
 	if !cotDecomposeEnabled() || cfg.APIURL == "" {
@@ -76,6 +81,16 @@ func DecomposeQuery(ctx context.Context, logger *slog.Logger, query string, cfg 
 		searchMx().D7CoT.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
 		return original
 	}
+
+	// Cache lookup — bypass LLM on hit.
+	cache := getRewriteCache()
+	cacheKey := rewriteCacheKey("d7:"+query, cfg.Model)
+	if cached, ok := cache.Get(cacheKey); ok {
+		searchMx().RewriteCacheHit.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", "d7")))
+		searchMx().D7CoT.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "decomposed")))
+		return strings.Split(cached, "\x00")
+	}
+	searchMx().RewriteCacheMiss.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", "d7")))
 
 	subs, err := callCoTLLM(ctx, query, cfg)
 	if err != nil {
@@ -114,6 +129,8 @@ func DecomposeQuery(ctx context.Context, logger *slog.Logger, query string, cfg 
 			slog.Any("sub_questions", cleaned),
 		)
 	}
+	// Store NUL-joined slice in cache for future identical queries.
+	cache.Set(cacheKey, strings.Join(cleaned, "\x00"))
 	return cleaned
 }
 
