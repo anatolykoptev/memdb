@@ -20,8 +20,9 @@ type schedMetricsStruct struct {
 	Duration        metric.Float64Histogram // labels: label
 	DLQ             metric.Int64Counter     // labels: label
 	TreeReorg       metric.Int64Counter     // labels: tier, outcome
-	PageRankRuns    metric.Int64Counter     // labels: outcome (success|empty|db_error|compute_error|skipped_other_leader)
-	PageRankLastRun metric.Float64Gauge     // seconds since epoch of last completed run
+	PageRankRuns           metric.Int64Counter     // labels: outcome (success|empty|db_error|compute_error|skipped_other_leader)
+	PageRankLastRun        metric.Float64Gauge     // seconds since epoch of last completed run
+	PageRankDistinctScores metric.Int64Gauge       // distinct PageRank score values written per cycle (distribution health)
 	// D3ClusterSize (Q5) — number of members in each cluster at promotion time.
 	// tier ∈ {episodic, semantic}.
 	D3ClusterSize metric.Int64Histogram
@@ -69,6 +70,9 @@ func schedMx() *schedMetricsStruct {
 			metric.WithDescription("Duration in seconds of the last PageRank computation cycle"),
 			metric.WithUnit("s"),
 		)
+		prDistinct, _ := meter.Int64Gauge("memdb.pagerank_distribution_distinct_total",
+			metric.WithDescription("Number of distinct PageRank scores written in the last compute cycle (healthy = O(nodes); collapse = O(1))"),
+		)
 		d3cs, _ := meter.Int64Histogram("memdb.scheduler.d3_cluster_size",
 			metric.WithDescription("D3 reorganizer: member count of each cluster at promotion (tier=episodic|semantic)"),
 			metric.WithExplicitBucketBoundaries(2, 3, 5, 10, 20, 50),
@@ -92,18 +96,19 @@ func schedMx() *schedMetricsStruct {
 			metric.WithExplicitBucketBoundaries(1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500),
 		)
 		schedMetricsInstruments = &schedMetricsStruct{
-			Messages:        msgs,
-			Duration:        dur,
-			DLQ:             dlq,
-			TreeReorg:       tr,
-			PageRankRuns:    prRuns,
-			PageRankLastRun: prLast,
-			D3ClusterSize:   d3cs,
-			PPRRuns:         pprRuns,
-			PPRCacheHits:    pprCacheHits,
-			PPRCacheTotal:   pprCacheTotal,
-			PPRIterCount:    pprIterCount,
-			PPRDurationMs:   pprDuration,
+			Messages:               msgs,
+			Duration:               dur,
+			DLQ:                    dlq,
+			TreeReorg:              tr,
+			PageRankRuns:           prRuns,
+			PageRankLastRun:        prLast,
+			PageRankDistinctScores: prDistinct,
+			D3ClusterSize:          d3cs,
+			PPRRuns:                pprRuns,
+			PPRCacheHits:           pprCacheHits,
+			PPRCacheTotal:          pprCacheTotal,
+			PPRIterCount:           pprIterCount,
+			PPRDurationMs:          pprDuration,
 		}
 		// Pre-register TreeReorg at zero so Prometheus scrapers see the
 		// series immediately (matches db/metrics.go pattern).
