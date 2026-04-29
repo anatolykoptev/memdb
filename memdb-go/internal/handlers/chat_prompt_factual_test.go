@@ -9,14 +9,40 @@ import (
 	"testing"
 )
 
+// factualSharedSignature is a phrase common to BOTH the high-confidence and
+// low-confidence variants of the factual EN prompt. Use this when a test
+// only cares that "some factual prompt fired" and not which variant.
+const factualSharedSignature = "concise but complete factual answer"
+
+// factualHighConfidenceMarker is unique to the high-confidence EN prompt
+// (the M12.2 commit-bias instruction).
+const factualHighConfidenceMarker = "Commit to an answer based on the retrieved evidence"
+
+// factualLowConfidenceMarker is unique to the low-confidence EN prompt
+// (the M12.2 hedging instruction).
+const factualLowConfidenceMarker = "low confidence in these memories"
+
+// memWithScore returns a memory item with the given metadata.relativity score
+// — the input shape that decideFactualPrompt reads. Mirrors the format
+// produced by search/helpers.go::FormatMemoryItem.
+func memWithScore(text string, score float64) map[string]any {
+	return map[string]any{
+		"memory": text,
+		"metadata": map[string]any{
+			"relativity": score,
+		},
+	}
+}
+
 func TestBuildSystemPrompt_FactualEN(t *testing.T) {
+	// No relativity score → topScore == 0 → low-confidence variant fires.
 	memories := []map[string]any{
 		{"memory": "User likes Go"},
 	}
 	prompt := buildSystemPrompt("What language does the user like?", memories, "", "", "factual")
 
-	if !strings.Contains(prompt, "SHORTEST factual phrase") {
-		t.Error("prompt missing factual EN signature 'SHORTEST factual phrase'")
+	if !strings.Contains(prompt, factualSharedSignature) {
+		t.Errorf("prompt missing factual EN signature %q", factualSharedSignature)
 	}
 	if strings.Contains(prompt, "MemDB Assistant") || strings.Contains(prompt, "Four-Step Verdict") {
 		t.Error("factual EN prompt should not contain default cloud chat boilerplate")
@@ -52,7 +78,7 @@ func TestBuildSystemPrompt_FactualWithCustomBase(t *testing.T) {
 	if prompt != "Custom system prompt." {
 		t.Errorf("prompt = %q, want raw custom base — basePrompt must win over answer_style", prompt)
 	}
-	if strings.Contains(prompt, "SHORTEST factual phrase") {
+	if strings.Contains(prompt, factualSharedSignature) {
 		t.Error("custom base should suppress factual template entirely")
 	}
 }
@@ -74,8 +100,8 @@ func TestBuildSystemPrompt_FactualWithMemories(t *testing.T) {
 			t.Errorf("factual prompt missing memory %d (%q)", i+1, want)
 		}
 	}
-	if !strings.Contains(prompt, "SHORTEST factual phrase") {
-		t.Error("factual prompt must still carry rule 1")
+	if !strings.Contains(prompt, factualSharedSignature) {
+		t.Error("factual prompt must still carry rule 1 (concise-but-complete)")
 	}
 }
 
@@ -94,7 +120,7 @@ func TestBuildSystemPrompt_ConversationalExplicit(t *testing.T) {
 			t.Errorf("explicit conversational prompt missing %q (must equal default branch)", want)
 		}
 	}
-	if strings.Contains(explicitPrompt, "SHORTEST factual phrase") {
+	if strings.Contains(explicitPrompt, factualSharedSignature) {
 		t.Error("conversational must not pick the factual template")
 	}
 }

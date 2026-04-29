@@ -200,8 +200,13 @@ type nativeChatRequest struct {
 	// Allowed values:
 	//   - ""               — default behaviour (cloudChatPromptEN/ZH), zero regression for existing clients.
 	//   - "conversational" — explicit default; identical to "".
-	//   - "factual"        — factual-extraction QA prompt (factualQAPromptEN/ZH).
-	//                        Tuned for short-phrase answers (e.g. LoCoMo benchmark).
+	//   - "factual"        — factual-extraction QA prompt. M12.2 splits this
+	//                        into two confidence-conditional variants
+	//                        (factualQAPromptHighConfidenceEN/ZH for top
+	//                        score >= MEMDB_FACTUAL_CONFIDENCE_THRESHOLD,
+	//                        factualQAPromptLowConfidenceEN/ZH otherwise).
+	//                        Tuned for concise factual answers (e.g. LoCoMo
+	//                        benchmark).
 	// A non-empty SystemPrompt always wins over AnswerStyle (basePrompt path is preserved
 	// for backward compatibility). Unknown values yield 400.
 	AnswerStyle *string `json:"answer_style,omitempty"`
