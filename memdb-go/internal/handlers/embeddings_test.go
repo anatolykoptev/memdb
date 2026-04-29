@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
+	"github.com/anatolykoptev/go-kit/embed"
 )
 
-// mockEmbedder implements embedder.Embedder for testing the embeddings handler.
+// mockEmbedder implements embed.Embedder for testing the embeddings handler.
 type mockEmbedder struct {
 	embedFn func(ctx context.Context, texts []string) ([][]float32, error)
 	dim     int
@@ -468,7 +468,7 @@ func TestOpenAIEmbeddings_Registry_SelectsCorrectModel(t *testing.T) {
 		},
 	}
 
-	reg := embedder.NewRegistry("multilingual-e5-large")
+	reg := embed.NewRegistry("multilingual-e5-large")
 	reg.Register("multilingual-e5-large", e5Emb)
 	reg.Register("jina-code-v2", codeEmb)
 
@@ -502,7 +502,7 @@ func TestOpenAIEmbeddings_Registry_SelectsCorrectModel(t *testing.T) {
 }
 
 func TestOpenAIEmbeddings_Registry_UnknownModel(t *testing.T) {
-	reg := embedder.NewRegistry("multilingual-e5-large")
+	reg := embed.NewRegistry("multilingual-e5-large")
 	reg.Register("multilingual-e5-large", &mockEmbedder{
 		embedFn: func(_ context.Context, texts []string) ([][]float32, error) {
 			return [][]float32{{0.1}}, nil
@@ -540,7 +540,7 @@ func TestOpenAIEmbeddings_Registry_FallbackOnEmptyModel(t *testing.T) {
 		},
 	}
 
-	reg := embedder.NewRegistry("multilingual-e5-large")
+	reg := embed.NewRegistry("multilingual-e5-large")
 	reg.Register("multilingual-e5-large", e5Emb)
 
 	h := &Handler{

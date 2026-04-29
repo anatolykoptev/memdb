@@ -23,8 +23,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/qdrant/go-client/qdrant"
 
+	"github.com/anatolykoptev/go-kit/embed/onnx"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
-	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 )
 
 const (
@@ -53,7 +53,7 @@ func main() {
 
 	// Initialize ONNX embedder
 	logger.Info("initializing ONNX embedder", slog.String("model_dir", modelDir))
-	emb, err := embedder.NewONNXEmbedder(modelDir, embedder.DefaultONNXConfig(), logger)
+	emb, err := onnx.New(onnx.Config{ModelDir: modelDir, Model: onnx.DefaultModelConfig()}, logger)
 	if err != nil {
 		logger.Error("embedder init failed", slog.Any("error", err))
 		os.Exit(1)
@@ -122,7 +122,7 @@ func main() {
 }
 
 // reembedPolarDB re-embeds all activated Memory nodes in PolarDB.
-func reembedPolarDB(ctx context.Context, pool *pgxpool.Pool, emb *embedder.ONNXEmbedder, logger *slog.Logger) (int, error) {
+func reembedPolarDB(ctx context.Context, pool *pgxpool.Pool, emb *onnx.Embedder, logger *slog.Logger) (int, error) {
 	// Load all activated memories with embeddings
 	query := fmt.Sprintf(`
 		SELECT m.id, m.properties->>'memory' AS memory
@@ -207,7 +207,7 @@ func reembedPolarDB(ctx context.Context, pool *pgxpool.Pool, emb *embedder.ONNXE
 }
 
 // reembedQdrant re-embeds all points in a Qdrant collection.
-func reembedQdrant(ctx context.Context, client *qdrant.Client, collection string, emb *embedder.ONNXEmbedder, logger *slog.Logger) (int, error) {
+func reembedQdrant(ctx context.Context, client *qdrant.Client, collection string, emb *onnx.Embedder, logger *slog.Logger) (int, error) {
 	if found, err := qdrantCollectionExists(ctx, client, collection); err != nil {
 		return 0, err
 	} else if !found {
@@ -268,7 +268,7 @@ func scrollAllQdrantPoints(ctx context.Context, client *qdrant.Client, collectio
 }
 
 // reembedPointBatches processes all points in batches: embed + upsert back to Qdrant.
-func reembedPointBatches(ctx context.Context, client *qdrant.Client, collection string, allPoints []*qdrant.RetrievedPoint, emb *embedder.ONNXEmbedder, logger *slog.Logger) (int, error) {
+func reembedPointBatches(ctx context.Context, client *qdrant.Client, collection string, allPoints []*qdrant.RetrievedPoint, emb *onnx.Embedder, logger *slog.Logger) (int, error) {
 	updated := 0
 	for i := 0; i < len(allPoints); i += batchSize {
 		end := i + batchSize
@@ -286,7 +286,7 @@ func reembedPointBatches(ctx context.Context, client *qdrant.Client, collection 
 }
 
 // reembedSingleBatch embeds one batch of points and upserts them back to Qdrant.
-func reembedSingleBatch(ctx context.Context, client *qdrant.Client, collection string, batch []*qdrant.RetrievedPoint, emb *embedder.ONNXEmbedder) (int, error) {
+func reembedSingleBatch(ctx context.Context, client *qdrant.Client, collection string, batch []*qdrant.RetrievedPoint, emb *onnx.Embedder) (int, error) {
 	texts := make([]string, len(batch))
 	for j, pt := range batch {
 		memory := extractPayloadString(pt.Payload, "memory")

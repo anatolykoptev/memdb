@@ -4,35 +4,33 @@ package server
 // Covers: initEmbedder, initSearchService, initLLMExtractor.
 
 import (
+	"errors"
 	"log/slog"
 	"os"
 	"time"
 
+	"github.com/anatolykoptev/go-kit/embed"
+	"github.com/anatolykoptev/go-kit/embed/onnx"
 	"github.com/anatolykoptev/go-kit/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
-	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/handlers"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
 
-// initEmbedder initializes the embedder via factory (non-fatal if unavailable).
-// When ONNXModelDirCode is set, also loads a second ONNX model and creates a Registry.
-func initEmbedder(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) embedder.Embedder {
-	embCfg := embedder.Config{
-		Type:         cfg.EmbedderType,
-		ONNXModelDir: cfg.ONNXModelDir,
-		VoyageAPIKey: cfg.VoyageAPIKey,
-		Model:        cfg.EmbedderModel,
-		OllamaURL:    cfg.OllamaURL,
-		OllamaDim:    cfg.OllamaDim,
-		OllamaPrefix: cfg.OllamaPrefix,
-		OllamaQuery:  cfg.OllamaQuery,
-		HTTPBaseURL:  cfg.EmbedURL,
-	}
-	e, err := embedder.New(embCfg, logger)
+// initEmbedder initializes the embedder (non-fatal if unavailable).
+//
+// HTTP / Ollama / Voyage backends are constructed via embed.New. The "onnx"
+// backend lives in a sibling subpackage (embed/onnx) — embed.New returns
+// ErrONNXNotInFactory for type="onnx" and we wire onnx.New explicitly to
+// keep the cgo dependency confined to processes that actually need it.
+//
+// When ONNXModelDirCode is set, also loads a second ONNX model and creates
+// a Registry.
+func initEmbedder(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) embed.Embedder {
+	e, err := newPrimaryEmbedder(cfg, logger)
 	if err != nil {
 		logger.Warn("embedder init failed (native search disabled)", slog.Any("error", err))
 		return nil
@@ -41,15 +39,16 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) 
 
 	// Multi-model registry: HTTP embedder uses sidecar(s) for models;
 	// EmbedURLCode overrides jina URL when set (separate Python sidecar).
-	if cfg.EmbedderType == "http" && cfg.EmbedURL != "" {
-		registry := embedder.NewRegistry("multilingual-e5-large")
+	switch {
+	case cfg.EmbedderType == "http" && cfg.EmbedURL != "":
+		registry := embed.NewRegistry("multilingual-e5-large")
 		registry.Register("multilingual-e5-large", e)
 
 		codeURL := cfg.EmbedURL
 		if cfg.EmbedURLCode != "" {
 			codeURL = cfg.EmbedURLCode
 		}
-		codeEmb := embedder.NewHTTPEmbedder(codeURL, "jina-code-v2", 768, logger)
+		codeEmb := embed.NewHTTPEmbedder(codeURL, "jina-code-v2", 768, logger)
 		registry.Register("jina-code-v2", codeEmb)
 		logger.Info("code embedder loaded (http)",
 			slog.String("model", "jina-code-v2"),
@@ -57,15 +56,15 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) 
 			slog.Int("dim", 768),
 		)
 		h.SetEmbedRegistry(registry)
-	} else if cfg.ONNXModelDirCode != "" {
-		registry := embedder.NewRegistry("multilingual-e5-large")
+	case cfg.ONNXModelDirCode != "":
+		registry := embed.NewRegistry("multilingual-e5-large")
 		registry.Register("multilingual-e5-large", e)
 
-		codeCfg, ok := embedder.KnownONNXModels()["jina-code-v2"]
+		codeCfg, ok := onnx.KnownModels()["jina-code-v2"]
 		if !ok {
-			codeCfg = embedder.ONNXModelConfig{Dim: 768, MaxLen: 512, PadID: 0}
+			codeCfg = onnx.ModelConfig{Dim: 768, MaxLen: 512, PadID: 0}
 		}
-		codeEmb, codeErr := embedder.NewONNXEmbedder(cfg.ONNXModelDirCode, codeCfg, logger)
+		codeEmb, codeErr := onnx.New(onnx.Config{ModelDir: cfg.ONNXModelDirCode, Model: codeCfg}, logger)
 		if codeErr != nil {
 			logger.Warn("code embedder init failed", slog.Any("error", codeErr))
 		} else {
@@ -81,12 +80,43 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) 
 	return e
 }
 
+// newPrimaryEmbedder dispatches the primary embedder based on cfg.EmbedderType.
+// "onnx" / "" goes through the onnx subpackage (cgo); everything else uses embed.New.
+func newPrimaryEmbedder(cfg *config.Config, logger *slog.Logger) (embed.Embedder, error) {
+	if cfg.EmbedderType == "onnx" || cfg.EmbedderType == "" {
+		if cfg.ONNXModelDir == "" {
+			return nil, errors.New("embedder: onnx requires MEMDB_ONNX_MODEL_DIR")
+		}
+		modelCfg := onnx.DefaultModelConfig()
+		if mc, ok := onnx.KnownModels()[cfg.EmbedderModel]; ok {
+			modelCfg = mc
+		}
+		e, err := onnx.New(onnx.Config{ModelDir: cfg.ONNXModelDir, Model: modelCfg}, logger)
+		if err != nil {
+			return nil, err
+		}
+		logger.Info("embedder: onnx", slog.String("model_dir", cfg.ONNXModelDir))
+		return e, nil
+	}
+	return embed.New(embed.Config{
+		Type:         cfg.EmbedderType,
+		ONNXModelDir: cfg.ONNXModelDir,
+		VoyageAPIKey: cfg.VoyageAPIKey,
+		Model:        cfg.EmbedderModel,
+		OllamaURL:    cfg.OllamaURL,
+		OllamaDim:    cfg.OllamaDim,
+		OllamaPrefix: cfg.OllamaPrefix,
+		OllamaQuery:  cfg.OllamaQuery,
+		HTTPBaseURL:  cfg.EmbedURL,
+	}, logger)
+}
+
 // initSearchService creates the SearchService and wires up optional LLM features and profiler.
 func initSearchService(
 	cfg *config.Config,
 	pg *db.Postgres,
 	qd *db.Qdrant,
-	emb embedder.Embedder,
+	emb embed.Embedder,
 	rd *db.Redis,
 	h *handlers.Handler,
 	logger *slog.Logger,

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
+	"github.com/anatolykoptev/go-kit/embed"
 )
 
 // openaiEmbeddingRequest is the OpenAI-compatible embedding request format.
@@ -72,7 +72,7 @@ func (h *Handler) OpenAIEmbeddings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Select embedder: registry (multi-model) or single embedder (legacy).
-	var emb embedder.Embedder
+	var emb embed.Embedder
 	model := req.Model
 	if h.embedRegistry != nil {
 		var ok bool

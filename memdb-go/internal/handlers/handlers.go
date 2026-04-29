@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anatolykoptev/go-kit/embed"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
-	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/rpc"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
@@ -38,8 +38,8 @@ type Handler struct {
 	qdrant        *db.Qdrant                   // nil = not initialized
 	redis         *db.Redis                    // nil = not initialized
 	wmCache       *db.WorkingMemoryCache       // nil = VSET disabled, use postgres for candidates
-	embedder      embedder.Embedder            // nil = native search disabled
-	embedRegistry *embedder.Registry           // nil = single-model mode (uses embedder field)
+	embedder      embed.Embedder               // nil = native search disabled
+	embedRegistry *embed.Registry              // nil = single-model mode (uses embedder field)
 	searchService *search.SearchService        // nil = search falls back to proxy
 	llmExtractor  *llm.LLMExtractor            // nil = mode=fine falls back to proxy
 	llmChat       *llm.Client                  // nil = chat falls back to proxy
@@ -78,13 +78,13 @@ func (h *Handler) SetDBClients(pg *db.Postgres, qd *db.Qdrant, rd *db.Redis) {
 }
 
 // SetEmbedder sets the embedding client for native search.
-func (h *Handler) SetEmbedder(e embedder.Embedder) {
+func (h *Handler) SetEmbedder(e embed.Embedder) {
 	h.embedder = e
 }
 
 // SetEmbedRegistry sets the multi-model embedder registry for /v1/embeddings.
 // When set, the embeddings handler resolves models by name from the registry.
-func (h *Handler) SetEmbedRegistry(r *embedder.Registry) { h.embedRegistry = r }
+func (h *Handler) SetEmbedRegistry(r *embed.Registry) { h.embedRegistry = r }
 
 // SetSearchService sets the unified search service for native search handlers.
 func (h *Handler) SetSearchService(svc *search.SearchService) {
@@ -139,7 +139,7 @@ func (h *Handler) SetWorkingMemoryCache(c *db.WorkingMemoryCache) {
 
 // Embedder returns the configured embedder, or nil if not yet set.
 // Used by server.go to pass the embedder to the scheduler Reorganizer.
-func (h *Handler) Embedder() embedder.Embedder {
+func (h *Handler) Embedder() embed.Embedder {
 	return h.embedder
 }
 

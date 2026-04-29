@@ -7,10 +7,10 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/anatolykoptev/go-kit/embed"
 	"github.com/anatolykoptev/go-kit/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
-	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/handlers"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
@@ -82,7 +82,7 @@ func initReorganizer(
 	cfg *config.Config,
 	pg *db.Postgres,
 	rd *db.Redis,
-	emb embedder.Embedder,
+	emb embed.Embedder,
 	wmCache *db.WorkingMemoryCache,
 	extractor *llm.LLMExtractor,
 	profiler *scheduler.Profiler,

@@ -34,8 +34,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/anatolykoptev/go-kit/embed/onnx"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
-	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
@@ -78,7 +78,7 @@ func main() {
 	defer cancel()
 	start := time.Now()
 
-	emb, err := embedder.NewONNXEmbedder(modelDir, embedder.DefaultONNXConfig(), logger)
+	emb, err := onnx.New(onnx.Config{ModelDir: modelDir, Model: onnx.DefaultModelConfig()}, logger)
 	if err != nil {
 		logger.Error("embedder init failed", slog.Any("error", err))
 		os.Exit(1)

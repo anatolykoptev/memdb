@@ -22,8 +22,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/anatolykoptev/go-kit/embed"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
-	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
@@ -58,7 +58,7 @@ func TestValidatedFeedback_E2E(t *testing.T) {
 	t.Cleanup(func() { pg.Close() })
 
 	// HTTPEmbedder targets production embed-server (not ONNX — no local model files needed).
-	emb := embedder.NewHTTPEmbedder(embedURL, "multilingual-e5-large", 1024, logger)
+	emb := embed.NewHTTPEmbedder(embedURL, "multilingual-e5-large", 1024, logger)
 
 	llmClient := llm.NewClient(llmBaseClean, llmKey, "gemini-2.5-flash-lite", nil, logger)
 	llmExt := llm.NewLLMExtractor(llmBaseClean, llmKey, "gemini-2.5-flash-lite", nil, logger)

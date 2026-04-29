@@ -1,5 +1,4 @@
-// Package embedder provides text embedding backends.
-package embedder
+package embed
 
 import "context"
 

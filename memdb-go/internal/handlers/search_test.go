@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
+	"github.com/anatolykoptev/go-kit/embed"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/rpc"
 )
 
@@ -87,7 +87,7 @@ func TestNativeSearch_NoEmbedder(t *testing.T) {
 // can't search), a valid search request returns 503.
 func TestNativeSearch_NoPostgres(t *testing.T) {
 	h := &Handler{logger: discardLogger()}
-	h.SetEmbedder(embedder.NewVoyageClient("fake-key", "voyage-4-lite", discardLogger()))
+	h.SetEmbedder(embed.NewVoyageClient("fake-key", "voyage-4-lite", discardLogger()))
 
 	body := `{"query":"test","user_id":"memos","top_k":6}`
 	req := httptest.NewRequest(http.MethodPost, "/product/search", strings.NewReader(body))

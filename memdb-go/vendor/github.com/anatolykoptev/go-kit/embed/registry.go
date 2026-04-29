@@ -1,4 +1,4 @@
-package embedder
+package embed
 
 import "sync"
 
@@ -39,7 +39,7 @@ func (r *Registry) Close() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, e := range r.models {
-		e.Close()
+		_ = e.Close()
 	}
 	return nil
 }

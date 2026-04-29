@@ -5,10 +5,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/anatolykoptev/go-kit/embed"
 	"github.com/anatolykoptev/go-kit/rerank"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
-	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
@@ -116,7 +116,7 @@ const (
 //  6. Evict remove_ids from Redis VSET hot cache
 type Reorganizer struct {
 	postgres         reorgPostgres          // *db.Postgres in production, spy in tests
-	embedder         embedder.Embedder
+	embedder         embed.Embedder
 	wmCache          *db.WorkingMemoryCache // nil = VSET not configured
 	llmClient        *llm.Client            // shared LLM client with retry + fallback
 	logger           *slog.Logger
@@ -143,7 +143,7 @@ func (r *Reorganizer) SetCacheInvalidator(c CacheInvalidator) { r.cacheInvalidat
 // fallback for all LLM calls (consolidation, feedback, prefs, enhance).
 func NewReorganizer(
 	postgres *db.Postgres,
-	emb embedder.Embedder,
+	emb embed.Embedder,
 	wmCache *db.WorkingMemoryCache,
 	llmClient *llm.Client,
 	logger *slog.Logger,

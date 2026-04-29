@@ -1,21 +1,20 @@
-package embedder
+package embed
 
 // OllamaClient — HTTP client for Ollama /api/embed (batch API, Ollama ≥ 0.3.6).
 //
-// # Compatibility with ONNX (multilingual-e5-large)
+// # Compatibility with multilingual-e5-large
 //
-// Our ONNX embedder runs multilingual-e5-large and embeds texts WITHOUT any
-// prefix — raw text goes directly into the model. The model was fine-tuned to
-// work with "query: " / "passage: " prefixes for retrieval, but in our pipeline
-// we store raw-text embeddings for consistency (the Python backend also stores
-// without prefix).
+// Our reference ONNX embedder runs multilingual-e5-large WITHOUT any prefix —
+// raw text goes directly into the model. The model was fine-tuned to work with
+// "query: " / "passage: " prefixes for retrieval, but in our pipeline we store
+// raw-text embeddings for consistency.
 //
 // Ollama models have Modelfile templates that auto-prepend prefixes:
 //   - mxbai-embed-large  → "Represent this sentence for searching relevant passages: "
 //   - nomic-embed-text   → "search_query: " (via SYSTEM template)
 //
-// This means switching to Ollama with default settings WILL change the vector
-// space and break cosine similarity against existing stored embeddings.
+// Switching to Ollama with default settings WILL change the vector space and
+// break cosine similarity against existing stored embeddings.
 //
 // # How to achieve 100% compatibility
 //
@@ -38,10 +37,9 @@ package embedder
 // # Normalization
 //
 // Ollama ≥ 0.3.6 performs L2 normalization server-side (in llm/embed.go).
-// Our ONNX embedder also L2-normalizes (in pool.go: l2Normalize).
-// Both produce unit vectors → cosine similarity = dot product.
-// WithNormalizeL2 is available as a safety net for older Ollama versions or
-// models that don't normalize.
+// Our reference ONNX embedder also L2-normalizes. Both produce unit vectors
+// → cosine similarity = dot product. WithNormalizeL2 is available as a safety
+// net for older Ollama versions or models that don't normalize.
 
 import (
 	"bytes"
@@ -53,9 +51,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 )
 
 const (
@@ -127,6 +122,7 @@ func WithNormalizeL2(enabled bool) OllamaOption {
 // NewOllamaClient creates a new Ollama embedding client.
 // baseURL: Ollama server URL (e.g. "http://localhost:11434"), empty = default.
 // model: embedding model name (e.g. "nomic-embed-text", "mxbai-embed-large"), empty = default.
+// logger=nil falls back to slog.Default().
 func NewOllamaClient(baseURL, model string, logger *slog.Logger, opts ...OllamaOption) *OllamaClient {
 	if baseURL == "" {
 		baseURL = ollamaDefaultURL
@@ -134,6 +130,9 @@ func NewOllamaClient(baseURL, model string, logger *slog.Logger, opts ...OllamaO
 	baseURL = strings.TrimRight(baseURL, "/")
 	if model == "" {
 		model = ollamaDefaultModel
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	c := &OllamaClient{
 		baseURL: baseURL,
@@ -192,7 +191,7 @@ func (c *OllamaClient) embedRaw(ctx context.Context, input []string) ([][]float3
 		if err != nil {
 			return nil, 0, fmt.Errorf("ollama: http request to %s: %w", url, err)
 		}
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck
 
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -240,17 +239,9 @@ func (c *OllamaClient) Embed(ctx context.Context, texts []string) ([][]float32, 
 	}
 
 	start := time.Now()
-	mx := embedderMetrics()
-	mx.BatchSize.Record(ctx, float64(len(texts)),
-		metric.WithAttributes(attribute.String("backend", "ollama")))
-	outcome := "success"
+	outcome := outcomeSuccess
 	defer func() {
-		mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
-			metric.WithAttributes(attribute.String("backend", "ollama")))
-		mx.Requests.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("backend", "ollama"),
-			attribute.String("outcome", outcome),
-		))
+		recordRequest("ollama", outcome, len(texts), time.Since(start))
 	}()
 
 	input := texts
@@ -262,7 +253,7 @@ func (c *OllamaClient) Embed(ctx context.Context, texts []string) ([][]float32, 
 	}
 	embs, err := c.embedRaw(ctx, input)
 	if err != nil {
-		outcome = "error"
+		outcome = outcomeError
 		return nil, err
 	}
 	c.logger.Debug("ollama embed complete",
@@ -305,3 +296,6 @@ func (c *OllamaClient) Dimension() int {
 
 // Close is a no-op for the HTTP-based Ollama client.
 func (c *OllamaClient) Close() error { return nil }
+
+// Compile-time interface check.
+var _ Embedder = (*OllamaClient)(nil)

@@ -1,4 +1,4 @@
-package embedder
+package embed
 
 import (
 	"context"
@@ -6,9 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 )
 
 // retryConfig holds exponential backoff parameters.
@@ -56,19 +53,10 @@ func retryReason(err error, status int) string {
 	if status == http.StatusTooManyRequests {
 		return "http_429"
 	}
-	if status >= 500 {
+	if status >= http.StatusInternalServerError {
 		return "http_5xx"
 	}
 	return "transient"
-}
-
-// recordRetry bumps the retry counter for the given reason.
-func recordRetry(ctx context.Context, reason string) {
-	mx := embedderMetrics()
-	if mx.RetryTotal == nil {
-		return
-	}
-	mx.RetryTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
 }
 
 // withRetry executes fn up to cfg.maxAttempts times with exponential backoff.
@@ -92,8 +80,7 @@ func withRetry[T any](ctx context.Context, cfg retryConfig, fn func() (T, int, e
 		}
 
 		// Record this retry attempt with the classified reason.
-		reason := retryReason(err, status)
-		recordRetry(ctx, reason)
+		recordRetryReason(retryReason(err, status))
 
 		select {
 		case <-ctx.Done():

@@ -1,12 +1,16 @@
-package embedder
+package onnx
 
-import "math"
+import "github.com/anatolykoptev/go-kit/embed"
 
 // meanPool computes mean pooling over the hidden states using the attention
-// mask, then L2-normalizes each resulting vector.
+// mask, then L2-normalizes each resulting vector via embed.L2Normalize.
 //
 // hidden is a flat [batchSize * seqLen * dim] float32 slice.
 // mask is a flat [batchSize * seqLen] int64 slice.
+//
+// Lives in this subpackage rather than the parent because mean pooling is
+// only required by the ONNX backend; the HTTP / Ollama / Voyage backends
+// receive ready-pooled vectors from their respective servers.
 func meanPool(hidden []float32, mask []int64, batchSize, seqLen, dim int) [][]float32 {
 	result := make([][]float32, batchSize)
 
@@ -35,24 +39,9 @@ func meanPool(hidden []float32, mask []int64, batchSize, seqLen, dim int) [][]fl
 			}
 		}
 
-		l2Normalize(vec)
+		embed.L2Normalize(vec)
 		result[b] = vec
 	}
 
 	return result
-}
-
-// l2Normalize normalizes the vector in-place to unit L2 norm.
-func l2Normalize(vec []float32) {
-	var sumSq float64
-	for _, v := range vec {
-		sumSq += float64(v) * float64(v)
-	}
-	norm := math.Sqrt(sumSq)
-	if norm > 0 {
-		invNorm := float32(1.0 / norm)
-		for i := range vec {
-			vec[i] *= invNorm
-		}
-	}
 }

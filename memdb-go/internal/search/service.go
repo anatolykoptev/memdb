@@ -14,9 +14,9 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/anatolykoptev/go-kit/embed"
 	"github.com/anatolykoptev/go-kit/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
-	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
 )
 
@@ -25,7 +25,7 @@ import (
 type SearchService struct {
 	postgres    postgresClient
 	qdrant      *db.Qdrant
-	embedder    embedder.Embedder
+	embedder    embed.Embedder
 	logger      *slog.Logger
 	LLMReranker LLMRerankConfig
 	// RerankClient is the cross-encoder rerank client (step 6.05). Nil-safe:
@@ -67,7 +67,7 @@ func (s *SearchService) SetReflectionAgent(a *ReflectionAgent) {
 // NewSearchService creates a SearchService. Any dependency may be nil (caller
 // should check CanSearch before calling Search).
 // pg must satisfy postgresClient; the concrete *db.Postgres does.
-func NewSearchService(pg *db.Postgres, qd *db.Qdrant, emb embedder.Embedder, logger *slog.Logger) *SearchService {
+func NewSearchService(pg *db.Postgres, qd *db.Qdrant, emb embed.Embedder, logger *slog.Logger) *SearchService {
 	s := &SearchService{
 		qdrant:   qd,
 		embedder: emb,

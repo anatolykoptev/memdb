@@ -1,4 +1,4 @@
-package embedder
+package embed
 
 import (
 	"bytes"
@@ -10,15 +10,14 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 )
 
 const httpEmbedTimeout = 30 * time.Second
 
 // HTTPEmbedder calls a remote OpenAI-compatible /v1/embeddings endpoint.
-// Designed for the Rust embed-server sidecar on the internal Docker network.
+// Designed for the Rust embed-server sidecar on the internal Docker network,
+// but compatible with any provider that speaks the OpenAI shape (Voyage,
+// Mixedbread, Together, vLLM-served encoders, etc.).
 type HTTPEmbedder struct {
 	baseURL string
 	model   string
@@ -29,7 +28,11 @@ type HTTPEmbedder struct {
 
 // NewHTTPEmbedder creates an HTTPEmbedder pointing at baseURL.
 // baseURL should not include /v1/embeddings — it will be appended automatically.
+// logger=nil falls back to slog.Default().
 func NewHTTPEmbedder(baseURL, model string, dim int, logger *slog.Logger) *HTTPEmbedder {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &HTTPEmbedder{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		model:   model,
@@ -54,37 +57,29 @@ type httpEmbedData struct {
 }
 
 // Embed sends texts to the remote embedding server and returns vectors.
+//
+// Retries transient failures (timeout, 429, 5xx) with exponential backoff
+// (200ms → 400ms → 800ms, cap 5s, 3 attempts total). Non-retriable errors
+// (4xx validation, unmarshal) fail fast.
 func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
 	}
 
 	start := time.Now()
-	mx := embedderMetrics()
-	mx.BatchSize.Record(ctx, float64(len(texts)),
-		metric.WithAttributes(attribute.String("backend", "http")))
-	outcome := "success"
+	outcome := outcomeSuccess
 	defer func() {
-		mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
-			metric.WithAttributes(attribute.String("backend", "http")))
-		mx.Requests.Add(ctx, 1, metric.WithAttributes(
-			attribute.String("backend", "http"),
-			attribute.String("outcome", outcome),
-		))
+		recordRequest("http", outcome, len(texts), time.Since(start))
 	}()
 
 	body, err := json.Marshal(httpEmbedRequest{Input: texts, Model: h.model})
 	if err != nil {
-		outcome = "error"
+		outcome = outcomeError
 		return nil, fmt.Errorf("http embedder: marshal: %w", err)
 	}
 
 	url := h.baseURL + "/v1/embeddings"
 
-	// Retry transient failures: client timeout under load, 429/503/504 from
-	// embed-server back-pressure. Exponential backoff via shared withRetry
-	// helper (200ms → 400ms → 800ms, cap 5s, 3 attempts total). Non-retriable
-	// errors (4xx validation, unmarshal) fail fast.
 	respBody, err := withRetry(ctx, defaultRetry, func() ([]byte, int, error) {
 		req, reqErr := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 		if reqErr != nil {
@@ -96,7 +91,7 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		if doErr != nil {
 			return nil, 0, fmt.Errorf("http embedder: request: %w", doErr)
 		}
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck
 
 		rb, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
@@ -108,25 +103,25 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		return rb, resp.StatusCode, nil
 	})
 	if err != nil {
-		outcome = "error"
+		outcome = outcomeError
 		return nil, err
 	}
 
 	var parsed httpEmbedResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		outcome = "error"
+		outcome = outcomeError
 		return nil, fmt.Errorf("http embedder: unmarshal: %w", err)
 	}
 
 	if len(parsed.Data) != len(texts) {
-		outcome = "error"
+		outcome = outcomeError
 		return nil, fmt.Errorf("http embedder: expected %d embeddings, got %d", len(texts), len(parsed.Data))
 	}
 
 	out := make([][]float32, len(texts))
 	for _, d := range parsed.Data {
 		if d.Index < 0 || d.Index >= len(texts) {
-			outcome = "error"
+			outcome = outcomeError
 			return nil, fmt.Errorf("http embedder: invalid index %d", d.Index)
 		}
 		out[d.Index] = d.Embedding
@@ -149,3 +144,6 @@ func (h *HTTPEmbedder) Dimension() int { return h.dim }
 
 // Close is a no-op for the HTTP-based embedder.
 func (h *HTTPEmbedder) Close() error { return nil }
+
+// Compile-time interface check.
+var _ Embedder = (*HTTPEmbedder)(nil)
