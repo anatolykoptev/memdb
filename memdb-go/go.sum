@@ -13,6 +13,10 @@ github.com/anatolykoptev/go-kit v0.26.0 h1:3d2fEHz+we/DISc3Y4AAIytftvu/6/t5g+lcx
 github.com/anatolykoptev/go-kit v0.26.0/go.mod h1:v4plvwT/sA9C7kSZhXU+nTWdzB0JFkNhIycb6awAHoU=
 github.com/anatolykoptev/go-kit v0.26.1-0.20260429023000-edf8540e9789 h1:iQAvzcKrfxw9usfVzZgZFN+wGXrWAsLU19l2OuWfg+s=
 github.com/anatolykoptev/go-kit v0.26.1-0.20260429023000-edf8540e9789/go.mod h1:v4plvwT/sA9C7kSZhXU+nTWdzB0JFkNhIycb6awAHoU=
+github.com/anatolykoptev/go-kit v0.27.0 h1:+0HX1AFED4xBqZ6gsSoczOF7yaxrqv3CpodYyqOvLPQ=
+github.com/anatolykoptev/go-kit v0.27.0/go.mod h1:v4plvwT/sA9C7kSZhXU+nTWdzB0JFkNhIycb6awAHoU=
+github.com/anatolykoptev/go-kit v0.28.0 h1:/7gVpBs5rSo7AIyKtw6FhL8ET1hrBfVouY1TkJYGqlQ=
+github.com/anatolykoptev/go-kit v0.28.0/go.mod h1:UqViC2HoCeIoIj6Qi3dJREVQX43dgUeHV3SynpcL8Zs=
 github.com/anatolykoptev/go-stealth v1.3.1 h1:6Q1MSi8JA66xggtVL8iAKdCy/ULKQ76KU7KSbfgo67A=
 github.com/anatolykoptev/go-stealth v1.3.1/go.mod h1:/3rYAaunzRjBKtFtHLeEh/Jw/jVyGRtdBPJeF8voYog=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
