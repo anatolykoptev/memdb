@@ -33,8 +33,12 @@ import (
 	"log/slog"
 	"os"
 	"sort"
+	"strconv"
+	"sync"
 
 	"github.com/anatolykoptev/go-kit/rerank"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
@@ -62,6 +66,79 @@ func cePrecomputeEnabledEnv() bool {
 		return true
 	}
 	return v != "false"
+}
+
+// cePrecomputeMathPrefilterEnabled returns true when
+// MEMDB_CE_PRECOMPUTE_MATH_PREFILTER=1. Default is false (disabled).
+func cePrecomputeMathPrefilterEnabled() bool {
+	return os.Getenv("MEMDB_CE_PRECOMPUTE_MATH_PREFILTER") == "1"
+}
+
+// cePrecomputeCosineThreshold returns the cosine threshold for the math
+// prefilter from MEMDB_CE_PRECOMPUTE_COSINE_THRESHOLD. Default 0.3.
+func cePrecomputeCosineThreshold() float64 {
+	v := os.Getenv("MEMDB_CE_PRECOMPUTE_COSINE_THRESHOLD")
+	if v == "" {
+		return 0.3
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f < 0 || f > 1 {
+		return 0.3
+	}
+	return f
+}
+
+// ceMathPrefilterMetrics holds OTel counters for the math prefilter pass.
+var (
+	ceMathOnce     sync.Once
+	ceMathSkipped  metric.Int64Counter
+	ceMathKept     metric.Int64Counter
+)
+
+// ceMathMx lazily initialises the math-prefilter OTel counters.
+func ceMathMx() (skipped, kept metric.Int64Counter) {
+	ceMathOnce.Do(func() {
+		meter := otel.Meter("memdb-go/scheduler")
+		ceMathSkipped, _ = meter.Int64Counter(
+			"memdb.scheduler.ce_precompute_math_skipped_total",
+			metric.WithDescription("CE precompute pairs dropped by math prefilter (cosine < threshold)"),
+		)
+		ceMathKept, _ = meter.Int64Counter(
+			"memdb.scheduler.ce_precompute_math_kept_total",
+			metric.WithDescription("CE precompute pairs passed by math prefilter (sent to bge-reranker)"),
+		)
+	})
+	return ceMathSkipped, ceMathKept
+}
+
+// applyMathPrefilter filters neighbours by cosine similarity to the anchor.
+// Returns the filtered slice (kept pairs) and counts skipped + kept.
+//
+// Bypass cases (graceful degrade):
+//   - anchor.Embedding is empty → return all neighbours unchanged (test #4).
+//   - a neighbour.Embedding is empty → keep that neighbour (test #5).
+func applyMathPrefilter(anchor db.HierarchyMemory, neighbours []db.HierarchyMemory, threshold float64) (filtered []db.HierarchyMemory, nSkipped, nKept int) {
+	if len(anchor.Embedding) == 0 {
+		// Cannot compute cosine without anchor embedding — bypass entirely.
+		return neighbours, 0, len(neighbours)
+	}
+	filtered = make([]db.HierarchyMemory, 0, len(neighbours))
+	for _, n := range neighbours {
+		if len(n.Embedding) == 0 {
+			// Neighbour without embedding — keep (graceful degrade).
+			filtered = append(filtered, n)
+			nKept++
+			continue
+		}
+		cos := cosineBetween(anchor.Embedding, n.Embedding)
+		if cos >= threshold {
+			filtered = append(filtered, n)
+			nKept++
+		} else {
+			nSkipped++
+		}
+	}
+	return filtered, nSkipped, nKept
 }
 
 // runCEPrecomputePass scores top-K neighbours per raw memory and
@@ -97,6 +174,9 @@ func (r *Reorganizer) runCEPrecomputePass(
 	)
 	log.Debug("ce precompute: starting pass", slog.Int("candidates", len(rawMems)))
 
+	mathPrefilter := cePrecomputeMathPrefilterEnabled()
+	mathThreshold := cePrecomputeCosineThreshold()
+
 	scored := 0
 	for i := range rawMems {
 		select {
@@ -114,6 +194,22 @@ func (r *Reorganizer) runCEPrecomputePass(
 		if len(neighbours) == 0 {
 			continue
 		}
+
+		if mathPrefilter {
+			var nSkipped, nKept int
+			neighbours, nSkipped, nKept = applyMathPrefilter(mem, neighbours, mathThreshold)
+			skippedCtr, keptCtr := ceMathMx()
+			if nSkipped > 0 {
+				skippedCtr.Add(ctx, int64(nSkipped))
+			}
+			if nKept > 0 {
+				keptCtr.Add(ctx, int64(nKept))
+			}
+			if len(neighbours) == 0 {
+				continue
+			}
+		}
+
 		entries := cePrecomputeScoreNeighbours(ctx, r.rerankClient, mem.Text, neighbours)
 		if len(entries) == 0 {
 			continue
