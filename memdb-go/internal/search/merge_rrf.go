@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
 const (
@@ -35,7 +36,7 @@ func gokitRRFEnabled() bool {
 // rrfKValue returns the configured RRF k constant.
 // Falls back to gokitrerank.DefaultRRFK (60) on missing or invalid env.
 func rrfKValue() int {
-	return envIntSearchDefault(rrfKEnvVar, gokitrerank.DefaultRRFK)
+	return envcfg.Int(rrfKEnvVar, gokitrerank.DefaultRRFK)
 }
 
 // extractIDs returns a slice of IDs from a VectorSearchResult slice, preserving

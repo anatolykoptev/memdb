@@ -19,40 +19,12 @@ package rerank
 
 import (
 	"context"
-	"os"
-	"strconv"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
-
-// envFloatMMR reads an env variable and parses it as float64.
-// Returns def when the variable is unset or unparseable.
-func envFloatMMR(key string, def float64) float64 {
-	s := os.Getenv(key)
-	if s == "" {
-		return def
-	}
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return def
-	}
-	return v
-}
-
-// envIntMMR reads an env variable and parses it as int.
-// Returns def when the variable is unset or unparseable.
-func envIntMMR(key string, def int) int {
-	s := os.Getenv(key)
-	if s == "" {
-		return def
-	}
-	v, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	return v
-}
 
 var (
 	mmrKeptCounter    metric.Int64Counter
@@ -88,8 +60,8 @@ type MMR struct {
 func NewMMRFromEnv(embByID map[string][]float32) MMR {
 	return MMR{
 		EmbeddingsByID: embByID,
-		Bar:            envFloatMMR("MEMDB_MMR_BAR", 0.8),
-		TopK:           envIntMMR("MEMDB_MMR_TOPK", 0),
+		Bar:            envcfg.Float("MEMDB_MMR_BAR", 0.8),
+		TopK:           envcfg.Int("MEMDB_MMR_TOPK", 0),
 	}
 }
 

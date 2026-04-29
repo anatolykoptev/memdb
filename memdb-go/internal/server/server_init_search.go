@@ -6,7 +6,6 @@ package server
 import (
 	"log/slog"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/anatolykoptev/go-kit/rerank"
@@ -17,6 +16,7 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
 // initEmbedder initializes the embedder via factory (non-fatal if unavailable).
@@ -115,10 +115,10 @@ func initSearchService(
 	}
 	if circuitEnabled() {
 		cbCfg := rerank.CircuitConfig{
-			FailThreshold:  envIntCB("MEMDB_RERANK_CIRCUIT_FAIL_THRESHOLD", 5),
-			OpenDuration:   time.Duration(envIntCB("MEMDB_RERANK_CIRCUIT_OPEN_DURATION_S", 30)) * time.Second,
-			HalfOpenProbes: envIntCB("MEMDB_RERANK_CIRCUIT_HALF_OPEN_PROBES", 1),
-			FailRateWindow: time.Duration(envIntCB("MEMDB_RERANK_CIRCUIT_FAIL_WINDOW_S", 60)) * time.Second,
+			FailThreshold:  envcfg.IntRange("MEMDB_RERANK_CIRCUIT_FAIL_THRESHOLD", 5, 1, 1<<30),
+			OpenDuration:   time.Duration(envcfg.IntRange("MEMDB_RERANK_CIRCUIT_OPEN_DURATION_S", 30, 1, 1<<30)) * time.Second,
+			HalfOpenProbes: envcfg.IntRange("MEMDB_RERANK_CIRCUIT_HALF_OPEN_PROBES", 1, 1, 1<<30),
+			FailRateWindow: time.Duration(envcfg.IntRange("MEMDB_RERANK_CIRCUIT_FAIL_WINDOW_S", 60, 1, 1<<30)) * time.Second,
 		}
 		rerankOpts = append(rerankOpts, rerank.WithCircuit(cbCfg))
 		logger.Info("rerank circuit breaker enabled",
@@ -217,20 +217,6 @@ func initSearchService(
 // Controlled by MEMDB_RERANK_CIRCUIT=1; default OFF.
 func circuitEnabled() bool {
 	return os.Getenv("MEMDB_RERANK_CIRCUIT") == "1"
-}
-
-// envIntCB reads an int env var for circuit breaker config.
-// Returns def if the variable is unset, empty, unparseable, or non-positive.
-func envIntCB(key string, def int) int {
-	s := os.Getenv(key)
-	if s == "" {
-		return def
-	}
-	v, err := strconv.Atoi(s)
-	if err != nil || v <= 0 {
-		return def
-	}
-	return v
 }
 
 // initLLMExtractor creates the LLM extractor for fine-mode native add (non-fatal if URL not set).
