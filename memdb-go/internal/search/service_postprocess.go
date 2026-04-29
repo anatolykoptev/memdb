@@ -181,6 +181,13 @@ func buildTextRerankSuffix(s *SearchService, llmEnabled bool, llmCap int, embByI
 		MaxInputSize:  stagedMaxInputSize(),
 		OnStage:       stagedStageHook,
 		OnJustified:   stagedJustifiedHook,
+		// M12.6: thread the cross-encoder client through so the
+		// default `ce` backend can replace the two LLM calls per
+		// query. Backend selection is env-driven (MEMDB_STAGED_BACKEND);
+		// when CE is requested but the client is unavailable the
+		// strategy logs a WARN and falls back to LLMBackend (NOT
+		// silent — see staged.go::Rerank).
+		RerankClient: s.RerankClient,
 	})
 	return chain
 }
