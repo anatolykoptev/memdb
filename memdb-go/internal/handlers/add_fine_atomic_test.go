@@ -54,7 +54,9 @@ func TestAtomicToExtracted(t *testing.T) {
 	if got.Type != "LongTermMemory" {
 		t.Errorf("expected LongTermMemory, got %s", got.Type)
 	}
-	wantTags := []string{atomicFactKind, "career"}
+	// Canonical "user" / "assistant" roles now also emit a speaker:* tag
+	// so downstream filters can scope by speaker uniformly.
+	wantTags := []string{atomicFactKind, "career", "speaker:user"}
 	if !reflect.DeepEqual(got.Tags, wantTags) {
 		t.Errorf("tags mismatch: got %v want %v", got.Tags, wantTags)
 	}

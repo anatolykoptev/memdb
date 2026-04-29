@@ -8,12 +8,17 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
+
+// strconvItoa wraps strconv.Itoa (kept local-style alias to avoid scattering
+// strconv usage across handlers; isolated to validate.go).
+var strconvItoa = strconv.Itoa
 
 // --- Validated handler methods ---
 
@@ -393,12 +398,18 @@ func validateSearchRequest(req searchRequest) []string {
 }
 
 // validateSearchRequired checks required fields: query and user_id.
+//
+// M9 dual-speaker exception: when len(Speakers)>=2, UserID is OPTIONAL —
+// the fan-out runs one search per speaker (each is a user_id in its own
+// right) and the legacy single-speaker buildSearchParams path is bypassed.
+// Single-speaker callers (the 99%) still get the strict "user_id required"
+// guarantee unchanged.
 func validateSearchRequired(req searchRequest) []string {
 	var errs []string
 	if req.Query == nil || strings.TrimSpace(*req.Query) == "" {
 		errs = append(errs, "query is required and must be non-empty")
 	}
-	if req.UserID == nil || *req.UserID == "" {
+	if len(req.Speakers) < 2 && (req.UserID == nil || *req.UserID == "") {
 		errs = append(errs, "user_id is required")
 	}
 	return errs
@@ -432,7 +443,40 @@ func validateSearchOptionals(req searchRequest) []string {
 	if req.SkillMemTopK != nil && *req.SkillMemTopK < 0 {
 		errs = append(errs, "skill_mem_top_k must be >= 0")
 	}
+	errs = append(errs, validateDualSpeakerSearch(req)...)
 	return errs
+}
+
+// validateDualSpeakerSearch validates the Speakers / TopKPerSpeaker /
+// MergeStrategy fields introduced for M9 server-side dual-speaker retrieval.
+// All fields are optional — empty Speakers means legacy single-speaker path.
+func validateDualSpeakerSearch(req searchRequest) []string {
+	var errs []string
+	for i, s := range req.Speakers {
+		if s == "" {
+			errs = append(errs, "speakers[i] must be non-empty (i="+strconvItoa(i)+")")
+		}
+	}
+	if req.TopKPerSpeaker != nil && *req.TopKPerSpeaker < 1 {
+		errs = append(errs, "top_k_per_speaker must be >= 1")
+	}
+	if req.MergeStrategy != nil {
+		if e := validateMergeStrategyValue(*req.MergeStrategy); e != "" {
+			errs = append(errs, e)
+		}
+	}
+	return errs
+}
+
+// validateMergeStrategyValue returns an error message if the merge_strategy
+// value is not one of the known enum values. Empty string is allowed (default).
+func validateMergeStrategyValue(s string) string {
+	switch s {
+	case "", "interleave", "score":
+		return ""
+	default:
+		return "merge_strategy must be 'interleave' or 'score'"
+	}
 }
 
 // validateDedupValue returns an error string if the dedup value is not recognized.

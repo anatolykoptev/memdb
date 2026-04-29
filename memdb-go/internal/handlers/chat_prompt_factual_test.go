@@ -74,13 +74,25 @@ func TestBuildSystemPrompt_FactualZH(t *testing.T) {
 }
 
 func TestBuildSystemPrompt_FactualWithCustomBase(t *testing.T) {
-	// basePrompt non-empty must win over answer_style=factual (backward-compat).
+	// M12.4 (2026-04-29): when a caller supplies a custom system_prompt AND
+	// answer_style=factual (LoCoMo dual-speaker harness, any harness wrapping
+	// per-speaker memory blocks into a custom prompt), we now ALSO append the
+	// variant-conditional anti-refusal rules block. Pre-fix this branch
+	// returned basePrompt verbatim, dropping the M12.2 commit/no-refuse rules
+	// and producing 48% chat_refused_with_evidence on full-corpus eval.
+	//
+	// The custom prompt itself is preserved unchanged at the head of the
+	// rendered output — only the rules block is added after it.
 	prompt := buildSystemPrompt("anything", nil, "", "Custom system prompt.", "factual")
-	if prompt != "Custom system prompt." {
-		t.Errorf("prompt = %q, want raw custom base — basePrompt must win over answer_style", prompt)
+	if !strings.HasPrefix(prompt, "Custom system prompt.") {
+		t.Errorf("prompt = %q, want to start with the verbatim custom base", prompt)
 	}
-	if strings.Contains(prompt, factualSharedSignature) {
-		t.Error("custom base should suppress factual template entirely")
+	if !strings.Contains(prompt, "## Answer Rules") {
+		t.Error("custom base + factual must inject the '## Answer Rules' block (M12.4)")
+	}
+	// Zero memories → zero variant → low-confidence body → 'no answer' contract preserved.
+	if !strings.Contains(prompt, "no answer") {
+		t.Error("custom base + factual + zero memories must keep the 'no answer' refusal contract")
 	}
 }
 

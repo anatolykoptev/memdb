@@ -116,16 +116,17 @@ func atomicToExtracted(f llm.AtomicFact) llm.ExtractedFact {
 	}
 }
 
-// tagsForAtomic builds the Tag list. We always include "atomic_fact" so
-// search-side filters can target the new corpus, plus the optional topic
-// tag from the LLM, plus the speaker name if it's not the canonical
-// "user"/"assistant".
+// tagsForAtomic builds the Tag list. Always includes "atomic_fact" plus
+// the optional topic tag, plus a "speaker:<who>" tag for EVERY non-empty
+// AttributedTo (canonical "user"/"assistant" included). Asymmetric
+// suppression of canonical roles made those facts unfilterable on the
+// search path — removed so per-speaker scope works uniformly.
 func tagsForAtomic(f llm.AtomicFact) []string {
 	tags := []string{atomicFactKind}
 	if f.TopicTag != "" {
 		tags = append(tags, f.TopicTag)
 	}
-	if f.AttributedTo != "" && f.AttributedTo != "user" && f.AttributedTo != "assistant" {
+	if f.AttributedTo != "" {
 		tags = append(tags, "speaker:"+f.AttributedTo)
 	}
 	return tags
@@ -189,7 +190,11 @@ func observationDateFromRequest(req *fullAddRequest) string {
 //     atomic row degrades to kind='paragraph_legacy';
 //   - idx_memory_linked_ids is a GIN index on (properties -> 'linked_memory_ids')
 //     and never matches values nested inside `info`;
-//   - idx_memory_attributed_to is a partial index on properties->>'attributed_to'.
+//   - idx_memory_attributed_to is a partial index on properties->>'attributed_to';
+//   - migration 0024 (F11) creates a GIN partial index on (properties ->
+//     'event_dates') predicated on `properties ? 'event_dates'` — the same
+//     top-level lift contract applies, otherwise SearchMemoriesByDateRange
+//     never matches.
 //
 // We also keep the values inside `info` so existing JSONB-property tests and
 // any downstream consumers reading info.kind still see them — the cost of the
@@ -206,6 +211,9 @@ func liftAtomicDiscriminators(props map[string]any, factInfo map[string]any) {
 	}
 	if v, ok := factInfo["attributed_to"]; ok {
 		props["attributed_to"] = v
+	}
+	if v, ok := factInfo["event_dates"]; ok {
+		props["event_dates"] = v
 	}
 }
 

@@ -81,6 +81,20 @@ func buildSystemPromptWithDecision(_ context.Context, query string, memories []m
 
 	decision := factualPromptDecision{Variant: factualVariantNone, Reason: refusalReasonNone}
 
+	// M12.4: when the caller supplied a custom system_prompt AND requested the
+	// factual answer style (LoCoMo dual-speaker harness, any harness wrapping
+	// per-speaker memory blocks into a custom prompt), classify the memory pool
+	// up-front so we can inject the variant-conditional anti-refusal rules.
+	// Pre-fix: this branch fell through with decision.Variant=none and the
+	// rendered prompt was basePrompt + memCtx — the M12.2 commit/no-refuse
+	// rules were silently dropped, producing 48% chat_refused_with_evidence on
+	// full-corpus eval. The injection adds a "## Answer Rules" block AFTER the
+	// caller's prompt and BEFORE the memory section.
+	customFactual := basePrompt != "" && answerStyle == answerStyleFactual
+	if customFactual {
+		decision = decideFactualPrompt(memories)
+	}
+
 	var rendered string
 	switch {
 	case basePrompt == "":
@@ -97,11 +111,30 @@ func buildSystemPromptWithDecision(_ context.Context, query string, memories []m
 		now := chatPromptNow()
 		rendered = fmt.Sprintf(tpl, now, memCtx)
 	case strings.Contains(basePrompt, "{memories}"):
+		// Caller controls placement of memCtx. Append rules block AFTER the
+		// substituted prompt so the rules apply on top of caller-customised
+		// context layout. Rules-then-memory ordering is not guaranteed here
+		// (caller decides), but the rules are still in scope of the same
+		// system message.
 		rendered = strings.Replace(basePrompt, "{memories}", memCtx, 1)
+		if customFactual {
+			rendered = rendered + "\n\n" + buildFactualRulesBlock(decision.Variant)
+		}
 	case len(memories) > 0:
-		rendered = basePrompt + "\n\n## Fact Memories:\n" + memCtx
+		rendered = basePrompt
+		if customFactual {
+			rendered += "\n\n" + buildFactualRulesBlock(decision.Variant)
+		}
+		rendered += "\n\n## Fact Memories:\n" + memCtx
 	default:
 		rendered = basePrompt
+		if customFactual {
+			// Zero-memory custom-factual: still emit the rules block so the
+			// model sees the "no answer" refusal contract from the low-conf
+			// body (decision.Variant=zero falls into the low-EN path inside
+			// buildFactualRulesBlock).
+			rendered += "\n\n" + buildFactualRulesBlock(decision.Variant)
+		}
 	}
 
 	if profileSection != "" {
