@@ -33,7 +33,6 @@ import (
 	"log/slog"
 	"os"
 	"sort"
-	"strconv"
 	"sync"
 
 	"github.com/anatolykoptev/go-kit/rerank"
@@ -41,6 +40,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
 const (
@@ -71,15 +71,7 @@ func cePrecomputeMathPrefilterEnabled() bool {
 // cePrecomputeCosineThreshold returns the cosine threshold for the math
 // prefilter from MEMDB_CE_PRECOMPUTE_COSINE_THRESHOLD. Default 0.3.
 func cePrecomputeCosineThreshold() float64 {
-	v := os.Getenv("MEMDB_CE_PRECOMPUTE_COSINE_THRESHOLD")
-	if v == "" {
-		return 0.3
-	}
-	f, err := strconv.ParseFloat(v, 64)
-	if err != nil || f < 0 || f > 1 {
-		return 0.3
-	}
-	return f
+	return envcfg.FloatRange("MEMDB_CE_PRECOMPUTE_COSINE_THRESHOLD", 0.3, 0, 1)
 }
 
 // ceMathPrefilterMetrics holds OTel counters for the math prefilter pass.

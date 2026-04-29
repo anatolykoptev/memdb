@@ -28,6 +28,8 @@ import (
 	"context"
 	"os"
 	"strconv"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
 // PPRScorer computes query-seeded Personalized PageRank scores for a cube.
@@ -117,38 +119,9 @@ func (s *SearchService) blendPPRIntoMetadata(
 // pprBlendWeightsFromEnv reads MEMDB_PPR_BLEND_PPR / MEMDB_PPR_BLEND_GLOBAL.
 // Defaults: 0.7 / 0.3.
 func pprBlendWeightsFromEnv() (pprW, globalW float64) {
-	pprW = envFloatSearch("MEMDB_PPR_BLEND_PPR", 0.7)
-	globalW = envFloatSearch("MEMDB_PPR_BLEND_GLOBAL", 0.3)
+	pprW = envcfg.Float("MEMDB_PPR_BLEND_PPR", 0.7)
+	globalW = envcfg.Float("MEMDB_PPR_BLEND_GLOBAL", 0.3)
 	return
-}
-
-// envFloatSearch reads key from env as float64; returns def on missing or parse error.
-func envFloatSearch(key string, def float64) float64 {
-	s := os.Getenv(key)
-	if s == "" {
-		return def
-	}
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return def
-	}
-	return v
-}
-
-// envIntSearchDefault reads key from env as int; returns def on missing or
-// parse error. Named with a Default suffix to avoid colliding with the
-// Atoi-style helpers in sibling packages and to make the fallback value
-// explicit at the call site.
-func envIntSearchDefault(key string, def int) int {
-	s := os.Getenv(key)
-	if s == "" {
-		return def
-	}
-	v, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	return v
 }
 
 // readMetaFloat reads a float64 from a metadata map that may store the value
