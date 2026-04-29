@@ -82,14 +82,33 @@ type chatPromptMetricsInstruments struct {
 	TemplateUsed metric.Int64Counter
 }
 
+// chatPromptTemplateLabels lists the canonical template label values for
+// memdb.chat.prompt_template_used_total. Pre-registered at zero so dashboards
+// and alert rules see the full series space from container start.
+// Labels: factual_high | factual_low | factual_zero | conversational | custom.
+var chatPromptTemplateLabels = []string{
+	"factual_high",
+	"factual_low",
+	"factual_zero",
+	"conversational",
+	"custom",
+}
+
 // chatPromptMx returns the singleton chat-prompt instruments, lazy-initialised.
-// Counter memdb.chat.prompt_template_used_total{template={factual|conversational|custom}}.
+// Counter memdb.chat.prompt_template_used_total{template=factual_high|factual_low|factual_zero|conversational|custom}.
 func chatPromptMx() *chatPromptMetricsInstruments {
 	chatPromptOnce.Do(func() {
 		meter := otel.Meter("memdb-go/chat")
 		used, _ := meter.Int64Counter("memdb.chat.prompt_template_used_total",
-			metric.WithDescription("Count of chat requests per system-prompt template (factual/conversational/custom)."),
+			metric.WithDescription("Count of chat requests per system-prompt template (factual_high/factual_low/factual_zero/conversational/custom)."),
 		)
+		// Pre-register all template label values at zero so Prometheus emits
+		// the series before the first real chat request. Matches the enum in
+		// promptTemplateLabel (chat_record.go).
+		ctx := context.Background()
+		for _, tpl := range chatPromptTemplateLabels {
+			used.Add(ctx, 0, metric.WithAttributes(attribute.String("template", tpl)))
+		}
 		chatPromptMetrics = &chatPromptMetricsInstruments{TemplateUsed: used}
 	})
 	return chatPromptMetrics

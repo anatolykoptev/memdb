@@ -19,32 +19,43 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// promptTemplateLabel maps the (basePrompt, answerStyle, decision) triple to the
-// metric label emitted by chat handlers.
+// promptTemplateLabel maps the (basePrompt, answerStyle, decision) triplet to
+// the metric label emitted by chat handlers.
 //
-// Precedence:
-//  1. decision.Variant != none — factual routing was inspected (either applied to
-//     a server-default factual template, or recorded as a side-effect when caller
-//     supplied a custom basePrompt). Emit "factual_<variant>" so dashboards can
-//     compare high/low/zero confidence buckets across both prompt sources.
-//  2. basePrompt != "" — caller passed a custom system prompt and is not on the
-//     factual branch. Emit "custom" (legacy label preserved).
-//  3. otherwise — conversational/factual answer-style branches without custom prompt.
+// Label hierarchy (highest precedence first):
+//   - "custom"          — non-empty basePrompt wins; backward-compat path.
+//                         M12.4 anti-refusal injection still fires on this
+//                         branch — observability of WHICH variant applied is
+//                         carried by chat_refusal_total{variant=*}, not here.
+//   - "factual_high"    — factual branch, top-1 score >= confidence threshold.
+//   - "factual_low"     — factual branch, memories present but all below threshold.
+//   - "factual_zero"    — factual branch, no memories retrieved.
+//   - "conversational"  — default branch (empty answerStyle or non-factual).
 func promptTemplateLabel(basePrompt, answerStyle string, decision factualPromptDecision) string {
-	if decision.Variant != factualVariantNone {
-		return "factual_" + string(decision.Variant)
-	}
 	if basePrompt != "" {
 		return "custom"
 	}
 	if answerStyle == answerStyleFactual {
-		return answerStyleFactual
+		switch decision.Variant {
+		case factualVariantHigh:
+			return "factual_high"
+		case factualVariantLow:
+			return "factual_low"
+		case factualVariantZero:
+			return "factual_zero"
+		default:
+			// factualVariantNone or unknown — shouldn't happen on the factual
+			// path but fall back gracefully to the coarse label.
+			return answerStyleFactual
+		}
 	}
 	return answerStyleConversational
 }
 
 // recordChatPromptUsed bumps memdb.chat.prompt_template_used_total{template=...}.
-// Called once per chat request right after buildSystemPrompt returns.
+// Called once per chat request right after buildSystemPromptWithDecision returns.
+// `decision` carries the variant (high/low/zero/none) so the label is granular:
+// factual_high | factual_low | factual_zero | conversational | custom.
 func recordChatPromptUsed(ctx context.Context, basePrompt, answerStyle string, decision factualPromptDecision) {
 	chatPromptMx().TemplateUsed.Add(ctx, 1,
 		metric.WithAttributes(attribute.String("template", promptTemplateLabel(basePrompt, answerStyle, decision))),
