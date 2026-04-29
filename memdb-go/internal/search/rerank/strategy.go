@@ -106,7 +106,9 @@ func (c Chain) RerankWithTimings(ctx context.Context, query string, items []Item
 		prevTopID := top1ID(items)
 		t0 := time.Now()
 		out, err := r.Rerank(ctx, query, items)
-		durations[r.Name()] = time.Since(t0)
+		d := time.Since(t0)
+		durations[r.Name()] = d
+		recordStrategyDuration(ctx, r.Name(), d)
 		if err != nil {
 			recordOutcome(ctx, r.Name(), "error")
 			// Forward the input on error — chain must be best-effort.
@@ -149,8 +151,9 @@ const (
 // metric singleton — pre-registers all known strategy/outcome pairs so
 // dashboards see series from container start.
 var (
-	rerankCounter      metric.Int64Counter
-	top1ChangedCounter metric.Int64Counter
+	rerankCounter        metric.Int64Counter
+	top1ChangedCounter   metric.Int64Counter
+	strategyDurHistogram metric.Int64Histogram
 )
 
 // known names pre-registered at zero. Adding a new strategy MUST extend
@@ -165,6 +168,13 @@ func init() {
 	t1, _ := m.Int64Counter("memdb.search.rerank_top1_changed_total",
 		metric.WithDescription("Whether a rerank stage moved a different item to position 1 (stage in cosine|cross_encoder|llm_judge|mmr|staged, changed in true|false)"))
 	top1ChangedCounter = t1
+	h, _ := m.Int64Histogram(
+		"memdb.search.rerank_strategy_duration_ms",
+		metric.WithDescription("Per-strategy rerank wall time. name in cosine|cross_encoder|llm_judge|mmr|staged|math_prefilter"),
+		metric.WithExplicitBucketBoundaries(1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
+		metric.WithUnit("ms"),
+	)
+	strategyDurHistogram = h
 	ctx := context.Background()
 	for _, n := range preregNames {
 		for _, oc := range []string{OutcomeSuccess, OutcomeSkipped, OutcomeError} {
@@ -225,4 +235,16 @@ func RecordSuccess(ctx context.Context, name string) {
 // config) but did not error.
 func RecordSkipped(ctx context.Context, name string) {
 	recordOutcome(ctx, name, OutcomeSkipped)
+}
+
+// recordStrategyDuration emits a single observation on the per-strategy
+// duration histogram. No-op when the histogram is uninitialised (test
+// harnesses without otel init).
+func recordStrategyDuration(ctx context.Context, name string, d time.Duration) {
+	if strategyDurHistogram == nil {
+		return
+	}
+	strategyDurHistogram.Record(ctx, d.Milliseconds(), metric.WithAttributes(
+		attribute.String("name", name),
+	))
 }

@@ -121,7 +121,6 @@ func (ce CrossEncoder) rerank(ctx context.Context, query string, items []Item) (
 	type indexed struct {
 		score    float32
 		item     Item
-		origIdx  int  // position in items[] (1-based)
 		fromLive bool // true = score came from live CE call
 	}
 	rest := make([]indexed, 0, len(items)-1)
@@ -132,16 +131,16 @@ func (ce CrossEncoder) rerank(ctx context.Context, query string, items []Item) (
 		id := items[i].ID()
 		if id == "" {
 			// No ID — cannot match against cache; treat as uncached.
-			rest = append(rest, indexed{item: items[i], origIdx: i, fromLive: true})
+			rest = append(rest, indexed{item: items[i], fromLive: true})
 			uncachedItems = append(uncachedItems, items[i])
 			uncachedRestIdx = append(uncachedRestIdx, len(rest)-1)
 			continue
 		}
 		s, ok := scoreByID[id]
 		if ok {
-			rest = append(rest, indexed{score: s, item: items[i], origIdx: i})
+			rest = append(rest, indexed{score: s, item: items[i]})
 		} else {
-			rest = append(rest, indexed{item: items[i], origIdx: i, fromLive: true})
+			rest = append(rest, indexed{item: items[i], fromLive: true})
 			uncachedItems = append(uncachedItems, items[i])
 			uncachedRestIdx = append(uncachedRestIdx, len(rest)-1)
 		}

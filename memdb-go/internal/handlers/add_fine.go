@@ -65,7 +65,7 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 		CustomTags:      req.CustomTags,
 		Sources:         buildSourcesFromMessages(req.Messages),
 		Key:             stringOrEmpty(req.Key),
-		ObservationDate: observationDateFromMessages(req.Messages),
+		ObservationDate: h.resolveObservationDate(ctx, req.Messages),
 	}
 	items, err := h.applyAndPersistFineFacts(ctx, embedded, fc)
 	recordStageDuration(ctx, "apply", t)

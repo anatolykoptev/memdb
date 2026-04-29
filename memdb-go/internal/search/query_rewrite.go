@@ -76,6 +76,11 @@ type QueryRewriteResult struct {
 // RewriteQueryForRetrieval rewrites `query` into a retrieval-optimised form
 // via the configured LLM. Returns the original query on any fallback path
 // (disabled, short, long, LLM error, low confidence, parse failure).
+//
+// Cache: results are stored in the process-global rewriteCache (keyed on
+// query + model). Cache hit short-circuits the LLM call entirely; miss writes
+// the result back. When MEMDB_REWRITE_CACHE_SIZE=0 the cache is nil and every
+// call always reaches the LLM — D4 functionality is NOT disabled.
 func RewriteQueryForRetrieval(ctx context.Context, query, nowISO string, cfg QueryRewriteConfig) QueryRewriteResult {
 	result := QueryRewriteResult{Original: query, Rewritten: query}
 	if !queryRewriteEnabled() || cfg.APIURL == "" {
@@ -90,6 +95,18 @@ func RewriteQueryForRetrieval(ctx context.Context, query, nowISO string, cfg Que
 		searchMx().D4Rewrite.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
 		return result
 	}
+
+	// Cache lookup — bypass LLM on hit.
+	cache := getRewriteCache()
+	cacheKey := rewriteCacheKey(query, cfg.Model)
+	if cached, ok := cache.Get(cacheKey); ok {
+		searchMx().RewriteCacheHit.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", "d4")))
+		searchMx().D4Rewrite.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "rewritten")))
+		result.Rewritten = cached
+		result.Used = true
+		return result
+	}
+	searchMx().RewriteCacheMiss.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", "d4")))
 
 	userMsg := fmt.Sprintf("Now: %s\n\nUser query: %s\n\nRespond with strict JSON only.", nowISO, query)
 
@@ -107,6 +124,8 @@ func RewriteQueryForRetrieval(ctx context.Context, query, nowISO string, cfg Que
 	result.Rewritten = rewritten
 	result.Confidence = conf
 	result.Used = true
+	// Store in cache for future identical queries (same query + model).
+	cache.Set(cacheKey, rewritten)
 	return result
 }
 

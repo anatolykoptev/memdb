@@ -118,7 +118,12 @@ def bow_cosine(a: str, b: str) -> float:
 
 
 class Embedder:
-    """Calls an OpenAI-compatible embeddings endpoint via LLM_URL/LLM_API_KEY."""
+    """Calls an OpenAI-compatible embeddings endpoint.
+
+    Supports embed-server (http://127.0.0.1:8082, no auth required) and any
+    OpenAI-compatible endpoint.  When api_key is empty, the Authorization header
+    is omitted so embed-server (which ignores auth) works without a dummy key.
+    """
 
     def __init__(self, base: str, api_key: str, model: str):
         self.base = base.rstrip("/")
@@ -129,10 +134,13 @@ class Embedder:
     def embed(self, text: str) -> list[float]:
         if text in self._cache:
             return self._cache[text]
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         resp = requests.post(
             f"{self.base}/embeddings",
             json={"input": text, "model": self.model, "encoding_format": "float"},
-            headers={"Authorization": f"Bearer {self.api_key}"},
+            headers=headers,
             timeout=30,
         )
         resp.raise_for_status()
@@ -296,7 +304,25 @@ def main() -> int:
         "--retrieval-only", action="store_true", help="Score top-retrieved instead of chat_answer."
     )
     p.add_argument(
-        "--embed-model", default=os.getenv("LOCOMO_EMBED_MODEL", "text-embedding-3-small")
+        "--embed-model",
+        default=os.getenv("LOCOMO_EMBED_MODEL", "multilingual-e5-large"),
+        help="Embedding model name (default: multilingual-e5-large, matching embed-server).",
+    )
+    # EMBED_URL takes priority for semsim; falls back to LLM_URL for backward compat.
+    # embed-server (http://127.0.0.1:8082) requires no auth — set EMBED_API_KEY="" or omit.
+    p.add_argument(
+        "--embed-url",
+        default=os.getenv("EMBED_URL", os.getenv("LLM_URL", "")),
+        help=(
+            "Base URL for embeddings endpoint including /v1 prefix "
+            "(e.g. http://127.0.0.1:8082/v1). "
+            "Uses EMBED_URL env, falls back to LLM_URL."
+        ),
+    )
+    p.add_argument(
+        "--embed-api-key",
+        default=os.getenv("EMBED_API_KEY", os.getenv("LLM_API_KEY", "")),
+        help="Bearer token for embeddings endpoint (empty = no auth, for embed-server).",
     )
     p.add_argument("--llm-url", default=os.getenv("LLM_URL", ""))
     p.add_argument("--llm-api-key", default=os.getenv("LLM_API_KEY", ""))
@@ -340,9 +366,10 @@ def main() -> int:
 
     embedder = None
     semsim_mode = "bow"
-    if not args.no_embed and args.llm_url and args.llm_api_key:
-        embedder = Embedder(args.llm_url, args.llm_api_key, args.embed_model)
-        semsim_mode = f"embed:{args.embed_model}"
+    # embed-server requires no auth, so we only need a non-empty URL (not api_key).
+    if not args.no_embed and args.embed_url:
+        embedder = Embedder(args.embed_url, args.embed_api_key, args.embed_model)
+        semsim_mode = f"embed:{args.embed_model}@{args.embed_url}"
 
     per_qa: list[dict] = []
     for rec in predictions:
