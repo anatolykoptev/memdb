@@ -53,6 +53,11 @@ func (h *Handler) embedFacts(ctx context.Context, facts []llm.ExtractedFact) []e
 // buildUpdateWMNode creates a WorkingMemory node for an UPDATE fact.
 // Returns (node, vsetInsert, ok) — ok=false if the embedding is missing.
 //
+// observationDate (M12.1) is the in-conversation date (YYYY-MM-DD) of the
+// latest source message; "" when not available. Stamped onto top-level props
+// alongside created_at so retrieval clients can prefix candidates with the
+// real conversation date instead of server wall-clock at ingest.
+//
 //nolint:revive // signature intentionally positional, see file header
 func buildUpdateWMNode(
 	f llm.ExtractedFact,
@@ -62,6 +67,7 @@ func buildUpdateWMNode(
 	customTags []string,
 	sources []map[string]any,
 	key string,
+	observationDate string,
 ) (db.MemoryInsertNode, wmVSetInsert, bool) {
 	if ef.embVec == "" || len(ef.embedding) == 0 {
 		return db.MemoryInsertNode{}, wmVSetInsert{}, false
@@ -85,7 +91,8 @@ func buildUpdateWMNode(
 		Mode: modeFine, Now: now, CreatedAt: createdAt,
 		Info: factInfo, CustomTags: allTags, Sources: sources, Background: "",
 		RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
-		Key: key,
+		Key:             key,
+		ObservationDate: observationDate,
 	}))
 	if err != nil {
 		return db.MemoryInsertNode{}, wmVSetInsert{}, false
@@ -98,6 +105,11 @@ func buildUpdateWMNode(
 // buildAddNodes creates the WM + LTM node pair for a new fact.
 // Returns nil nodes + nil item if embVec is empty (embed failed).
 //
+// observationDate (M12.1) is the in-conversation date (YYYY-MM-DD) of the
+// latest source message; "" when not available. Stamped onto top-level props
+// of both WM and LTM nodes so retrieval clients see the real conversation
+// date instead of server wall-clock at ingest.
+//
 // Positional signature pinned by phase35_test.go (TestBuildAddNodes_*).
 //
 //nolint:revive // signature pinned by tests, see file header
@@ -107,6 +119,7 @@ func buildAddNodes(
 	info map[string]any, customTags []string,
 	sources []map[string]any,
 	key string,
+	observationDate string,
 ) ([]db.MemoryInsertNode, *addResponseItem) {
 	_ = embedding // pinned-signature parameter; reserved for future per-fact telemetry
 	if embVec == "" {
@@ -134,7 +147,8 @@ func buildAddNodes(
 		Mode: modeFine, Now: now, CreatedAt: createdAt,
 		Info: factInfo, CustomTags: allTags, Sources: sources, Background: "",
 		RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
-		Key: key,
+		Key:             key,
+		ObservationDate: observationDate,
 	}))
 	ltJSON, err2 := marshalProps(buildNodeProps(memoryNodeProps{
 		ID: ltID, Memory: f.Memory, MemoryType: f.Type,
@@ -142,7 +156,8 @@ func buildAddNodes(
 		Mode: modeFine, Now: now, CreatedAt: createdAt,
 		Info: factInfo, CustomTags: allTags, Sources: sources, Background: background,
 		RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
-		Key: key,
+		Key:             key,
+		ObservationDate: observationDate,
 	}))
 	if err1 != nil || err2 != nil {
 		return nil, nil

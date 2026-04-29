@@ -30,6 +30,13 @@ type fastAddContext struct {
 	// fullAddRequest.Key into properties.key. Empty means "no key" (historical
 	// default). Validation lives at the request boundary.
 	key string
+
+	// observationDate is the in-conversation timestamp (YYYY-MM-DD) of the
+	// latest message in the source batch — derived once at the top of each
+	// add pipeline via observationDateFromMessages. Empty means "no chat_time
+	// on any message"; downstream callers (buildNodeProps) treat empty as
+	// "do not emit observation_date prop". M12.1.
+	observationDate string
 }
 
 // pendingFastMemory is a memory that survived hash-dedup and is queued for embedding.
@@ -53,14 +60,15 @@ func (h *Handler) nativeFastAddForCube(ctx context.Context, req *fullAddRequest,
 	}
 
 	fac := fastAddContext{
-		cubeID:     cubeID,
-		userID:     *req.UserID,
-		agentID:    stringOrEmpty(req.AgentID),
-		sessionID:  stringOrEmpty(req.SessionID),
-		now:        nowTimestamp(),
-		info:       mapOrEmpty(req.Info),
-		customTags: req.CustomTags,
-		key:        stringOrEmpty(req.Key),
+		cubeID:          cubeID,
+		userID:          *req.UserID,
+		agentID:         stringOrEmpty(req.AgentID),
+		sessionID:       stringOrEmpty(req.SessionID),
+		now:             nowTimestamp(),
+		info:            mapOrEmpty(req.Info),
+		customTags:      req.CustomTags,
+		key:             stringOrEmpty(req.Key),
+		observationDate: observationDateFromMessages(req.Messages),
 	}
 
 	hashes := computeHashes(memories)
@@ -202,7 +210,8 @@ func (h *Handler) buildFastNodes(
 		UserName: fac.cubeID, UserID: fac.userID, AgentID: fac.agentID, SessionID: fac.sessionID,
 		Mode: modeFast, Now: fac.now, CreatedAt: fac.now,
 		Info: memInfo, CustomTags: fac.customTags, Sources: mem.Sources, Background: "",
-		Key: fac.key,
+		Key:             fac.key,
+		ObservationDate: fac.observationDate,
 	}))
 	if err != nil {
 		return nil, addResponseItem{}, fmt.Errorf("marshal wm properties: %w", err)
@@ -214,7 +223,8 @@ func (h *Handler) buildFastNodes(
 		UserName: fac.cubeID, UserID: fac.userID, AgentID: fac.agentID, SessionID: fac.sessionID,
 		Mode: modeFast, Now: fac.now, CreatedAt: fac.now,
 		Info: memInfo, CustomTags: fac.customTags, Sources: mem.Sources, Background: workingBinding(wmID),
-		Key: fac.key,
+		Key:             fac.key,
+		ObservationDate: fac.observationDate,
 	}))
 	if err != nil {
 		return nil, addResponseItem{}, fmt.Errorf("marshal lt properties: %w", err)
