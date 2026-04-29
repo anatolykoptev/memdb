@@ -60,7 +60,7 @@ func (s *SearchService) searchL1(ctx context.Context, p SearchParams) (*SearchOu
 		items = nil // graceful degrade — return empty result
 	}
 
-	actMem := s.formatWorkingMem(queryVec, items, p)
+	actMem := s.formatWorkingMem(ctx, queryVec, items, p)
 
 	result := &SearchResult{
 		TextMem:  []MemoryBucket{{CubeID: p.CubeID, Memories: []map[string]any{}, TotalNodes: 0}},

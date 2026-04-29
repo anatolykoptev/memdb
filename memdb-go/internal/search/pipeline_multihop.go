@@ -144,12 +144,12 @@ func (s *SearchService) stageInternetEmbed(ctx context.Context, st *pipelineStat
 
 // stageMergeCandidates merges per-type vector + fulltext + BFS + internet
 // streams into TextMerged / SkillMerged / ToolMerged.
-func (s *SearchService) stageMergeCandidates(_ context.Context, st *pipelineState) error {
+func (s *SearchService) stageMergeCandidates(ctx context.Context, st *pipelineState) error {
 	if st.PSR == nil {
 		st.skip("merge_candidates")
 		return nil
 	}
-	st.TextMerged, st.SkillMerged, st.ToolMerged = s.mergeSearchResults(st.PSR, st.BFSResults, st.InternetMerged, st.Params)
+	st.TextMerged, st.SkillMerged, st.ToolMerged = s.mergeSearchResults(ctx, st.PSR, st.BFSResults, st.InternetMerged, st.Params)
 	return nil
 }
 
