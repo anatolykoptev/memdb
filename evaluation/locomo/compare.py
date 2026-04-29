@@ -124,6 +124,36 @@ def main() -> int:
                     f"| {cat:<3s} | {name:<12s} | {m:<8s} | {bv:8.3f} | {cv:9.3f} | {fmt_delta(cv - bv):>8s} "
                     f"| {b.get('n', 0):>6d} | {c.get('n', 0):>6d} |"
                 )
+
+    # ── M13 J5: paired McNemar's per category + headline ─────────────────
+    # Aligns rows by (conv_id, question_idx) and reports paired chi² + p-value.
+    base_per_qa = base.get("per_qa") or []
+    cand_per_qa = cand.get("per_qa") or []
+    if base_per_qa and cand_per_qa:
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from score_report import compare_runs, format_compare_text  # noqa: PLC0415
+
+            cmp = compare_runs(
+                base_per_qa,
+                cand_per_qa,
+                label_a=args.baseline.stem,
+                label_b=args.candidate.stem,
+            )
+            if cmp["headline"]["n_paired"] > 0:
+                print("\n## Paired McNemar's test (M13 J5)\n")
+                print(
+                    f"Aligned {cmp['meta']['n_paired_with_verdict']} of "
+                    f"{cmp['meta']['n_paired_keys']} paired keys "
+                    f"(unpaired: A={cmp['meta']['n_unpaired_a']}, "
+                    f"B={cmp['meta']['n_unpaired_b']}; "
+                    f"missing verdict: {cmp['meta']['n_missing_verdict']}).\n"
+                )
+                print("```")
+                print(format_compare_text(cmp))
+                print("```")
+        except ImportError as exc:
+            print(f"\n(paired McNemar skipped: {exc})", file=sys.stderr)
     return 0
 
 

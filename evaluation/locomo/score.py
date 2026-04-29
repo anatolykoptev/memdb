@@ -426,6 +426,36 @@ def main() -> int:
     extra_excl_sets: list[frozenset[int]] = [extra_excl] if extra_excl else []
     agg_tracks = build_aggregate_tracks(per_qa, extra_excl_sets)
 
+    # ── M13 J5: paper-quality statistics block (additive, never blocking) ──
+    # Backward-compatible: legacy fields preserved unchanged. New "statistics"
+    # key carries headline CI, per-cat CI, and ensemble agreement metrics.
+    # Only emitted when LLM verdicts are available (llm_score present).
+    statistics_block: dict | None = None
+    if any("llm_score" in r for r in per_qa):
+        try:
+            from score_report import (  # noqa: PLC0415
+                format_report_text,
+                generate_full_report,
+            )
+
+            statistics_block = generate_full_report(
+                per_qa,
+                judge_config_signature=args.llm_judge_model
+                if args.llm_judge
+                else None,
+                sample_metadata={
+                    "commit_sha": git_sha(),
+                    "predictions_file": str(args.predictions),
+                    "judge_model": args.llm_judge_model if args.llm_judge else None,
+                    "semsim_mode": semsim_mode,
+                },
+            )
+        except (ImportError, ValueError) as exc:
+            print(
+                f"  warning: statistics block skipped ({exc})",
+                file=sys.stderr,
+            )
+
     # by_category is available both nested in aggregate (backward compat with compare.py)
     # and as a top-level key per M2 spec so callers can read it directly.
     out: dict = {
@@ -443,6 +473,8 @@ def main() -> int:
         **agg_tracks,
         "per_qa": per_qa,
     }
+    if statistics_block is not None:
+        out["statistics"] = statistics_block
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w") as f:
         json.dump(out, f, indent=2, ensure_ascii=False)
@@ -484,6 +516,15 @@ def main() -> int:
             )
     # Always print dual-track summary
     print_dual_track_summary(agg_tracks)
+    # ── M13 J5: paper-quality block (only when judge ran) ───────────────
+    if statistics_block is not None:
+        try:
+            from score_report import format_report_text  # noqa: PLC0415
+
+            print()
+            print(format_report_text(statistics_block))
+        except ImportError:
+            pass
     print(f"wrote → {args.out}")
     return 0
 
