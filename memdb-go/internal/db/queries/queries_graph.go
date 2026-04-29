@@ -16,7 +16,7 @@ package queries
 //
 //	$4 = created_at (text), $5 = valid_at (text, empty string = NULL)
 const InsertMemoryEdge = `
-INSERT INTO memory_edges (from_id, to_id, relation, created_at, valid_at)
+INSERT INTO %[1]s.memory_edges (from_id, to_id, relation, created_at, valid_at)
 VALUES ($1, $2, $3, $4, NULLIF($5, ''))
 ON CONFLICT (from_id, to_id, relation) DO NOTHING`
 
@@ -27,7 +27,7 @@ ON CONFLICT (from_id, to_id, relation) DO NOTHING`
 //
 //	$5 = valid_at (empty string = NULL), $6 = confidence (0..1), $7 = rationale
 const InsertMemoryEdgeWithConfidence = `
-INSERT INTO memory_edges (from_id, to_id, relation, created_at, valid_at, confidence, rationale)
+INSERT INTO %[1]s.memory_edges (from_id, to_id, relation, created_at, valid_at, confidence, rationale)
 VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, NULLIF($7, ''))
 ON CONFLICT (from_id, to_id, relation) DO NOTHING`
 
@@ -45,7 +45,7 @@ ON CONFLICT (from_id, to_id, relation) DO NOTHING`
 //	$5 = confidence (float8[])    — weight in [0,1]
 //	$6 = rationales (text[])      — opaque payload (e.g. {"dt_seconds":42})
 const BulkInsertMemoryEdges = `
-INSERT INTO memory_edges (from_id, to_id, relation, created_at, confidence, rationale)
+INSERT INTO %[1]s.memory_edges (from_id, to_id, relation, created_at, confidence, rationale)
 SELECT f, t, r, $4, c, NULLIF(rat, '')
 FROM UNNEST($1::text[], $2::text[], $3::text[], $5::float8[], $6::text[])
      AS u(f, t, r, c, rat)
@@ -111,7 +111,7 @@ const GraphRecallByEdge = `
 SELECT m.properties->>(('id'::text)) AS memory_id,
        (m.properties::text::jsonb - 'sources')::text
 FROM %[1]s."Memory" m
-JOIN memory_edges e ON m.properties->>(('id'::text)) = e.to_id
+JOIN %[1]s.memory_edges e ON m.properties->>(('id'::text)) = e.to_id
 WHERE e.from_id = ANY($1)
   AND e.relation = $2
   AND e.invalid_at IS NULL

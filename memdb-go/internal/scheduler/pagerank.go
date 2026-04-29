@@ -123,11 +123,13 @@ func (w *Worker) runPageRankOnce(ctx context.Context, pg *db.Postgres) error {
 	}
 
 	success := 0
+	var totalDistinct int64
 	for _, cubeID := range cubes {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if err := w.runPageRankForCube(ctx, pg, cubeID); err != nil {
+		n, err := w.runPageRankForCube(ctx, pg, cubeID)
+		if err != nil {
 			w.logger.Warn("pagerank: cube failed",
 				slog.String("cube_id", cubeID),
 				slog.Any("error", err),
@@ -139,10 +141,12 @@ func (w *Worker) runPageRankOnce(ctx context.Context, pg *db.Postgres) error {
 			mx.PageRankRuns.Add(ctx, 1, labelPageRankOutcome(outcome))
 		} else {
 			success++
+			totalDistinct += int64(n)
 		}
 	}
 	mx.PageRankRuns.Add(ctx, int64(success), labelPageRankOutcome("success"))
 	mx.PageRankLastRun.Record(ctx, time.Since(start).Seconds())
+	mx.PageRankDistinctScores.Record(ctx, totalDistinct)
 
 	w.logger.Info("pagerank: cycle complete",
 		slog.Int("cubes_total", len(cubes)),
@@ -154,13 +158,14 @@ func (w *Worker) runPageRankOnce(ctx context.Context, pg *db.Postgres) error {
 
 // runPageRankForCube fetches all valid edges for a cube, computes PageRank,
 // and persists the scores as Memory.properties->>'pagerank'.
-func (w *Worker) runPageRankForCube(ctx context.Context, pg *db.Postgres, cubeID string) error {
+// Returns the number of distinct scores written (for distribution health metric).
+func (w *Worker) runPageRankForCube(ctx context.Context, pg *db.Postgres, cubeID string) (int, error) {
 	edges, err := pg.FetchEdgesForPageRank(ctx, cubeID)
 	if err != nil {
-		return fmt.Errorf("fetch edges: %w", err)
+		return 0, fmt.Errorf("fetch edges: %w", err)
 	}
 	if len(edges) == 0 {
-		return nil // no edges → nothing to rank
+		return 0, nil // no edges → nothing to rank
 	}
 
 	scores := computePageRank(edges)
@@ -168,13 +173,20 @@ func (w *Worker) runPageRankForCube(ctx context.Context, pg *db.Postgres, cubeID
 		// Non-empty edge list produced no scores — degenerate graph (e.g. all
 		// edges had empty node IDs). This is a math/input failure, not a DB
 		// failure; emit compute_error so PromQL alerts fire.
-		return fmt.Errorf("%w: cube=%s edges=%d", errComputePageRank, cubeID, len(edges))
+		return 0, fmt.Errorf("%w: cube=%s edges=%d", errComputePageRank, cubeID, len(edges))
 	}
 
-	if err := pg.BulkSetPageRank(ctx, cubeID, scores); err != nil {
-		return fmt.Errorf("bulk set pagerank: %w", err)
+	// Count distinct scores to detect distribution collapse before persisting.
+	distinct := make(map[float64]struct{}, len(scores))
+	for _, v := range scores {
+		distinct[v] = struct{}{}
 	}
-	return nil
+	distinctCount := len(distinct)
+
+	if err := pg.BulkSetPageRank(ctx, cubeID, scores); err != nil {
+		return 0, fmt.Errorf("bulk set pagerank: %w", err)
+	}
+	return distinctCount, nil
 }
 
 // computePageRank runs the iterative power-method PageRank on the given edges.
