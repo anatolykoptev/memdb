@@ -147,7 +147,11 @@ func (h *Handler) runFineExtraction(
 	}
 	// Date-aware hint: emit `[mention YYYY-MM-DD]` on time-anchored facts (M9 S4).
 	hints := append(dateAwareExtractHints(), sig.Hints...)
-	facts, err := h.llmExtractor.ExtractAndDedup(ctx, conversation, candidates, hints...)
+	// LoCoMo fidelity: anchor D6 resolution against the in-conversation date
+	// (latest message's chat_time) instead of today's wall-clock. Empty string
+	// falls back to time.Now() inside ExtractAndDedupAt for non-LoCoMo callers.
+	obsDate := h.resolveObservationDate(ctx, req.Messages)
+	facts, err := h.llmExtractor.ExtractAndDedupAt(ctx, conversation, candidates, obsDate, hints...)
 	if err != nil {
 		recordDateAwareExtractOutcome(ctx, dateAwareExtractOutcomeError)
 		return nil, true, fmt.Errorf("fine add: extract and dedup: %w", err)

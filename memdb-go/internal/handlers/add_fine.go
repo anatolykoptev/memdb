@@ -26,7 +26,9 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 	if len(req.Messages) == 0 {
 		return nil, nil
 	}
-	now := nowTimestamp()
+	// Prefer per-message chat_time over wall-clock so D6 / F3 / episodic
+	// resolve "yesterday" relative to the conversation, not the ingest hour.
+	now := conversationNowAnchor(req.Messages)
 	sessionID := stringOrEmpty(req.SessionID)
 	conversation := formatConversation(req.Messages, now)
 

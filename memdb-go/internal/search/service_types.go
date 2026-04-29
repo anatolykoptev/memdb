@@ -102,6 +102,15 @@ type SearchParams struct {
 	// boost post-step can award per-tag score multipliers (Q3 stream).
 	// An empty or nil slice means "no tag boost" — no items are penalised.
 	Tags []string
+	// AttributedTo filters atomic-fact memories by the speaker attribution
+	// stored in properties->>'attributed_to'. Empty = no filter (legacy).
+	// When non-empty, vector search and full-text search restrict results
+	// to rows where attributed_to matches exactly. Backed by the partial
+	// index `idx_memory_attributed_to` from migration 0022. Used to scope
+	// retrieval within a single user_id when multi-speaker atomic facts
+	// coexist (mem0 pattern; complementary to the Speakers fan-out which
+	// scopes across user_ids).
+	AttributedTo string
 }
 
 // SearchOutput holds the formatted result plus optional embedding sidecar.

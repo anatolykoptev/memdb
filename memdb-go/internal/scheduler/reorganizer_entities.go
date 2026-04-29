@@ -17,11 +17,17 @@ import (
 const entityLinkTimeout = 15 * time.Second // timeout for background entity linking goroutine
 
 // entityPair holds the LTM node and its associated entities/relations for linking.
+//
+// validAt / invalidAt mirror the handler-side entityLinkPair (F11 lift):
+// when ExtractedFact.EventDates is non-empty, EventDates[0] (and [1] for
+// ranges) drive these stamps; otherwise we fall back to ExtractedFact.ValidAt.
+// See llm.ExtractedFact.EdgeValidity for the derivation.
 type entityPair struct {
 	ltmID     string
 	entities  []llm.EntityMention
 	relations []llm.EntityRelation
 	validAt   string
+	invalidAt string
 }
 
 // linkEntities fires a background goroutine that upserts entity_nodes and creates
@@ -60,9 +66,12 @@ func collectEntityPairs(embedded []embeddedMemReadFact) []entityPair {
 		if len(ef.fact.Entities) == 0 || ef.ltmID == "" {
 			continue
 		}
+		validAt, invalidAt := ef.fact.EdgeValidity(ef.fact.ValidAt)
 		pairs = append(pairs, entityPair{
 			ltmID: ef.ltmID, entities: ef.fact.Entities,
-			relations: ef.fact.Relations, validAt: ef.fact.ValidAt,
+			relations: ef.fact.Relations,
+			validAt:   validAt,
+			invalidAt: invalidAt,
 		})
 	}
 	return pairs
@@ -125,6 +134,21 @@ func (r *Reorganizer) linkOnePair(ctx context.Context, p entityPair, cubeID, now
 			r.logger.Debug("mem_read entity link: upsert entity edge failed",
 				slog.String("from", fromID), slog.String("pred", rel.Predicate),
 				slog.String("to", toID), slog.Any("error", err))
+		}
+	}
+	// F11 bi-temporal lift: stamp invalid_at on this LTM's edges when the
+	// fact carries an explicit date range (EventDates = [start, end]).
+	// Invalidate* helpers update only rows with invalid_at IS NULL — the
+	// async validator / contradiction judge cannot be overwritten by a
+	// range boundary.
+	if p.invalidAt != "" {
+		if err := r.postgres.InvalidateEdgesByMemoryID(ctx, p.ltmID, p.invalidAt); err != nil {
+			r.logger.Debug("mem_read entity link: stamp memory_edges invalid_at failed",
+				slog.String("ltm_id", p.ltmID), slog.Any("error", err))
+		}
+		if err := r.postgres.InvalidateEntityEdgesByMemoryID(ctx, p.ltmID, p.invalidAt); err != nil {
+			r.logger.Debug("mem_read entity link: stamp entity_edges invalid_at failed",
+				slog.String("ltm_id", p.ltmID), slog.Any("error", err))
 		}
 	}
 }

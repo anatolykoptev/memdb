@@ -222,9 +222,14 @@ func TestBuildSystemPrompt_FactualConversationalNoDecision(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPrompt_FactualCustomBaseWinsOverDecision(t *testing.T) {
-	// Backward-compat: non-empty system_prompt suppresses the factual branch
-	// and leaves decision empty.
+func TestBuildSystemPrompt_FactualCustomBasePreservesPrompt(t *testing.T) {
+	// M12.4: when a caller supplies a custom system_prompt + factual answer
+	// style (LoCoMo dual-speaker harness), the custom prompt MUST be preserved
+	// verbatim AND the variant-marked anti-refusal rules block injected after
+	// it. The decision struct is now populated so factual_<variant> metric
+	// labels and X-Memdb-Refusal-Reason fire for custom-prompt callers too —
+	// pre-fix this branch silently dropped both the decision and the rules,
+	// causing 48% chat_refused_with_evidence on full-corpus eval.
 	memories := []map[string]any{memWithScore("strong hit", 0.95)}
 	prompt, decision := buildSystemPromptWithDecision(
 		context.Background(),
@@ -235,9 +240,114 @@ func TestBuildSystemPrompt_FactualCustomBaseWinsOverDecision(t *testing.T) {
 	if !strings.Contains(prompt, "Custom system prompt.") {
 		t.Errorf("prompt missing custom base: %q", prompt)
 	}
-	// We must NOT touch the metric / header machinery for custom-base requests.
+	if decision.Variant != factualVariantHigh {
+		t.Errorf("custom-base + factual + high-cosine: decision.Variant = %q, want high", decision.Variant)
+	}
+	if !strings.Contains(prompt, "## Answer Rules") {
+		t.Error("custom-base + factual: missing injected '## Answer Rules' block")
+	}
+	if !strings.Contains(prompt, factualHighConfidenceMarker) {
+		t.Errorf("custom-base + factual + high: missing %q", factualHighConfidenceMarker)
+	}
+}
+
+// TestBuildSystemPrompt_FactualCustomBaseRulesPerVariant verifies that the
+// injected rule block reflects the chosen variant for custom-prompt callers.
+// Mirrors the dual-speaker harness path: each (variant, body) row covers the
+// invariants the M12.2 rules expose to the LLM.
+func TestBuildSystemPrompt_FactualCustomBaseRulesPerVariant(t *testing.T) {
+	cases := []struct {
+		name        string
+		memories    []map[string]any
+		wantVariant factualPromptVariant
+		mustContain []string
+		mustAbsent  []string
+	}{
+		{
+			name:        "high",
+			memories:    []map[string]any{memWithScore("Caroline supports LGBTQ rights", 0.92)},
+			wantVariant: factualVariantHigh,
+			mustContain: []string{
+				factualHighConfidenceMarker,           // "Commit to an answer based on the retrieved evidence"
+				"actively search for confirming",      // rule 5
+				"count ALL distinct mentions",         // rule 8
+				"Synthesize from evidence",            // rule 9
+				"Cross-character shared events",       // rule 10
+				"Reply \"no answer\" only if every memory is unambiguously off-topic",
+			},
+			mustAbsent: []string{factualLowConfidenceMarker},
+		},
+		{
+			name:        "low",
+			memories:    []map[string]any{memWithScore("noisy near-match", 0.30)},
+			wantVariant: factualVariantLow,
+			mustContain: []string{
+				"lower confidence in these memories", // factualLowConfidenceMarker substring
+				"Use any relevant context to answer",
+				"only when every memory is entirely unrelated",
+				"Synthesize from evidence",
+				"Cross-character shared events",
+			},
+			mustAbsent: []string{factualHighConfidenceMarker},
+		},
+		{
+			name:        "zero",
+			memories:    nil,
+			wantVariant: factualVariantZero,
+			mustContain: []string{
+				"lower confidence in these memories", // zero falls back to low-EN body
+				"no answer",                          // refusal contract preserved
+			},
+			mustAbsent: []string{factualHighConfidenceMarker},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			prompt, decision := buildSystemPromptWithDecision(
+				context.Background(),
+				"unused query",
+				c.memories,
+				"", "DUAL-SPEAKER PROMPT BLOCK", "factual", "",
+			)
+			if decision.Variant != c.wantVariant {
+				t.Errorf("variant = %q, want %q", decision.Variant, c.wantVariant)
+			}
+			if !strings.Contains(prompt, "DUAL-SPEAKER PROMPT BLOCK") {
+				t.Error("custom prompt missing from rendered output")
+			}
+			if !strings.Contains(prompt, "## Answer Rules") {
+				t.Error("rendered prompt missing '## Answer Rules' header")
+			}
+			for _, s := range c.mustContain {
+				if !strings.Contains(prompt, s) {
+					t.Errorf("rendered prompt missing required fragment %q", s)
+				}
+			}
+			for _, s := range c.mustAbsent {
+				if strings.Contains(prompt, s) {
+					t.Errorf("rendered prompt leaked forbidden fragment %q", s)
+				}
+			}
+		})
+	}
+}
+
+// TestBuildSystemPrompt_CustomBaseConversationalNoRules verifies that the
+// rules block is NOT injected when answerStyle is empty/conversational —
+// preserves legacy behaviour for non-factual custom-prompt callers.
+func TestBuildSystemPrompt_CustomBaseConversationalNoRules(t *testing.T) {
+	memories := []map[string]any{memWithScore("anything", 0.99)}
+	prompt, decision := buildSystemPromptWithDecision(
+		context.Background(),
+		"hello",
+		memories,
+		"", "Custom system prompt.", "conversational", "",
+	)
+	if strings.Contains(prompt, "## Answer Rules") {
+		t.Error("conversational custom-base must NOT inject the factual rules block")
+	}
 	if decision.Variant != factualVariantNone {
-		t.Errorf("custom-base decision.Variant = %q, want none", decision.Variant)
+		t.Errorf("decision.Variant = %q, want none for conversational branch", decision.Variant)
 	}
 }
 

@@ -251,7 +251,14 @@ func buildAtomicUserMessage(conversation string, candidates []Candidate, observa
 		sb.WriteString("]")
 	}
 	fmt.Fprintf(&sb, "\n\n## Observation Date\n%s\n", observationDate)
-	fmt.Fprintf(&sb, "\n## Current Date\n%s\n", time.Now().UTC().Format("2006-01-02"))
+	// Current Date == Observation Date for LoCoMo / chat_time-stamped conversations:
+	// the D6 resolution rule reads this header to anchor relative time references
+	// ("yesterday", "next Thursday"). Anchoring against time.Now() corrupts
+	// extraction for any conversation older than today (LoCoMo bug — F11 leak).
+	// observationDate is "" only when the caller had no chat_time AND
+	// MEMDB_OBS_DATE_EXTRACT was off; in that case the early branch above
+	// already filled it with time.Now() so this is always set.
+	fmt.Fprintf(&sb, "\n## Current Date\n%s\n", observationDate)
 	return sb.String()
 }
 
