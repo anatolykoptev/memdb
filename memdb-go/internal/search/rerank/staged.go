@@ -11,13 +11,11 @@ package rerank
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"time"
 
-	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/go-kit/rerank"
 )
 
 const (
@@ -51,6 +49,12 @@ Do not invent IDs. If an input ID doesn't match any memory you saw, omit it.`
 //
 // Hook callbacks let the parent register otel metric writes without
 // pulling otel into this package's transport.
+//
+// M12.6: the two LLM round-trips (refine + justify) are now factored
+// behind a StagedBackend. Set Backend explicitly, or leave it nil and
+// resolveBackend() picks via MEMDB_STAGED_BACKEND (default `ce` when
+// RerankClient is wired and Available; `llm` otherwise so existing
+// callers / tests that did not migrate keep functioning).
 type Staged struct {
 	Config        LLMConfig
 	Logger        *slog.Logger
@@ -65,6 +69,15 @@ type Staged struct {
 	// renamed this from the misleading "1_cosine" so dashboards
 	// stop suggesting D5 owns three stages. Optional (nil → no-op).
 	OnStageSize func(ctx context.Context, stage string, size int)
+
+	// RerankClient is the cross-encoder HTTP client (embed-server's
+	// /v1/rerank). Used by the CE / Hybrid backends; ignored by
+	// LLMBackend. Nil + env=ce silently falls back to LLMBackend.
+	RerankClient *rerank.Client
+
+	// Backend overrides the env-driven backend selection. Leave nil
+	// for the auto-selector (recommended).
+	Backend StagedBackend
 }
 
 // Name implements Reranker.
@@ -72,10 +85,32 @@ func (Staged) Name() string { return "staged" }
 
 // Rerank implements Reranker.
 func (s Staged) Rerank(ctx context.Context, query string, items []Item) ([]Item, error) {
-	if !stagedEnabled() || s.Config.APIURL == "" || len(items) < stagedMinInputSize {
+	// Pre-flight gate: env disabled OR too few candidates → skip silently.
+	if !stagedEnabled() || len(items) < stagedMinInputSize {
 		RecordSkipped(ctx, s.Name())
 		return items, nil
 	}
+	choice := s.pickBackend()
+	if choice.backend == nil {
+		// Neither LLM credentials nor a usable CE client → cannot run.
+		// NOT silent: fire the strategy-level skipped counter AND log a
+		// WARN so operators see the misconfiguration instead of mistaking
+		// a missing client for "the strategy chose to skip".
+		if s.Logger != nil {
+			s.Logger.Warn("staged: no usable backend (CE client unavailable AND LLM URL empty); staged retrieval is a no-op",
+				slog.String("requested", choice.requested),
+			)
+		}
+		RecordSkipped(ctx, s.Name())
+		return items, nil
+	}
+	if choice.fallback && s.Logger != nil {
+		s.Logger.Warn("staged: requested backend unavailable, falling back",
+			slog.String("requested", choice.requested),
+			slog.String("resolved", choice.backend.Name()),
+		)
+	}
+	backend := choice.backend
 	candidates := items
 	maxIn := s.maxInput()
 	if len(candidates) > maxIn {
@@ -87,27 +122,36 @@ func (s Staged) Rerank(ctx context.Context, query string, items []Item) ([]Item,
 	// Record the candidate count entering D5 under the corrected label.
 	s.fireStageSize(ctx, "0_cosine_prefilter", len(candidates))
 
-	// Stage 2: refine (LLM shortlist).
+	// Resolve the outcome label up front; both stages contribute to it.
+	outcome := outcomeForChoice(choice)
+
+	// Stage 2: refine (CE / LLM shortlist).
 	s.fireStageSize(ctx, "2_refine", len(candidates))
-	shortlist, err := s.stage2Refine(ctx, query, candidates)
+	shortlist, err := backend.Stage2Refine(ctx, query, candidates, s.shortlist())
 	if err != nil {
 		s.fireStage(ctx, "2_refine", "error")
 		s.debug("staged stage2 failed, returning original", err)
+		recordStagedBackend(ctx, backend.Name(), "error")
 		return items, nil
 	}
 	s.fireStage(ctx, "2_refine", "success")
 	if len(shortlist) == 0 {
+		recordStagedBackend(ctx, backend.Name(), outcome)
 		RecordSuccess(ctx, s.Name())
 		return items, nil
 	}
 
-	// Stage 3: justify (LLM relevance filter).
+	// Stage 3: justify (CE threshold / LLM relevance filter).
 	s.fireStageSize(ctx, "3_justify", len(shortlist))
-	justified, err := s.stage3Justify(ctx, query, shortlist, candidates)
+	justified, err := backend.Stage3Justify(ctx, query, shortlist, candidates)
 	if err != nil {
 		s.fireStage(ctx, "3_justify", "fallback")
 		s.debug("staged stage3 failed, using stage2 output as final", err)
 		out := reorderByIDs(items, shortlist)
+		// Stage 2 succeeded, stage 3 did not: surface as fallback so
+		// operators can see partial degradation distinctly from the
+		// clean-success path.
+		recordStagedBackend(ctx, backend.Name(), "fallback")
 		RecordSuccess(ctx, s.Name())
 		return out, nil
 	}
@@ -126,86 +170,34 @@ func (s Staged) Rerank(ctx context.Context, query string, items []Item) ([]Item,
 		}
 	}
 	if len(relevantIDs) == 0 {
+		recordStagedBackend(ctx, backend.Name(), outcome)
 		RecordSuccess(ctx, s.Name())
 		return items, nil
 	}
 	out := reorderByIDs(items, relevantIDs)
+	recordStagedBackend(ctx, backend.Name(), outcome)
 	RecordSuccess(ctx, s.Name())
 	return out, nil
 }
 
-// stage2Refine returns the ordered shortlist of IDs.
-func (s Staged) stage2Refine(ctx context.Context, query string, items []Item) ([]string, error) {
-	var b strings.Builder
-	for i, it := range items {
-		mem := it.EmbeddingText()
-		if len(mem) > stagedMemTruncStage2 {
-			mem = mem[:stagedMemTruncStage2] + "..."
-		}
-		fmt.Fprintf(&b, "[%d] id=%s  %s\n", i+1, it.ID(), strings.TrimSpace(mem))
+// outcomeForChoice maps the resolved backendChoice to the metric outcome
+// label used by `memdb.search.staged.backend_total`.
+//   - both stages clean    → "success"
+//   - requested→fallback   → "fallback" (caller already logged WARN)
+func outcomeForChoice(choice backendChoice) string {
+	if choice.fallback {
+		return "fallback"
 	}
-	userMsg := fmt.Sprintf("Query: %s\n\nCandidates:\n%s\n\nReturn JSON {\"ids\":[...]} — top 10 ids, most relevant first.", query, b.String())
-
-	var parsed struct {
-		IDs []string `json:"ids"`
-	}
-	if err := callStagedLLM(ctx, s.Config, stagedStage2SystemPrompt, userMsg, &parsed); err != nil {
-		return nil, fmt.Errorf("stage2: %w", err)
-	}
-	cap := s.shortlist()
-	if len(parsed.IDs) > cap {
-		parsed.IDs = parsed.IDs[:cap]
-	}
-	return parsed.IDs, nil
+	return "success"
 }
 
+// stagedJustifiedItem is the per-ID relevance verdict returned by both
+// the LLM and the CE backends in Stage 3. The CE backend leaves
+// Justification empty — only ID + Relevant are consumed downstream.
 type stagedJustifiedItem struct {
 	ID            string `json:"id"`
 	Justification string `json:"justification"`
 	Relevant      bool   `json:"relevant"`
-}
-
-// stage3Justify returns justified items for the shortlist.
-func (s Staged) stage3Justify(ctx context.Context, query string, shortlist []string, allItems []Item) ([]stagedJustifiedItem, error) {
-	byID := make(map[string]string, len(allItems))
-	for _, it := range allItems {
-		byID[it.ID()] = it.EmbeddingText()
-	}
-	var b strings.Builder
-	for _, id := range shortlist {
-		mem, ok := byID[id]
-		if !ok {
-			continue
-		}
-		if len(mem) > stagedMemTruncStage3 {
-			mem = mem[:stagedMemTruncStage3] + "..."
-		}
-		fmt.Fprintf(&b, "id=%s\n  %s\n\n", id, strings.TrimSpace(mem))
-	}
-	userMsg := fmt.Sprintf("Query: %s\n\nShortlisted memories:\n%s\n\nReturn JSON {\"items\":[{\"id\",\"justification\",\"relevant\"}...]}", query, b.String())
-
-	var parsed struct {
-		Items []stagedJustifiedItem `json:"items"`
-	}
-	if err := callStagedLLM(ctx, s.Config, stagedStage3SystemPrompt, userMsg, &parsed); err != nil {
-		return nil, fmt.Errorf("stage3: %w", err)
-	}
-	return parsed.Items, nil
-}
-
-// callStagedLLM dispatches a single chat-completion via llm.ChatStructured.
-// Free function so the generic type T is inferred from the target argument
-// at call sites.
-func callStagedLLM[T any](ctx context.Context, cfg LLMConfig, systemPrompt, userMsg string, target *T) error {
-	client := llm.NewSimpleClient(cfg.APIURL, cfg.APIKey, cfg.Model)
-	return llm.ChatStructured(ctx, client, "d5_staged", []llm.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userMsg},
-	}, target,
-		llm.WithMaxTokens(stagedMaxTokens),
-		llm.WithTimeout(stagedTimeout),
-		llm.WithRespBodyLimit(stagedRespBodyLimit),
-	)
 }
 
 // reorderByIDs places items with IDs in `order` first (in that order),
