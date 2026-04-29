@@ -148,7 +148,10 @@ func (h *Handler) runAtomicFineForCube(ctx context.Context, req *fullAddRequest,
 	if len(req.Messages) == 0 {
 		return nil, nil
 	}
-	now := nowTimestamp()
+	// Prefer per-message chat_time over wall-clock — same anchor logic as
+	// the legacy fine path (add_fine.go) so atomic + legacy ingest paths
+	// share temporal-resolution semantics.
+	now := conversationNowAnchor(req.Messages)
 	sessionID := stringOrEmpty(req.SessionID)
 	conversation := formatConversation(req.Messages, now)
 

@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 const (
@@ -93,9 +94,45 @@ type ExtractedFact struct {
 	// by the user's messages (inferred or contradicted). Hallucinated facts are dropped
 	// before insert, eliminating the need for a separate filterHallucinatedFacts call.
 	Hallucinated bool `json:"hallucinated,omitempty"`
+	// EventDates are ISO-8601 (YYYY-MM-DD) calendar dates the fact references
+	// — explicit anchors only ("On August 17, 2023…", "Friday Oct 18", "August 2023").
+	// Empty when the fact has no explicit calendar date or only carries generic
+	// relative time ("yesterday", "last week"). F11 bi-temporal index
+	// (migration 0024_event_dates.sql) reads top-level properties.event_dates;
+	// see internal/db/postgres_temporal.go for the search-time consumer.
+	EventDates []string `json:"event_dates,omitempty"`
 	// ContentHash is the SHA-256 content hash set by the add pipeline before insert.
 	// Not populated by LLM — set by filterAddsByContentHash for dedup tracking.
 	ContentHash string `json:"-"`
+}
+
+// EdgeValidity derives the bi-temporal (valid_at, invalid_at) pair for an
+// edge written from this fact. F11 lift: explicit calendar dates the LLM
+// extracted into EventDates are the strongest signal of "fact happened on
+// date X" — they outrank ValidAt (chat-time fallback) on entity_edges and
+// memory_edges.
+//
+// Rules:
+//   - len(EventDates) >= 1 → valid_at = EventDates[0] + "T00:00:00Z"
+//     (the YYYY-MM-DD strings are pre-validated by validateISODates /
+//     filterISODatesNoCtx, so we promote without re-parsing).
+//   - len(EventDates) == 2 → invalid_at = EventDates[1] + "T00:00:00Z"
+//     (date range: start..end). Single-date facts leave invalid_at empty
+//     so the contradiction-judge / async validator can still decide.
+//   - len(EventDates) == 0 → fall back to ValidAt (legacy behaviour).
+//
+// fallbackValidAt is what the call site previously passed (typically
+// ExtractedFact.ValidAt). Returning it unchanged when EventDates is empty
+// preserves the pre-F11 path for facts without explicit calendar anchors.
+func (f *ExtractedFact) EdgeValidity(fallbackValidAt string) (validAt, invalidAt string) {
+	if f == nil || len(f.EventDates) == 0 {
+		return fallbackValidAt, ""
+	}
+	validAt = f.EventDates[0] + "T00:00:00Z"
+	if len(f.EventDates) >= 2 {
+		invalidAt = f.EventDates[1] + "T00:00:00Z"
+	}
+	return validAt, invalidAt
 }
 
 // PreferenceCategories is the closed enum of valid preference_category values
@@ -214,7 +251,7 @@ const unifiedSystemPrompt = `You are a long-term memory manager. Given a convers
 
 Resolution rules (D6 — apply BEFORE extracting any fact):
 - Resolve all pronouns ("she", "he", "they", "it", "this", "that") using the preceding conversation context. Replace them with the concrete referent name (e.g. "she" → "Caroline").
-- Convert relative temporal references to absolute when the context makes them unambiguous (e.g. "next Thursday" → "2026-04-30", "last week" → "the week of 2026-04-14", "yesterday" → the prior calendar date).
+- Convert relative temporal references to absolute using the "## Current Date" header below (the in-conversation anchor — NOT today's wall-clock). E.g. if Current Date is 2023-05-08: "yesterday" → "2023-05-07", "next Thursday" → the next Thursday after 2023-05-08, "last week" → the week before 2023-05-08. NEVER assume today's wall-clock when the Current Date header is present.
 - If a pronoun or temporal reference CANNOT be resolved reliably from context, leave it AS-IS and cap "confidence" at 0.7.
 - Store BOTH forms: "raw_text" = verbatim original from the conversation (for audit), "resolved_text" = the pronoun+temporal-resolved form (used as primary retrieval text).
 
@@ -235,6 +272,7 @@ For each fact, output a JSON object with these fields:
 - "confidence": float 0.0–1.0 — your certainty this is a real, useful fact. Cap at 0.7 when resolution (D6) left pronouns/temporal refs unresolved.
 - "target_id": (only for "update" or "delete") the id of the existing memory to change
 - "valid_at": ISO-8601 timestamp when this fact became true (resolve from conversation dates/times; omit if unknown)
+- "event_dates": REQUIRED array of ISO-8601 (YYYY-MM-DD) dates whenever the **raw_text** (verbatim source utterance) contains an explicit calendar reference. This field is INDEPENDENT of valid_at — emit BOTH when both apply (valid_at is the timestamp the fact became true; event_dates lists every calendar date the raw_text mentions). **Judge against raw_text, NOT resolved_text. The D6 resolution rule may convert "yesterday" → ISO inside resolved_text, but that resolution does NOT count as an explicit calendar reference for event_dates — only the verbatim raw_text counts.** Trigger conditions (raw_text MUST contain): full date ("August 17, 2023" → ["2023-08-17"]), month+year ("August 2023" → ["2023-08-01"]), weekday+month+day with year resolvable from raw_text context ("Friday Oct 18, 2024" → ["2024-10-18"]), date ranges (emit start AND end). Do NOT emit for generic relative time in raw_text like "yesterday", "last week", "next month", "this morning", "a few days ago", "recently", "soon", "the other day" — even if D6 resolved them to ISO inside resolved_text. Omit the field entirely when raw_text has no explicit calendar date; never emit an empty array or a placeholder. Examples: raw "On August 17, 2023 I went bowling" → "event_dates": ["2023-08-17"]. raw "I started the job in March 2025" → "event_dates": ["2025-03-01"]. raw "Yesterday I had coffee" → OMIT event_dates (raw_text has no explicit date even though D6 may put one in resolved_text). raw "I love hiking" → OMIT event_dates.
 - "hallucinated": true if the fact is NOT explicitly stated by the user (inferred, assumed, or contradicted by the user's words). Omit or set false for facts the user clearly stated.
 - "tags": an array of 2-4 strings representing key entities, topics or concepts extracted from this fact (e.g. ["Python", "Programming"]). Never leave empty for add/update.
 - "entities": array of named entities in this fact (up to 5): [{"name": "...", "type": "PERSON|ORG|PLACE|CONCEPT|PRODUCT"}]. Omit if no clear named entities exist.
@@ -296,8 +334,33 @@ Return ONLY a JSON array of fact objects (no "skip" entries needed). Return [] i
 // message to guide extraction focus. Pass no hints for default behavior.
 // Facts with confidence < MinConfidence are filtered out before returning.
 // The caller is responsible for acting on each fact's Action field.
+//
+// This wrapper uses today's UTC date as the D6 temporal anchor. Callers that
+// have an in-conversation date (e.g. LoCoMo chat_time) MUST use
+// ExtractAndDedupAt instead so "yesterday"/"next Thursday" resolve relative
+// to the conversation, not to today's wall-clock.
 func (e *LLMExtractor) ExtractAndDedup(ctx context.Context, conversation string, candidates []Candidate, hints ...string) ([]ExtractedFact, error) {
+	return e.ExtractAndDedupAt(ctx, conversation, candidates, "", hints...)
+}
+
+// ExtractAndDedupAt is ExtractAndDedup with an explicit "current date" anchor.
+//
+// `now` should be "YYYY-MM-DD" (the in-conversation date — typically the
+// latest message's chat_time). Empty string falls back to time.Now().UTC()
+// for non-LoCoMo callers that have no conversation timestamp.
+//
+// The anchor is injected into the user message under "## Current Date" so
+// the D6 resolution rule (relative → absolute temporal references) anchors
+// against the conversation, not today's wall-clock. This is the LoCoMo
+// data-fidelity fix: 2023-05-08 conversation MUST resolve "yesterday" to
+// 2023-05-07, not 2026-04-28.
+func (e *LLMExtractor) ExtractAndDedupAt(ctx context.Context, conversation string, candidates []Candidate, now string, hints ...string) ([]ExtractedFact, error) {
+	if strings.TrimSpace(now) == "" {
+		now = time.Now().UTC().Format("2006-01-02")
+	}
+
 	var sb strings.Builder
+	fmt.Fprintf(&sb, "## Current Date\n%s\n\n", now)
 	sb.WriteString("Conversation:\n")
 	sb.WriteString(conversation)
 
@@ -365,6 +428,34 @@ func (e *LLMExtractor) JudgeDedupMerge(ctx context.Context, newMem string, candi
 
 // --- Internal helpers ---
 
+// filterISODatesNoCtx is the context-less twin of validateISODates (atomic_extractor.go).
+// Drops entries that fail time.Parse against isoDateLayout. Returns nil for an empty
+// input or all-bad slice so the caller can omit the field entirely (json.Marshal with
+// omitempty will skip a nil slice). Bad entries are silently dropped — the OTel
+// counter in validateISODates is intentionally NOT mirrored here because parseExtractedFacts
+// runs without a request context, and the legacy-path drop rate is observable through
+// the F11 SQL coverage check ("count(properties ? 'event_dates')").
+func filterISODatesNoCtx(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, err := time.Parse(isoDateLayout, s); err != nil {
+			continue
+		}
+		out = append(out, s)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // parseExtractedFacts parses, validates, and filters a JSON array of ExtractedFact.
 // Facts with confidence < MinConfidence or empty memory (non-delete) are dropped.
 //
@@ -416,6 +507,11 @@ func parseExtractedFacts(raw string) ([]ExtractedFact, error) {
 		if f.Type != "PreferenceMemory" || !PreferenceCategories[f.PreferenceCategory] {
 			f.PreferenceCategory = ""
 		}
+		// F11: event_dates must parse as ISO-8601 (YYYY-MM-DD). Drop entries
+		// that don't (e.g. "summer 2023", "circa 2010", placeholder "YYYY-MM-DD")
+		// silently — same policy as the atomic extractor (see validateISODates).
+		// Nil result omits the field downstream.
+		f.EventDates = filterISODatesNoCtx(f.EventDates)
 		// Skip action: drop from output
 		if f.Action == MemSkip {
 			continue

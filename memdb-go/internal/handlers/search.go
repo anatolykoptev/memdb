@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
 
@@ -64,6 +66,19 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
+	// M9 dual-speaker fan-out branch. When len(Speakers)>=2, fan out one
+	// search per speaker in parallel, tag every memory with
+	// metadata.speaker_label, then merge per merge_strategy. Bypasses the
+	// per-cube cache because the merged result is request-shaped (speaker
+	// list + strategy + per-leg topK) — cache reuse is unsafe without a
+	// composite key. Single-speaker / no-speaker requests skip this and
+	// fall through to the legacy path below (zero behaviour change).
+	if len(req.Speakers) >= 2 {
+		h.handleDualSpeakerSearch(ctx, w, req, params)
+		return
+	}
+	observability.RecordDualSpeakerEngaged(ctx, "search", len(req.Speakers))
+
 	// Check cache (includes mode and level in key)
 	profileKey := derefStringOr(req.Profile, "default")
 	modeKey := derefStringOr(req.Mode, "fast")
@@ -71,9 +86,10 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 	// Include CubeID in the cache key: two requests for the same user but different
 	// readable_cube_ids must not collide. UserName is kept for audit/debug purposes
 	// but CubeID is the actual storage scope used by the read path.
-	cacheKey := fmt.Sprintf("%ssearch:%s:%s:%s:%s:%s:%s:%d:%d:%d:%s",
+	cacheKey := fmt.Sprintf("%ssearch:%s:%s:%s:%s:%s:%s:%d:%d:%d:%s:%s",
 		cachePrefix, profileKey, modeKey, levelKey, params.UserName, params.CubeID,
-		hashQuery(params.Query), params.TopK, params.SkillTopK, params.PrefTopK, params.Dedup)
+		hashQuery(params.Query), params.TopK, params.SkillTopK, params.PrefTopK, params.Dedup,
+		params.AttributedTo)
 	if cached := h.cacheGet(ctx, cacheKey); cached != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -119,6 +135,49 @@ func (h *Handler) NativeSearch(w http.ResponseWriter, r *http.Request) {
 	h.logSearchResult(output.Result, params.Query, params.Dedup)
 }
 
+// handleDualSpeakerSearch services a /product/search request with len(Speakers)>=2.
+// Builds a base SearchParams (UserName/CubeID get overridden per leg inside
+// runDualSpeakerSearch), invokes the parallel fan-out, then writes the
+// merged response in the standard envelope. Bypasses the per-cube cache —
+// the merged shape is request-shaped and cache reuse would need a composite
+// key that the M9 surface doesn't yet support.
+func (h *Handler) handleDualSpeakerSearch(ctx context.Context, w http.ResponseWriter, req searchRequest, params search.SearchParams) {
+	// Engagement metric: emit "enabled" for the count we're about to fan out.
+	observability.RecordDualSpeakerEngaged(ctx, "search", len(req.Speakers))
+
+	topKPerSpeaker := 0
+	if req.TopKPerSpeaker != nil {
+		topKPerSpeaker = *req.TopKPerSpeaker
+	}
+	mergeStrategy := ""
+	if req.MergeStrategy != nil {
+		mergeStrategy = *req.MergeStrategy
+	}
+
+	mode := ""
+	if req.Mode != nil {
+		mode = *req.Mode
+	}
+	output, err := h.runDualSpeakerSearch(ctx, req.Speakers, params, topKPerSpeaker, params.TopK, mergeStrategy, mode)
+	if err != nil {
+		h.logger.Error("dual_speaker search failed", slog.Any("error", err))
+		h.writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"code":    500,
+			"message": "search failed: " + err.Error(),
+			"data":    nil,
+		})
+		return
+	}
+
+	resp := map[string]any{
+		"code":    200,
+		"message": "Search completed successfully",
+		"data":    output.Result,
+	}
+	h.writeJSON(w, http.StatusOK, resp)
+	h.logSearchResult(output.Result, params.Query, params.Dedup)
+}
+
 // logSearchResult logs result counts after a successful native search.
 func (h *Handler) logSearchResult(result *search.SearchResult, query, dedup string) {
 	if result == nil {
@@ -158,7 +217,12 @@ func (h *Handler) logSearchResult(result *search.SearchResult, query, dedup stri
 // be built from p.CubeID, not p.UserName, so the filter matches the stored
 // value regardless of whether user_id == cube_id.
 func buildSearchParams(req searchRequest) (search.SearchParams, error) {
-	userName := *req.UserID
+	// UserID may be nil for the M9 dual-speaker path (validation pass when
+	// len(Speakers)>=2); the dual-speaker branch overrides UserName/CubeID
+	// per leg before issuing each search, so the empty default here is
+	// harmless. Single-speaker callers always have UserID guaranteed by
+	// validateSearchRequired.
+	userName := stringOrEmpty(req.UserID)
 	cubeID := userName
 	var cubeIDs []string
 	if req.ReadableCubeIDs != nil && len(*req.ReadableCubeIDs) > 0 {
@@ -247,6 +311,9 @@ func applySearchOverrides(params *search.SearchParams, req searchRequest) {
 	}
 	if req.LLMRerank != nil {
 		params.LLMRerank = *req.LLMRerank
+	}
+	if req.AttributedTo != nil {
+		params.AttributedTo = strings.TrimSpace(*req.AttributedTo)
 	}
 }
 

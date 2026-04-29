@@ -150,7 +150,7 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	memories, prefString, err := h.chatSearchMemories(ctx, &req)
+	memories, prefString, dualLegs, err := h.chatRetrieve(ctx, &req)
 	if err != nil {
 		h.logger.Warn("chat search failed", slog.Any("error", err))
 		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
@@ -161,11 +161,15 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	basePrompt := stringOrEmpty(req.SystemPrompt)
+	basePrompt := h.resolveBasePrompt(&req, dualLegs)
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
-	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID), profileCubeIDForRequest(&req))
+	profileSection := h.chatProfileSection(ctx, chatProfileUserID(&req), profileCubeIDForRequest(&req))
+	// M12.4: buildSystemPromptWithDecision now also routes the custom-prompt +
+	// factual branch (LoCoMo dual-speaker harness etc.), populating decision
+	// AND injecting the variant-marked anti-refusal rules block. No post-hoc
+	// decideFactualPrompt call needed here.
 	prompt, decision := buildSystemPromptWithDecision(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
-	recordChatPromptUsed(ctx, basePrompt, answerStyle)
+	recordChatPromptUsed(ctx, basePrompt, answerStyle, decision)
 	recordFactualPromptDecision(ctx, w, decision)
 	// M12.5: chat-path observability — top-1 cosine, context tokens. Recorded
 	// pre-LLM so even chats that fail downstream surface their input shape.
@@ -228,7 +232,7 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	memories, prefString, err := h.chatSearchMemories(ctx, &req)
+	memories, prefString, dualLegs, err := h.chatRetrieve(ctx, &req)
 	if err != nil {
 		h.logger.Warn("chat stream search failed", slog.Any("error", err))
 		h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
@@ -239,11 +243,13 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	basePrompt := stringOrEmpty(req.SystemPrompt)
+	basePrompt := h.resolveBasePrompt(&req, dualLegs)
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
-	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID), profileCubeIDForRequest(&req))
+	profileSection := h.chatProfileSection(ctx, chatProfileUserID(&req), profileCubeIDForRequest(&req))
+	// M12.4: buildSystemPromptWithDecision routes the custom-prompt + factual
+	// branch and injects the anti-refusal rules block. See NativeChatComplete.
 	prompt, decision := buildSystemPromptWithDecision(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
-	recordChatPromptUsed(ctx, basePrompt, answerStyle)
+	recordChatPromptUsed(ctx, basePrompt, answerStyle, decision)
 	// Set debug header BEFORE rpc.SSEHeaders writes response status — once
 	// SSEHeaders fires the header set is frozen.
 	recordFactualPromptDecision(ctx, w, decision)
@@ -333,8 +339,14 @@ func (h *Handler) emitSegment(sse *rpc.SSEWriter, seg chatSegment, fullResp *str
 // validateChatRequest validates a nativeChatRequest.
 func validateChatRequest(req *nativeChatRequest) []string {
 	var errs []string
-	if req.UserID == nil || *req.UserID == "" {
-		errs = append(errs, "user_id is required")
+	// M9 dual-speaker: when Speakers is empty, UserID is still required (legacy).
+	// When Speakers is non-empty, UserID is optional — handler defaults to
+	// Speakers[0] for cube/post-add scoping. This keeps existing single-speaker
+	// callers strict while letting dual-speaker callers omit UserID.
+	if len(req.Speakers) == 0 {
+		if req.UserID == nil || *req.UserID == "" {
+			errs = append(errs, "user_id is required")
+		}
 	}
 	if req.Query == nil || strings.TrimSpace(*req.Query) == "" {
 		errs = append(errs, "query is required and must be non-empty")
@@ -356,6 +368,19 @@ func validateChatRequest(req *nativeChatRequest) []string {
 	if req.Level != nil && *req.Level != "" {
 		if _, err := parseChatLevel(req); err != nil {
 			errs = append(errs, err.Error())
+		}
+	}
+	for i, s := range req.Speakers {
+		if s == "" {
+			errs = append(errs, fmt.Sprintf("speakers[%d] must be non-empty", i))
+		}
+	}
+	if req.TopKPerSpeaker != nil && *req.TopKPerSpeaker < 1 {
+		errs = append(errs, "top_k_per_speaker must be >= 1")
+	}
+	if req.MergeStrategy != nil {
+		if e := validateMergeStrategyValue(*req.MergeStrategy); e != "" {
+			errs = append(errs, e)
 		}
 	}
 	return errs

@@ -19,9 +19,21 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// promptTemplateLabel maps the (basePrompt, answerStyle) pair to the metric label
-// emitted by chat handlers. "custom" wins when basePrompt is non-empty (backward-compat).
-func promptTemplateLabel(basePrompt, answerStyle string) string {
+// promptTemplateLabel maps the (basePrompt, answerStyle, decision) triple to the
+// metric label emitted by chat handlers.
+//
+// Precedence:
+//  1. decision.Variant != none — factual routing was inspected (either applied to
+//     a server-default factual template, or recorded as a side-effect when caller
+//     supplied a custom basePrompt). Emit "factual_<variant>" so dashboards can
+//     compare high/low/zero confidence buckets across both prompt sources.
+//  2. basePrompt != "" — caller passed a custom system prompt and is not on the
+//     factual branch. Emit "custom" (legacy label preserved).
+//  3. otherwise — conversational/factual answer-style branches without custom prompt.
+func promptTemplateLabel(basePrompt, answerStyle string, decision factualPromptDecision) string {
+	if decision.Variant != factualVariantNone {
+		return "factual_" + string(decision.Variant)
+	}
 	if basePrompt != "" {
 		return "custom"
 	}
@@ -33,9 +45,9 @@ func promptTemplateLabel(basePrompt, answerStyle string) string {
 
 // recordChatPromptUsed bumps memdb.chat.prompt_template_used_total{template=...}.
 // Called once per chat request right after buildSystemPrompt returns.
-func recordChatPromptUsed(ctx context.Context, basePrompt, answerStyle string) {
+func recordChatPromptUsed(ctx context.Context, basePrompt, answerStyle string, decision factualPromptDecision) {
 	chatPromptMx().TemplateUsed.Add(ctx, 1,
-		metric.WithAttributes(attribute.String("template", promptTemplateLabel(basePrompt, answerStyle))),
+		metric.WithAttributes(attribute.String("template", promptTemplateLabel(basePrompt, answerStyle, decision))),
 	)
 }
 

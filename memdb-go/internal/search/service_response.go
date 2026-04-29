@@ -11,6 +11,14 @@ func (s *SearchService) formatWorkingMem(queryVec []float32, items []db.VectorSe
 	if len(items) == 0 {
 		return nil
 	}
+	// Same attribution filter as mergeSearchResults — keep act_mem coherent
+	// with text_mem when caller scopes a single-speaker perspective.
+	if p.AttributedTo != "" {
+		items = filterByAttribution(items, p.AttributedTo)
+		if len(items) == 0 {
+			return nil
+		}
+	}
 	wmMerged := make([]MergedResult, 0, len(items))
 	for _, r := range items {
 		wmMerged = append(wmMerged, MergedResult{

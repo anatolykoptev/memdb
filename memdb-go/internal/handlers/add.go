@@ -336,6 +336,38 @@ func observationDateFromMessages(messages []chatMessage) string {
 	return ""
 }
 
+// conversationNowAnchor returns the temporal "now" anchor for prompt-level
+// rules (D6 resolution, F3 event extractor, episodic summary). Prefers the
+// latest message's chat_time so LoCoMo / replay / archival ingest resolve
+// "yesterday" relative to the conversation date, not server wall-clock today.
+// Returns the same Python-compatible RFC3339 microsecond format as
+// nowTimestamp() so downstream parsers (parseNowAnchor, formatConversation
+// fallback) keep working. Falls back to wall-clock when no chat_time is
+// stamped (live-chat callers, buffer flush, admin reprocess).
+func conversationNowAnchor(messages []chatMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		ct := strings.TrimSpace(messages[i].ChatTime)
+		if ct == "" {
+			continue
+		}
+		// Try common formats and re-emit in nowTimestamp() shape.
+		layouts := []string{
+			time.RFC3339Nano,
+			time.RFC3339,
+			"2006-01-02T15:04:05.000000",
+			"2006-01-02T15:04:05",
+			"2006-01-02 15:04:05",
+			"2006-01-02",
+		}
+		for _, l := range layouts {
+			if t, err := time.Parse(l, ct); err == nil {
+				return t.UTC().Format("2006-01-02T15:04:05.000000")
+			}
+		}
+	}
+	return nowTimestamp()
+}
+
 // nowUnix returns the current Unix timestamp in seconds.
 func nowUnix() int64 {
 	return time.Now().Unix()
