@@ -906,6 +906,11 @@ def query_chat_dual(
         "include_preference": False,
         "threshold": _CHAT_RETRIEVAL_SUPPRESS_THRESHOLD,
         "system_prompt": system_prompt,
+        # M12.4 routing trigger: server's buildSystemPromptWithDecision
+        # injects variant-conditional anti-refusal rules ONLY when answer_style
+        # is "factual" — the dual-speaker harness path was silently bypassing
+        # M12.4 because this flag was missing, leaving 48% chat_refused_with_evidence.
+        "answer_style": "factual",
     }
     start = time.time()
     resp = requests.post(
