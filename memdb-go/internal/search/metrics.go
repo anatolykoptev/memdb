@@ -59,8 +59,8 @@ type searchMetricsInstruments struct {
 	// Label: stage = "d4" | "d7".
 	RewriteCacheHit  metric.Int64Counter
 	RewriteCacheMiss metric.Int64Counter
-	// RRFEngaged counts calls that went through the go-kit/rerank.RRF path
-	// (MEMDB_USE_GOKIT_RRF=1). Zero when env is unset (legacy path active).
+	// RRFEngaged counts fusion calls by strategy label (strategy=rrf|wrrf|dbsf|linear).
+	// Zero when MEMDB_FUSION_STRATEGY is unset and legacy path is active.
 	RRFEngaged metric.Int64Counter
 	// RRFKGauge records the k constant used each time go-kit RRF fires.
 	// Lets operators confirm MEMDB_RRF_K override is picked up.
@@ -131,7 +131,7 @@ func searchMx() *searchMetricsInstruments {
 		rwMiss, _ := m.Int64Counter("memdb.search.rewrite_cache_miss_total",
 			metric.WithDescription("D4/D7 rewrite LRU cache misses by stage (stage=d4|d7)"))
 		rrfEng, _ := m.Int64Counter("memdb.search.rrf_engaged_total",
-			metric.WithDescription("go-kit/rerank.RRF fusion calls (MEMDB_USE_GOKIT_RRF=1 active); 0 when legacy path is used"))
+			metric.WithDescription("go-kit fusion calls by strategy (strategy=rrf|wrrf|dbsf|linear); 0 when legacy path is used"))
 		rrfK, _ := m.Float64Histogram("memdb.search.rrf_k",
 			metric.WithDescription("RRF k constant used per go-kit RRF fusion call (set via MEMDB_RRF_K, default 60)"),
 			metric.WithExplicitBucketBoundaries(10, 20, 30, 60, 100, 200))
@@ -219,9 +219,11 @@ func searchMx() *searchMetricsInstruments {
 			rwHit.Add(ctx, 0, metric.WithAttributes(attribute.String("stage", stage)))
 			rwMiss.Add(ctx, 0, metric.WithAttributes(attribute.String("stage", stage)))
 		}
-		// Pre-register go-kit RRF counters at zero so dashboards see the
-		// series even when MEMDB_USE_GOKIT_RRF is not yet enabled.
-		rrfEng.Add(ctx, 0)
+		// Pre-register fusion-strategy counters at zero so dashboards see all
+		// strategy series from container start, before any fusion fires.
+		for _, strat := range []string{"rrf", "wrrf", "dbsf", "linear"} {
+			rrfEng.Add(ctx, 0, metric.WithAttributes(attribute.String("strategy", strat)))
+		}
 		rrfK.Record(ctx, 0)
 		// Pre-register Task #100 counting boost outcomes so dashboards see both
 		// series from container start, before the first counting query arrives.
