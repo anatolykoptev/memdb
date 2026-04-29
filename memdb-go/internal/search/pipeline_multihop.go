@@ -180,14 +180,19 @@ func (s *SearchService) stageD2GraphExpand(ctx context.Context, st *pipelineStat
 // the GIN-index path is cheap (single round-trip, no recursion). 1-hop
 // only — multi-hop is left to D2.
 //
-// Env-gate: MEMDB_F12_LINKED — default ON. Set to "0"/"false"/"no"/"off"
-// to disable.  Soft-fails on DB error (logs Debug, returns input).
+// Env-gate: MEMDB_F12_LINKED_EXPAND — default OFF (M14.Y1). Set to "1" to
+// enable. Disabled by default because production ingest uses Python mode=raw
+// which does not populate linked_memory_ids, so the GIN-index query returns
+// empty results on every search (~5ms × 123 calls wasted). Flip to "1" once
+// the atomic ingest path is the primary production path.
+// Soft-fails on DB error (logs Debug, returns input).
 //
 // Latency budget: +50ms p95 — single index-bound query, scored on cosine
 // against the query vector when the linked memory carries an embedding
 // (which all post-F8 atomic facts do).
 func (s *SearchService) stageLinkedExpand(ctx context.Context, st *pipelineState) error {
 	if !linkedExpandEnabled() {
+		linkedExpandRecord(ctx, "disabled", 0, 0)
 		st.skip("linked_expand")
 		return nil
 	}
