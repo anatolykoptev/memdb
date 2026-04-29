@@ -330,6 +330,39 @@ def main() -> int:
         default=10,
         help="Concurrent judge calls (default: 10).",
     )
+    # M13 J3-Q — multi-query reassembler judge.  Replaces the binary
+    # llm_judge with a 5pt judge that sees the union of memories retrieved
+    # across paraphrased sub-queries (recorded by query.py --multi-query).
+    # Falls back to the binary judge with a warning when the predictions
+    # JSON does not carry a `multi_query` block, so it's safe to pass on
+    # any predictions file (NEVER silent-disables).
+    p.add_argument(
+        "--multi-query",
+        action="store_true",
+        help=(
+            "Enable M13 J3-Q reassembler judge. Requires predictions JSON "
+            "produced with `query.py --multi-query` (each rec carries a "
+            "`multi_query.union` block). When the block is missing, the "
+            "row is judged via the legacy binary judge with a warning."
+        ),
+    )
+    p.add_argument(
+        "--multi-query-model",
+        default=os.getenv("LOCOMO_REASSEMBLER_MODEL", "gemini-2.5-flash"),
+        help=(
+            "Model for the reassembler judge (default: gemini-2.5-flash). "
+            "Env: LOCOMO_REASSEMBLER_MODEL."
+        ),
+    )
+    p.add_argument(
+        "--multi-query-binary-threshold",
+        type=int,
+        default=3,
+        help=(
+            "5pt → binary cutoff (default 3).  score_5pt >= threshold "
+            "⇒ CORRECT.  Lower for more permissive scoring."
+        ),
+    )
     args = p.parse_args()
     extra_excl = parse_exclude_categories(args.exclude_categories)
 
@@ -373,24 +406,83 @@ def main() -> int:
                 "semsim": sim,
                 "hit_at_k": h,
                 "error": rec.get("error"),
+                # Private — stripped before write_json.  The reassembler
+                # judge needs the union of memories from the multi-query
+                # block; we attach a reference here so the parallel worker
+                # has everything in one place without a second pass.
+                "_mq_block": rec.get("multi_query"),
             }
         )
 
     # ----- LLM Judge (concurrent) -----
     if args.llm_judge:
+        # Path-A: binary llm_judge (legacy).  Path-B: M13 J3-Q multi-query
+        # reassembler.  Both share the worker pool so the rest of the
+        # plumbing (cache flush, error count, progress logs) is uniform.
         from llm_judge import get_shared_cache, judge  # noqa: PLC0415
 
         judge_cache = get_shared_cache()
         judge_api_base = os.getenv("LLM_API_BASE", "http://127.0.0.1:8317/v1")
         judge_api_key = os.getenv("CLI_PROXY_API_KEY") or os.getenv("LLM_API_KEY") or ""
 
-        print(
-            f"Running LLM Judge ({args.llm_judge_model}, "
-            f"workers={args.llm_judge_workers}, n={len(per_qa)}) ...",
-            file=sys.stderr,
-        )
+        # Lazy import for the reassembler — only when --multi-query is set
+        # (otherwise the import is wasted on every score run).
+        reassemble_verdict = None
+        if args.multi_query:
+            from judge_multi_query_reassembler import (  # noqa: PLC0415
+                reassemble_verdict as _rv,
+            )
+            reassemble_verdict = _rv  # type: ignore[assignment]
+            print(
+                f"Running LLM Judge (M13 J3-Q multi-query reassembler "
+                f"{args.multi_query_model}, threshold={args.multi_query_binary_threshold}, "
+                f"workers={args.llm_judge_workers}, n={len(per_qa)}) ...",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"Running LLM Judge ({args.llm_judge_model}, "
+                f"workers={args.llm_judge_workers}, n={len(per_qa)}) ...",
+                file=sys.stderr,
+            )
+
+        # Track how many rows actually used the multi-query path vs the
+        # binary fallback (when the rec has no multi_query block).
+        mq_rows = 0
+        mq_fallback_rows = 0
 
         def _judge_row(row: dict) -> dict:
+            mq_block = row.get("_mq_block") if args.multi_query else None
+            if (
+                args.multi_query
+                and isinstance(mq_block, dict)
+                and isinstance(mq_block.get("union"), list)
+                and reassemble_verdict is not None
+            ):
+                verdict = reassemble_verdict(
+                    question=row.get("question") or "",
+                    gold=row.get("gold_answer") or "",
+                    sub_queries=list(mq_block.get("sub_queries") or []),
+                    union_memories=list(mq_block.get("union") or []),
+                    model=args.multi_query_model,
+                    api_base=judge_api_base,
+                    api_key=judge_api_key,
+                    binary_threshold=args.multi_query_binary_threshold,
+                )
+                return {
+                    "score": verdict.score,
+                    "reason": verdict.reason,
+                    "score_5pt": verdict.score_5pt,
+                    "matched_facts": verdict.matched_facts,
+                    "missing_facts": verdict.missing_facts,
+                    "judge_path": "multi_query_reassembler",
+                }
+            # Fallback: binary judge.  Either --multi-query was off, or
+            # the prediction record has no multi_query block (older file).
+            if args.multi_query and not isinstance(mq_block, dict):
+                # Surface so operators don't run a "multi-query" report on
+                # the wrong predictions file.
+                pass  # warning is printed once outside the worker
             result = judge(
                 question=row.get("question") or "",
                 gold=row.get("gold_answer") or "",
@@ -400,7 +492,23 @@ def main() -> int:
                 api_key=judge_api_key,
                 cache=judge_cache,
             )
+            result["judge_path"] = "binary_fallback"
             return result
+
+        if args.multi_query:
+            n_with_block = sum(
+                1 for r in per_qa if isinstance(r.get("_mq_block"), dict)
+                and isinstance((r.get("_mq_block") or {}).get("union"), list)
+            )
+            n_missing = len(per_qa) - n_with_block
+            if n_missing > 0:
+                print(
+                    f"  WARNING: {n_missing}/{len(per_qa)} rows have no "
+                    f"`multi_query.union` block — those will use the "
+                    f"binary judge fallback. Re-run query.py with "
+                    f"--multi-query to populate them.",
+                    file=sys.stderr,
+                )
 
         try:
             with ThreadPoolExecutor(max_workers=args.llm_judge_workers) as executor:
@@ -411,15 +519,41 @@ def main() -> int:
                     result = fut.result()
                     per_qa[idx]["llm_score"] = result["score"]
                     per_qa[idx]["llm_reason"] = result["reason"]
+                    if "score_5pt" in result:
+                        per_qa[idx]["llm_score_5pt"] = result["score_5pt"]
+                        per_qa[idx]["llm_matched_facts"] = result.get("matched_facts", [])
+                        per_qa[idx]["llm_missing_facts"] = result.get("missing_facts", [])
+                    per_qa[idx]["llm_judge_path"] = result.get("judge_path", "binary")
+                    if result.get("judge_path") == "multi_query_reassembler":
+                        mq_rows += 1
+                    elif result.get("judge_path") == "binary_fallback":
+                        mq_fallback_rows += 1
                     done += 1
                     if done % 50 == 0:
                         print(f"  judge {done}/{len(per_qa)} ...", file=sys.stderr)
         finally:
             judge_cache.flush()
+            if args.multi_query and reassemble_verdict is not None:
+                # Flush reassembler cache too.
+                from judge_multi_query_reassembler import (  # noqa: PLC0415
+                    flush_shared_cache as _flush_mq,
+                )
+                _flush_mq()
 
+        if args.multi_query:
+            print(
+                f"  judge paths: multi_query={mq_rows} "
+                f"binary_fallback={mq_fallback_rows}",
+                file=sys.stderr,
+            )
         errors = sum(1 for r in per_qa if str(r.get("llm_reason", "")).startswith("judge_error:"))
         if errors:
             print(f"  judge_error count: {errors}/{len(per_qa)}", file=sys.stderr)
+
+    # Strip private `_mq_block` before serialization — it's only needed
+    # by the judge worker and would bloat the per_qa output JSON.
+    for r in per_qa:
+        r.pop("_mq_block", None)
 
     agg = summarize(per_qa)
     # Build dual-track (and any extra) aggregate dicts
@@ -436,6 +570,13 @@ def main() -> int:
             "semsim_mode": semsim_mode,
             "exclude_categories": sorted(extra_excl) if extra_excl else [],
             "llm_judge_model": args.llm_judge_model if args.llm_judge else None,
+            "multi_query_enabled": bool(args.multi_query),
+            "multi_query_model": (
+                args.multi_query_model if args.multi_query else None
+            ),
+            "multi_query_binary_threshold": (
+                args.multi_query_binary_threshold if args.multi_query else None
+            ),
             **pred_doc.get("meta", {}),
         },
         "aggregate": agg,

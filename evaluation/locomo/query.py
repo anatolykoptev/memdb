@@ -72,6 +72,13 @@ from typing import Any, Callable, TypeVar
 
 import requests
 
+# Make the locomo dir importable when running as a script from the repo root
+# (parity with the test bootstrap).  Imports below MUST stay below this so
+# the mq modules find their siblings (judge_query_splitter, etc.).
+_LOCOMO_DIR = Path(__file__).resolve().parent
+if str(_LOCOMO_DIR) not in sys.path:
+    sys.path.insert(0, str(_LOCOMO_DIR))
+
 # LoCoMo's raw-mode memories are short verbatim dialogue turns ("Caroline: Hey Mel!").
 # Question-form queries match these at cosine ~0.15-0.30, well below the
 # DefaultRelativity=0.5 threshold in memdb-go/internal/search/config.go.
@@ -1206,6 +1213,75 @@ def main() -> int:
             "(useful for targeted re-runs of previously failed questions)."
         ),
     )
+    # M13 J3-Q — multi-query expansion (opt-in).
+    # When enabled, each question is paraphrased into N sub-queries via an
+    # LLM splitter, each sub-query runs through the existing /product/search
+    # pipeline in parallel, and the deduped union is recorded alongside the
+    # legacy single-query retrieval.  The union is what score.py's
+    # reassembler judge consumes, so cat-1 multi-fact aggregation gets
+    # broader coverage without changing the chat path.
+    #
+    # NEVER silently disables the single-query path: when --multi-query is
+    # off (default) behaviour is unchanged.  When on, the single-query
+    # retrieval still happens and is recorded under `retrieved` so existing
+    # downstream tools (compare.py, M12.5 observability) keep working.
+    p.add_argument(
+        "--multi-query",
+        action="store_true",
+        help=(
+            "Enable M13 J3-Q multi-query expansion. Paraphrases each question "
+            "into N sub-queries (default 3), runs each through retrieval in "
+            "parallel, and records the deduped union for use by the "
+            "reassembler judge in score.py.  Chat path is unchanged."
+        ),
+    )
+    p.add_argument(
+        "--multi-query-variants",
+        type=int,
+        default=3,
+        metavar="N",
+        help=(
+            "Number of paraphrased sub-queries per question (default 3). "
+            "Includes the original question as variant[0] when "
+            "--multi-query-include-original (default true)."
+        ),
+    )
+    p.add_argument(
+        "--multi-query-model",
+        default=os.getenv("LOCOMO_SPLITTER_MODEL", "gemini-2.5-flash"),
+        help=(
+            "LLM used by the splitter (default: gemini-2.5-flash). "
+            "Env: LOCOMO_SPLITTER_MODEL."
+        ),
+    )
+    p.add_argument(
+        "--multi-query-temperature",
+        type=float,
+        default=0.3,
+        help=(
+            "Sampling temperature for the splitter LLM (default 0.3 — mild "
+            "diversity without inventing entities)."
+        ),
+    )
+    p.add_argument(
+        "--multi-query-max-union",
+        type=int,
+        default=60,
+        metavar="N",
+        help=(
+            "Cap on the union size after dedupe (default 60). Bounds the "
+            "context bloat passed to the reassembler judge."
+        ),
+    )
+    p.add_argument(
+        "--multi-query-no-include-original",
+        action="store_true",
+        help=(
+            "Do NOT prepend the original question as the first sub-query. "
+            "Off by default — including the original guarantees the union "
+            "is a strict superset of single-query retrieval."
+        ),
+    )
     args = p.parse_args()
 
     try:
@@ -1256,6 +1332,26 @@ def main() -> int:
         f"(env LOCOMO_DUAL_SPEAKER={os.getenv('LOCOMO_DUAL_SPEAKER', '<unset>')!r})",
         flush=True,
     )
+
+    multi_query_enabled = bool(args.multi_query)
+    if multi_query_enabled:
+        # Lazy import — keeps default-path startup free of unused module loads.
+        from judge_multi_query_retrieval import (  # noqa: PLC0415
+            MultiQueryConfig,
+            multi_query_retrieve,
+        )
+        from judge_query_splitter import SplitterConfig  # noqa: PLC0415
+
+        print(
+            f"[query] multi_query=ON variants={args.multi_query_variants} "
+            f"model={args.multi_query_model} max_union={args.multi_query_max_union} "
+            f"include_original={not args.multi_query_no_include_original}",
+            flush=True,
+        )
+    else:
+        MultiQueryConfig = None  # type: ignore[assignment]
+        multi_query_retrieve = None  # type: ignore[assignment]
+        SplitterConfig = None  # type: ignore[assignment]
     if dual_speaker:
         print(
             f"[query] top_k_per_speaker={args.top_k_per_speaker} "
@@ -1394,6 +1490,63 @@ def main() -> int:
                     rec.setdefault("_errors", []).append(rec["error"])
                     print(f"  CHAT ERROR: {exc}", file=sys.stderr, flush=True)
 
+        # M13 J3-Q: optional multi-query expansion.  Runs AFTER the legacy
+        # retrieval/chat path completes so the original `retrieved` field is
+        # always populated (single-query baseline preserved for compare.py).
+        # Multi-query union is stored on a separate `multi_query` block —
+        # score.py reads it when --multi-query is also passed there.
+        # Wrapped in try/except so a multi-query failure never breaks the
+        # primary prediction record (fail-open to single-query).
+        if multi_query_enabled:
+            mq_start = time.time()
+            try:
+                splitter_cfg = SplitterConfig(  # type: ignore[misc]
+                    n_variants=args.multi_query_variants,
+                    model=args.multi_query_model,
+                    temperature=args.multi_query_temperature,
+                )
+                if dual_speaker:
+                    mq_cfg = MultiQueryConfig(  # type: ignore[misc]
+                        splitter=splitter_cfg,
+                        memdb_url=args.memdb_url,
+                        conv_id=qa["conv_id"],
+                        top_k_per_speaker=args.top_k_per_speaker,
+                        top_k=args.top_k,
+                        max_union_size=args.multi_query_max_union,
+                        include_original=not args.multi_query_no_include_original,
+                    )
+                else:
+                    user_id_mq = f"{qa['conv_id']}__speaker_{args.speaker}"
+                    mq_cfg = MultiQueryConfig(  # type: ignore[misc]
+                        splitter=splitter_cfg,
+                        memdb_url=args.memdb_url,
+                        user_id=user_id_mq,
+                        top_k=args.top_k,
+                        max_union_size=args.multi_query_max_union,
+                        include_original=not args.multi_query_no_include_original,
+                    )
+                mq_result = multi_query_retrieve(question, mq_cfg)  # type: ignore[misc]
+                rec["multi_query"] = {
+                    "enabled": True,
+                    "sub_queries": mq_result["sub_queries"],
+                    "union": mq_result["union"],
+                    "union_size_before_cap": mq_result["union_size_before_cap"],
+                    "union_size_after_cap": mq_result["union_size_after_cap"],
+                    "errors": mq_result["errors"],
+                    "ms": int((time.time() - mq_start) * 1000),
+                }
+            except Exception as exc:  # noqa: BLE001 — fail-open to single-query
+                rec["multi_query"] = {
+                    "enabled": True,
+                    "error": f"{type(exc).__name__}: {str(exc)[:240]}",
+                    "ms": int((time.time() - mq_start) * 1000),
+                }
+                print(
+                    f"  MULTI-QUERY ERROR (fail-open): {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
         return rec
 
     if args.workers > 1:
@@ -1450,6 +1603,20 @@ def main() -> int:
                     "retry_on_timeout": retry_n,
                     "retry_backoff_base": retry_backoff,
                     "per_question_deadline": per_q_deadline,
+                    "multi_query_enabled": multi_query_enabled,
+                    "multi_query_variants": (
+                        args.multi_query_variants if multi_query_enabled else None
+                    ),
+                    "multi_query_model": (
+                        args.multi_query_model if multi_query_enabled else None
+                    ),
+                    "multi_query_max_union": (
+                        args.multi_query_max_union if multi_query_enabled else None
+                    ),
+                    "multi_query_include_original": (
+                        (not args.multi_query_no_include_original)
+                        if multi_query_enabled else None
+                    ),
                 },
             },
             f,
