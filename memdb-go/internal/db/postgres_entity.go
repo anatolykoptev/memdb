@@ -13,7 +13,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 )
 
 // EntitySimilarityThreshold is the minimum cosine similarity (0–1) for two entity names
@@ -114,24 +117,36 @@ func (p *Postgres) FindEntitiesByNormalizedID(ctx context.Context, normalizedIDs
 
 // GetMemoriesByEntityIDs returns activated memory nodes that mention any of the
 // given entity IDs via MENTIONS_ENTITY edges. Used for entity-graph recall in search.
+//
+// M12.5: wrapped via observability.MeasureQuery — surfaces the entity-recall
+// latency spike that historically presented as "search feels slow" but
+// wasn't pinpointable to entity vs vector vs BFS.
 func (p *Postgres) GetMemoriesByEntityIDs(ctx context.Context, entityIDs []string, cubeID, personID string, limit int) ([]GraphRecallResult, error) {
 	if len(entityIDs) == 0 {
 		return nil, nil
 	}
 	q := fmt.Sprintf(queries.GetMemoriesByEntityIDs, graphName)
-	rows, err := p.pool.Query(ctx, q, cubeID, personID, entityIDs, limit)
+	results, err := observability.MeasureQuery(ctx, "GetMemoriesByEntityIDs", p.pool, func(conn *pgxpool.Conn) ([]GraphRecallResult, error) {
+		rows, err := conn.Query(ctx, q, cubeID, personID, entityIDs, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []GraphRecallResult
+		var scanned int64
+		for rows.Next() {
+			var r GraphRecallResult
+			if err := rows.Scan(&r.ID, &r.Properties); err != nil {
+				continue
+			}
+			out = append(out, r)
+			scanned++
+		}
+		observability.AddRowsScanned(ctx, "GetMemoriesByEntityIDs", scanned)
+		return out, rows.Err()
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get memories by entity ids: %w", err)
 	}
-	defer rows.Close()
-
-	var results []GraphRecallResult
-	for rows.Next() {
-		var r GraphRecallResult
-		if err := rows.Scan(&r.ID, &r.Properties); err != nil {
-			continue
-		}
-		results = append(results, r)
-	}
-	return results, rows.Err()
+	return results, nil
 }

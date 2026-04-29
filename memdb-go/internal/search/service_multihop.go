@@ -26,6 +26,8 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 )
 
 // multihopDecay / multihopMaxDepth — defaults live in tuning.go as
@@ -202,6 +204,10 @@ func expandViaGraph(
 	out = append(out, expansionItems...)
 	searchMx().HopsPerQuery.Record(ctx, int64(maxHop),
 		metric.WithAttributes(attribute.String("outcome", "expanded")))
+	// M12.5: how many neighbours did D2 actually inject? Pairs with
+	// memdb_search_d2_hops_per_query (depth) — both together let ops tell
+	// "deep walk, narrow yield" from "shallow walk, wide yield" failure modes.
+	observability.RecordD2AddedCandidates(ctx, len(expansionItems), cubeID)
 	if logger != nil {
 		logger.Debug("d2: multi-hop expanded",
 			slog.Int("seed_count", origSize),

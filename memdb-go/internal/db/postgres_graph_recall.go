@@ -8,7 +8,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 )
 
 // GraphRecallResult holds a single result from graph-based recall.
@@ -104,26 +107,39 @@ func (p *Postgres) GraphRecallByTags(ctx context.Context, cubeID, personID strin
 
 // GraphBFSTraversal expands seed node IDs up to `depth` hops via working_binding relationships.
 // Returns neighboring nodes not already in the seed set.
+//
+// M12.5: wrapped via observability.MeasureQuery so per-query latency lands
+// on memdb_db_query_duration_ms{query_name=GraphBFSTraversal}. Pairs with
+// the existing M11 hot-path indexes — if BFS p99 spikes after a deploy, we
+// see it in seconds via the histogram instead of "users complain about chat".
 func (p *Postgres) GraphBFSTraversal(ctx context.Context, seedIDs []string, cubeID, personID string, memoryTypes []string, depth, limit int, agentID string) ([]GraphRecallResult, error) {
 	if len(seedIDs) == 0 || depth <= 0 {
 		return nil, nil
 	}
 	q := fmt.Sprintf(queries.GraphBFSTraversal, graphName)
-	rows, err := p.pool.Query(ctx, q, seedIDs, cubeID, personID, memoryTypes, depth, limit, agentID)
+	results, err := observability.MeasureQuery(ctx, "GraphBFSTraversal", p.pool, func(conn *pgxpool.Conn) ([]GraphRecallResult, error) {
+		rows, err := conn.Query(ctx, q, seedIDs, cubeID, personID, memoryTypes, depth, limit, agentID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var out []GraphRecallResult
+		var scanned int64
+		for rows.Next() {
+			var r GraphRecallResult
+			if err := rows.Scan(&r.ID, &r.Properties); err != nil {
+				return nil, fmt.Errorf("graph bfs scan: %w", err)
+			}
+			out = append(out, r)
+			scanned++
+		}
+		observability.AddRowsScanned(ctx, "GraphBFSTraversal", scanned)
+		return out, rows.Err()
+	})
 	if err != nil {
 		return nil, fmt.Errorf("graph bfs traversal: %w", err)
 	}
-	defer rows.Close()
-
-	var results []GraphRecallResult
-	for rows.Next() {
-		var r GraphRecallResult
-		if err := rows.Scan(&r.ID, &r.Properties); err != nil {
-			return nil, fmt.Errorf("graph bfs scan: %w", err)
-		}
-		results = append(results, r)
-	}
-	return results, rows.Err()
+	return results, nil
 }
 
 // MultiHopEdgeExpansion performs a depth-limited BFS over the memory_edges

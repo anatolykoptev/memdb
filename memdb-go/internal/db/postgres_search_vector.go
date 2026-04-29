@@ -10,7 +10,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 )
 
 // VectorSearchResult holds a single result from vector or fulltext search.
@@ -61,24 +64,42 @@ func ParseVectorString(s string) []float32 {
 
 // VectorSearch performs cosine similarity search across multiple memory types.
 // Returns results sorted by similarity score (descending).
+//
+// M12.5: wrapped via observability.MeasureQuery so per-query latency and pool
+// acquire wait time land on memdb_db_query_duration_ms{query_name=VectorSearch}
+// and memdb_db_pgxpool_acquire_ms{query_name=VectorSearch}.
 func (p *Postgres) VectorSearch(ctx context.Context, vector []float32, cubeID, personID string, memoryTypes []string, agentID string, limit int) ([]VectorSearchResult, error) {
 	vecStr := FormatVector(vector)
 	q := fmt.Sprintf(queries.VectorSearch, graphName)
-	rows, err := p.pool.Query(ctx, q, vecStr, cubeID, personID, memoryTypes, limit, agentID)
+	results, err := observability.MeasureQuery(ctx, "VectorSearch", p.pool, func(conn *pgxpool.Conn) ([]VectorSearchResult, error) {
+		return scanVectorSearchRows(ctx, conn, "VectorSearch", q, vecStr, cubeID, personID, memoryTypes, limit, agentID)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
-	defer rows.Close()
+	return results, nil
+}
 
+// scanVectorSearchRows is shared between VectorSearch / multi-cube / cutoff —
+// they differ only in args. Bumps memdb_db_rows_scanned_total per call.
+func scanVectorSearchRows(ctx context.Context, conn *pgxpool.Conn, queryName, q string, args ...any) ([]VectorSearchResult, error) {
+	rows, err := conn.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	var results []VectorSearchResult
+	var scanned int64
 	for rows.Next() {
 		var r VectorSearchResult
 		if err := rows.Scan(&r.ID, &r.Properties, &r.Score, &r.EmbeddingStr); err != nil {
-			return nil, fmt.Errorf("vector search scan: %w", err)
+			return nil, fmt.Errorf("%s scan: %w", queryName, err)
 		}
 		r.Embedding = ParseVectorString(r.EmbeddingStr)
 		results = append(results, r)
+		scanned++
 	}
+	observability.AddRowsScanned(ctx, queryName, scanned)
 	return results, rows.Err()
 }
 
@@ -86,45 +107,31 @@ func (p *Postgres) VectorSearch(ctx context.Context, vector []float32, cubeID, p
 // Used for cross-domain experience memory: a successful flow on
 // site A can be found when handling site B if both are in cubeIDs.
 // Behaviour is otherwise identical to VectorSearch.
+//
+// M12.5: shares the "VectorSearch" query_name label with the single-cube
+// VectorSearch — same SQL shape, different args. Splitting the label would
+// double dashboard noise without adding signal.
 func (p *Postgres) VectorSearchMultiCube(ctx context.Context, vector []float32, cubeIDs []string, personID string, memoryTypes []string, agentID string, limit int) ([]VectorSearchResult, error) {
 	vecStr := FormatVector(vector)
 	q := fmt.Sprintf(queries.VectorSearchMultiCube, graphName)
-	rows, err := p.pool.Query(ctx, q, vecStr, cubeIDs, personID, memoryTypes, limit, agentID)
+	results, err := observability.MeasureQuery(ctx, "VectorSearch", p.pool, func(conn *pgxpool.Conn) ([]VectorSearchResult, error) {
+		return scanVectorSearchRows(ctx, conn, "VectorSearch", q, vecStr, cubeIDs, personID, memoryTypes, limit, agentID)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("vector search multi-cube: %w", err)
 	}
-	defer rows.Close()
-
-	var results []VectorSearchResult
-	for rows.Next() {
-		var r VectorSearchResult
-		if err := rows.Scan(&r.ID, &r.Properties, &r.Score, &r.EmbeddingStr); err != nil {
-			return nil, fmt.Errorf("vector search multi-cube scan: %w", err)
-		}
-		r.Embedding = ParseVectorString(r.EmbeddingStr)
-		results = append(results, r)
-	}
-	return results, rows.Err()
+	return results, nil
 }
 
 // VectorSearchWithCutoff performs VectorSearch with a temporal created_at cutoff.
 func (p *Postgres) VectorSearchWithCutoff(ctx context.Context, vector []float32, cubeID, personID string, memoryTypes []string, limit int, cutoff string, agentID string) ([]VectorSearchResult, error) {
 	vecStr := FormatVector(vector)
 	q := fmt.Sprintf(queries.VectorSearchWithCutoff, graphName)
-	rows, err := p.pool.Query(ctx, q, vecStr, cubeID, personID, memoryTypes, limit, cutoff, agentID)
+	results, err := observability.MeasureQuery(ctx, "VectorSearch", p.pool, func(conn *pgxpool.Conn) ([]VectorSearchResult, error) {
+		return scanVectorSearchRows(ctx, conn, "VectorSearch", q, vecStr, cubeID, personID, memoryTypes, limit, cutoff, agentID)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("vector search with cutoff: %w", err)
 	}
-	defer rows.Close()
-
-	var results []VectorSearchResult
-	for rows.Next() {
-		var r VectorSearchResult
-		if err := rows.Scan(&r.ID, &r.Properties, &r.Score, &r.EmbeddingStr); err != nil {
-			return nil, fmt.Errorf("vector search with cutoff scan: %w", err)
-		}
-		r.Embedding = ParseVectorString(r.EmbeddingStr)
-		results = append(results, r)
-	}
-	return results, rows.Err()
+	return results, nil
 }

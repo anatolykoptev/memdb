@@ -24,10 +24,24 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
+
+// stagesEmittingCandidates is the set of pipeline stages that mutate
+// st.TextMerged in ways we want to surface as memdb.search.stage_candidates_added.
+// Stages outside this set don't add candidates (or add them via a different
+// path with its own counter), and recording them would dilute the signal.
+//
+// MUST stay in sync with observability.stageNamesForCandidates pre-registration.
+var stagesEmittingCandidates = map[string]struct{}{
+	"temporal_augment": {},
+	"inject_events":    {},
+	"linked_expand":    {},
+	"d2_graph_expand":  {},
+}
 
 // stage is one step of the search pipeline.
 //
@@ -131,10 +145,21 @@ func runPipeline(ctx context.Context, logger *slog.Logger, stages []stage, s *pi
 	}
 	for _, st := range stages {
 		name := st.Name()
+		// M12.5: capture pre-stage TextMerged size so we can record the
+		// per-stage candidate delta below. Only stages in
+		// stagesEmittingCandidates fire the histogram (others would dilute it).
+		var preMergedSize int
+		if _, emit := stagesEmittingCandidates[name]; emit {
+			preMergedSize = len(s.TextMerged)
+		}
 		t0 := time.Now()
 		err := st.Run(ctx, s)
 		dur := time.Since(t0)
 		s.Timings[name] = dur
+		if _, emit := stagesEmittingCandidates[name]; emit {
+			added := len(s.TextMerged) - preMergedSize
+			observability.RecordStageCandidatesAdded(ctx, name, added)
+		}
 
 		outcome := "success"
 		switch {
