@@ -220,6 +220,34 @@ def parse_exclude_categories(value: str) -> frozenset[int]:
     return frozenset(int(x.strip()) for x in value.split(",") if x.strip())
 
 
+def _parse_judge_config_arg(value: str, *, model: str):
+    """Resolve --judge-config CLI arg to a JudgeConfig instance.
+
+    Accepts either an inline JSON string or `@path/to/file.json`.
+    Empty string → return None (caller falls back to legacy path).
+    """
+    if not value:
+        return None
+    raw = value.strip()
+    if raw.startswith("@"):
+        with Path(raw[1:]).open() as f:
+            payload = json.load(f)
+    else:
+        payload = json.loads(raw)
+    if not isinstance(payload, dict):
+        raise ValueError(f"--judge-config must be a JSON object, got {type(payload).__name__}")
+    # Local import: keep score.py importable even when llm_judge has issues.
+    from llm_judge import JudgeConfig  # noqa: PLC0415
+    # Whitelist fields (avoid picking up junk keys).
+    allowed = {
+        "n_trials", "scale", "threshold", "require_cot", "normalize",
+        "cache_invalidation_key", "model", "api_base", "api_key", "timeout",
+    }
+    kwargs = {k: v for k, v in payload.items() if k in allowed}
+    kwargs.setdefault("model", model)
+    return JudgeConfig(**kwargs)
+
+
 def excl_key(excl: frozenset[int]) -> str:
     """Return the JSON key suffix for a given exclusion set.
 
@@ -330,6 +358,17 @@ def main() -> int:
         default=10,
         help="Concurrent judge calls (default: 10).",
     )
+    p.add_argument(
+        "--judge-config",
+        default="",
+        help=(
+            "Optional JSON config (inline or @path/to/file.json) for the M13 J1 robust "
+            "judge: enables multi-trial majority vote, 5-point scale, normalization, "
+            "and per-run cache invalidation. When omitted, --llm-judge falls back to "
+            "the legacy single-trial binary path (backward compatible). "
+            'Example: --judge-config \'{"n_trials":3,"scale":"5point","normalize":true,"cache_invalidation_key":"m13-j1-run1"}\''
+        ),
+    )
     args = p.parse_args()
     extra_excl = parse_exclude_categories(args.exclude_categories)
 
@@ -378,44 +417,112 @@ def main() -> int:
 
     # ----- LLM Judge (concurrent) -----
     if args.llm_judge:
-        from llm_judge import get_shared_cache, judge  # noqa: PLC0415
+        # Resolve --judge-config to a JudgeConfig (M13 J1) or None (legacy path).
+        judge_cfg = _parse_judge_config_arg(
+            args.judge_config, model=args.llm_judge_model
+        ) if args.judge_config else None
+
+        from llm_judge import get_shared_cache  # noqa: PLC0415
 
         judge_cache = get_shared_cache()
         judge_api_base = os.getenv("LLM_API_BASE", "http://127.0.0.1:8317/v1")
         judge_api_key = os.getenv("CLI_PROXY_API_KEY") or os.getenv("LLM_API_KEY") or ""
 
-        print(
-            f"Running LLM Judge ({args.llm_judge_model}, "
-            f"workers={args.llm_judge_workers}, n={len(per_qa)}) ...",
-            file=sys.stderr,
-        )
+        if judge_cfg is None:
+            # ----- Legacy single-trial binary path (unchanged behaviour) -----
+            from llm_judge import judge  # noqa: PLC0415
 
-        def _judge_row(row: dict) -> dict:
-            result = judge(
-                question=row.get("question") or "",
-                gold=row.get("gold_answer") or "",
-                prediction=row.get("prediction") or "",
-                model=args.llm_judge_model,
-                api_base=judge_api_base,
-                api_key=judge_api_key,
-                cache=judge_cache,
+            print(
+                f"Running LLM Judge ({args.llm_judge_model}, "
+                f"workers={args.llm_judge_workers}, n={len(per_qa)}, mode=legacy-binary) ...",
+                file=sys.stderr,
             )
-            return result
 
-        try:
-            with ThreadPoolExecutor(max_workers=args.llm_judge_workers) as executor:
-                futures = {executor.submit(_judge_row, row): i for i, row in enumerate(per_qa)}
-                done = 0
-                for fut in as_completed(futures):
-                    idx = futures[fut]
-                    result = fut.result()
-                    per_qa[idx]["llm_score"] = result["score"]
-                    per_qa[idx]["llm_reason"] = result["reason"]
-                    done += 1
-                    if done % 50 == 0:
-                        print(f"  judge {done}/{len(per_qa)} ...", file=sys.stderr)
-        finally:
-            judge_cache.flush()
+            def _judge_row(row: dict) -> dict:
+                result = judge(
+                    question=row.get("question") or "",
+                    gold=row.get("gold_answer") or "",
+                    prediction=row.get("prediction") or "",
+                    model=args.llm_judge_model,
+                    api_base=judge_api_base,
+                    api_key=judge_api_key,
+                    cache=judge_cache,
+                )
+                return result
+
+            try:
+                with ThreadPoolExecutor(max_workers=args.llm_judge_workers) as executor:
+                    futures = {executor.submit(_judge_row, row): i for i, row in enumerate(per_qa)}
+                    done = 0
+                    for fut in as_completed(futures):
+                        idx = futures[fut]
+                        result = fut.result()
+                        per_qa[idx]["llm_score"] = result["score"]
+                        per_qa[idx]["llm_reason"] = result["reason"]
+                        done += 1
+                        if done % 50 == 0:
+                            print(f"  judge {done}/{len(per_qa)} ...", file=sys.stderr)
+            finally:
+                judge_cache.flush()
+        else:
+            # ----- M13 J1 robust judge (multi-trial, 5-point, normalized) -----
+            from llm_judge import judge_prediction  # noqa: PLC0415
+
+            # Inject api_base / api_key from environment into the cfg (the user
+            # may have provided them; if not, llm_judge falls through to env).
+            judge_cfg.api_base = judge_cfg.api_base or judge_api_base
+            judge_cfg.api_key = judge_cfg.api_key or judge_api_key
+
+            print(
+                f"Running LLM Judge ({judge_cfg.model}, "
+                f"workers={args.llm_judge_workers}, n={len(per_qa)}, "
+                f"mode=robust scale={judge_cfg.scale} n_trials={judge_cfg.n_trials} "
+                f"threshold={judge_cfg.threshold} normalize={judge_cfg.normalize} "
+                f"inv_key={judge_cfg.cache_invalidation_key or '-'}) ...",
+                file=sys.stderr,
+            )
+
+            def _judge_row_robust(row: dict) -> dict:
+                v = judge_prediction(
+                    question=row.get("question") or "",
+                    gold=row.get("gold_answer") or "",
+                    prediction=row.get("prediction") or "",
+                    cfg=judge_cfg,
+                    cache=judge_cache,
+                )
+                return {
+                    "score": 1 if v.verdict else 0,
+                    "score_5pt": v.score_5pt,
+                    "kappa_w_self": v.kappa_w_self,
+                    "reason": v.reasoning_summary,
+                    "n_trials": len(v.trials),
+                    "parse_error": next(
+                        (t.get("parse_error") for t in v.trials if t.get("parse_error")),
+                        None,
+                    ),
+                }
+
+            try:
+                with ThreadPoolExecutor(max_workers=args.llm_judge_workers) as executor:
+                    futures = {
+                        executor.submit(_judge_row_robust, row): i
+                        for i, row in enumerate(per_qa)
+                    }
+                    done = 0
+                    for fut in as_completed(futures):
+                        idx = futures[fut]
+                        result = fut.result()
+                        per_qa[idx]["llm_score"] = result["score"]
+                        per_qa[idx]["llm_reason"] = result["reason"]
+                        per_qa[idx]["llm_score_5pt"] = result["score_5pt"]
+                        per_qa[idx]["llm_kappa_w_self"] = result["kappa_w_self"]
+                        if result["parse_error"]:
+                            per_qa[idx]["llm_parse_error"] = result["parse_error"]
+                        done += 1
+                        if done % 50 == 0:
+                            print(f"  judge {done}/{len(per_qa)} ...", file=sys.stderr)
+            finally:
+                judge_cache.flush()
 
         errors = sum(1 for r in per_qa if str(r.get("llm_reason", "")).startswith("judge_error:"))
         if errors:
