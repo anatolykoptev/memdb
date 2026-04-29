@@ -14,7 +14,11 @@
 #   LOCOMO_SKIP_CHAT=1    skip /product/chat/complete, score retrieval only
 #   LOCOMO_CATEGORIES     comma-separated categories (default: "1" = backward compat).
 #                         Use "1,2,3,4,5" for 5-category 50-QA sample mode.
-#   LLM_URL, LLM_API_KEY  for embedding-based semsim (optional)
+#   EMBED_URL             embed-server base URL for semsim (default: http://127.0.0.1:8082/v1)
+#                         Set to "" to skip embedding and use BoW cosine instead.
+#   EMBED_API_KEY         Bearer token for embed endpoint (default: "" — embed-server needs none)
+#   LLM_URL, LLM_API_KEY  LLM endpoint (judge, chat). Not used for embeddings.
+#   LOCOMO_LLM_JUDGE=1    run LLM judge scoring (accepts "1" or "true")
 #   OUT_SUFFIX            override default <commit-sha> output filename
 
 set -euo pipefail
@@ -26,6 +30,11 @@ mkdir -p "$RESULTS_DIR"
 
 MEMDB_URL="${MEMDB_URL:-http://localhost:8080}"
 LOCOMO_CATEGORIES="${LOCOMO_CATEGORIES:-1}"
+# Embed-server for semsim. Default: local embed-server on :8082 (no auth needed).
+# Set EMBED_URL="" to disable embedding and fall back to BoW cosine.
+# Must include /v1 path prefix (embed-server exposes /v1/embeddings).
+EMBED_URL="${EMBED_URL:-http://127.0.0.1:8082/v1}"
+EMBED_API_KEY="${EMBED_API_KEY:-}"
 
 if [[ "${LOCOMO_FULL:-0}" == "1" ]]; then
     MODE_FLAG="--full"
@@ -80,13 +89,17 @@ SCORE_ARGS=()
 if [[ "${LOCOMO_SKIP_CHAT:-0}" == "1" ]]; then
     SCORE_ARGS+=("--retrieval-only")
 fi
-if [[ -z "${LLM_URL:-}" || -z "${LLM_API_KEY:-}" ]]; then
+if [[ -z "${EMBED_URL:-}" ]]; then
     SCORE_ARGS+=("--no-embed")
+else
+    SCORE_ARGS+=("--embed-url" "$EMBED_URL")
+    SCORE_ARGS+=("--embed-api-key" "${EMBED_API_KEY:-}")
 fi
-# LLM Judge headline (Memobase / mem0-comparable) is opt-in via LOCOMO_LLM_JUDGE=1.
+# LLM Judge headline (Memobase / mem0-comparable) is opt-in via LOCOMO_LLM_JUDGE=1|true.
 # Requires LLM_URL + LLM_API_KEY to be set. Defaults to off because the judge
 # itself costs N extra LLM calls (~$0.05–0.20 on full corpus).
-if [[ "${LOCOMO_LLM_JUDGE:-0}" == "1" && -n "${LLM_URL:-}" && -n "${LLM_API_KEY:-}" ]]; then
+_judge_flag="${LOCOMO_LLM_JUDGE:-0}"
+if [[ ( "$_judge_flag" == "1" || "$_judge_flag" == "true" ) && -n "${LLM_URL:-}" && -n "${LLM_API_KEY:-}" ]]; then
     SCORE_ARGS+=("--llm-judge")
 fi
 python3 "$EVAL_DIR/score.py" \
