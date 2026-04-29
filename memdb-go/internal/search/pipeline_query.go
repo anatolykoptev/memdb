@@ -9,6 +9,9 @@ package search
 import (
 	"context"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // stageD7CoTDecompose runs D7 — optional LLM Chain-of-Thought query
@@ -62,11 +65,17 @@ func (s *SearchService) stageEmbedQuery(ctx context.Context, st *pipelineState) 
 
 // stageTokenizeTemporal builds the BM25 token list, the tsquery, and
 // detects an optional temporal cutoff from the natural-language query.
+// Also applies the Task #100 counting-aware top-K boost BEFORE computeBudget
+// so the inflated value propagates to every DB fan-out sub-limit.
 // Pure CPU — never errors.
-func (s *SearchService) stageTokenizeTemporal(_ context.Context, st *pipelineState) error {
+func (s *SearchService) stageTokenizeTemporal(ctx context.Context, st *pipelineState) error {
 	st.Tokens = TokenizeMixed(st.Params.Query)
 	st.TSQuery = BuildTSQuery(st.Tokens)
 	st.CutoffISO, st.HasCutoff = s.detectTemporalCutoff(st.Params.Query)
+	// Task #100: raise TopK for counting/cardinality queries before the budget
+	// is computed so every downstream DB limit benefits from the wider window.
+	outcome := applyCountingBoost(st)
+	searchMx().CountingBoost.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
 	st.Budget = s.computeBudget(st.Params)
 	return nil
 }
