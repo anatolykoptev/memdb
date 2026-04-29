@@ -1,13 +1,16 @@
 // Package rerank — cross-encoder strategy (precompute lookup + live fallback).
 //
 // Ports cross_encoder_adapter.go + cross_encoder_precompute.go from the
-// parent search pkg into a typed Reranker. Two execution paths preserved:
+// parent search pkg into a typed Reranker. Three execution paths:
 //
-//  1. Lookup-first (M10 Stream 6, default ON): if items[0] (the cosine
+//  1. Full hit (M10 Stream 6, default ON): if items[0] (the cosine
 //     anchor) has a ce_score_topk cache covering every other item, we
-//     reorder by the cached pair scores and skip the live HTTP call.
-//  2. Live fallback: any miss / disabled / too-few items / empty anchor
-//     falls through to the go-kit/rerank.Client HTTP path.
+//     reorder by the cached pair scores and skip the live HTTP call entirely.
+//  2. Partial hit (M14 Y2 fix): some items hit cache, remaining items fire
+//     a single batched live CE call. Merged and sorted by score. Emits
+//     outcome="partial" metric so operators see partial-hit rate separately.
+//  3. Live fallback: anchor without cache / env-disabled / too-few items /
+//     stale cache → full live HTTP call.
 //
 // Metric hooks (OnLiveCall, OnPrecompute) let the parent search pkg attach
 // the legacy memdb.search.ce_live_call_total + .ce_precompute_hit_total
@@ -34,7 +37,7 @@ type CrossEncoder struct {
 	// OnLiveCall fires when the live HTTP path executes (regardless of
 	// the reason — miss, anchor without cache, env-disabled).
 	OnLiveCall func(ctx context.Context)
-	// OnPrecompute fires for every lookup outcome (hit | miss | stale).
+	// OnPrecompute fires for every lookup outcome (hit | partial | miss | stale).
 	OnPrecompute func(ctx context.Context, outcome string)
 	// QueryUserID, QuerySessionID, QueryTags carry the query-time identity
 	// context used by the metadata boost post-step (Q3 stream). Empty
@@ -51,14 +54,13 @@ type CrossEncoder struct {
 // Name implements Reranker.
 func (CrossEncoder) Name() string { return "cross_encoder" }
 
-// Rerank implements Reranker. Behaviour parity with the legacy
-// rerankMemoryItemsPrecomputed + rerankMemoryItems pair.
+// Rerank implements Reranker.
 //
 // Skip → no client / empty batch.
-// Live (no lookup) → 1 item, env-disabled, anchor without ID, missing /
-// stale cache, or any per-neighbour cache miss.
-// Lookup hit → all neighbours present in cache; reorder by cached scores
-// and skip the live HTTP call entirely.
+// Live (no lookup) → 1 item, env-disabled, anchor without ID, missing / stale cache,
+// or zero cached neighbours in the result set.
+// Partial hit (M14 Y2) → some neighbours cached, rest batched to live CE once.
+// Full hit → all neighbours present in cache; no live call.
 //
 // After CE scoring (whichever path), applyMetadataBoost multiplies scores
 // by (1 + matched weight factors) per the Q3 spec. Zero BoostWeights or
@@ -114,36 +116,58 @@ func (ce CrossEncoder) rerank(ctx context.Context, query string, items []Item) (
 		return out, nil
 	}
 
-	// Walk non-anchor items collecting cached scores. Any miss → live.
-	cachedScores := make([]float32, len(items))
-	cachedScores[0] = 1.0 // anchor self-score by convention
+	// Walk non-anchor items: collect cached scores and separate uncached items.
+	// M14 Y2: use-what-you-have — no longer bail on first miss.
+	type indexed struct {
+		score    float32
+		item     Item
+		origIdx  int  // position in items[] (1-based)
+		fromLive bool // true = score came from live CE call
+	}
+	rest := make([]indexed, 0, len(items)-1)
+	var uncachedItems []Item    // items with no cache entry → need live CE
+	var uncachedRestIdx []int   // parallel index into rest[] for uncachedItems
+
 	for i := 1; i < len(items); i++ {
 		id := items[i].ID()
 		if id == "" {
-			ce.fireOnPrecompute(ctx, "miss")
-			out := ce.runLive(ctx, query, items)
-			RecordSuccess(ctx, ce.Name())
-			return out, nil
+			// No ID — cannot match against cache; treat as uncached.
+			rest = append(rest, indexed{item: items[i], origIdx: i, fromLive: true})
+			uncachedItems = append(uncachedItems, items[i])
+			uncachedRestIdx = append(uncachedRestIdx, len(rest)-1)
+			continue
 		}
 		s, ok := scoreByID[id]
-		if !ok {
-			ce.fireOnPrecompute(ctx, "miss")
-			out := ce.runLive(ctx, query, items)
-			RecordSuccess(ctx, ce.Name())
-			return out, nil
+		if ok {
+			rest = append(rest, indexed{score: s, item: items[i], origIdx: i})
+		} else {
+			rest = append(rest, indexed{item: items[i], origIdx: i, fromLive: true})
+			uncachedItems = append(uncachedItems, items[i])
+			uncachedRestIdx = append(uncachedRestIdx, len(rest)-1)
 		}
-		cachedScores[i] = s
 	}
 
-	// All items had cached scores. Reorder DESC, anchor stays at 0.
-	type indexed struct {
-		score float32
-		item  Item
+	if len(uncachedItems) == len(items)-1 {
+		// Nothing was cached — full live call (emit miss, not partial).
+		ce.fireOnPrecompute(ctx, "miss")
+		out := ce.runLive(ctx, query, items)
+		RecordSuccess(ctx, ce.Name())
+		return out, nil
 	}
-	rest := make([]indexed, 0, len(items)-1)
-	for i := 1; i < len(items); i++ {
-		rest = append(rest, indexed{score: cachedScores[i], item: items[i]})
+
+	if len(uncachedItems) > 0 {
+		// Partial hit: fire live CE only for the uncached subset.
+		liveScored := ce.runLiveSubset(ctx, query, uncachedItems)
+		for k, ri := range uncachedRestIdx {
+			rest[ri].score = float32(liveScored[k].Score())
+		}
+		ce.fireOnPrecompute(ctx, "partial")
+	} else {
+		// All items had cached scores — full hit.
+		ce.fireOnPrecompute(ctx, "hit")
 	}
+
+	// Insertion-sort rest DESC by score. Anchor stays at index 0.
 	for i := 1; i < len(rest); i++ {
 		j := i
 		for j > 0 && rest[j-1].score < rest[j].score {
@@ -161,7 +185,6 @@ func (ce CrossEncoder) rerank(ctx context.Context, query string, items []Item) (
 		out = append(out, r.item)
 	}
 
-	ce.fireOnPrecompute(ctx, "hit")
 	RecordSuccess(ctx, ce.Name())
 	return out, nil
 }
@@ -208,6 +231,49 @@ func (ce CrossEncoder) runLive(ctx context.Context, query string, items []Item) 
 		if !seen[i] {
 			out = append(out, it)
 		}
+	}
+	return out
+}
+
+// runLiveSubset calls the live HTTP rerank backend for a subset of items
+// (the uncached portion in a partial-hit). Returns items in the order the
+// CE backend scored them, with SetScore applied. Items without text are
+// returned with score 0 and no mutation — mirrors runLive behaviour for
+// no-text items. Fires OnLiveCall exactly once.
+func (ce CrossEncoder) runLiveSubset(ctx context.Context, query string, items []Item) []Item {
+	if len(items) == 0 {
+		return items
+	}
+	docs := make([]rerank.Doc, 0, len(items))
+	idxByID := make(map[string]int, len(items))
+	for i, it := range items {
+		text := it.EmbeddingText()
+		if text == "" {
+			continue
+		}
+		id := fmt.Sprintf("%d", i)
+		docs = append(docs, rerank.Doc{ID: id, Text: text})
+		idxByID[id] = i
+	}
+
+	out := make([]Item, len(items))
+	copy(out, items)
+
+	if len(docs) == 0 {
+		return out
+	}
+
+	if ce.OnLiveCall != nil {
+		ce.OnLiveCall(ctx)
+	}
+	scored := ce.Client.Rerank(ctx, query, docs)
+
+	for _, s := range scored {
+		origIdx, ok := idxByID[s.ID]
+		if !ok {
+			continue
+		}
+		out[origIdx].SetScore(float64(s.Score))
 	}
 	return out
 }

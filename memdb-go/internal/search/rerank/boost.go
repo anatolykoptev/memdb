@@ -1,6 +1,6 @@
 // Package rerank — metadata-driven boost weights (Q3 stream).
 //
-// Ported from MemOS http_bge.py:_apply_boost_generic (lines 287-324).
+// Ported from MemOS upstream `_apply_boost_generic` (Q3 stream).
 // After the cross-encoder scores are assigned, applyMetadataBoost
 // multiplies each item's score by (1 + sum_of_matched_weights):
 //
