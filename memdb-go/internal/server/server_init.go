@@ -7,13 +7,13 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/anatolykoptev/go-kit/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/handlers"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
+	rerankpkg "github.com/anatolykoptev/memdb/memdb-go/internal/search/rerank"
 )
 
 // initDBClients connects to databases for native handlers.
@@ -112,7 +112,7 @@ func initReorganizer(
 	// Gate on non-empty URL — if the encoder is not configured the pass stays
 	// disabled (rerankClient remains nil → runCEPrecomputePass exits early).
 	if cfg.CrossEncoderURL != "" {
-		rerankCli := rerank.New(rerank.Config{
+		rerankCli := rerankpkg.NewClient(rerankpkg.ClientConfig{
 			URL:            cfg.CrossEncoderURL,
 			Model:          cfg.CrossEncoderModel,
 			APIKey:         cfg.CrossEncoderAPIKey,

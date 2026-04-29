@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/anatolykoptev/go-kit/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
@@ -16,6 +15,7 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
+	rerankpkg "github.com/anatolykoptev/memdb/memdb-go/internal/search/rerank"
 )
 
 // initEmbedder initializes the embedder via factory (non-fatal if unavailable).
@@ -97,7 +97,7 @@ func initSearchService(
 	// APIKey supports hosted providers (Cohere/Jina/Voyage/Mixedbread);
 	// leave empty for self-hosted TEI/embed-server. MaxCharsPerDoc caps
 	// per-doc length (rune-aware) to bound O(seq²) attention compute.
-	svc.RerankClient = rerank.New(rerank.Config{
+	svc.RerankClient = rerankpkg.NewClient(rerankpkg.ClientConfig{
 		URL:            cfg.CrossEncoderURL,
 		Model:          cfg.CrossEncoderModel,
 		APIKey:         cfg.CrossEncoderAPIKey,
