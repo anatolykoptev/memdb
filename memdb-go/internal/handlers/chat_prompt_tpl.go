@@ -109,6 +109,10 @@ const cloudChatPromptZH = `# Role
 //     factual answer" because LoCoMo gold answers are often phrased like
 //     "Yes, Caroline supports LGBTQ rights" not bare "Yes". Forced terseness
 //     costs LLM Judge.
+//   - M12.2 deepen (anti-refusal): added rules 5c (yes/no default to
+//     fact-based reasoning), 6c (counting aggregation), 7c (temporal
+//     approximation). Chat-50 evidence: 18/26 fails had hit@K=1 but model
+//     still refused — generation was the bottleneck, not retrieval.
 //
 // Two %s placeholders, same signature as cloudChatPromptEN: (1) current time,
 // (2) numbered memories — call site stays unchanged.
@@ -135,18 +139,24 @@ The retrieval system has high confidence that these memories contain the answer.
 # Answer Rules — follow strictly
 1. Reply with a concise but complete factual answer (usually 1-15 words). Include the entity AND the qualifying detail when both are present in the memories (e.g. "Yes, Caroline supports LGBTQ rights" not bare "Yes"; "a bookcase filled with DVDs and movies" not just "a bookcase").
 2. Do NOT say "based on the memories", "it appears", "the user mentioned", or similar meta-framing.
-3. For dates/times, give the most specific form present in the memories (e.g. "May 2023", "last summer", "Tuesday").
+3. For dates/times: give the most specific form present in the memories (e.g. "May 2023", "last summer", "Tuesday"). If the exact date is absent but inferable (e.g. "a few months ago" + known reference point), give your best estimate — do not refuse on grounds of approximation.
 4. For names/entities, reply with the bare name when the question asks "who" (e.g. "Emma" not "Her sister Emma"); include the relationship when the question asks for it.
-5. For yes/no questions, reply "yes" or "no" followed by the supporting fact when one is present (e.g. "Yes, in March 2023").
+5. For yes/no questions: actively search for confirming OR denying evidence in every memory. If any memory implies an answer, reply "yes" or "no" followed by the supporting fact (e.g. "Yes, in March 2023"). Do NOT default to "not stated" — derive the answer from closest related context.
 6. **Commit**: at least one memory above carries strong evidence for the question. Synthesize an answer even if the phrasing is approximate. Reply "no answer" only if every memory is unambiguously off-topic — NOT because the wording differs from the question.
 7. Match the phrasing and register used in the memories themselves — do not paraphrase more than needed.
+8. For counting questions (how many, how often, how much): count ALL distinct mentions across every memory, even if the total is not stated explicitly. Never base a count on a single memory when multiple memories contribute.
 `
 
 // factualQAPromptLowConfidenceEN is the M12.2 low-confidence variant. Selected
 // when retrieval delivered ZERO memories OR all memories scored below the
-// confidence threshold. Preserves the original M7 refusal contract: when
-// evidence is weak, refusing is safer than fabricating. LoCoMo scoring still
-// rewards "no answer" on truly absent topics.
+// confidence threshold. Preserves the original M7 refusal contract for truly
+// absent topics, but softened in M12.2 deepen: partial evidence should still
+// produce an answer — refuse only when zero relevant context exists.
+//
+// M12.2 deepen rationale: chat-50 evidence showed 69% of failures (18/26) had
+// hit@K=1 — retrieval was correct but the model refused. Many of these cases
+// routed to the low-confidence variant and hit the strict "no answer" fallback.
+// The fix: "answer with what we have" beats "refuse because confidence is low".
 //
 // Two %s placeholders: (1) current time, (2) numbered memories.
 //
@@ -162,7 +172,8 @@ Below are numbered memories retrieved from their past conversations, ordered by 
 Memories may contain first-person statements from EITHER person, or dialogue lines with speaker labels.
 Both persons' statements are valid evidence — use any memory that contains the answer, regardless of which person said it.
 
-The retrieval system has low confidence in these memories. They may not address the question.
+The retrieval system has lower confidence in these memories, but they may still contain the answer.
+**Use any relevant context to answer; only refuse if the memories contain zero relevant information.**
 
 <memories>
 %s
@@ -171,16 +182,18 @@ The retrieval system has low confidence in these memories. They may not address 
 # Answer Rules — follow strictly
 1. Reply with a concise but complete factual answer (usually 1-15 words). Include the entity AND the qualifying detail when both are present in the memories.
 2. Do NOT say "based on the memories", "it appears", "the user mentioned", or similar meta-framing.
-3. For dates/times, give the most specific form present in the memories (e.g. "May 2023", "last summer", "Tuesday").
+3. For dates/times: give the most specific form present in the memories (e.g. "May 2023", "last summer", "Tuesday"). If the exact date is absent but inferable, give your best estimate rather than refusing.
 4. For names/entities, reply with the bare name when the question asks "who" (e.g. "Emma" not "Her sister Emma").
-5. For yes/no questions, reply "yes" or "no" followed by the supporting fact when one is present.
-6. If no memory clearly supports an answer, reply exactly: no answer
+5. For yes/no questions: actively search for confirming OR denying evidence in every memory. If any memory implies an answer, reply "yes" or "no" followed by the supporting fact. Do NOT default to "not stated" — derive the answer from closest related context.
+6. Provide the best answer you can from any relevant memory, even if the match is partial or approximate. Reply exactly: no answer — only when every memory is entirely unrelated to the question.
 7. Match the phrasing and register used in the memories themselves — do not paraphrase more than needed.
+8. For counting questions (how many, how often, how much): count ALL distinct mentions across every memory, even if the total is not stated explicitly. Never base a count on a single memory when multiple memories contribute.
 `
 
 // factualQAPromptHighConfidenceZH — Chinese counterpart of the high-confidence
 // variant. Rule 6 keeps the literal English string "no answer" because LoCoMo
 // scoring compares against the English gold answer (per M7 design).
+// M12.2 deepen: rules 5, 7, 8 updated to match EN anti-refusal changes.
 //
 // Two %s placeholders with the same meaning as factualQAPromptHighConfidenceEN.
 //
@@ -206,15 +219,18 @@ const factualQAPromptHighConfidenceZH = `# Role
 # Answer Rules — 严格遵守
 1. 用简洁但完整的事实短语回答（通常 1-15 个词）。当记忆同时给出实体和修饰细节时一并保留（例如 "Yes, Caroline supports LGBTQ rights" 而非单独的 "Yes"）。
 2. 不要说"根据记忆"、"似乎"、"用户提到"或类似的元描述。
-3. 对于日期/时间，使用记忆中存在的最具体形式（例如"2023 年 5 月"、"去年夏天"、"周二"）。
+3. 对于日期/时间：使用记忆中存在的最具体形式（例如"2023 年 5 月"、"去年夏天"、"周二"）。如果确切日期缺失但可以推断，给出最佳估计——不要以近似为由拒答。
 4. 对于人名/实体，当问题问"谁"时仅回复名称本身（例如"Emma"而非"她的姐姐 Emma"）；当问题需要关系时则附上关系。
-5. 对于是/否问题，回复"yes"或"no"，并在记忆中存在时附上支撑事实（例如"Yes, in March 2023"）。
+5. 对于是/否问题：主动在每条记忆中寻找确认或否认的证据。如果任何记忆暗示了答案，回复"yes"或"no"并附上支撑事实（例如"Yes, in March 2023"）。不要默认回答"未提及"——从最相关的上下文中推导答案。
 6. **承诺**：上方至少一条记忆对当前问题携带较强证据。即便措辞需要近似，也请综合给出答案。仅当所有记忆都明显与问题无关时才回复 "no answer" — 不要因措辞不同就拒答。
 7. 与记忆中的措辞和语气保持一致 — 不要做超出必要的改写。
+8. 对于计数问题（多少个、多少次、多少量）：统计所有记忆中的所有不同提及，即使总数未被明确陈述。当多条记忆有贡献时，不要仅基于单条记忆给出计数。
 `
 
 // factualQAPromptLowConfidenceZH — Chinese counterpart of the low-confidence
 // variant. Rule 6 keeps literal English "no answer" so LoCoMo scoring matches.
+// M12.2 deepen: softened to match EN anti-refusal changes — answer with
+// partial evidence; refuse only when zero relevant context exists.
 //
 // Two %s placeholders with the same meaning as factualQAPromptHighConfidenceEN.
 //
@@ -230,7 +246,8 @@ const factualQAPromptLowConfidenceZH = `# Role
 记忆可能包含任意一方的第一人称陈述，或带有说话者标签的对话行。
 两方的陈述都是有效证据——无论是哪方说的，只要记忆中包含答案，均可使用。
 
-检索系统对这些记忆置信度较低，可能并未涵盖该问题。
+检索系统对这些记忆置信度较低，但仍可能包含答案。
+**请利用任何相关上下文来回答；仅当记忆中完全没有相关信息时才拒答。**
 
 <memories>
 %s
@@ -239,11 +256,12 @@ const factualQAPromptLowConfidenceZH = `# Role
 # Answer Rules — 严格遵守
 1. 用简洁但完整的事实短语回答（通常 1-15 个词）。
 2. 不要说"根据记忆"、"似乎"、"用户提到"或类似的元描述。
-3. 对于日期/时间，使用记忆中存在的最具体形式（例如"2023 年 5 月"、"去年夏天"、"周二"）。
+3. 对于日期/时间：使用记忆中存在的最具体形式（例如"2023 年 5 月"、"去年夏天"、"周二"）。如果确切日期缺失但可以推断，给出最佳估计而非拒答。
 4. 对于人名/实体，当问题问"谁"时仅回复名称本身（例如"Emma"而非"她的姐姐 Emma"）。
-5. 对于是/否问题，回复"yes"或"no"，并在记忆中存在时附上支撑事实。
-6. 如果没有任何记忆清晰地支持答案，请精确回复: no answer
+5. 对于是/否问题：主动在每条记忆中寻找确认或否认的证据。如果任何记忆暗示了答案，回复"yes"或"no"并附上支撑事实。不要默认回答"未提及"。
+6. 尽量利用任何相关记忆给出最佳答案，即使匹配是部分的或近似的。仅当所有记忆与问题完全无关时，精确回复: no answer
 7. 与记忆中的措辞和语气保持一致 — 不要做超出必要的改写。
+8. 对于计数问题（多少个、多少次、多少量）：统计所有记忆中的所有不同提及，即使总数未被明确陈述。
 `
 
 // Backward-compatibility aliases for legacy callers / tests that still
