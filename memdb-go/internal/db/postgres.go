@@ -21,6 +21,7 @@ import (
 "github.com/jackc/pgx/v5/pgxpool"
 
 "github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
+"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 )
 
 // graphName is the fixed PolarDB graph name. All queries use this constant.
@@ -92,6 +93,14 @@ return nil, fmt.Errorf("postgres connect: %w", err)
 }
 
 pg := &Postgres{pool: pool, logger: logger}
+
+// M12.5: register the async pgxpool busy-conns gauge. Wires
+// memdb_db_pgxpool_busy_conns to a callback that scrapes
+// pool.Stat().AcquiredConns() on every Prometheus collection. Failure to
+// register is non-fatal — log and continue (the pool itself is fine).
+if _, gerr := observability.RegisterPoolGauge(pool); gerr != nil {
+	logger.Warn("pgxpool gauge registration failed", slog.Any("error", gerr))
+}
 
 // Versioned SQL migrations — single source of truth for schema.
 // Covers extensions + AGE graph bootstrap (0003), memos_graph."Memory"

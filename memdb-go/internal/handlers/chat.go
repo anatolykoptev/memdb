@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/rpc"
 )
 
@@ -26,6 +27,16 @@ const (
 	answerStyleFactual        = "factual"
 	answerStyleConversational = "conversational"
 )
+
+// chatTopRelativity returns the relativity score of memories[0] (post-threshold,
+// post-sort). Returns 0.0 when memories is empty — the histogram pre-registers
+// 0 so an empty-evidence chat still bumps the _count series.
+func chatTopRelativity(memories []map[string]any) float64 {
+	if len(memories) == 0 {
+		return 0
+	}
+	return relativity(memories[0])
+}
 
 // promptTemplateLabel maps the (basePrompt, answerStyle) pair to the metric label
 // emitted by chat handlers. "custom" wins when basePrompt is non-empty (backward-compat).
@@ -174,6 +185,14 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID), profileCubeIDForRequest(&req))
 	prompt := buildSystemPromptWithProfile(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
 	recordChatPromptUsed(ctx, basePrompt, answerStyle)
+	// M12.5: chat-path observability — top-1 cosine, context tokens. Recorded
+	// pre-LLM so even chats that fail downstream surface their input shape.
+	emitStyle := answerStyle
+	if emitStyle == "" {
+		emitStyle = answerStyleConversational
+	}
+	observability.RecordChatTop1Cosine(ctx, chatTopRelativity(memories))
+	observability.RecordChatContextTokens(ctx, prompt, profileCubeIDForRequest(&req), emitStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
 
 	answer, err := h.llmChat.Chat(ctx, messages, chatMaxTokens)
@@ -186,6 +205,11 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response, reasoning := parseThinkTags(answer)
+	// M12.5: post-LLM signals — pred length + over-refusal detection. Refusal
+	// only counts as "with evidence" when memories was non-empty (i.e. the
+	// system gave the model something to work with but it refused anyway).
+	observability.RecordChatPredLength(ctx, response, emitStyle)
+	observability.RecordChatRefusedWithEvidence(ctx, response, len(memories), "", emitStyle)
 
 	if derefBoolOr(req.AddMessageOnAnswer, false) {
 		h.chatPostAdd(&req, *req.Query, response)
@@ -238,6 +262,15 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID), profileCubeIDForRequest(&req))
 	prompt := buildSystemPromptWithProfile(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
 	recordChatPromptUsed(ctx, basePrompt, answerStyle)
+	// M12.5: same chat-path observability as the non-streaming branch. Stream
+	// post-answer signals (pred length, refusal) record in streamChatResponse
+	// after the buffer is drained.
+	streamStyle := answerStyle
+	if streamStyle == "" {
+		streamStyle = answerStyleConversational
+	}
+	observability.RecordChatTop1Cosine(ctx, chatTopRelativity(memories))
+	observability.RecordChatContextTokens(ctx, prompt, profileCubeIDForRequest(&req), streamStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
 
 	rpc.SSEHeaders(w)
@@ -250,11 +283,16 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chunks, errc := h.llmChat.ChatStream(ctx, messages, llm.StreamOpts{})
-	h.streamChatResponse(sse, chunks, errc, &req)
+	h.streamChatResponse(sse, chunks, errc, &req, streamStyle, len(memories))
 }
 
 // streamChatResponse reads chunks, classifies think tags, emits SSE events.
-func (h *Handler) streamChatResponse(sse *rpc.SSEWriter, chunks <-chan llm.StreamChunk, errc <-chan error, req *nativeChatRequest) {
+//
+// M12.5: answerStyle + memCount carry the resolved labels from the caller so
+// post-stream pred-length / refusal counters tag identically to the non-stream
+// path. memCount is the post-threshold memory count (used as the "had
+// evidence?" signal for memdb.chat.refused_with_evidence_total).
+func (h *Handler) streamChatResponse(sse *rpc.SSEWriter, chunks <-chan llm.StreamChunk, errc <-chan error, req *nativeChatRequest, answerStyle string, memCount int) {
 	parser := &thinkParser{}
 	var fullResp strings.Builder
 
@@ -278,8 +316,15 @@ func (h *Handler) streamChatResponse(sse *rpc.SSEWriter, chunks <-chan llm.Strea
 	}
 	_ = sse.WriteDone()
 
+	// M12.5: post-stream observability. context.Background() because the
+	// request context may have been cancelled by the time streaming finishes
+	// (SSE consumers disconnect mid-stream); we still want the metric.
+	finalAnswer := fullResp.String()
+	observability.RecordChatPredLength(context.Background(), finalAnswer, answerStyle)
+	observability.RecordChatRefusedWithEvidence(context.Background(), finalAnswer, memCount, "", answerStyle)
+
 	if derefBoolOr(req.AddMessageOnAnswer, false) {
-		h.chatPostAdd(req, *req.Query, fullResp.String())
+		h.chatPostAdd(req, *req.Query, finalAnswer)
 	}
 }
 

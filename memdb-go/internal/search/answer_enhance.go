@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -202,6 +203,7 @@ func applyAnswerEnhancement(
 ) []map[string]any {
 	if !answerEnhanceEnabled() || len(items) == 0 || cfg.APIURL == "" {
 		searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
+		observability.RecordD10EnhanceOutcome(ctx, "skipped")
 		return items
 	}
 	// Pre-check relativity floor to distinguish "threshold below" (skipped)
@@ -216,11 +218,13 @@ func applyAnswerEnhancement(
 	}
 	if !anyRelevant {
 		searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
+		observability.RecordD10EnhanceOutcome(ctx, "skipped")
 		return items
 	}
 	answer, sources, conf, err := EnhanceRetrievalAnswer(ctx, query, items, cfg)
 	if err != nil {
 		searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "error")))
+		observability.RecordD10EnhanceOutcome(ctx, "error")
 		if logger != nil {
 			logger.Debug("enhance failed, continuing without", slog.Any("error", err))
 		}
@@ -228,9 +232,11 @@ func applyAnswerEnhancement(
 	}
 	if answer == "" || answer == answerEnhanceUnknownAnswer {
 		searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "unknown")))
+		observability.RecordD10EnhanceOutcome(ctx, "unknown")
 		return items
 	}
 	searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "answered")))
 	searchMx().D10Conf.Record(ctx, conf)
+	observability.RecordD10EnhanceOutcome(ctx, "answered")
 	return prependEnhancedAnswer(items, answer, sources, conf, query)
 }
