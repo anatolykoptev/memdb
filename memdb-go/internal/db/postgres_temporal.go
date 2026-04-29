@@ -12,6 +12,10 @@ package db
 import (
 	"context"
 	"fmt"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 )
 
 // TemporalMatch is one row returned by SearchMemoriesByDateRange. Mirrors the
@@ -78,18 +82,27 @@ WHERE properties->>(('user_name'::text)) = $1
         AND ($3 = '' OR d.val <= $3)
   )
 LIMIT $4`
-	rows, err := p.pool.Query(ctx, q, userName, start, end, limit)
+	out, err := observability.MeasureQuery(ctx, "SearchMemoriesByDateRange", p.pool, func(conn *pgxpool.Conn) ([]TemporalMatch, error) {
+		rows, qerr := conn.Query(ctx, q, userName, start, end, limit)
+		if qerr != nil {
+			return nil, qerr
+		}
+		defer rows.Close()
+		results := make([]TemporalMatch, 0, 16)
+		var scanned int64
+		for rows.Next() {
+			var m TemporalMatch
+			if err := rows.Scan(&m.ID, &m.Properties); err != nil {
+				return nil, err
+			}
+			results = append(results, m)
+			scanned++
+		}
+		observability.AddRowsScanned(ctx, "SearchMemoriesByDateRange", scanned)
+		return results, rows.Err()
+	})
 	if err != nil {
 		return nil, fmt.Errorf("temporal date range search (%s, [%s, %s]): %w", userName, start, end, err)
 	}
-	defer rows.Close()
-	out := make([]TemporalMatch, 0, 16)
-	for rows.Next() {
-		var m TemporalMatch
-		if err := rows.Scan(&m.ID, &m.Properties); err != nil {
-			return nil, err
-		}
-		out = append(out, m)
-	}
-	return out, rows.Err()
+	return out, nil
 }

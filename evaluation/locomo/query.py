@@ -62,6 +62,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import re
 import sys
 import time
 import threading
@@ -905,6 +906,154 @@ def _load_qids_from_file(path: Path) -> set[tuple[str, int]]:
     return pairs
 
 
+# ---------------------------------------------------------------------------
+# M12.5 — observability summary block (Category D)
+# ---------------------------------------------------------------------------
+# These metrics surface harness-path signals that M11 LoCoMo regression
+# analysis was missing.  Computed once at the end of the run and printed in a
+# stable text block so CI / postmortems can grep them deterministically.
+# ---------------------------------------------------------------------------
+
+
+# Refusal regex — kept in sync with internal/observability/m12_metrics.go
+# (Go-side IsRefusalAnswer).  False-positive guard: substantive answers like
+# "she does not own a dog" must NOT match — anchor "do not (contain|state|
+# mention|...)" patterns.
+_LOCOMO_REFUSAL_RE = re.compile(
+    r"(?i)\b(do not (contain|state|mention|describe|specify|detail|provide|"
+    r"include|indicate|reference)|memories.{0,40}(do not|no information|"
+    r"don't (contain|mention|state)))\b"
+)
+_LOCOMO_BARE_NO_ANSWER_RE = re.compile(
+    r"(?i)^\s*(no answer|i don't know|i do not know|unknown|n/?a)\s*\.?\s*$"
+)
+# Today-leak regex — flags predictions that reference 2025/2026 dates when
+# the LoCoMo gold dataset is pre-2024.  Surfaces "system prompt date echo"
+# bugs (where the LLM treats the current_time placeholder as a memory fact).
+_LOCOMO_TODAY_LEAK_RE = re.compile(r"\b(202[5-9]|203\d)\b")
+
+
+def _is_locomo_refusal(answer: str) -> bool:
+    """Mirror of Go-side observability.IsRefusalAnswer — see m12_metrics.go."""
+    a = (answer or "").strip()
+    if not a:
+        return False
+    if _LOCOMO_BARE_NO_ANSWER_RE.match(a):
+        return True
+    return bool(_LOCOMO_REFUSAL_RE.search(a))
+
+
+def _print_m12_observability(predictions: list[dict], gold: list[dict]) -> None:
+    """Print a stable "## Observability deltas vs M11 baseline" block.
+
+    Caller passes the full predictions list and the gold list (for category
+    cross-reference).  All counts are derived in a single pass — no I/O.
+
+    Output goes to stderr so it doesn't pollute the JSON stdout caller may
+    capture.  Format is intentionally plain "key=value" lines so CI tooling
+    can parse them with grep.
+    """
+    if not predictions:
+        print("[m12 observability] no predictions — skipping summary", file=sys.stderr)
+        return
+
+    n = len(predictions)
+    today_leak = 0
+    refused = 0
+    refused_with_hit = 0
+    ts_emit = 0  # memory-line emit count where ts != ""
+    ts_total = 0  # total memory lines considered
+    pred_lengths: list[int] = []
+    per_conv_pred_lengths: dict[str, list[int]] = {}
+
+    for rec in predictions:
+        ans = rec.get("chat_answer") or ""
+        if isinstance(ans, str):
+            pred_lengths.append(len(ans))
+            conv_id = rec.get("conv_id") or ""
+            if conv_id:
+                per_conv_pred_lengths.setdefault(conv_id, []).append(len(ans))
+            if _LOCOMO_TODAY_LEAK_RE.search(ans):
+                today_leak += 1
+            if _is_locomo_refusal(ans):
+                refused += 1
+                # "with evidence" = the harness retrieved at least one memory.
+                # Catches the Go-side over-refusal pattern from a different
+                # vantage point: if memdb returned candidates but the chat
+                # response is "no answer", something is wrong with prompt/
+                # rerank.
+                retrieved = rec.get("retrieved") or []
+                if isinstance(retrieved, list) and len(retrieved) > 0:
+                    refused_with_hit += 1
+
+        # Per-memory ts-prefix emit rate. _build_dual_speaker_system_prompt
+        # adds a "{ts}: {content}" prefix only when ts is non-empty; if the
+        # ts-extraction path silently regressed (M12.1 fix territory), this
+        # rate craters and we see it here without re-running the harness.
+        for key in ("speaker_a_memories", "speaker_b_memories", "retrieved"):
+            mems = rec.get(key) or []
+            if not isinstance(mems, list):
+                continue
+            for m in mems:
+                if not isinstance(m, dict):
+                    continue
+                ts_total += 1
+                if (m.get("ts") or "").strip():
+                    ts_emit += 1
+
+    # Per-cube (per-conv_id) judge mean — placeholder; the harness doesn't
+    # currently record per-question judge scores in process_one_qa, so we
+    # emit a length-based proxy until the score path is wired.  Detects cube
+    # outliers (e.g. "conv-26 averages 5 chars while conv-01 averages 80 →
+    # something cube-specific broke").
+    per_cube: dict[str, dict[str, float]] = {}
+    for conv_id, lens in per_conv_pred_lengths.items():
+        if not lens:
+            continue
+        slens = sorted(lens)
+        per_cube[conv_id] = {
+            "n": float(len(slens)),
+            "p50_chars": float(slens[len(slens) // 2]),
+            "p95_chars": float(slens[int(len(slens) * 0.95)]),
+            "mean_chars": sum(slens) / len(slens),
+        }
+
+    # Length distribution.
+    p50 = p95 = 0
+    if pred_lengths:
+        slens = sorted(pred_lengths)
+        p50 = slens[len(slens) // 2]
+        p95 = slens[min(len(slens) - 1, int(len(slens) * 0.95))]
+
+    ts_rate = (ts_emit / ts_total) if ts_total else 0.0
+    refused_pct = 100.0 * refused / n if n else 0.0
+    refused_hit_pct = 100.0 * refused_with_hit / n if n else 0.0
+    today_leak_pct = 100.0 * today_leak / n if n else 0.0
+
+    lines = [
+        "",
+        "## Observability deltas vs M11 baseline",
+        f"locomo_chat_today_leak_count={today_leak} ({today_leak_pct:.1f}%)",
+        f"locomo_chat_refused_count={refused} ({refused_pct:.1f}%)",
+        f"locomo_chat_refused_with_hit_count={refused_with_hit} ({refused_hit_pct:.1f}%)",
+        f"locomo_ts_prefix_emit_rate={ts_rate:.3f} ({ts_emit}/{ts_total})",
+        f"locomo_pred_length_p50={p50}",
+        f"locomo_pred_length_p95={p95}",
+        f"locomo_pred_length_total_predictions={len(pred_lengths)}",
+    ]
+
+    if per_cube:
+        lines.append("locomo_per_cube_pred_length:")
+        for conv_id in sorted(per_cube.keys()):
+            stats = per_cube[conv_id]
+            lines.append(
+                f"  {conv_id}: n={int(stats['n'])} p50={int(stats['p50_chars'])} "
+                f"p95={int(stats['p95_chars'])} mean={stats['mean_chars']:.1f}"
+            )
+
+    print("\n".join(lines), file=sys.stderr, flush=True)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     g = p.add_mutually_exclusive_group(required=True)
@@ -1218,6 +1367,12 @@ def main() -> int:
 
     # Print retry summary to stderr (even when retries=0; shows zero counts)
     _RETRY_STATS.print_summary()
+
+    # M12.5: harness-path observability deltas vs M11 baseline.  Computed once
+    # at the end of the run from the in-memory predictions list, no extra I/O.
+    # See docs/superpowers/plans/2026-04-29-m12-recovery-analysis.md §4 for
+    # what each metric flags.
+    _print_m12_observability(predictions, gold)
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open("w") as f:

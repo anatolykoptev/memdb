@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 )
 
 // PageRankEdge is a directed edge record returned by FetchEdgesForPageRank.
@@ -237,7 +239,16 @@ func (p *Postgres) SetLinkedMemoryIDs(ctx context.Context, memoryID, cubeID stri
 	if err != nil {
 		return fmt.Errorf("marshal linked_memory_ids: %w", err)
 	}
-	if _, err := p.pool.Exec(ctx, fmt.Sprintf(queries.SetLinkedMemoryIDs, graphName), memoryID, cubeID, string(body)); err != nil {
+	q := fmt.Sprintf(queries.SetLinkedMemoryIDs, graphName)
+	// M12.5: wrapped via observability.MeasureQuery — write-path timing.
+	// Returns the CommandTag (we don't use it, but the wrapper requires a
+	// non-error return type). The Exec path doesn't surface a row count to
+	// AddRowsScanned (Exec returns "rows affected", semantically different).
+	_, err = observability.MeasureQuery(ctx, "SetLinkedMemoryIDs", p.pool, func(conn *pgxpool.Conn) (struct{}, error) {
+		_, e := conn.Exec(ctx, q, memoryID, cubeID, string(body))
+		return struct{}{}, e
+	})
+	if err != nil {
 		return fmt.Errorf("set linked_memory_ids: %w", err)
 	}
 	return nil
@@ -262,21 +273,28 @@ func (p *Postgres) GetMemoriesByLinkedIDs(
 		return nil, nil
 	}
 	q := fmt.Sprintf(queries.GetMemoriesByLinkedIDs, graphName)
-	rows, err := p.pool.Query(ctx, q, linkIDs, cubeID, personID, agentID, limit)
+	out, err := observability.MeasureQuery(ctx, "GetMemoriesByLinkedIDs", p.pool, func(conn *pgxpool.Conn) ([]VectorSearchResult, error) {
+		rows, err := conn.Query(ctx, q, linkIDs, cubeID, personID, agentID, limit)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		var results []VectorSearchResult
+		var scanned int64
+		for rows.Next() {
+			var r VectorSearchResult
+			if err := rows.Scan(&r.ID, &r.Properties, &r.EmbeddingStr); err != nil {
+				continue
+			}
+			r.Embedding = ParseVectorString(r.EmbeddingStr)
+			results = append(results, r)
+			scanned++
+		}
+		observability.AddRowsScanned(ctx, "GetMemoriesByLinkedIDs", scanned)
+		return results, rows.Err()
+	})
 	if err != nil {
 		return nil, fmt.Errorf("get memories by linked_ids: %w", err)
 	}
-	defer rows.Close()
-
-	var out []VectorSearchResult
-	for rows.Next() {
-		var r VectorSearchResult
-		if err := rows.Scan(&r.ID, &r.Properties, &r.EmbeddingStr); err != nil {
-			continue
-		}
-		// Best-effort embedding parse — empty / malformed stays empty.
-		r.Embedding = ParseVectorString(r.EmbeddingStr)
-		out = append(out, r)
-	}
-	return out, rows.Err()
+	return out, nil
 }

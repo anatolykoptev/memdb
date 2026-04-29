@@ -22,6 +22,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 )
 
 // EventEntry is one row from memos_graph.user_events.
@@ -113,12 +116,20 @@ WHERE cube_id = $1
   AND event_date BETWEEN $3 AND $4
 ORDER BY event_date DESC
 LIMIT $5`
-	rows, err := p.pool.Query(ctx, q, cubeID, userID, start, end, limit)
+	out, err := observability.MeasureQuery(ctx, "SearchEventsByDate", p.pool, func(conn *pgxpool.Conn) ([]EventEntry, error) {
+		rows, qerr := conn.Query(ctx, q, cubeID, userID, start, end, limit)
+		if qerr != nil {
+			return nil, qerr
+		}
+		defer rows.Close()
+		results, scanErr := scanEventRows(rows)
+		observability.AddRowsScanned(ctx, "SearchEventsByDate", int64(len(results)))
+		return results, scanErr
+	})
 	if err != nil {
 		return nil, fmt.Errorf("SearchEventsByDate query: %w", err)
 	}
-	defer rows.Close()
-	return scanEventRows(rows)
+	return out, nil
 }
 
 // SearchEventsByTag returns events whose `tags` array overlaps the given

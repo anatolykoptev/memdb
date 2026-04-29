@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 )
 
 const (
@@ -85,8 +86,17 @@ func (j LLMJudge) Rerank(ctx context.Context, query string, items []Item) ([]Ite
 	sort.Strings(nodeIDs)
 	cacheKey := fmt.Sprintf("%x", sha256.Sum256([]byte(query+"\x00"+strings.Join(nodeIDs, ","))))
 
+	// M12.5: capture pre-rerank top-1 ID so we can detect swaps after the
+	// LLM scores land. Distinct from M12.7's rerank_gate_decision_total
+	// (which fires before the rerank runs); this is post-decision shape.
+	preTop1 := ""
+	if len(candidates) > 0 {
+		preTop1 = candidates[0].ID()
+	}
+
 	if cached, ok := globalLLMCache.get(cacheKey); ok {
 		out := applyLLMScores(candidates, rest, cached)
+		recordJudgeTop1Outcome(ctx, preTop1, out, cached)
 		RecordSuccess(ctx, j.Name())
 		return out, nil
 	}
@@ -103,8 +113,48 @@ func (j LLMJudge) Rerank(ctx context.Context, query string, items []Item) ([]Ite
 	}
 	globalLLMCache.set(cacheKey, scores, llmRerankCacheTTL)
 	out := applyLLMScores(candidates, rest, scores)
+	recordJudgeTop1Outcome(ctx, preTop1, out, scores)
 	RecordSuccess(ctx, j.Name())
 	return out, nil
+}
+
+// recordJudgeTop1Outcome maps (preTop1, postItems, scores) into one of the
+// three M12.5 outcome labels:
+//
+//	reject_all — scores map is empty / all zero (LLM accepted nothing)
+//	swap       — top-1 item ID changed (LLM moved someone up)
+//	agree      — top-1 item ID identical (LLM confirmed the cosine ranking)
+//
+// Defensive: empty preTop1 / no candidates → "agree" (no signal to record).
+func recordJudgeTop1Outcome(ctx context.Context, preTop1 string, postItems []Item, scores map[string]float64) {
+	if scoresAllZero(scores) {
+		observability.RecordJudgeChangedTop1(ctx, "reject_all")
+		return
+	}
+	if preTop1 == "" || len(postItems) == 0 {
+		observability.RecordJudgeChangedTop1(ctx, "agree")
+		return
+	}
+	if postItems[0].ID() != preTop1 {
+		observability.RecordJudgeChangedTop1(ctx, "swap")
+		return
+	}
+	observability.RecordJudgeChangedTop1(ctx, "agree")
+}
+
+// scoresAllZero returns true when every value in scores is exactly 0 (or the
+// map is empty). The LLMJudge contract sends 0.0 to mark "no relevance",
+// so an all-zero map = LLM rejected every candidate.
+func scoresAllZero(scores map[string]float64) bool {
+	if len(scores) == 0 {
+		return true
+	}
+	for _, v := range scores {
+		if v > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // applyLLMScores writes scores onto each candidate, marks llm_reranked,
