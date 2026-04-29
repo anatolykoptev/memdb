@@ -193,6 +193,61 @@ func TestErrComputePageRank_SentinelIsDistinct(t *testing.T) {
 	}
 }
 
+// TestComputePageRank_DistributionSpread is a regression guard for the
+// M11.Y distribution-collapse bug: ag_catalog.memory_edges shadow caused
+// FetchEdgesForPageRank to fail silently, leaving all nodes with stale
+// uniform scores (only 5 distinct values for 9014 entries in prod).
+//
+// On a well-connected 100-node synthetic graph the algorithm MUST produce
+// at least 50 distinct float64 scores. Fewer than 50 indicates either:
+//   (a) the power-method converged to a degenerate uniform distribution
+//       (edges not traversed / all edge weights equal → all nodes identical), or
+//   (b) a future serialization regression collapsed scores to low precision.
+//
+// Graph topology: each node i links to 5 targets with weights derived from
+// (i*7 + j*3) mod 17 + 1. The asymmetric weights break all node symmetry,
+// guaranteeing each node receives a unique PageRank score. A symmetric
+// uniform ring (used in an earlier draft) converged to 1/n for all nodes —
+// asymmetric weights are required to exercise the distribution.
+func TestComputePageRank_DistributionSpread(t *testing.T) {
+	const n = 100
+	const minDistinct = 50 // conservative lower bound; asymmetric graph yields 100
+
+	edges := make([]db.PageRankEdge, 0, n*5)
+	for i := 0; i < n; i++ {
+		for k := 1; k <= 5; k++ {
+			j := (i + k*13) % n
+			if j == i {
+				continue
+			}
+			w := float64((i*7+j*3)%17 + 1) // unique per (i,j) pair
+			edges = append(edges, db.PageRankEdge{
+				FromID: fmt.Sprintf("N%03d", i),
+				ToID:   fmt.Sprintf("N%03d", j),
+				Weight: w,
+			})
+		}
+	}
+
+	scores := computePageRank(edges)
+	if scores == nil {
+		t.Fatal("computePageRank returned nil for non-empty edge list")
+	}
+	if len(scores) != n {
+		t.Errorf("expected %d nodes, got %d", n, len(scores))
+	}
+
+	distinct := make(map[float64]struct{}, len(scores))
+	for _, v := range scores {
+		distinct[v] = struct{}{}
+	}
+	if len(distinct) < minDistinct {
+		t.Errorf("distribution collapse detected: only %d distinct scores for %d nodes (want >= %d); "+
+			"this mirrors the M11.Y prod bug where ag_catalog.memory_edges shadow caused uniform PageRank",
+			len(distinct), n, minDistinct)
+	}
+}
+
 // TestRunPageRankLoop_MetricIncrementsAfterTick is a smoke test that starts
 // the goroutine with a 1s interval against a stub (no-op postgres), waits for
 // one tick, and confirms the goroutine doesn't panic and terminates cleanly.

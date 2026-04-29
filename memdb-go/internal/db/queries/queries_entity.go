@@ -61,7 +61,7 @@ const GetMemoriesByEntityIDs = `
 SELECT m.properties->>(('id'::text)) AS memory_id,
        (m.properties::text::jsonb - 'sources')::text
 FROM %[1]s."Memory" m
-JOIN memory_edges e ON m.properties->>(('id'::text)) = e.from_id
+JOIN %[1]s.memory_edges e ON m.properties->>(('id'::text)) = e.from_id
 WHERE e.to_id = ANY($3)
   AND e.relation = 'MENTIONS_ENTITY'
   AND e.invalid_at IS NULL

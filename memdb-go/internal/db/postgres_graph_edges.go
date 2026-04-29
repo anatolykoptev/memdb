@@ -57,7 +57,7 @@ func (p *Postgres) CreateMemoryEdge(ctx context.Context, fromID, toID, relation,
 	if fromID == "" || toID == "" || relation == "" {
 		return nil
 	}
-	_, err := p.pool.Exec(ctx, queries.InsertMemoryEdge, fromID, toID, relation, createdAt, validAt)
+	_, err := p.pool.Exec(ctx, fmt.Sprintf(queries.InsertMemoryEdge, graphName), fromID, toID, relation, createdAt, validAt)
 	if err != nil {
 		return fmt.Errorf("create memory edge %s -[%s]-> %s: %w", fromID, relation, toID, err)
 	}
@@ -80,7 +80,7 @@ func (p *Postgres) CreateMemoryEdgeWithConfidence(ctx context.Context, fromID, t
 	} else if confidence > 1 {
 		confidence = 1
 	}
-	_, err := p.pool.Exec(ctx, queries.InsertMemoryEdgeWithConfidence, fromID, toID, relation, createdAt, validAt, confidence, rationale)
+	_, err := p.pool.Exec(ctx, fmt.Sprintf(queries.InsertMemoryEdgeWithConfidence, graphName), fromID, toID, relation, createdAt, validAt, confidence, rationale)
 	if err != nil {
 		return fmt.Errorf("create memory edge w/confidence %s -[%s]-> %s: %w", fromID, relation, toID, err)
 	}
@@ -128,11 +128,11 @@ func (p *Postgres) InvalidateEdgesByMemoryID(ctx context.Context, memoryID, inva
 	if memoryID == "" || invalidAt == "" {
 		return nil
 	}
-	const q = `
-UPDATE memory_edges
+	q := fmt.Sprintf(`
+UPDATE %s.memory_edges
 SET invalid_at = $2
 WHERE from_id = $1
-  AND invalid_at IS NULL`
+  AND invalid_at IS NULL`, graphName)
 	_, err := p.pool.Exec(ctx, q, memoryID, invalidAt)
 	if err != nil {
 		return fmt.Errorf("invalidate edges for memory %s: %w", memoryID, err)
