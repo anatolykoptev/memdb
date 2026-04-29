@@ -5,6 +5,12 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 // stubItem is a tiny in-memory Item used by chain + strategy tests so we
@@ -231,5 +237,91 @@ func TestChain_RerankDelegatesToTimings(t *testing.T) {
 	}
 	if out[0].ID() != "b" {
 		t.Errorf("expected reversed order from stubReranker, got %s first", out[0].ID())
+	}
+}
+
+// resetStrategyDurHistogram re-initialises strategyDurHistogram on the
+// currently-active OTel MeterProvider. Called from tests that install a
+// real SDK provider to verify histogram observations.
+func resetStrategyDurHistogram(t *testing.T) {
+	t.Helper()
+	m := otel.Meter("memdb-go/search/rerank")
+	h, err := m.Int64Histogram(
+		"memdb.search.rerank_strategy_duration_ms",
+		metric.WithDescription("Per-strategy rerank wall time. name in cosine|cross_encoder|llm_judge|mmr|staged|math_prefilter"),
+		metric.WithExplicitBucketBoundaries(1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
+		metric.WithUnit("ms"),
+	)
+	if err != nil {
+		t.Fatalf("failed to register strategyDurHistogram: %v", err)
+	}
+	strategyDurHistogram = h
+}
+
+// TestRerank_StrategyDuration_Emitted verifies that RerankWithTimings emits
+// one histogram observation per strategy, keyed by strategy name. The OTel
+// SDK ManualReader is used so no external server is needed.
+func TestRerank_StrategyDuration_Emitted(t *testing.T) {
+	// Install SDK with ManualReader BEFORE re-initialising the histogram so
+	// observations land on the real provider, not the no-op meter.
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	otel.SetMeterProvider(mp)
+	t.Cleanup(func() { otel.SetMeterProvider(nil) })
+
+	resetStrategyDurHistogram(t)
+	t.Cleanup(func() { strategyDurHistogram = nil }) // leave clean for subsequent tests
+
+	c := Chain{
+		stubReranker{name: "alpha", flag: "af"},
+		stubReranker{name: "beta", flag: "bf"},
+		stubReranker{name: "gamma", flag: "gf"},
+	}
+	items := []Item{newStub("x", 0.8), newStub("y", 0.7)}
+	ctx := context.Background()
+	res, err := c.RerankWithTimings(ctx, "query", items)
+	if err != nil {
+		t.Fatalf("RerankWithTimings err: %v", err)
+	}
+	if res == nil {
+		t.Fatal("expected non-nil ChainResult")
+	}
+
+	// Collect the OTel snapshot.
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(ctx, &rm); err != nil {
+		t.Fatalf("collect metrics: %v", err)
+	}
+
+	const wantName = "memdb.search.rerank_strategy_duration_ms"
+	observed := make(map[string]int64) // name → data-point count
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != wantName {
+				continue
+			}
+			hist, ok := m.Data.(metricdata.Histogram[int64])
+			if !ok {
+				t.Fatalf("metric %q: unexpected data type %T", wantName, m.Data)
+			}
+			for _, dp := range hist.DataPoints {
+				name, ok := dp.Attributes.Value(attribute.Key("name"))
+				if !ok {
+					continue
+				}
+				observed[name.AsString()] += int64(dp.Count)
+			}
+		}
+	}
+
+	for _, want := range []string{"alpha", "beta", "gamma"} {
+		cnt, found := observed[want]
+		if !found {
+			t.Errorf("strategy %q: no histogram observation found in OTel snapshot", want)
+			continue
+		}
+		if cnt != 1 {
+			t.Errorf("strategy %q: expected 1 observation, got %d", want, cnt)
+		}
 	}
 }
