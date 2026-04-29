@@ -177,7 +177,8 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	if emitStyle == "" {
 		emitStyle = answerStyleConversational
 	}
-	observability.RecordChatTop1Cosine(ctx, chatTopRelativity(memories))
+	top1Score := chatTopRelativity(memories)
+	observability.RecordChatTop1Cosine(ctx, top1Score)
 	observability.RecordChatContextTokens(ctx, prompt, profileCubeIDForRequest(&req), emitStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
 
