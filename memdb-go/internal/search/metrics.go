@@ -54,6 +54,11 @@ type searchMetricsInstruments struct {
 	// LinkedExpandCount (F12) — histogram of linked-by neighbours injected
 	// per query (excluding seeds). Mirrors HopsPerQuery's shape.
 	LinkedExpandCount metric.Int64Histogram
+	// RewriteCacheHit / RewriteCacheMiss — cache hit/miss counters for
+	// D4 query-rewrite and D7 CoT-decompose LLM calls.
+	// Label: stage = "d4" | "d7".
+	RewriteCacheHit  metric.Int64Counter
+	RewriteCacheMiss metric.Int64Counter
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -110,6 +115,10 @@ func searchMx() *searchMetricsInstruments {
 		lexc, _ := m.Int64Histogram("memdb.search.linked_expand_count",
 			metric.WithDescription("F12 linked_memory_ids: linked-by neighbours injected per query (excluding seeds)"),
 			metric.WithExplicitBucketBoundaries(0, 1, 3, 5, 10, 25, 50))
+		rwHit, _ := m.Int64Counter("memdb.search.rewrite_cache_hit_total",
+			metric.WithDescription("D4/D7 rewrite LRU cache hits by stage (stage=d4|d7)"))
+		rwMiss, _ := m.Int64Counter("memdb.search.rewrite_cache_miss_total",
+			metric.WithDescription("D4/D7 rewrite LRU cache misses by stage (stage=d4|d7)"))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -131,6 +140,8 @@ func searchMx() *searchMetricsInstruments {
 			RecallBudget:     rb,
 			LinkedExpand:     lex,
 			LinkedExpandCount: lexc,
+			RewriteCacheHit:  rwHit,
+			RewriteCacheMiss: rwMiss,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -181,6 +192,12 @@ func searchMx() *searchMetricsInstruments {
 			lex.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
 		}
 		lexc.Record(ctx, 0)
+		// Pre-register rewrite cache counters for both stages so dashboards
+		// see the series from container start, before any search fires.
+		for _, stage := range []string{"d4", "d7"} {
+			rwHit.Add(ctx, 0, metric.WithAttributes(attribute.String("stage", stage)))
+			rwMiss.Add(ctx, 0, metric.WithAttributes(attribute.String("stage", stage)))
+		}
 	})
 	return searchMetrics
 }
