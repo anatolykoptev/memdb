@@ -18,13 +18,17 @@ import (
 
 // nativeRawAddForCube processes raw-mode add for a single cube/user.
 // Pipeline:
-//  1. Extract text directly from each message's Content (no windowing)
+//  1. Extract text + per-msg metadata directly from each message (no windowing)
 //  2. Per message: content-hash dedup → embed → cosine dedup → build LTM node
 //  3. Batch insert into Postgres
 //  4. Write to VSET cache
+//
+// Each row maps 1:1 to a source message, so per-message metadata
+// (chat_time, uuid, agent_id, role) is stamped into properties.info instead
+// of a sources[] array. Filterable via existing info-key search predicates.
 func (h *Handler) nativeRawAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
-	texts := extractRawTexts(req.Messages)
-	if len(texts) == 0 {
+	items := extractRawItems(req.Messages)
+	if len(items) == 0 {
 		return nil, nil
 	}
 
@@ -40,15 +44,15 @@ func (h *Handler) nativeRawAddForCube(ctx context.Context, req *fullAddRequest, 
 		observationDate: h.resolveObservationDate(ctx, req.Messages),
 	}
 
-	hashes := hashRawTexts(texts)
+	hashes := hashRawItems(items)
 	existingHashes := h.filterExistingHashes(ctx, hashes, cubeID)
 
 	var nodes []db.MemoryInsertNode
-	var items []addResponseItem
+	var responseItems []addResponseItem
 	var embeddings [][]float32
 
-	for i, text := range texts {
-		node, item, emb, skip, err := h.processRawMemory(ctx, text, hashes[i], existingHashes, fac)
+	for i, it := range items {
+		node, item, emb, skip, err := h.processRawMemory(ctx, it, hashes[i], existingHashes, fac)
 		if err != nil {
 			return nil, err
 		}
@@ -56,21 +60,21 @@ func (h *Handler) nativeRawAddForCube(ctx context.Context, req *fullAddRequest, 
 			continue
 		}
 		nodes = append(nodes, node)
-		items = append(items, item)
+		responseItems = append(responseItems, item)
 		embeddings = append(embeddings, emb)
 	}
 
 	if len(nodes) == 0 {
-		return items, nil
+		return responseItems, nil
 	}
 	if err := h.postgres.InsertMemoryNodes(ctx, nodes); err != nil {
 		return nil, fmt.Errorf("insert nodes: %w", err)
 	}
-	h.writeRawCache(ctx, cubeID, nodes, items, embeddings)
+	h.writeRawCache(ctx, cubeID, nodes, responseItems, embeddings)
 	// M8 Stream 10 — emit structural edges for the LTM rows just inserted.
 	// Raw mode is 1 node per /add item (no WM pair), so refs map 1:1 to nodes.
 	h.emitStructuralEdges(ctx, fac, rawBatchRefs(nodes, embeddings, fac.now))
-	return items, nil
+	return responseItems, nil
 }
 
 // rawBatchRefs zips raw-mode insert nodes with their embeddings into
@@ -94,32 +98,52 @@ func rawBatchRefs(nodes []db.MemoryInsertNode, embeddings [][]float32, createdAt
 	return refs
 }
 
-// extractRawTexts returns non-empty Content from each message without any processing.
-func extractRawTexts(messages []chatMessage) []string {
-	var texts []string
-	for _, msg := range messages {
-		trimmed := strings.TrimSpace(msg.Content)
-		if trimmed != "" {
-			texts = append(texts, trimmed)
-		}
-	}
-	return texts
+// rawTextItem carries the trimmed message content alongside per-message
+// metadata that must survive into properties.info on the resulting LTM row.
+// Replaces the prior []string contract (which silently dropped chat_time,
+// uuid, agent_id, role).
+type rawTextItem struct {
+	Text     string
+	ChatTime string
+	UUID     string
+	AgentID  string
+	Role     string
 }
 
-// hashRawTexts computes content hashes for raw texts.
-func hashRawTexts(texts []string) []string {
-	hashes := make([]string, len(texts))
-	for i, t := range texts {
-		hashes[i] = textHash(t)
+// extractRawItems returns non-empty messages with per-msg metadata preserved.
+func extractRawItems(messages []chatMessage) []rawTextItem {
+	out := make([]rawTextItem, 0, len(messages))
+	for _, msg := range messages {
+		trimmed := strings.TrimSpace(msg.Content)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, rawTextItem{
+			Text:     trimmed,
+			ChatTime: msg.ChatTime,
+			UUID:     msg.UUID,
+			AgentID:  msg.AgentID,
+			Role:     msg.Role,
+		})
+	}
+	return out
+}
+
+// hashRawItems computes content hashes for raw items.
+func hashRawItems(items []rawTextItem) []string {
+	hashes := make([]string, len(items))
+	for i, it := range items {
+		hashes[i] = textHash(it.Text)
 	}
 	return hashes
 }
 
-// processRawMemory handles hash dedup, embedding, cosine dedup, and node building for one text.
+// processRawMemory handles hash dedup, embedding, cosine dedup, and node building for one item.
 // Returns (node, item, embedding, skip, err).
 func (h *Handler) processRawMemory(
 	ctx context.Context,
-	text, hash string,
+	it rawTextItem,
+	hash string,
 	existingHashes map[string]bool,
 	fac fastAddContext,
 ) (db.MemoryInsertNode, addResponseItem, []float32, bool, error) {
@@ -128,7 +152,7 @@ func (h *Handler) processRawMemory(
 		return db.MemoryInsertNode{}, addResponseItem{}, nil, true, nil
 	}
 
-	embedding, err := h.embedSingle(ctx, text)
+	embedding, err := h.embedSingle(ctx, it.Text)
 	if err != nil {
 		return db.MemoryInsertNode{}, addResponseItem{}, nil, false, err
 	}
@@ -138,7 +162,22 @@ func (h *Handler) processRawMemory(
 	}
 
 	memInfo := mergeInfo(fac.info, hash)
-	node, item, err := buildRawNode(text, embedding, fac, memInfo)
+	// Per-msg passthrough into info so raw rows carry the same per-message
+	// signal as fast/fine rows carry in their sources[]. Empty values stay
+	// absent — back-compat with pre-fix corpus and existing search filters.
+	if it.ChatTime != "" {
+		memInfo["chat_time"] = it.ChatTime
+	}
+	if it.UUID != "" {
+		memInfo["uuid"] = it.UUID
+	}
+	if it.AgentID != "" {
+		memInfo["agent_id"] = it.AgentID
+	}
+	if it.Role != "" {
+		memInfo["role"] = it.Role
+	}
+	node, item, err := buildRawNode(it.Text, embedding, fac, memInfo)
 	if err != nil {
 		return db.MemoryInsertNode{}, addResponseItem{}, nil, false, err
 	}
