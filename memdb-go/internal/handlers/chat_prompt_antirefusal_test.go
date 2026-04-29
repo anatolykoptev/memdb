@@ -176,6 +176,101 @@ func TestChatPrompt_TemporalQuestion_LowConf_HasApproximateGuidance(t *testing.T
 	}
 }
 
+// ── Synthesis instruction (Pattern A — WRONG_AGGREGATION fix) ─────────────────
+
+// TestChatPrompt_SynthesisInstruction_HighConf verifies that the high-confidence
+// prompt carries rule 9: synthesize from evidence rather than disclaiming.
+// Chat-50 evidence: cat-4 WRONG_AGGREGATION — model said "memories do not
+// explicitly state" even when stained-glass → religious inference was available.
+func TestChatPrompt_SynthesisInstruction_HighConf(t *testing.T) {
+	memories := []map[string]any{
+		memWithScore("Caroline made stained glass windows for a church fundraiser", 0.77),
+	}
+	prompt, _ := buildSystemPromptWithDecision(
+		nil,
+		"Would Caroline be considered religious?",
+		memories,
+		"", "", "factual", "",
+	)
+	if !strings.Contains(prompt, factualHighConfidenceMarker) {
+		t.Fatalf("precondition: expected high-confidence variant, missing marker %q", factualHighConfidenceMarker)
+	}
+	if !strings.Contains(prompt, "Synthesize from evidence") {
+		t.Error("high-confidence prompt missing synthesis instruction (rule 9)")
+	}
+	if !strings.Contains(prompt, "memories do not explicitly state") {
+		// Rule 9 must explicitly ban this phrase in the model's output.
+		t.Error("high-confidence prompt missing explicit ban on 'memories do not explicitly state' disclaimer")
+	}
+}
+
+// TestChatPrompt_SynthesisInstruction_LowConf verifies rule 9 is present in the
+// low-confidence variant as well.
+func TestChatPrompt_SynthesisInstruction_LowConf(t *testing.T) {
+	memories := []map[string]any{
+		memWithScore("Caroline attended Sunday services regularly last year", 0.38),
+	}
+	prompt, _ := buildSystemPromptWithDecision(
+		nil,
+		"Would Caroline be considered religious?",
+		memories,
+		"", "", "factual", "",
+	)
+	if !strings.Contains(prompt, factualLowConfidenceMarker) {
+		t.Fatalf("precondition: expected low-confidence variant, missing marker %q", factualLowConfidenceMarker)
+	}
+	if !strings.Contains(prompt, "Synthesize from evidence") {
+		t.Error("low-confidence prompt missing synthesis instruction (rule 9)")
+	}
+}
+
+// ── Cross-character shared-event instruction (Pattern B — cat-5 fix) ──────────
+
+// TestChatPrompt_CharCrossRef_HighConf verifies that the high-confidence prompt
+// carries rule 10: cross-apply shared-event facts instead of refusing on name
+// mismatch. Chat-50 evidence: all 8/10 cat-5 fails were accident-related;
+// question targeted Caroline while memory referenced Melanie's family experience.
+func TestChatPrompt_CharCrossRef_HighConf(t *testing.T) {
+	memories := []map[string]any{
+		memWithScore("Melanie's family was scared but resilient after the accident", 0.81),
+	}
+	prompt, _ := buildSystemPromptWithDecision(
+		nil,
+		"How did Caroline feel after the accident?",
+		memories,
+		"", "", "factual", "",
+	)
+	if !strings.Contains(prompt, factualHighConfidenceMarker) {
+		t.Fatalf("precondition: expected high-confidence variant, missing marker %q", factualHighConfidenceMarker)
+	}
+	if !strings.Contains(prompt, "Cross-character shared events") {
+		t.Error("high-confidence prompt missing cross-character instruction (rule 10)")
+	}
+	if !strings.Contains(prompt, "Do NOT refuse solely because the name in the memory differs") {
+		t.Error("high-confidence prompt missing name-mismatch refusal ban (rule 10)")
+	}
+}
+
+// TestChatPrompt_CharCrossRef_LowConf verifies rule 10 is present in the
+// low-confidence variant.
+func TestChatPrompt_CharCrossRef_LowConf(t *testing.T) {
+	memories := []map[string]any{
+		memWithScore("Melanie's family was scared but resilient after the accident", 0.34),
+	}
+	prompt, _ := buildSystemPromptWithDecision(
+		nil,
+		"How did Caroline feel after the accident?",
+		memories,
+		"", "", "factual", "",
+	)
+	if !strings.Contains(prompt, factualLowConfidenceMarker) {
+		t.Fatalf("precondition: expected low-confidence variant, missing marker %q", factualLowConfidenceMarker)
+	}
+	if !strings.Contains(prompt, "Cross-character shared events") {
+		t.Error("low-confidence prompt missing cross-character instruction (rule 10)")
+	}
+}
+
 // ── Low-confidence variant: any relevant memory should produce answer ─────────
 
 // TestChatPrompt_LowConf_PartialMatchInstruction verifies that the
