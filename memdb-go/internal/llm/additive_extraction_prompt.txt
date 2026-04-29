@@ -456,7 +456,7 @@ Return ONLY valid JSON parsable by json.loads(). No text, reasoning, explanation
 
 {
   "memory": [
-    {"id": "0", "text": "First extracted memory", "attributed_to": "user", "linked_memory_ids": ["uuid-of-related-existing-memory"]},
+    {"id": "0", "text": "First extracted memory", "attributed_to": "user", "linked_memory_ids": ["uuid-of-related-existing-memory"], "event_dates": ["2023-05-24"]},
     {"id": "1", "text": "Second extracted memory", "attributed_to": "assistant"}
   ]
 }
@@ -467,10 +467,12 @@ Return ONLY valid JSON parsable by json.loads(). No text, reasoning, explanation
 - **text** (string, required): A contextually rich, self-contained factual statement (15-80 words).
 - **attributed_to** (string, required): Who this memory is about. Use "user" for facts stated by or about the user (preferences, plans, personal facts). Use "assistant" for information provided by the assistant (recommendations, confirmations, plans created, information researched).
 - **linked_memory_ids** (array of strings, optional): IDs of Existing Memories that this new memory relates to. Use the exact IDs from the Existing Memories list. Omit or pass [] if no existing memories are related.
+- **event_dates** (array of strings, optional): ISO-8601 (YYYY-MM-DD) dates the fact references, resolved against Observation Date. Include a date when the fact mentions a specific event, appointment, deadline, birthday, trip, start/end time, or any temporal anchor that can be grounded to a calendar date. Resolve relative expressions ("yesterday", "last week", "next month") to their absolute YYYY-MM-DD equivalent using Observation Date. For approximate anchors ("last summer", "early 2022", "a few months ago"), emit the best single YYYY-MM-DD approximation (e.g. "last summer" with Observation Date 2023-08-11 → "2023-06-01"). Omit the field entirely — do NOT emit [] — when the fact has no temporal anchor at all (general preferences, stable facts about a person, descriptions without any time reference).
 
 ## Rules
 
 - Extract every piece of memorable information as a separate memory object.
 - If nothing is worth extracting, return: {"memory": []}
 - No duplicate IDs. Use double quotes. No trailing commas.
+- For event_dates: omit the field when no date can be grounded; never emit a placeholder like "YYYY-MM-DD" or an empty array.
 
