@@ -6,92 +6,110 @@ import (
 	"testing"
 )
 
-// --- extractRawTexts tests ---
+// --- extractRawItems tests ---
 
-func TestExtractRawTexts_PreservesContent(t *testing.T) {
+func TestExtractRawItems_PreservesContent(t *testing.T) {
 	// Raw mode must NOT add timestamp prefixes or split — text comes through as-is.
 	jsonPayload := `{"action":"click","selector":".btn","ts":1234567890}`
 	msgs := []chatMessage{
 		{Role: "user", Content: jsonPayload, ChatTime: "2026-04-10T10:00:00"},
 	}
 
-	texts := extractRawTexts(msgs)
-	if len(texts) != 1 {
-		t.Fatalf("expected 1 text, got %d", len(texts))
+	items := extractRawItems(msgs)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
 	}
-	if texts[0] != jsonPayload {
-		t.Errorf("expected text to be unchanged JSON, got: %q", texts[0])
+	if items[0].Text != jsonPayload {
+		t.Errorf("expected text unchanged, got: %q", items[0].Text)
 	}
-	// Negative checks: no role prefix, no timestamp brackets injected
-	if strings.Contains(texts[0], "user:") {
-		t.Errorf("raw text must not contain role prefix, got: %q", texts[0])
+	if items[0].ChatTime != "2026-04-10T10:00:00" {
+		t.Errorf("expected ChatTime preserved, got %q", items[0].ChatTime)
 	}
-	if strings.Contains(texts[0], "[2026-04-10") {
-		t.Errorf("raw text must not contain timestamp prefix, got: %q", texts[0])
+	if items[0].Role != "user" {
+		t.Errorf("expected Role preserved, got %q", items[0].Role)
+	}
+	if strings.Contains(items[0].Text, "user:") {
+		t.Errorf("raw text must not contain role prefix, got: %q", items[0].Text)
+	}
+	if strings.Contains(items[0].Text, "[2026-04-10") {
+		t.Errorf("raw text must not contain timestamp prefix, got: %q", items[0].Text)
 	}
 }
 
-func TestExtractRawTexts_LongContentNotSplit(t *testing.T) {
-	// Raw mode must NOT split at windowChars — large structured payloads stay intact.
+func TestExtractRawItems_PerMsgMetadata(t *testing.T) {
+	// Per-msg metadata (uuid, agent_id, role) must propagate so add_raw
+	// can stamp them into properties.info.
+	msgs := []chatMessage{
+		{Role: "assistant", Content: "x", UUID: "uuid-1", AgentID: "opus"},
+	}
+	items := extractRawItems(msgs)
+	if items[0].UUID != "uuid-1" || items[0].AgentID != "opus" || items[0].Role != "assistant" {
+		t.Errorf("per-msg metadata lost: %+v", items[0])
+	}
+}
+
+func TestExtractRawItems_LongContentNotSplit(t *testing.T) {
 	long := strings.Repeat("x", windowChars*2)
 	msgs := []chatMessage{{Role: "user", Content: long}}
 
-	texts := extractRawTexts(msgs)
-	if len(texts) != 1 {
-		t.Fatalf("expected 1 text (no splitting), got %d", len(texts))
+	items := extractRawItems(msgs)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item (no splitting), got %d", len(items))
 	}
-	if len(texts[0]) != len(long) {
-		t.Errorf("expected text length %d, got %d", len(long), len(texts[0]))
+	if len(items[0].Text) != len(long) {
+		t.Errorf("expected text length %d, got %d", len(long), len(items[0].Text))
 	}
 }
 
-func TestExtractRawTexts_MultipleMessages(t *testing.T) {
+func TestExtractRawItems_MultipleMessages(t *testing.T) {
 	msgs := []chatMessage{
 		{Role: "user", Content: "first"},
 		{Role: "assistant", Content: "second"},
 		{Role: "user", Content: "third"},
 	}
-	texts := extractRawTexts(msgs)
-	if len(texts) != 3 {
-		t.Fatalf("expected 3 texts, got %d", len(texts))
+	items := extractRawItems(msgs)
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(items))
 	}
 	want := []string{"first", "second", "third"}
 	for i, w := range want {
-		if texts[i] != w {
-			t.Errorf("texts[%d] = %q, want %q", i, texts[i], w)
+		if items[i].Text != w {
+			t.Errorf("items[%d].Text = %q, want %q", i, items[i].Text, w)
 		}
 	}
 }
 
-func TestExtractRawTexts_SkipsEmpty(t *testing.T) {
+func TestExtractRawItems_SkipsEmpty(t *testing.T) {
 	msgs := []chatMessage{
 		{Role: "user", Content: ""},
 		{Role: "user", Content: "   "},
 		{Role: "user", Content: "real content"},
 	}
-	texts := extractRawTexts(msgs)
-	if len(texts) != 1 {
-		t.Fatalf("expected 1 text after skipping empty, got %d", len(texts))
+	items := extractRawItems(msgs)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item after skipping empty, got %d", len(items))
 	}
-	if texts[0] != "real content" {
-		t.Errorf("expected 'real content', got %q", texts[0])
-	}
-}
-
-func TestExtractRawTexts_EmptyMessages(t *testing.T) {
-	if texts := extractRawTexts(nil); texts != nil {
-		t.Errorf("expected nil for nil input, got %v", texts)
-	}
-	if texts := extractRawTexts([]chatMessage{}); texts != nil {
-		t.Errorf("expected nil for empty slice, got %v", texts)
+	if items[0].Text != "real content" {
+		t.Errorf("expected 'real content', got %q", items[0].Text)
 	}
 }
 
-// --- hashRawTexts tests ---
+func TestExtractRawItems_EmptyMessages(t *testing.T) {
+	if items := extractRawItems(nil); len(items) != 0 {
+		t.Errorf("expected empty for nil input, got %v", items)
+	}
+	if items := extractRawItems([]chatMessage{}); len(items) != 0 {
+		t.Errorf("expected empty for empty slice, got %v", items)
+	}
+}
 
-func TestHashRawTexts_DeterministicAndDistinct(t *testing.T) {
-	texts := []string{"alpha", "beta", "alpha"}
-	hashes := hashRawTexts(texts)
+// --- hashRawItems tests ---
+
+func TestHashRawItems_DeterministicAndDistinct(t *testing.T) {
+	items := []rawTextItem{
+		{Text: "alpha"}, {Text: "beta"}, {Text: "alpha"},
+	}
+	hashes := hashRawItems(items)
 	if len(hashes) != 3 {
 		t.Fatalf("expected 3 hashes, got %d", len(hashes))
 	}
