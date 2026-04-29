@@ -154,3 +154,91 @@ func pickFactualTemplate(variant factualPromptVariant, lang string) string {
 	}
 	return factualQAPromptLowConfidenceEN
 }
+
+// ── M12.4: anti-refusal rules for custom-prompt callers ─────────────────────
+//
+// The dual-speaker LoCoMo harness (and any other client passing a non-empty
+// system_prompt + answer_style=factual) bypasses pickFactualTemplate entirely:
+// the basePrompt branch in buildSystemPromptWithDecision wins, and the M12.2
+// anti-refusal rules embedded in factualQAPromptHigh/LowConfidence* are
+// LOST. Result on full-corpus LoCoMo eval before this fix:
+// chat_refused_with_evidence = 954/1984 (48%) — the model refuses despite
+// receiving relevant retrieval.
+//
+// Fix: when basePrompt != "" + answerStyle=factual, append a variant-marked
+// "## Answer Rules:" block AFTER the caller's system prompt and BEFORE the
+// memory section. The rule fragments below mirror the exact text found in
+// factualQAPromptHigh/LowConfidenceEN (rules 1-10) and the variant-specific
+// preamble that distinguishes high-confidence ("commit, do not refuse") from
+// low/zero ("use any relevant context; refuse only when zero relevant info").
+//
+// Why a separate fragment instead of substring-extracting from the templates:
+// the templates carry %s placeholders for time/memory that we cannot easily
+// strip with a single pass. Defining the rule blocks separately keeps the
+// custom-prompt path explicit and the natural factual branch byte-for-byte
+// unchanged. When the natural branch fires (basePrompt == "") it continues
+// to use pickFactualTemplate; the rules below are NOT injected on top of it
+// (would double the rules — see buildSystemPromptWithDecision branch logic).
+//
+// The marker substrings (factualHighConfidenceMarker / factualLowConfidenceMarker
+// in chat_prompt_factual_test.go) are reproduced verbatim so the same
+// detection logic that flags variant-leak in the natural-branch tests also
+// works on the injected block.
+
+const factualRulesPreambleHighEN = "The retrieval system has high confidence that these memories contain the answer.\n**Commit to an answer based on the retrieved evidence; do not refuse.**"
+
+const factualRulesPreambleLowEN = "The retrieval system has lower confidence in these memories, but they may still contain the answer.\n**Use any relevant context to answer; only refuse if the memories contain zero relevant information.**"
+
+// factualRulesBodyHighEN — rules 1-10 of factualQAPromptHighConfidenceEN.
+// Rule 6 is the high-confidence variant ("commit; reply 'no answer' only if
+// every memory is unambiguously off-topic"). Keep this string in sync with
+// chat_prompt_tpl.go::factualQAPromptHighConfidenceEN.
+//
+//nolint:lll // prompt rules are long by nature
+const factualRulesBodyHighEN = `1. Reply with a concise but complete factual answer (usually 1-15 words). Include the entity AND the qualifying detail when both are present in the memories (e.g. "Yes, Caroline supports LGBTQ rights" not bare "Yes"; "a bookcase filled with DVDs and movies" not just "a bookcase").
+2. Do NOT say "based on the memories", "it appears", "the user mentioned", or similar meta-framing.
+3. For dates/times: give the most specific form present in the memories (e.g. "May 2023", "last summer", "Tuesday"). If the exact date is absent but inferable (e.g. "a few months ago" + known reference point), give your best estimate — do not refuse on grounds of approximation.
+4. For names/entities, reply with the bare name when the question asks "who" (e.g. "Emma" not "Her sister Emma"); include the relationship when the question asks for it.
+5. For yes/no questions: actively search for confirming OR denying evidence in every memory. If any memory implies an answer, reply "yes" or "no" followed by the supporting fact (e.g. "Yes, in March 2023"). Do NOT default to "not stated" — derive the answer from closest related context.
+6. **Commit**: at least one memory above carries strong evidence for the question. Synthesize an answer even if the phrasing is approximate. Reply "no answer" only if every memory is unambiguously off-topic — NOT because the wording differs from the question.
+7. Match the phrasing and register used in the memories themselves — do not paraphrase more than needed.
+8. For counting questions (how many, how often, how much): count ALL distinct mentions across every memory, even if the total is not stated explicitly. Never base a count on a single memory when multiple memories contribute.
+9. **Synthesize from evidence**: When the question asks about a property or trait and the memories show a related action or behaviour (not the trait stated directly), SYNTHESIZE the answer from that evidence. Do NOT add disclaimers like "memories do not explicitly state" — commit to your best-fit inference. Example: Q "Is X religious?" + memory "X made stained glass windows for a church" → answer "Somewhat religious" based on the evidence.
+10. **Cross-character shared events**: When the question asks about person X but the memories reference a SHARED event involving person Y (accident, party, trip, conversation), facts about Y's experience often apply to X as witness, family, or co-participant. Do NOT refuse solely because the name in the memory differs from the name in the question. Example: Q "How did X feel after the accident?" + memory "Y's family was scared but resilient after the accident" → X as a family member shares that emotional scope; answer accordingly. When in doubt, prefer cross-applying shared-event facts over refusing.`
+
+// factualRulesBodyLowEN — rules 1-10 of factualQAPromptLowConfidenceEN. Rule
+// 6 is the low/zero-confidence variant ("provide best answer from any
+// relevant memory; reply exactly: no answer — only when every memory is
+// entirely unrelated"). Keep in sync with
+// chat_prompt_tpl.go::factualQAPromptLowConfidenceEN.
+//
+//nolint:lll // prompt rules are long by nature
+const factualRulesBodyLowEN = `1. Reply with a concise but complete factual answer (usually 1-15 words). Include the entity AND the qualifying detail when both are present in the memories.
+2. Do NOT say "based on the memories", "it appears", "the user mentioned", or similar meta-framing.
+3. For dates/times: give the most specific form present in the memories (e.g. "May 2023", "last summer", "Tuesday"). If the exact date is absent but inferable, give your best estimate rather than refusing.
+4. For names/entities, reply with the bare name when the question asks "who" (e.g. "Emma" not "Her sister Emma").
+5. For yes/no questions: actively search for confirming OR denying evidence in every memory. If any memory implies an answer, reply "yes" or "no" followed by the supporting fact. Do NOT default to "not stated" — derive the answer from closest related context.
+6. Provide the best answer you can from any relevant memory, even if the match is partial or approximate. Reply exactly: no answer — only when every memory is entirely unrelated to the question.
+7. Match the phrasing and register used in the memories themselves — do not paraphrase more than needed.
+8. For counting questions (how many, how often, how much): count ALL distinct mentions across every memory, even if the total is not stated explicitly. Never base a count on a single memory when multiple memories contribute.
+9. **Synthesize from evidence**: When the question asks about a property or trait and the memories show a related action or behaviour (not the trait stated directly), SYNTHESIZE the answer from that evidence. Do NOT add disclaimers like "memories do not explicitly state" — commit to your best-fit inference. Example: Q "Is X religious?" + memory "X made stained glass windows for a church" → answer "Somewhat religious" based on the evidence.
+10. **Cross-character shared events**: When the question asks about person X but the memories reference a SHARED event involving person Y (accident, party, trip, conversation), facts about Y's experience often apply to X as witness, family, or co-participant. Do NOT refuse solely because the name in the memory differs from the name in the question. Example: Q "How did X feel after the accident?" + memory "Y's family was scared but resilient after the accident" → X as a family member shares that emotional scope; answer accordingly. When in doubt, prefer cross-applying shared-event facts over refusing.`
+
+// buildFactualRulesBlock returns the variant-conditional anti-refusal block
+// to inject after a custom system_prompt. Only English — Chinese custom
+// prompts in dual-speaker harness are not in scope (LoCoMo is English-only).
+// The block is wrapped in a "## Answer Rules:" header so the model treats it
+// as a distinct directive section rather than free text.
+//
+// Variant routing:
+//   - factualVariantHigh        → high-confidence preamble + high body (rule 6 = commit)
+//   - factualVariantLow / Zero  → low-confidence preamble + low body (rule 6 = strict-but-conditional)
+//
+// Empty string for variant=none (caller checks answerStyle before calling).
+func buildFactualRulesBlock(variant factualPromptVariant) string {
+	preamble, body := factualRulesPreambleLowEN, factualRulesBodyLowEN
+	if variant == factualVariantHigh {
+		preamble, body = factualRulesPreambleHighEN, factualRulesBodyHighEN
+	}
+	return "## Answer Rules\n" + preamble + "\n\n" + body
+}

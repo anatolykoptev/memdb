@@ -53,7 +53,7 @@ func (h *Handler) chatSearchMemories(ctx context.Context, req *nativeChatRequest
 	// etc.). M12.7 revival.
 	baseParams := search.SearchParams{
 		Query:       *req.Query,
-		UserName:    *req.UserID,
+		UserName:    stringOrEmpty(req.UserID),
 		AgentID:     stringOrEmpty(req.AgentID),
 		TopK:        topK,
 		PrefTopK:    prefTopK,
@@ -200,6 +200,9 @@ func (h *Handler) searchSingleCube(ctx context.Context, cubeID string, base sear
 }
 
 // resolveCubeIDs returns the list of cube IDs to search, falling back to user_id.
+// Returns nil when no identifier can be resolved (M9 dual-speaker case where
+// UserID is intentionally absent — that path uses chatSearchMemoriesDual,
+// not the single-cube searcher).
 func resolveCubeIDs(readableCubeIDs []string, memCubeID, userID *string) []string {
 	if len(readableCubeIDs) > 0 {
 		return readableCubeIDs
@@ -207,7 +210,10 @@ func resolveCubeIDs(readableCubeIDs []string, memCubeID, userID *string) []strin
 	if memCubeID != nil && *memCubeID != "" {
 		return []string{*memCubeID}
 	}
-	return []string{*userID}
+	if userID != nil && *userID != "" {
+		return []string{*userID}
+	}
+	return nil
 }
 
 // profileCubeIDForRequest picks the single cube_id used to scope user-profile
@@ -268,8 +274,18 @@ func chatBuildMessages(systemPrompt, query string, history []map[string]string) 
 }
 
 // chatPostAdd fires a fire-and-forget add for the chat Q&A pair.
+//
+// M9 dual-speaker: when UserID is empty (the Speakers fan-out path), the
+// post-add is skipped — there's no obvious "owner" speaker for the Q&A
+// turn, and writing it under Speakers[0] would silently bias multi-tenant
+// memory partitioning. Callers that want post-add in dual mode must
+// supply UserID + WritableCubeIDs explicitly.
 func (h *Handler) chatPostAdd(req *nativeChatRequest, query, response string) {
-	userID := *req.UserID
+	userID := stringOrEmpty(req.UserID)
+	if userID == "" {
+		h.logger.Debug("chat post-add skipped: no user_id (dual-speaker request)")
+		return
+	}
 	cubeIDs := req.WritableCubeIDs
 	if len(cubeIDs) == 0 && req.MemCubeID != nil && *req.MemCubeID != "" {
 		cubeIDs = []string{*req.MemCubeID}

@@ -23,3 +23,7 @@ results/predictions-m10-stage4-w4-hop2-*.json
 # Large, ephemeral, never committed.
 results/.llm_judge_cache.json
 results/.llm_judge_cache.json.tmp
+results/.llm_judge_cache.bak.json
+
+# Run-side completion sentinels written by harness scripts (never committed).
+results/.*-done-signal

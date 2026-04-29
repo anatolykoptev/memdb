@@ -24,6 +24,9 @@ import (
 //
 // Label hierarchy (highest precedence first):
 //   - "custom"          — non-empty basePrompt wins; backward-compat path.
+//                         M12.4 anti-refusal injection still fires on this
+//                         branch — observability of WHICH variant applied is
+//                         carried by chat_refusal_total{variant=*}, not here.
 //   - "factual_high"    — factual branch, top-1 score >= confidence threshold.
 //   - "factual_low"     — factual branch, memories present but all below threshold.
 //   - "factual_zero"    — factual branch, no memories retrieved.

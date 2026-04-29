@@ -179,7 +179,13 @@ def judge(
         api_key=api_key,
         timeout=timeout,
     )
-    cache.set(key, result)
+    # Do not cache transient errors (auth failure, timeout, parse fail, etc.) —
+    # caching them poisons subsequent runs because retry sees the cached error
+    # and skips the live call. Errors are detected by the "judge_error:" prefix
+    # set by _call_judge's exception handlers.
+    reason = str(result.get("reason", "")) if isinstance(result, dict) else ""
+    if not reason.startswith("judge_error:"):
+        cache.set(key, result)
     return result
 
 

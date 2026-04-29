@@ -93,6 +93,7 @@ func buildUpdateWMNode(
 		RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
 		Key:             key,
 		ObservationDate: observationDate,
+		EventDates:      f.EventDates,
 	}))
 	if err != nil {
 		return db.MemoryInsertNode{}, wmVSetInsert{}, false
@@ -149,6 +150,7 @@ func buildAddNodes(
 		RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
 		Key:             key,
 		ObservationDate: observationDate,
+		EventDates:      f.EventDates,
 	}))
 	ltJSON, err2 := marshalProps(buildNodeProps(memoryNodeProps{
 		ID: ltID, Memory: f.Memory, MemoryType: f.Type,
@@ -158,6 +160,7 @@ func buildAddNodes(
 		RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
 		Key:             key,
 		ObservationDate: observationDate,
+		EventDates:      f.EventDates,
 	}))
 	if err1 != nil || err2 != nil {
 		return nil, nil
@@ -175,7 +178,11 @@ func buildAddNodes(
 	return nodes, item
 }
 
-// formatConversation formats messages into the "role: [time]: content\n" text for the LLM.
+// formatConversation formats messages into "alias(role): [time]: content" text for the LLM.
+// When a message carries Alias (Memobase pattern), it's prefixed before the role —
+// "Alice(user): [...]: ..." — letting the extractor write self-attributed facts
+// ("Alice mentioned X") instead of generic "User said X". Falls back to bare
+// role when Alias is empty (legacy behaviour preserved).
 func formatConversation(messages []chatMessage, fallbackTime string) string {
 	var sb strings.Builder
 	for _, msg := range messages {
@@ -183,7 +190,11 @@ func formatConversation(messages []chatMessage, fallbackTime string) string {
 		if chatTime == "" {
 			chatTime = fallbackTime
 		}
-		fmt.Fprintf(&sb, "%s: [%s]: %s\n", msg.Role, chatTime, msg.Content)
+		speaker := msg.Role
+		if alias := strings.TrimSpace(msg.Alias); alias != "" {
+			speaker = alias + "(" + msg.Role + ")"
+		}
+		fmt.Fprintf(&sb, "%s: [%s]: %s\n", speaker, chatTime, msg.Content)
 	}
 	return strings.TrimSpace(sb.String())
 }
