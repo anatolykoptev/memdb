@@ -39,6 +39,43 @@ type searchRequest struct {
 	// Level restricts search to a MemOS memory tier: l1, l2, or l3.
 	// Omit (nil) for full search (backward compat).
 	Level *string `json:"level,omitempty"`
+
+	// Speakers — server-side dual/multi-speaker fan-out (M9 dual-speaker
+	// retrieval). When non-empty, the handler issues one search per speaker
+	// (each value is a user_id, identical to the existing UserID semantics)
+	// in parallel, tags every returned memory with metadata.speaker_label,
+	// and merges the per-speaker buckets into a single TopK list.
+	//
+	// When empty (or len==1 and identical to UserID): the request is
+	// equivalent to the legacy single-speaker path — zero behaviour change
+	// for existing callers. The eval-only client wrapper in
+	// evaluation/locomo/query.py:query_search_dual is the reference shape;
+	// vaelor and other prod clients can now opt in via the JSON field.
+	Speakers []string `json:"speakers,omitempty"`
+
+	// TopKPerSpeaker — per-speaker TopK budget when Speakers fan-out is
+	// active. Defaults to TopK when nil/0. The merged response is still
+	// capped at TopK so downstream callers see the same overall budget.
+	TopKPerSpeaker *int `json:"top_k_per_speaker,omitempty"`
+
+	// MergeStrategy — how per-speaker buckets are stitched into the final
+	// list. Allowed values:
+	//   - ""           → default (interleave)
+	//   - "interleave" → round-robin over speakers (preserves diversity)
+	//   - "score"      → flat sort by metadata.relativity descending
+	// Unknown values are rejected at validation time. Ignored when
+	// Speakers is empty.
+	MergeStrategy *string `json:"merge_strategy,omitempty"`
+
+	// AttributedTo — single-user filter by atomic-fact speaker attribution.
+	// Distinct from Speakers (which fans out across user_ids). This filters
+	// WITHIN a single user's memory pool to facts whose top-level
+	// properties->>'attributed_to' = AttributedTo. Backed by the partial
+	// index `idx_memory_attributed_to` from migration 0022. Used when one
+	// user_id contains multiple speakers' atomic facts (e.g. dual-ingest
+	// without reverse_role) and the caller wants a single perspective.
+	// Empty/nil = no filter (legacy behaviour).
+	AttributedTo *string `json:"attributed_to,omitempty"`
 }
 
 // addRequest validates POST /product/add (basic fields only, used by ValidatedAdd).
@@ -89,6 +126,22 @@ type chatMessage struct {
 	Role     string `json:"role"`
 	Content  string `json:"content"`
 	ChatTime string `json:"chat_time,omitempty"`
+	// UUID is a caller-supplied stable identifier for this message. When
+	// present it propagates into sources[].uuid so future ingests of the
+	// same message (replay/retry/edit drift) can be deduplicated on a
+	// stronger key than content_hash. Optional. Empty preserves legacy
+	// content-hash-only behaviour byte-for-byte.
+	UUID string `json:"uuid,omitempty"`
+	// AgentID is per-message override for top-level agent_id. Useful when
+	// a single transcript batch carries replies from multiple models
+	// (main thread + subagent inline). Empty falls back to top-level.
+	AgentID string `json:"agent_id,omitempty"`
+	// Alias is the speaker's display name (e.g. "Alice", "Maria"). When
+	// present it gets baked into the conversation text the LLM sees as
+	// "Alice(user): ..." — Memobase pattern that lets the extractor write
+	// self-attributed facts ("Alice mentioned X") without a separate
+	// fan-out. Optional; if absent the bare role label is used.
+	Alias string `json:"alias,omitempty"`
 }
 
 // feedbackRequest validates POST /product/feedback.
@@ -214,4 +267,29 @@ type nativeChatRequest struct {
 	// Level restricts memory search to a MemOS tier: l1, l2, or l3.
 	// Omit (nil) for full search (backward compat).
 	Level *string `json:"level,omitempty"`
+
+	// Speakers — server-side dual/multi-speaker fan-out for chat retrieval
+	// (M9 dual-speaker). When non-empty, chat issues one retrieval per
+	// speaker in parallel (each is a user_id, identical UserID semantics),
+	// tags every memory with metadata.speaker_label, then composes the
+	// system prompt with per-speaker labelled memory blocks
+	// ("## Speaker <id> memories: ..."). Mirrors the eval-only path in
+	// evaluation/locomo/query.py:query_chat_dual but on the server, so
+	// vaelor / other consumers can opt in without copying the harness.
+	//
+	// Empty (or len==1 == UserID): legacy single-speaker behaviour —
+	// zero regression for existing callers.
+	//
+	// Compatibility: a non-empty SystemPrompt still wins (basePrompt
+	// branch in buildSystemPromptWithDecision), but the system prompt
+	// the handler builds itself when Speakers is set already includes
+	// the per-speaker blocks.
+	Speakers []string `json:"speakers,omitempty"`
+
+	// TopKPerSpeaker — per-speaker TopK budget. Defaults to TopK.
+	// Merged retrieval list is still capped at TopK overall.
+	TopKPerSpeaker *int `json:"top_k_per_speaker,omitempty"`
+
+	// MergeStrategy — same semantics as searchRequest.MergeStrategy.
+	MergeStrategy *string `json:"merge_strategy,omitempty"`
 }

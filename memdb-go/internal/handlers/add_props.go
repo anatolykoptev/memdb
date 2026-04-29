@@ -53,6 +53,17 @@ type memoryNodeProps struct {
 	// metadata lets retrieval clients prefix candidates with the real
 	// conversation date instead of a stale ingest stamp.
 	ObservationDate string
+
+	// EventDates (F11): ISO-8601 (YYYY-MM-DD) calendar dates this fact
+	// references — populated from the LLM extractor's "event_dates" field
+	// after ISO validation. Stamped at TOP LEVEL of properties so the GIN
+	// partial index from migration 0024 (`USING GIN ((properties::jsonb ->
+	// 'event_dates'))`) actually catches it, and the F7 search-time
+	// SearchMemoriesByDateRange query (internal/db/postgres_temporal.go)
+	// can resolve "when X happened" questions against the conversation's
+	// own calendar references. Empty/nil omits the field entirely (keeps
+	// JSONB compact for facts with no temporal anchor).
+	EventDates []string
 }
 
 // buildNodeProps constructs the JSONB properties dict matching the Python format.
@@ -109,6 +120,18 @@ func buildNodeProps(p memoryNodeProps) map[string]any {
 	if p.ObservationDate != "" {
 		props["observation_date"] = p.ObservationDate
 	}
+	// F11: event_dates — only emit when the extractor produced at least one
+	// validated ISO date. Empty/nil keeps the property absent so the GIN
+	// partial index from migration 0024 (predicate `WHERE properties ?
+	// 'event_dates'`) excludes the row, matching the documented contract.
+	// Cast through []any so json.Marshal emits a JSON array.
+	if len(p.EventDates) > 0 {
+		dates := make([]any, len(p.EventDates))
+		for i, s := range p.EventDates {
+			dates[i] = s
+		}
+		props["event_dates"] = dates
+	}
 	return props
 }
 
@@ -164,6 +187,10 @@ func buildMemoryPropertiesAt(
 }
 
 // buildSourcesFromMessages creates a sources slice from the raw messages list.
+// Per-message uuid and agent_id propagate into source rows when supplied so
+// downstream consumers (and future per-msg dedup) can address the original
+// message. Empty values are preserved as empty (not synthesised) so absence
+// stays distinguishable from "explicitly empty" at the source-of-truth level.
 func buildSourcesFromMessages(messages []chatMessage) []map[string]any {
 	sources := make([]map[string]any, 0, len(messages))
 	for _, msg := range messages {
@@ -171,11 +198,18 @@ func buildSourcesFromMessages(messages []chatMessage) []map[string]any {
 		if chatTime == "" {
 			chatTime = time.Now().UTC().Format("2006-01-02T15:04:05")
 		}
-		sources = append(sources, map[string]any{
+		src := map[string]any{
 			"role":      msg.Role,
 			"content":   msg.Content,
 			"chat_time": chatTime,
-		})
+		}
+		if msg.UUID != "" {
+			src["uuid"] = msg.UUID
+		}
+		if msg.AgentID != "" {
+			src["agent_id"] = msg.AgentID
+		}
+		sources = append(sources, src)
 	}
 	return sources
 }
