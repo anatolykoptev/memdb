@@ -24,6 +24,10 @@
 //   - embed_cache_hit_total{model}      — counter (full-batch hit events, NOT per-text)
 //   - embed_cache_miss_total{model}     — counter (fall-through-to-backend events)
 //   - embed_cache_set_docs_total{model} — counter (texts written to cache, per-text)
+//
+// Correctness guards:
+//
+//   - embed_dim_mismatch_total{model}   — counter (response dim != WithDim)
 
 package embed
 
@@ -150,6 +154,19 @@ var (
 		},
 		[]string{"model"},
 	)
+
+	// ── Correctness metrics ─────────────────────────────────────────────────────
+
+	// embedDimMismatchTotal counts vectors whose length did not match the
+	// dimension declared via WithDim. Per-text granularity: a 10-text request
+	// where 3 vectors are wrong-dim increments by 3.
+	embedDimMismatchTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "embed_dim_mismatch_total",
+			Help: "Total vectors whose length did not match the dimension declared via WithDim.",
+		},
+		[]string{"model"},
+	)
 )
 
 // init pre-registers retry-reason labels at zero so all four series are
@@ -232,6 +249,14 @@ func recordCacheMiss(model string) {
 // recordCacheSet adds n to the cache-set-docs counter (per-text granularity).
 func recordCacheSet(model string, n int) {
 	embedCacheSetDocsTotal.WithLabelValues(model).Add(float64(n))
+}
+
+// ── Correctness helpers ──────────────────────────────────────────────────────
+
+// recordDimMismatch increments the dim-mismatch counter for the given model.
+// Called once per offending vector (per-text granularity).
+func recordDimMismatch(model string) {
+	embedDimMismatchTotal.WithLabelValues(model).Inc()
 }
 
 // itoa converts a non-negative integer to its decimal string representation.
