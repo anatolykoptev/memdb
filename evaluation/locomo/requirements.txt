@@ -1,0 +1,24 @@
+# Runtime dependencies for evaluation/locomo programmatic judges.
+#
+# Install (host without venv → user-site, system Python protected):
+#   pip3 install --user --break-system-packages -r evaluation/locomo/requirements.txt
+#
+# Optional (NOT required by judge_programmatic.py; harness fallbacks
+# gracefully when missing):
+#   spaCy + en_core_web_md — NER. We use a curated entity dictionary
+#   instead because LoCoMo has ≤30 distinct named entities; saves the
+#   ~50MB model download and ~400MB resident RAM on the eval host.
+
+# Number-word parsing for cat-1 numeric ("three" ≡ "3", compound forms).
+# NOTE: PyPI does NOT ship word2number 0.1.13 (the M13 plan had a typo).
+# 1.1 is the latest stable release as of 2026-04-28.
+word2number==1.1
+
+# Date / duration phrase parsing for cat-3 temporal + duration.
+# 1.2.0 pinned for reproducibility; verified against LoCoMo "yesterday",
+# "last month", "May 7 2024", "since 2020", "2 weeks ago".
+dateparser==1.2.0
+
+# pytest for test discovery — system pytest 9.0.3 is also fine, only
+# pinned here for CI reproducibility.
+pytest>=7.0

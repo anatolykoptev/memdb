@@ -234,6 +234,9 @@ OVERVIEW*.md
 !examples/**/*.example.json
 !examples/**/.env.example
 
+# Allow eval-harness dependency files
+!evaluation/**/requirements.txt
+
 # Ignore built example binaries
 examples/go_client/go_client
 
