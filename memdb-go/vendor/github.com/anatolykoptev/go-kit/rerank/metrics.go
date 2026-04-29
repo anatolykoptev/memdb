@@ -248,6 +248,35 @@ var (
 		},
 		[]string{"lists"},
 	)
+
+	// Fusion-palette metrics (WeightedRRF, DBSF, LinearMinMax).
+
+	// rerankWeightedRRFListsFusedTotal counts standalone WeightedRRF fusion events.
+	rerankWeightedRRFListsFusedTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rerank_weighted_rrf_lists_fused_total",
+			Help: "Total standalone WeightedRRF fusion events by input list count bucket.",
+		},
+		[]string{"lists"},
+	)
+
+	// rerankDBSFListsFusedTotal counts standalone DBSF fusion events.
+	rerankDBSFListsFusedTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rerank_dbsf_lists_fused_total",
+			Help: "Total standalone DBSF fusion events by input list count bucket.",
+		},
+		[]string{"lists"},
+	)
+
+	// rerankLinearMinMaxListsFusedTotal counts standalone LinearMinMax fusion events.
+	rerankLinearMinMaxListsFusedTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rerank_linear_minmax_lists_fused_total",
+			Help: "Total standalone LinearMinMax fusion events by input list count bucket.",
+		},
+		[]string{"lists"},
+	)
 )
 
 // ── G0 helpers ───────────────────────────────────────────────────────────────
@@ -412,16 +441,38 @@ const rrfListsBucketCutoff = 5
 // recordRRFListsFused increments the standalone-RRF call counter by 1.
 // n is the number of input lists fused; bucketed to keep label cardinality low.
 func recordRRFListsFused(n int) {
-	var bucket string
+	rerankRRFListsFusedTotal.WithLabelValues(rrfListsBucket(n)).Inc()
+}
+
+// recordWeightedRRFListsFused increments the standalone-WeightedRRF call counter.
+// Same bucketing convention as recordRRFListsFused.
+func recordWeightedRRFListsFused(n int) {
+	rerankWeightedRRFListsFusedTotal.WithLabelValues(rrfListsBucket(n)).Inc()
+}
+
+// recordDBSFListsFused increments the standalone-DBSF call counter.
+// Same bucketing convention as recordRRFListsFused.
+func recordDBSFListsFused(n int) {
+	rerankDBSFListsFusedTotal.WithLabelValues(rrfListsBucket(n)).Inc()
+}
+
+// recordLinearMinMaxListsFused increments the standalone-LinearMinMax call counter.
+// Same bucketing convention as recordRRFListsFused.
+func recordLinearMinMaxListsFused(n int) {
+	rerankLinearMinMaxListsFusedTotal.WithLabelValues(rrfListsBucket(n)).Inc()
+}
+
+// rrfListsBucket maps an input-list count to a bounded Prometheus label.
+// Shared by RRF and the fusion-palette helpers (WeightedRRF, DBSF, LinearMinMax).
+func rrfListsBucket(n int) string {
 	switch {
 	case n <= 0:
-		bucket = "0"
+		return "0"
 	case n >= rrfListsBucketCutoff:
-		bucket = ">=5"
+		return ">=5"
 	default:
-		bucket = itoa(n)
+		return itoa(n)
 	}
-	rerankRRFListsFusedTotal.WithLabelValues(bucket).Inc()
 }
 
 // itoa converts a non-negative integer to its decimal string representation.

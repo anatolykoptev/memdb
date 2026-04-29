@@ -2,11 +2,13 @@
 //
 // Env gates:
 //
-//	MEMDB_USE_GOKIT_RRF=1  — enable go-kit RRF path (default OFF)
+//	MEMDB_USE_GOKIT_RRF=1  — enable go-kit RRF path (legacy gate, still honoured)
 //	MEMDB_RRF_K=<int>      — override RRF k constant (default 60, Robertson 2009)
+//	MEMDB_FUSION_STRATEGY  — select fusion strategy (see merge_fusion.go)
 //
-// When MEMDB_USE_GOKIT_RRF is unset or 0, MergeVectorAndFulltext is called
-// unchanged — bytewise parity with pre-PR behaviour is guaranteed.
+// When MEMDB_USE_GOKIT_RRF is unset or 0 AND MEMDB_FUSION_STRATEGY is unset,
+// MergeVectorAndFulltext is called unchanged — bytewise parity with pre-PR
+// behaviour is guaranteed.
 package search
 
 import (
@@ -14,6 +16,8 @@ import (
 	"os"
 
 	gokitrerank "github.com/anatolykoptev/go-kit/rerank"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
@@ -86,7 +90,7 @@ func MergeVectorAndFulltextGokit(vec, ft []db.VectorSearchResult) []MergedResult
 	k := rrfKValue()
 	mx := searchMx()
 	ctx := context.Background()
-	mx.RRFEngaged.Add(ctx, 1)
+	mx.RRFEngaged.Add(ctx, 1, metric.WithAttributes(attribute.String("strategy", strategyRRF)))
 	mx.RRFKGauge.Record(ctx, float64(k))
 
 	fused := gokitrerank.RRF(k, extractIDs(vec), extractIDs(ft))
@@ -110,9 +114,16 @@ func MergeVectorAndFulltextGokit(vec, ft []db.VectorSearchResult) []MergedResult
 	return out
 }
 
-// mergeVectorAndFulltextDispatch routes to the gokit path when env-gated,
-// otherwise falls back to the original MergeVectorAndFulltext.
+// mergeVectorAndFulltextDispatch routes to the appropriate fusion backend.
+//
+// Priority:
+//  1. MEMDB_FUSION_STRATEGY is set → use new multi-strategy dispatcher (merge_fusion.go)
+//  2. MEMDB_USE_GOKIT_RRF=1 (legacy gate) → use plain go-kit RRF path
+//  3. Neither → fall back to original MergeVectorAndFulltext (custom merge)
 func mergeVectorAndFulltextDispatch(vec, ft []db.VectorSearchResult) []MergedResult {
+	if os.Getenv(fusionStrategyEnvVar) != "" {
+		return mergeVectorAndFulltextFusion(vec, ft)
+	}
 	if gokitRRFEnabled() {
 		return MergeVectorAndFulltextGokit(vec, ft)
 	}
