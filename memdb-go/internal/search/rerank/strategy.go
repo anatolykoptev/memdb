@@ -92,9 +92,18 @@ type ChainResult struct {
 //
 // The returned ChainResult is never nil on success. Total chain time
 // is the sum of Durations (strategies run sequentially, no overlap).
+//
+// Per-stage top-1 change detection: when a strategy returns a non-nil
+// reordered slice and the top item's ID differs from the input, we
+// emit memdb.search.rerank_top1_changed_total{stage,changed=true|false}.
+// Skipped/error strategies do NOT contribute (they didn't reorder).
+// This is the "did the LLM-judge actually pull a different memory to
+// the top vs the cosine candidate" signal — the headline indicator that
+// the gate + LLM judge are doing useful work.
 func (c Chain) RerankWithTimings(ctx context.Context, query string, items []Item) (*ChainResult, error) {
 	durations := make(map[string]time.Duration, len(c))
 	for _, r := range c {
+		prevTopID := top1ID(items)
 		t0 := time.Now()
 		out, err := r.Rerank(ctx, query, items)
 		durations[r.Name()] = time.Since(t0)
@@ -107,9 +116,20 @@ func (c Chain) RerankWithTimings(ctx context.Context, query string, items []Item
 			recordOutcome(ctx, r.Name(), "skipped")
 			continue
 		}
+		newTopID := top1ID(out)
+		recordTop1Changed(ctx, r.Name(), prevTopID != newTopID)
 		items = out
 	}
 	return &ChainResult{Items: items, Durations: durations}, nil
+}
+
+// top1ID returns the ID of the first item, or "" for an empty slice.
+// Helper for top-1 change detection — does not allocate.
+func top1ID(items []Item) string {
+	if len(items) == 0 {
+		return ""
+	}
+	return items[0].ID()
 }
 
 // Name returns "chain" so the Chain itself can be used as a Reranker. Useful
@@ -129,7 +149,8 @@ const (
 // metric singleton — pre-registers all known strategy/outcome pairs so
 // dashboards see series from container start.
 var (
-	rerankCounter metric.Int64Counter
+	rerankCounter      metric.Int64Counter
+	top1ChangedCounter metric.Int64Counter
 )
 
 // known names pre-registered at zero. Adding a new strategy MUST extend
@@ -141,6 +162,9 @@ func init() {
 	c, _ := m.Int64Counter("memdb.search.rerank_strategy_total",
 		metric.WithDescription("Per-strategy rerank outcome (name in cosine|cross_encoder|llm_judge|staged, outcome in success|skipped|error)"))
 	rerankCounter = c
+	t1, _ := m.Int64Counter("memdb.search.rerank_top1_changed_total",
+		metric.WithDescription("Whether a rerank stage moved a different item to position 1 (stage in cosine|cross_encoder|llm_judge|mmr|staged, changed in true|false)"))
+	top1ChangedCounter = t1
 	ctx := context.Background()
 	for _, n := range preregNames {
 		for _, oc := range []string{OutcomeSuccess, OutcomeSkipped, OutcomeError} {
@@ -149,7 +173,31 @@ func init() {
 				attribute.String("outcome", oc),
 			))
 		}
+		for _, ch := range []string{"true", "false"} {
+			t1.Add(ctx, 0, metric.WithAttributes(
+				attribute.String("stage", n),
+				attribute.String("changed", ch),
+			))
+		}
 	}
+}
+
+// recordTop1Changed bumps memdb.search.rerank_top1_changed_total for a
+// rerank stage. `changed` is the boolean rendered as the string label
+// "true" / "false" so PromQL filtering matches the convention used by
+// rerank_strategy_total.
+func recordTop1Changed(ctx context.Context, stage string, changed bool) {
+	if top1ChangedCounter == nil {
+		return
+	}
+	val := "false"
+	if changed {
+		val = "true"
+	}
+	top1ChangedCounter.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("stage", stage),
+		attribute.String("changed", val),
+	))
 }
 
 // recordOutcome bumps the per-strategy counter. Strategies use

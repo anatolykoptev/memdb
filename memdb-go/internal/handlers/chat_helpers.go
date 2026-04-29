@@ -46,6 +46,11 @@ func (h *Handler) chatSearchMemories(ctx context.Context, req *nativeChatRequest
 		return nil, "", err
 	}
 
+	// LLMRerank defaults to TRUE — same rationale as buildSearchParams in
+	// handlers/search.go: the gate (rerankStrategy) is the actual cost
+	// guard, so leaving the flag off in the chat handler defeats the
+	// LLM Judge feature for every chat caller (LoCoMo harness, oxpulse,
+	// etc.). M12.7 revival.
 	baseParams := search.SearchParams{
 		Query:       *req.Query,
 		UserName:    *req.UserID,
@@ -55,6 +60,7 @@ func (h *Handler) chatSearchMemories(ctx context.Context, req *nativeChatRequest
 		IncludePref: derefBoolOr(req.IncludePreference, true),
 		Dedup:       dedup,
 		Level:       level,
+		LLMRerank:   true,
 	}
 
 	memories, prefString, err := h.searchAcrossCubes(ctx, cubeIDs, baseParams)
