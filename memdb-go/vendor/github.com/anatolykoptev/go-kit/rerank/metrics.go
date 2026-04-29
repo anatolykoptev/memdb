@@ -236,6 +236,18 @@ var (
 		Name: "rerank_math_empty_vector_total",
 		Help: "Total docs passed to MathReranker with empty EmbedVector (debug aid).",
 	})
+
+	// RRF metrics.
+
+	// rerankRRFListsFusedTotal counts standalone RRF fusion events.
+	// Labels: lists (string count of input ranked lists, "1".."4", ">=5").
+	rerankRRFListsFusedTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "rerank_rrf_lists_fused_total",
+			Help: "Total standalone RRF fusion events by input list count bucket.",
+		},
+		[]string{"lists"},
+	)
 )
 
 // ── G0 helpers ───────────────────────────────────────────────────────────────
@@ -388,6 +400,28 @@ func recordMathEmptyVector(n int) {
 	if n > 0 {
 		rerankMathEmptyVectorTotal.Add(float64(n))
 	}
+}
+
+// ── RRF helpers ───────────────────────────────────────────────────────────────
+
+// rrfListsBucketCutoff is the upper edge of distinct RRF list-count buckets
+// (1..rrfListsBucketCutoff-1 emit verbatim; cutoff and above collapse to one
+// label). Keeps Prometheus cardinality bounded.
+const rrfListsBucketCutoff = 5
+
+// recordRRFListsFused increments the standalone-RRF call counter by 1.
+// n is the number of input lists fused; bucketed to keep label cardinality low.
+func recordRRFListsFused(n int) {
+	var bucket string
+	switch {
+	case n <= 0:
+		bucket = "0"
+	case n >= rrfListsBucketCutoff:
+		bucket = ">=5"
+	default:
+		bucket = itoa(n)
+	}
+	rerankRRFListsFusedTotal.WithLabelValues(bucket).Inc()
 }
 
 // itoa converts a non-negative integer to its decimal string representation.
