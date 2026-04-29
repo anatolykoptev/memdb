@@ -19,8 +19,9 @@ const factualSharedSignature = "concise but complete factual answer"
 const factualHighConfidenceMarker = "Commit to an answer based on the retrieved evidence"
 
 // factualLowConfidenceMarker is unique to the low-confidence EN prompt
-// (the M12.2 hedging instruction).
-const factualLowConfidenceMarker = "low confidence in these memories"
+// (the M12.2 hedging instruction). M12.2 deepen: updated to match new text
+// "lower confidence in these memories, but they may still contain the answer".
+const factualLowConfidenceMarker = "lower confidence in these memories"
 
 // memWithScore returns a memory item with the given metadata.relativity score
 // — the input shape that decideFactualPrompt reads. Mirrors the format
