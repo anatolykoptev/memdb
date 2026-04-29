@@ -15,6 +15,8 @@ github.com/anatolykoptev/go-kit v0.30.0 h1:hkGPX2Om7sbAjMZD0QEx3bC9wl/zXmeNvPKWu
 github.com/anatolykoptev/go-kit v0.30.0/go.mod h1:UqViC2HoCeIoIj6Qi3dJREVQX43dgUeHV3SynpcL8Zs=
 github.com/anatolykoptev/go-kit v0.31.0 h1:Zib02cAbuHzAKmRME6LbgJ3O8paWnFgDf1DHU6msoog=
 github.com/anatolykoptev/go-kit v0.31.0/go.mod h1:UqViC2HoCeIoIj6Qi3dJREVQX43dgUeHV3SynpcL8Zs=
+github.com/anatolykoptev/go-kit v0.32.0 h1:5/m9JwgwcopJHzo4tEcmWZygEaQcbvWWsqPw1DZ3fI8=
+github.com/anatolykoptev/go-kit v0.32.0/go.mod h1:UqViC2HoCeIoIj6Qi3dJREVQX43dgUeHV3SynpcL8Zs=
 github.com/anatolykoptev/go-stealth v1.3.1 h1:6Q1MSi8JA66xggtVL8iAKdCy/ULKQ76KU7KSbfgo67A=
 github.com/anatolykoptev/go-stealth v1.3.1/go.mod h1:/3rYAaunzRjBKtFtHLeEh/Jw/jVyGRtdBPJeF8voYog=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
