@@ -94,7 +94,7 @@ func searchMx() *searchMetricsInstruments {
 		lvl, _ := m.Int64Counter("memdb.search.level_total",
 			metric.WithDescription("Search requests by memory tier (level=l1|l2|l3|all)"))
 		ceph, _ := m.Int64Counter("memdb.search.ce_precompute_hit_total",
-			metric.WithDescription("M10 Stream 6: CE precompute lookup outcome (outcome in hit|miss|stale)"))
+			metric.WithDescription("M10 Stream 6 + M14 Y2: CE precompute lookup outcome (outcome in hit|partial|miss|stale)"))
 		celive, _ := m.Int64Counter("memdb.search.ce_live_call_total",
 			metric.WithDescription("M10 Stream 6: live cross-encoder HTTP rerank invocations"))
 		d1boost, _ := m.Float64Histogram("memdb.search.d1_boost_magnitude",
@@ -148,9 +148,10 @@ func searchMx() *searchMetricsInstruments {
 		for _, lv := range []string{"l1", "l2", "l3", "all"} {
 			lvl.Add(ctx, 0, metric.WithAttributes(attribute.String("level", lv)))
 		}
-		// Pre-register CE precompute outcomes so dashboards see all three
+		// Pre-register CE precompute outcomes so dashboards see all four
 		// series from container start, even before any search has fired.
-		for _, oc := range []string{"hit", "miss", "stale"} {
+		// "partial" added in M14 Y2: some items hit cache, rest go live.
+		for _, oc := range []string{"hit", "partial", "miss", "stale"} {
 			ceph.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
 		}
 		celive.Add(ctx, 0)

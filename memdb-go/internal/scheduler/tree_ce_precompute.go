@@ -49,12 +49,6 @@ const (
 	// single rerank call (well under the rerank.defaultMaxDocs cap of
 	// 50) and large enough to cover the typical search-result window.
 	cePrecomputeTopK = 10
-
-	// cePrecomputeMinNeighbourCosine is the floor for considering a
-	// candidate a "neighbour" worth scoring. Below this we waste a CE
-	// call on a pair the search-time anchor lookup will never serve
-	// (because cosine has already filtered weak candidates upstream).
-	cePrecomputeMinNeighbourCosine = 0.30
 )
 
 // cePrecomputeEnabledEnv is the scheduler-side mirror of the search-side
@@ -109,6 +103,26 @@ func ceMathMx() (skipped, kept metric.Int64Counter) {
 		)
 	})
 	return ceMathSkipped, ceMathKept
+}
+
+// ceFloorMetrics holds the OTel counter for the legacy neighbour-floor pass.
+var (
+	ceFloorOnce    sync.Once
+	ceFloorDropped metric.Int64Counter
+)
+
+// ceFloorMx lazily initialises the legacy floor counter.
+// Exposed via MEMDB_CE_PRECOMPUTE_COSINE_THRESHOLD (same env as B1 math
+// prefilter) so both filters share one observable threshold.
+func ceFloorMx() metric.Int64Counter {
+	ceFloorOnce.Do(func() {
+		meter := otel.Meter("memdb-go/scheduler")
+		ceFloorDropped, _ = meter.Int64Counter(
+			"memdb.scheduler.ce_precompute_floor_dropped_total",
+			metric.WithDescription("CE precompute pairs dropped by legacy cosine floor (=B1 threshold env)"),
+		)
+	})
+	return ceFloorDropped
 }
 
 // applyMathPrefilter filters neighbours by cosine similarity to the anchor.
@@ -190,7 +204,7 @@ func (r *Reorganizer) runCEPrecomputePass(
 		if mem.ID == "" || mem.Text == "" || len(mem.Embedding) == 0 {
 			continue
 		}
-		neighbours := cePrecomputeNeighbours(mem, rawMems, cePrecomputeTopK)
+		neighbours := cePrecomputeNeighbours(ctx, mem, rawMems, cePrecomputeTopK)
 		if len(neighbours) == 0 {
 			continue
 		}
@@ -228,21 +242,26 @@ func (r *Reorganizer) runCEPrecomputePass(
 }
 
 // cePrecomputeNeighbours returns the top-K nearest cosine neighbours of
-// `target` from the `pool`, excluding the target itself. Filters out
-// pairs below cePrecomputeMinNeighbourCosine — they're dead weight at
-// search time.
-func cePrecomputeNeighbours(target db.HierarchyMemory, pool []db.HierarchyMemory, topK int) []db.HierarchyMemory {
+// `target` from the `pool`, excluding the target itself. Filters out pairs
+// whose cosine similarity is below cePrecomputeCosineThreshold()
+// (MEMDB_CE_PRECOMPUTE_COSINE_THRESHOLD, default 0.3) — they're dead weight
+// at search time. Dropped pairs are counted via the
+// memdb.scheduler.ce_precompute_floor_dropped_total metric.
+func cePrecomputeNeighbours(ctx context.Context, target db.HierarchyMemory, pool []db.HierarchyMemory, topK int) []db.HierarchyMemory {
 	type scored struct {
 		idx int
 		cos float64
 	}
+	threshold := cePrecomputeCosineThreshold()
+	floorCtr := ceFloorMx()
 	candidates := make([]scored, 0, len(pool)-1)
 	for i := range pool {
 		if pool[i].ID == target.ID || pool[i].ID == "" || len(pool[i].Embedding) == 0 || pool[i].Text == "" {
 			continue
 		}
 		c := cosineBetween(target.Embedding, pool[i].Embedding)
-		if c < cePrecomputeMinNeighbourCosine {
+		if c < threshold {
+			floorCtr.Add(ctx, 1)
 			continue
 		}
 		candidates = append(candidates, scored{idx: i, cos: c})

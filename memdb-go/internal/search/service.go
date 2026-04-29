@@ -97,7 +97,21 @@ func (s *SearchService) CanSearch() bool {
 func (s *SearchService) Search(ctx context.Context, p SearchParams) (*SearchOutput, error) {
 	pipelineStart := time.Now()
 	st := &pipelineState{Params: p, EmbedQuery: p.Query}
-	stages := s.defaultStages()
+
+	// M14.Y4 fast-path: skip d4_query_rewrite + d7_cot_decompose for simple
+	// factual queries when MEMDB_SEARCH_FAST_PATH=1. Default OFF.
+	var stages []stage
+	switch {
+	case !fastPathEnabled():
+		recordFastPathOutcome(ctx, "disabled")
+		stages = s.defaultStages()
+	case isSimpleFactualQuery(p.Query):
+		recordFastPathOutcome(ctx, "enabled")
+		stages = s.fastPathStages()
+	default:
+		recordFastPathOutcome(ctx, "complex_query")
+		stages = s.defaultStages()
+	}
 
 	runPipeline(ctx, s.logger, stages, st)
 
