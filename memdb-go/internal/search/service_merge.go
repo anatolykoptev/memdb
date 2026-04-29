@@ -11,9 +11,9 @@ import (
 
 // mergeSearchResults merges all parallel results into per-type slices.
 func (s *SearchService) mergeSearchResults(psr *parallelSearchResults, bfsResults []db.GraphRecallResult, internetMerged []MergedResult, p SearchParams) (textMerged, skillMerged, toolMerged []MergedResult) {
-	textMerged = MergeVectorAndFulltext(psr.textVec, psr.textFT)
-	skillMerged = MergeVectorAndFulltext(psr.skillVec, psr.skillFT)
-	toolMerged = MergeVectorAndFulltext(psr.toolVec, psr.toolFT)
+	textMerged = mergeVectorAndFulltextDispatch(psr.textVec, psr.textFT)
+	skillMerged = mergeVectorAndFulltextDispatch(psr.skillVec, psr.skillFT)
+	toolMerged = mergeVectorAndFulltextDispatch(psr.toolVec, psr.toolFT)
 
 	graphAll := slices.Concat(psr.graphKeyResults, psr.graphTagResults, bfsResults, psr.entityGraphResults)
 	if len(graphAll) == 0 {

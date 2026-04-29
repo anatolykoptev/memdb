@@ -52,6 +52,7 @@ func newClientFromInternal(cfg *cfgInternal) (*Client, error) {
 		observer:    cfg.observer,
 		logger:      cfg.logger,
 		model:       model,
+		expectedDim: cfg.dim,
 		retry:       cfg.retry,
 		circuit:     cb,
 		fallback:    cfg.fallback,
