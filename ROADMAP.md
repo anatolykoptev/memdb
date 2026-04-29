@@ -46,11 +46,67 @@ convention) — up from 70.0% in v0.22.0 (+2.5pp). Position: between MemOS
 | M9 Memobase port + Phase 5 | Dual-speaker retrieval, LLM Judge metric, `[mention DATE]` time anchoring, cat-5 exclusion, Python container shutdown | 2026-04-26 |
 | v0.22.0 | First public release | Pure-Go runtime, public README, LICENSE/CONTRIBUTING/SECURITY/CODE_OF_CONDUCT, auto-release infra | 2026-04-26 |
 | **M10 user_profiles + perf + audit (v0.23.0)** | Memobase profile layer (S1/S2/S3), L1/L2/L3 API (S4), Helm chart (S5), CE precompute (S6), PageRank (S7), reward scaffold (S8). 5 audit fixes (C1/C2/C3/I4/P3). 72.5% LLM Judge (+2.5pp), 7.5× faster ingest. | 2026-04-26 |
+| **M11 14-stream sprint** | F7 temporal index, F8 atomic per-fact extraction (mem0 ADDITIVE), F11 bi-temporal edges (Graphiti/Zep), F12 linked_memory_ids resolver, F14 Personalized PageRank (HippoRAG 2), F2 reflection-loop, F9 recall budget tuning, F3 event extraction + 4 followup buckets. Measured 41.5% headline → regression vs M10 chat-50 stratified (72.5%). | 2026-04-28 |
+| **M12 recovery** | M12.1 harness ts-prefix fix, M12.2 chat prompt softening, M12.5 observability metrics, M12.6 staged rerank bge-reranker backend, M12.7 LLM Judge revival (60% top-1 swap rate), M12.11 go-kit/embed extraction, agtype migration cycle (PR #167), bfs_expand 1830× index speedup (PR #169). | 2026-04-29 |
+| **M13 evaluation harness v2 (industrial-grade)** | J1 core judge robustness, J2 programmatic judges per cat (numeric/temporal/multi-fact), J5 statistical rigor (bootstrap CI, McNemar, Cohen's κ), J3-Q multi-query expansion (HyDE-style; replaces J3 ensemble), W1 go-kit/rerank v2 wire-up. Open-source harness + arXiv methodology paper planned. | 2026-04-29 |
+| **M14 MathReranker integration** | A1 Stage-0 pre-CE diversity prefilter (PR #183 — λ=0.5, env-gated), B1 CE precompute background prefilter (PR #182 — env-gated), go-kit v0.29.0 bump (subsumed PR #181). Both env-gated default OFF; opt-in via `~/deploy/server-config/.env`. | 2026-04-29 |
 
 Phase D measured delta on `chat/complete` end-to-end (1 conv, 10 cat-1 QAs):
 F1 0.143 (+14x vs retrieval-only baseline), semsim 0.150 (+3.3x), hit@20 0.700.
 M9 Stage 3 v3 completed the full-corpus run (1986 QA, 10 conversations) — see
 "Latest measurement" below for results.
+
+## Post-merge ops checklist (M14)
+
+Track: enable M14 features in production env after PR merge + dozor auto-deploy. **All flags default OFF in code.** Flip in `~/deploy/server-config/.env`, then `docker compose restart memdb-go memdb-mcp` (env reload only — no rebuild). Owner: controller.
+
+### B1 — CE precompute background math prefilter (PR #182, safe to enable on merge)
+
+Add to `~/deploy/server-config/.env`:
+
+```bash
+# M14 B1 — drop low-cosine pairs before bge-reranker call
+# threshold=0.5 (stricter than legacy hardcoded floor 0.30 → real CPU saving)
+MEMDB_CE_PRECOMPUTE_MATH_PREFILTER=1
+MEMDB_CE_PRECOMPUTE_COSINE_THRESHOLD=0.5
+```
+
+Verify:
+- `memdb_scheduler_ce_precompute_math_skipped_total > 0` after first scheduler tick.
+- `embed_server` Prometheus shows reduced CE batch volume (target −20–40%).
+
+Risk: low. Background scheduler only, not on search hot path. Threshold 0.5 ≪ cosine median (0.6–0.8 in our corpus), safe upper bound. Fallback: unset env, restart.
+
+### A1 — Stage-0 pre-CE MathReranker prefilter (PR #183, A/B before flipping)
+
+**Do NOT enable on merge.** Quality feature — needs A/B measurement against M12 baseline first.
+
+Plan:
+1. Merge #183 with default OFF (no behavior change).
+2. Run A/B: 50 LoCoMo QA each with `MEMDB_RERANK_MATH_PREFILTER=1 MEMDB_RERANK_MATH_LAMBDA=0.5` vs unset.
+3. Compare cat-1 (multi-fact aggregation) headline. Hypothesis: +2-3pp.
+4. If positive, add to `~/deploy/server-config/.env`:
+
+```bash
+# M14 A1 — Stage-0 cosine+MMR diversity-aware pre-CE prefilter
+MEMDB_RERANK_MATH_PREFILTER=1
+MEMDB_RERANK_MATH_LAMBDA=0.5
+```
+
+Verify:
+- `memdb_search_math_prefilter_engaged_total > 0` after first /search.
+- `memdb_search_math_prefilter_skipped_total{reason="no_query_vec"}` ≈ 0 (sanity).
+- Cat-1 LLM Judge metric ≥ M12 baseline.
+
+Risk: medium. Reorders CE input → can shift recall on edge queries. Mitigated by env-gate + small A/B sample.
+
+### B1.1 follow-up — replace hardcoded `cePrecomputeMinNeighbourCosine = 0.30` with env (task #67)
+
+After B1 is in prod and stable, fold the legacy hardcoded floor into the same `MEMDB_CE_PRECOMPUTE_COSINE_THRESHOLD` env. Default 0.3 = parity. Eliminates dual filter, brings legacy filter under B1's metrics.
+
+### M14.X Stage 1 — pipeline magic-number audit (tasks #68, #69)
+
+Wrap 10+ found hardcoded thresholds (`similarity.go`, `dedup.go`, `merge.go`, `linked_expand.go`, `config.go` decay weights) in env-gated reads + Prometheus gauges. Defaults unchanged → zero behavior change. Goal: observability, not retuning. Rationale: `feedback_pipeline_magic_numbers.md` — silent magic numbers are silent regression vectors (M11 incident pattern).
 
 ## Active workstreams
 
