@@ -145,6 +145,8 @@ The retrieval system has high confidence that these memories contain the answer.
 6. **Commit**: at least one memory above carries strong evidence for the question. Synthesize an answer even if the phrasing is approximate. Reply "no answer" only if every memory is unambiguously off-topic — NOT because the wording differs from the question.
 7. Match the phrasing and register used in the memories themselves — do not paraphrase more than needed.
 8. For counting questions (how many, how often, how much): count ALL distinct mentions across every memory, even if the total is not stated explicitly. Never base a count on a single memory when multiple memories contribute.
+9. **Synthesize from evidence**: When the question asks about a property or trait and the memories show a related action or behaviour (not the trait stated directly), SYNTHESIZE the answer from that evidence. Do NOT add disclaimers like "memories do not explicitly state" — commit to your best-fit inference. Example: Q "Is X religious?" + memory "X made stained glass windows for a church" → answer "Somewhat religious" based on the evidence.
+10. **Cross-character shared events**: When the question asks about person X but the memories reference a SHARED event involving person Y (accident, party, trip, conversation), facts about Y's experience often apply to X as witness, family, or co-participant. Do NOT refuse solely because the name in the memory differs from the name in the question. Example: Q "How did X feel after the accident?" + memory "Y's family was scared but resilient after the accident" → X as a family member shares that emotional scope; answer accordingly. When in doubt, prefer cross-applying shared-event facts over refusing.
 `
 
 // factualQAPromptLowConfidenceEN is the M12.2 low-confidence variant. Selected
@@ -188,6 +190,8 @@ The retrieval system has lower confidence in these memories, but they may still 
 6. Provide the best answer you can from any relevant memory, even if the match is partial or approximate. Reply exactly: no answer — only when every memory is entirely unrelated to the question.
 7. Match the phrasing and register used in the memories themselves — do not paraphrase more than needed.
 8. For counting questions (how many, how often, how much): count ALL distinct mentions across every memory, even if the total is not stated explicitly. Never base a count on a single memory when multiple memories contribute.
+9. **Synthesize from evidence**: When the question asks about a property or trait and the memories show a related action or behaviour (not the trait stated directly), SYNTHESIZE the answer from that evidence. Do NOT add disclaimers like "memories do not explicitly state" — commit to your best-fit inference. Example: Q "Is X religious?" + memory "X made stained glass windows for a church" → answer "Somewhat religious" based on the evidence.
+10. **Cross-character shared events**: When the question asks about person X but the memories reference a SHARED event involving person Y (accident, party, trip, conversation), facts about Y's experience often apply to X as witness, family, or co-participant. Do NOT refuse solely because the name in the memory differs from the name in the question. Example: Q "How did X feel after the accident?" + memory "Y's family was scared but resilient after the accident" → X as a family member shares that emotional scope; answer accordingly. When in doubt, prefer cross-applying shared-event facts over refusing.
 `
 
 // factualQAPromptHighConfidenceZH — Chinese counterpart of the high-confidence
@@ -225,6 +229,8 @@ const factualQAPromptHighConfidenceZH = `# Role
 6. **承诺**：上方至少一条记忆对当前问题携带较强证据。即便措辞需要近似，也请综合给出答案。仅当所有记忆都明显与问题无关时才回复 "no answer" — 不要因措辞不同就拒答。
 7. 与记忆中的措辞和语气保持一致 — 不要做超出必要的改写。
 8. 对于计数问题（多少个、多少次、多少量）：统计所有记忆中的所有不同提及，即使总数未被明确陈述。当多条记忆有贡献时，不要仅基于单条记忆给出计数。
+9. **从证据中综合推断**：当问题询问某个属性或特征，而记忆展示的是相关行为或行动（并非直接陈述该特征）时，从证据中综合推断答案。不要添加"记忆没有明确说明"之类的免责声明——根据最佳推断给出答案。示例：问"X 信教吗？" + 记忆"X 为教堂制作彩色玻璃窗" → 回答"有些信教"（基于证据推断）。
+10. **跨角色共享事件**：当问题问的是人物 X，但记忆中提到的是涉及人物 Y 的共享事件（事故、聚会、旅行、对话），Y 的经历往往也适用于 X（作为目击者、家人或共同参与者）。不要仅因记忆中的名字与问题中的名字不同就拒答。示例：问"X 在事故后感受如何？" + 记忆"Y 的家人在事故后感到害怕但坚韧" → X 作为家庭成员共享该情感范围；据此作答。如有疑问，优先跨应用共享事件的事实，而不是拒答。
 `
 
 // factualQAPromptLowConfidenceZH — Chinese counterpart of the low-confidence
@@ -262,6 +268,8 @@ const factualQAPromptLowConfidenceZH = `# Role
 6. 尽量利用任何相关记忆给出最佳答案，即使匹配是部分的或近似的。仅当所有记忆与问题完全无关时，精确回复: no answer
 7. 与记忆中的措辞和语气保持一致 — 不要做超出必要的改写。
 8. 对于计数问题（多少个、多少次、多少量）：统计所有记忆中的所有不同提及，即使总数未被明确陈述。
+9. **从证据中综合推断**：当问题询问某个属性或特征，而记忆展示的是相关行为或行动时，从证据中综合推断答案。不要添加"记忆没有明确说明"之类的免责声明——根据最佳推断给出答案。
+10. **跨角色共享事件**：当问题问的是人物 X，但记忆中提到涉及人物 Y 的共享事件时，Y 的经历往往也适用于 X。不要仅因名字不同就拒答。如有疑问，优先跨应用共享事件的事实。
 `
 
 // Backward-compatibility aliases for legacy callers / tests that still
