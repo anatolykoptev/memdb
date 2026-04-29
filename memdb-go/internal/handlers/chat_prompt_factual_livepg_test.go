@@ -8,10 +8,13 @@
 //   2. The chat handler considers itself "native" (search + LLM both wired).
 //   3. chatSearchMemories → SearchService.Search runs against a real (empty)
 //      Postgres without panicking; an empty result set is the expected path.
-//   4. buildSystemPrompt routes through the factualQAPromptEN branch and the
+//   4. buildSystemPrompt routes through the factual-QA branch and the
 //      assembled system message is passed to the LLM client.
-//   5. The captured request body contains "SHORTEST factual phrase" — the
-//      load-bearing rule-1 string from the QA prompt.
+//   5. The captured request body contains "concise but complete factual
+//      answer" — the load-bearing rule-1 string from the M12.2 prompt
+//      (replaces the legacy "SHORTEST factual phrase" wording, which was
+//      softened because LoCoMo gold answers are full phrases not bare
+//      tokens).
 //
 // Gating:
 //   - build tag `livepg` keeps this file out of `go test ./...` in CI.
@@ -167,8 +170,8 @@ func TestLivePG_ChatComplete_FactualPrompt(t *testing.T) {
 	if calls == 0 {
 		t.Fatal("stub LLM was never called — chat handler must have proxied; check chatCanNative wiring")
 	}
-	if !strings.Contains(sysMsg, "SHORTEST factual phrase") {
-		t.Errorf("captured system message missing factual rule-1 string.\nsystem message:\n%s", sysMsg)
+	if !strings.Contains(sysMsg, "concise but complete factual answer") {
+		t.Errorf("captured system message missing M12.2 factual rule-1 string.\nsystem message:\n%s", sysMsg)
 	}
 	if strings.Contains(sysMsg, "Four-Step Verdict") {
 		t.Errorf("captured system message contains default cloud-chat boilerplate — factual routing failed.\nsystem message:\n%s", sysMsg)

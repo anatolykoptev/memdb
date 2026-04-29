@@ -2,6 +2,7 @@ package handlers
 
 // chat.go — native chat complete and streaming handlers.
 // Falls back to Python proxy when services are unavailable or on error.
+// Metric / debug-header recording lives in chat_record.go.
 
 import (
 	"context"
@@ -36,26 +37,6 @@ func chatTopRelativity(memories []map[string]any) float64 {
 		return 0
 	}
 	return relativity(memories[0])
-}
-
-// promptTemplateLabel maps the (basePrompt, answerStyle) pair to the metric label
-// emitted by chat handlers. "custom" wins when basePrompt is non-empty (backward-compat).
-func promptTemplateLabel(basePrompt, answerStyle string) string {
-	if basePrompt != "" {
-		return "custom"
-	}
-	if answerStyle == answerStyleFactual {
-		return answerStyleFactual
-	}
-	return answerStyleConversational
-}
-
-// recordChatPromptUsed bumps memdb.chat.prompt_template_used_total{template=...}.
-// Called once per chat request right after buildSystemPrompt returns.
-func recordChatPromptUsed(ctx context.Context, basePrompt, answerStyle string) {
-	chatPromptMx().TemplateUsed.Add(ctx, 1,
-		metric.WithAttributes(attribute.String("template", promptTemplateLabel(basePrompt, answerStyle))),
-	)
 }
 
 // chatCanNative returns true if all services needed for native chat are available.
@@ -183,8 +164,9 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	basePrompt := stringOrEmpty(req.SystemPrompt)
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
 	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID), profileCubeIDForRequest(&req))
-	prompt := buildSystemPromptWithProfile(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
+	prompt, decision := buildSystemPromptWithDecision(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
 	recordChatPromptUsed(ctx, basePrompt, answerStyle)
+	recordFactualPromptDecision(ctx, w, decision)
 	// M12.5: chat-path observability — top-1 cosine, context tokens. Recorded
 	// pre-LLM so even chats that fail downstream surface their input shape.
 	emitStyle := answerStyle
@@ -260,8 +242,11 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 	basePrompt := stringOrEmpty(req.SystemPrompt)
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
 	profileSection := h.chatProfileSection(ctx, stringOrEmpty(req.UserID), profileCubeIDForRequest(&req))
-	prompt := buildSystemPromptWithProfile(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
+	prompt, decision := buildSystemPromptWithDecision(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
 	recordChatPromptUsed(ctx, basePrompt, answerStyle)
+	// Set debug header BEFORE rpc.SSEHeaders writes response status — once
+	// SSEHeaders fires the header set is frozen.
+	recordFactualPromptDecision(ctx, w, decision)
 	// M12.5: same chat-path observability as the non-streaming branch. Stream
 	// post-answer signals (pred length, refusal) record in streamChatResponse
 	// after the buffer is drained.

@@ -93,14 +93,28 @@ const cloudChatPromptZH = `# Role
 3. **输出**：直接回答问题，**严禁**提及"记忆库"、"检索"或"AI 观点"等系统内部术语。
 4. **语言**：回答语言应与用户查询语言一致。`
 
-// factualQAPromptEN is the LoCoMo-tuned factual-extraction system prompt used
-// when answer_style="factual". Verbatim port of QA_SYSTEM_PROMPT from the
-// exp/locomo-qa-prompt branch (Fix-1 variant: +51% F1 on 5-cat sample).
-// Two %s placeholders: (1) current time, (2) numbered memories — same signature
-// as cloudChatPromptEN so the substitution call site stays unchanged.
+// factualQAPromptHighConfidenceEN is the M12.2 high-confidence variant of the
+// LoCoMo-tuned factual QA prompt. Selected when retrieval delivered at least
+// one memory whose top score crosses MEMDB_FACTUAL_CONFIDENCE_THRESHOLD
+// (default 0.5, see chat_prompt.go::factualConfidenceThreshold).
+//
+// Why two variants instead of one prompt with conditional rule 6:
+//   - M11 RCA: 220/841 = 26.2% of cat-4 wrong predictions had hit@k=1 AND
+//     model said "memories do not contain". The single-prompt rule 6
+//     ("reply exactly: no answer") combined with rule 1 ("SHORTEST factual
+//     phrase") trained the model to err on the refusal side even when gold
+//     was top-retrieved. Splitting the prompt at the threshold lets us bias
+//     toward commitment when retrieval signal is strong.
+//   - Rule 1 softened from "SHORTEST factual phrase" → "concise but complete
+//     factual answer" because LoCoMo gold answers are often phrased like
+//     "Yes, Caroline supports LGBTQ rights" not bare "Yes". Forced terseness
+//     costs LLM Judge.
+//
+// Two %s placeholders, same signature as cloudChatPromptEN: (1) current time,
+// (2) numbered memories — call site stays unchanged.
 //
 //nolint:lll // prompt templates are long by nature
-const factualQAPromptEN = `# Role
+const factualQAPromptHighConfidenceEN = `# Role
 You are answering factual questions about a conversation history between two people (let's call them Person A and Person B).
 
 # System Context
@@ -111,27 +125,67 @@ Below are numbered memories retrieved from their past conversations, ordered by 
 Memories may contain first-person statements from EITHER person, or dialogue lines with speaker labels.
 Both persons' statements are valid evidence — use any memory that contains the answer, regardless of which person said it.
 
+The retrieval system has high confidence that these memories contain the answer.
+**Commit to an answer based on the retrieved evidence; do not refuse.**
+
 <memories>
 %s
 </memories>
 
 # Answer Rules — follow strictly
-1. Reply with the SHORTEST factual phrase that answers the question (usually 1-10 words).
+1. Reply with a concise but complete factual answer (usually 1-15 words). Include the entity AND the qualifying detail when both are present in the memories (e.g. "Yes, Caroline supports LGBTQ rights" not bare "Yes"; "a bookcase filled with DVDs and movies" not just "a bookcase").
 2. Do NOT say "based on the memories", "it appears", "the user mentioned", or similar meta-framing.
 3. For dates/times, give the most specific form present in the memories (e.g. "May 2023", "last summer", "Tuesday").
-4. For names/entities, reply with the bare name (e.g. "Emma" not "Her sister Emma").
-5. For yes/no questions, reply "yes" or "no".
-6. If no memory supports an answer, reply exactly: no answer
+4. For names/entities, reply with the bare name when the question asks "who" (e.g. "Emma" not "Her sister Emma"); include the relationship when the question asks for it.
+5. For yes/no questions, reply "yes" or "no" followed by the supporting fact when one is present (e.g. "Yes, in March 2023").
+6. **Commit**: at least one memory above carries strong evidence for the question. Synthesize an answer even if the phrasing is approximate. Reply "no answer" only if every memory is unambiguously off-topic — NOT because the wording differs from the question.
 7. Match the phrasing and register used in the memories themselves — do not paraphrase more than needed.
 `
 
-// factualQAPromptZH is the Chinese counterpart of factualQAPromptEN. Translates
-// the seven answer rules faithfully; rule 6 keeps the literal English string
-// "no answer" because LoCoMo scoring compares against the English gold answer.
-// Two %s placeholders with the same meaning as factualQAPromptEN.
+// factualQAPromptLowConfidenceEN is the M12.2 low-confidence variant. Selected
+// when retrieval delivered ZERO memories OR all memories scored below the
+// confidence threshold. Preserves the original M7 refusal contract: when
+// evidence is weak, refusing is safer than fabricating. LoCoMo scoring still
+// rewards "no answer" on truly absent topics.
+//
+// Two %s placeholders: (1) current time, (2) numbered memories.
 //
 //nolint:lll // prompt templates are long by nature
-const factualQAPromptZH = `# Role
+const factualQAPromptLowConfidenceEN = `# Role
+You are answering factual questions about a conversation history between two people (let's call them Person A and Person B).
+
+# System Context
+- Current Time: %s (Baseline for freshness)
+
+# Memory Data
+Below are numbered memories retrieved from their past conversations, ordered by relevance.
+Memories may contain first-person statements from EITHER person, or dialogue lines with speaker labels.
+Both persons' statements are valid evidence — use any memory that contains the answer, regardless of which person said it.
+
+The retrieval system has low confidence in these memories. They may not address the question.
+
+<memories>
+%s
+</memories>
+
+# Answer Rules — follow strictly
+1. Reply with a concise but complete factual answer (usually 1-15 words). Include the entity AND the qualifying detail when both are present in the memories.
+2. Do NOT say "based on the memories", "it appears", "the user mentioned", or similar meta-framing.
+3. For dates/times, give the most specific form present in the memories (e.g. "May 2023", "last summer", "Tuesday").
+4. For names/entities, reply with the bare name when the question asks "who" (e.g. "Emma" not "Her sister Emma").
+5. For yes/no questions, reply "yes" or "no" followed by the supporting fact when one is present.
+6. If no memory clearly supports an answer, reply exactly: no answer
+7. Match the phrasing and register used in the memories themselves — do not paraphrase more than needed.
+`
+
+// factualQAPromptHighConfidenceZH — Chinese counterpart of the high-confidence
+// variant. Rule 6 keeps the literal English string "no answer" because LoCoMo
+// scoring compares against the English gold answer (per M7 design).
+//
+// Two %s placeholders with the same meaning as factualQAPromptHighConfidenceEN.
+//
+//nolint:lll // prompt templates are long by nature
+const factualQAPromptHighConfidenceZH = `# Role
 你正在回答关于两人（称为甲方和乙方）对话历史的事实性问题。
 
 # System Context
@@ -142,16 +196,62 @@ const factualQAPromptZH = `# Role
 记忆可能包含任意一方的第一人称陈述，或带有说话者标签的对话行。
 两方的陈述都是有效证据——无论是哪方说的，只要记忆中包含答案，均可使用。
 
+检索系统对这些记忆包含答案有较高置信度。
+**请基于检索到的证据给出明确回答，不要拒答。**
+
 <memories>
 %s
 </memories>
 
 # Answer Rules — 严格遵守
-1. 用回答问题所需的最简事实短语回复（通常 1-10 个词）。
+1. 用简洁但完整的事实短语回答（通常 1-15 个词）。当记忆同时给出实体和修饰细节时一并保留（例如 "Yes, Caroline supports LGBTQ rights" 而非单独的 "Yes"）。
 2. 不要说"根据记忆"、"似乎"、"用户提到"或类似的元描述。
 3. 对于日期/时间，使用记忆中存在的最具体形式（例如"2023 年 5 月"、"去年夏天"、"周二"）。
-4. 对于人名/实体，仅回复名称本身（例如"Emma"而非"她的姐姐 Emma"）。
-5. 对于是/否问题，回复"yes"或"no"。
-6. 如果没有任何记忆支持答案，请精确回复: no answer
+4. 对于人名/实体，当问题问"谁"时仅回复名称本身（例如"Emma"而非"她的姐姐 Emma"）；当问题需要关系时则附上关系。
+5. 对于是/否问题，回复"yes"或"no"，并在记忆中存在时附上支撑事实（例如"Yes, in March 2023"）。
+6. **承诺**：上方至少一条记忆对当前问题携带较强证据。即便措辞需要近似，也请综合给出答案。仅当所有记忆都明显与问题无关时才回复 "no answer" — 不要因措辞不同就拒答。
 7. 与记忆中的措辞和语气保持一致 — 不要做超出必要的改写。
 `
+
+// factualQAPromptLowConfidenceZH — Chinese counterpart of the low-confidence
+// variant. Rule 6 keeps literal English "no answer" so LoCoMo scoring matches.
+//
+// Two %s placeholders with the same meaning as factualQAPromptHighConfidenceEN.
+//
+//nolint:lll // prompt templates are long by nature
+const factualQAPromptLowConfidenceZH = `# Role
+你正在回答关于两人（称为甲方和乙方）对话历史的事实性问题。
+
+# System Context
+- 当前时间: %s (作为时效性判断的基准)
+
+# Memory Data
+以下是从他们过去对话中检索到的编号记忆，按相关性排序。
+记忆可能包含任意一方的第一人称陈述，或带有说话者标签的对话行。
+两方的陈述都是有效证据——无论是哪方说的，只要记忆中包含答案，均可使用。
+
+检索系统对这些记忆置信度较低，可能并未涵盖该问题。
+
+<memories>
+%s
+</memories>
+
+# Answer Rules — 严格遵守
+1. 用简洁但完整的事实短语回答（通常 1-15 个词）。
+2. 不要说"根据记忆"、"似乎"、"用户提到"或类似的元描述。
+3. 对于日期/时间，使用记忆中存在的最具体形式（例如"2023 年 5 月"、"去年夏天"、"周二"）。
+4. 对于人名/实体，当问题问"谁"时仅回复名称本身（例如"Emma"而非"她的姐姐 Emma"）。
+5. 对于是/否问题，回复"yes"或"no"，并在记忆中存在时附上支撑事实。
+6. 如果没有任何记忆清晰地支持答案，请精确回复: no answer
+7. 与记忆中的措辞和语气保持一致 — 不要做超出必要的改写。
+`
+
+// Backward-compatibility aliases for legacy callers / tests that still
+// reference factualQAPromptEN / factualQAPromptZH. Point at the
+// low-confidence variant — the strictly-stricter prompt — so any code path
+// that bypasses buildSystemPrompt's confidence routing still gets the
+// classic refusal contract. New code MUST go through buildSystemPrompt.
+const (
+	factualQAPromptEN = factualQAPromptLowConfidenceEN
+	factualQAPromptZH = factualQAPromptLowConfidenceZH
+)

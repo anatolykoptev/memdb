@@ -155,3 +155,54 @@ func chatAcceptanceMx() *chatAcceptanceInstruments {
 	})
 	return chatAcceptanceMetrics
 }
+
+// ── M12.2 — refusal-reason counter + top-retrieval-score histogram ────────────
+
+var (
+	chatRefusalOnce    sync.Once
+	chatRefusalMetrics *chatRefusalInstruments
+)
+
+type chatRefusalInstruments struct {
+	// RefusalTotal counts factual-style chat requests labelled by the
+	// prompt-routing decision. label reason ∈ {none, no_memories, low_confidence, other}.
+	// label variant ∈ {none, high, low, zero}. "none/none" is the happy-path
+	// (high-confidence prompt fired); "low_confidence" / "no_memories" are
+	// the targets of the M12.2 ChatRefusalSpike alert.
+	RefusalTotal metric.Int64Counter
+
+	// TopRetrievalScore observes the max(metadata.relativity) of the memory
+	// pool that fed buildSystemPromptWithDecision. Powers the
+	// "context_signal_strength" dashboard panel and the calibration check
+	// against MEMDB_FACTUAL_CONFIDENCE_THRESHOLD.
+	TopRetrievalScore metric.Float64Histogram
+}
+
+// chatRefusalMx returns the singleton M12.2 chat-refusal instruments,
+// lazy-initialised. Pre-registers the four reason labels at zero so
+// dashboards see the full series space immediately.
+//
+// Counter memdb.chat.refusal_total{reason=none|no_memories|low_confidence|other,variant=none|high|low|zero}.
+// Histogram memdb.chat.top_retrieval_score (unitless, range [0, 1]).
+func chatRefusalMx() *chatRefusalInstruments {
+	chatRefusalOnce.Do(func() {
+		meter := otel.Meter("memdb-go/chat")
+		total, _ := meter.Int64Counter("memdb.chat.refusal_total",
+			metric.WithDescription("Count of factual-style chat requests labelled by refusal reason and prompt variant. Powers ChatRefusalSpike alert."),
+		)
+		score, _ := meter.Float64Histogram("memdb.chat.top_retrieval_score",
+			metric.WithDescription("Top-1 metadata.relativity (max cosine score) of the memory pool seen by the factual chat prompt builder."),
+		)
+		// Pre-register reason labels at 0 so Prometheus emits the series
+		// before the first refusal happens.
+		ctx := context.Background()
+		for _, reason := range []string{"none", "no_memories", "low_confidence", "other"} {
+			total.Add(ctx, 0, metric.WithAttributes(attribute.String("reason", reason)))
+		}
+		chatRefusalMetrics = &chatRefusalInstruments{
+			RefusalTotal:      total,
+			TopRetrievalScore: score,
+		}
+	})
+	return chatRefusalMetrics
+}

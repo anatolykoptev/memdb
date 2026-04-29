@@ -1,6 +1,7 @@
 package handlers
 
 // chat_prompt.go — prompt templates and memory formatting for chat endpoints.
+// M12.2 conditional refusal logic lives in chat_prompt_softening.go.
 
 import (
 	"context"
@@ -13,17 +14,33 @@ import (
 // buildSystemPrompt constructs the chat system prompt with memory context.
 // Routing precedence:
 //  1. basePrompt != "" → use it as-is (custom system_prompt always wins, backward compat).
-//  2. answerStyle == "factual" → factualQAPrompt<EN|ZH> chosen by detectLang(query).
+//  2. answerStyle == "factual" → factualQAPrompt<HighConfidence|LowConfidence><EN|ZH>
+//     chosen by (decideFactualPrompt(memories), detectLang(query)).
 //  3. otherwise → cloudChatPrompt<EN|ZH> (existing default).
 //
 // answerStyle values are validated upstream by validateChatRequest; this function
 // treats any unknown value as the default branch (defensive — should never hit).
 func buildSystemPrompt(query string, memories []map[string]any, prefString, basePrompt, answerStyle string) string {
-	return buildSystemPromptWithProfile(context.TODO(), query, memories, prefString, basePrompt, answerStyle, "")
+	prompt, _ := buildSystemPromptWithDecision(context.TODO(), query, memories, prefString, basePrompt, answerStyle, "")
+	return prompt
 }
 
-// buildSystemPromptWithProfile is the M10 Stream 3 variant that optionally
-// prepends a "## User Profile" section to the rendered system prompt.
+// buildSystemPromptWithProfile preserves the M10 Stream 3 entry point used by
+// existing chat handlers. Returns only the rendered prompt — the decision is
+// dropped. New call sites that need metrics/headers should use
+// buildSystemPromptWithDecision.
+func buildSystemPromptWithProfile(ctx context.Context, query string, memories []map[string]any, prefString, basePrompt, answerStyle, profileSection string) string {
+	prompt, _ := buildSystemPromptWithDecision(ctx, query, memories, prefString, basePrompt, answerStyle, profileSection)
+	return prompt
+}
+
+// buildSystemPromptWithDecision is the underlying prompt-builder. It returns
+// both the rendered system prompt AND the factualPromptDecision so chat
+// handlers can emit X-Memdb-Refusal-Reason and metrics without re-deriving
+// the threshold logic.
+//
+// For non-factual branches (custom basePrompt, conversational default) the
+// returned decision has Variant=factualVariantNone and Reason=refusalReasonNone.
 //
 // profileSection — pre-rendered output of formatProfileSection (empty string
 // means: do not prepend, e.g. when the env gate is disabled or the caller
@@ -33,21 +50,23 @@ func buildSystemPrompt(query string, memories []map[string]any, prefString, base
 //
 // The profile section is also prepended to custom basePrompt branches so the
 // two-section ordering contract holds regardless of which template wins.
-func buildSystemPromptWithProfile(_ context.Context, query string, memories []map[string]any, prefString, basePrompt, answerStyle, profileSection string) string {
+func buildSystemPromptWithDecision(_ context.Context, query string, memories []map[string]any, prefString, basePrompt, answerStyle, profileSection string) (string, factualPromptDecision) {
 	memCtx := formatMemories(memories, prefString)
+
+	decision := factualPromptDecision{Variant: factualVariantNone, Reason: refusalReasonNone}
 
 	var rendered string
 	switch {
 	case basePrompt == "":
 		lang := detectLang(query)
-		tpl := cloudChatPromptEN
+		var tpl string
 		if answerStyle == answerStyleFactual {
-			tpl = factualQAPromptEN
-			if lang == "zh" {
-				tpl = factualQAPromptZH
-			}
+			decision = decideFactualPrompt(memories)
+			tpl = pickFactualTemplate(decision.Variant, lang)
 		} else if lang == "zh" {
 			tpl = cloudChatPromptZH
+		} else {
+			tpl = cloudChatPromptEN
 		}
 		now := time.Now().Format("2006-01-02 15:04 (Monday)")
 		rendered = fmt.Sprintf(tpl, now, memCtx)
@@ -59,10 +78,10 @@ func buildSystemPromptWithProfile(_ context.Context, query string, memories []ma
 		rendered = basePrompt
 	}
 
-	if profileSection == "" {
-		return rendered
+	if profileSection != "" {
+		rendered = profileSection + "\n" + rendered
 	}
-	return profileSection + "\n" + rendered
+	return rendered, decision
 }
 
 // formatMemories converts search result memories into numbered text for prompt injection.
