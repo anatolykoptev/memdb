@@ -64,12 +64,12 @@ func (s *SearchService) stagePostProcess(ctx context.Context, st *pipelineState)
 // stageWorkingMemFormat formats working-memory rows into the response's
 // ActMem slice. Cosine-rescores against the query vector for stable
 // ordering. No-op when psr is nil or working-memory was empty.
-func (s *SearchService) stageWorkingMemFormat(_ context.Context, st *pipelineState) error {
+func (s *SearchService) stageWorkingMemFormat(ctx context.Context, st *pipelineState) error {
 	if st.PSR == nil {
 		st.skip("working_mem_format")
 		return nil
 	}
-	st.ActMemFormatted = s.formatWorkingMem(st.QueryVec, st.PSR.workingMemItems, st.Params)
+	st.ActMemFormatted = s.formatWorkingMem(ctx, st.QueryVec, st.PSR.workingMemItems, st.Params)
 	return nil
 }
 

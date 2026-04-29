@@ -70,6 +70,13 @@ type searchMetricsInstruments struct {
 	// counting query but already had TopK ≥ countingTopK (outcome=skipped).
 	// Disabled queries (MEMDB_COUNTING_TOPK=0) also land in "skipped".
 	CountingBoost metric.Int64Counter
+	// AttributionFilter (Memobase) — outcome counter for the attributed_to
+	// post-filter applied to vector/fulltext/working-memory pools when
+	// SearchParams.AttributedTo is set. outcome ∈ {kept, dropped, missing,
+	// disabled}. "missing" rows have no properties.attributed_to and are
+	// retained (legacy memories). "disabled" emits once per search call when
+	// AttributedTo is empty so the absence-of-filter baseline is visible.
+	AttributionFilter metric.Int64Counter
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -137,6 +144,8 @@ func searchMx() *searchMetricsInstruments {
 			metric.WithExplicitBucketBoundaries(10, 20, 30, 60, 100, 200))
 		cntBoost, _ := m.Int64Counter("memdb.search.counting_boost_total",
 			metric.WithDescription("Task #100: counting-aware top-K boost outcome per search (outcome=boosted|skipped)"))
+		attrFilter, _ := m.Int64Counter("memdb.search.attribution_filter_total",
+			metric.WithDescription("Memobase attributed_to post-filter outcomes per row (outcome=kept|dropped|missing|disabled)"))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -160,9 +169,10 @@ func searchMx() *searchMetricsInstruments {
 			LinkedExpandCount: lexc,
 			RewriteCacheHit:  rwHit,
 			RewriteCacheMiss: rwMiss,
-			RRFEngaged:       rrfEng,
-			RRFKGauge:        rrfK,
-			CountingBoost:    cntBoost,
+			RRFEngaged:        rrfEng,
+			RRFKGauge:         rrfK,
+			CountingBoost:     cntBoost,
+			AttributionFilter: attrFilter,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -230,8 +240,28 @@ func searchMx() *searchMetricsInstruments {
 		for _, oc := range []string{"boosted", "skipped"} {
 			cntBoost.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
 		}
+		// Pre-register Memobase attribution filter outcomes so dashboards see
+		// the full series space from container start, before the first
+		// AttributedTo-scoped query arrives.
+		for _, oc := range []string{"kept", "dropped", "missing", "disabled"} {
+			attrFilter.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
+		}
 	})
 	return searchMetrics
+}
+
+// recordAttributionOutcome records one outcome label for the Memobase
+// attributed_to post-filter. Bumps the counter under attribute outcome=label.
+// Safe to call when AttributionFilter has not been initialised (no-op).
+func recordAttributionOutcome(ctx context.Context, outcome string, n int) {
+	if n <= 0 {
+		return
+	}
+	mx := searchMx()
+	if mx.AttributionFilter == nil {
+		return
+	}
+	mx.AttributionFilter.Add(ctx, int64(n), metric.WithAttributes(attribute.String("outcome", outcome)))
 }
 
 // recallBudgetTopKBuckets is the bounded set of top_k label values used by

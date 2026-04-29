@@ -10,18 +10,20 @@ import (
 )
 
 // mergeSearchResults merges all parallel results into per-type slices.
-func (s *SearchService) mergeSearchResults(psr *parallelSearchResults, bfsResults []db.GraphRecallResult, internetMerged []MergedResult, p SearchParams) (textMerged, skillMerged, toolMerged []MergedResult) {
+func (s *SearchService) mergeSearchResults(ctx context.Context, psr *parallelSearchResults, bfsResults []db.GraphRecallResult, internetMerged []MergedResult, p SearchParams) (textMerged, skillMerged, toolMerged []MergedResult) {
 	// AttributedTo filter: when set, drop atomic facts whose
 	// properties.attributed_to disagrees. Applied to vector + fulltext per-type
 	// pools BEFORE merge so merged scores stay correct. Graph + internet results
 	// are passed through unchanged (they don't carry per-fact attribution).
 	if p.AttributedTo != "" {
-		psr.textVec = filterByAttribution(psr.textVec, p.AttributedTo)
-		psr.textFT = filterByAttribution(psr.textFT, p.AttributedTo)
-		psr.skillVec = filterByAttribution(psr.skillVec, p.AttributedTo)
-		psr.skillFT = filterByAttribution(psr.skillFT, p.AttributedTo)
-		psr.toolVec = filterByAttribution(psr.toolVec, p.AttributedTo)
-		psr.toolFT = filterByAttribution(psr.toolFT, p.AttributedTo)
+		psr.textVec = filterByAttribution(ctx, psr.textVec, p.AttributedTo)
+		psr.textFT = filterByAttribution(ctx, psr.textFT, p.AttributedTo)
+		psr.skillVec = filterByAttribution(ctx, psr.skillVec, p.AttributedTo)
+		psr.skillFT = filterByAttribution(ctx, psr.skillFT, p.AttributedTo)
+		psr.toolVec = filterByAttribution(ctx, psr.toolVec, p.AttributedTo)
+		psr.toolFT = filterByAttribution(ctx, psr.toolFT, p.AttributedTo)
+	} else {
+		recordAttributionOutcome(ctx, "disabled", 1)
 	}
 
 	textMerged = mergeVectorAndFulltextDispatch(psr.textVec, psr.textFT)
@@ -58,27 +60,40 @@ func (s *SearchService) mergeSearchResults(psr *parallelSearchResults, bfsResult
 // properties.attributed_to differs from want. Rows missing the field are
 // retained — legacy non-atomic memories don't carry attribution and must
 // not be silently dropped. Empty want is a no-op (caller should gate).
-func filterByAttribution(in []db.VectorSearchResult, want string) []db.VectorSearchResult {
+//
+// Each row contributes one outcome to the attribution_filter_total counter:
+// "kept" — attribution matched want; "dropped" — attribution differed;
+// "missing" — row had no attributed_to field (legacy memory, kept anyway).
+func filterByAttribution(ctx context.Context, in []db.VectorSearchResult, want string) []db.VectorSearchResult {
 	if want == "" || len(in) == 0 {
 		return in
 	}
 	out := make([]db.VectorSearchResult, 0, len(in))
+	var kept, dropped, missing int
 	for _, r := range in {
 		props := ParseProperties(r.Properties)
 		// Missing attribution → keep (legacy memory without speaker tag).
 		if props == nil {
 			out = append(out, r)
+			missing++
 			continue
 		}
 		got, ok := props["attributed_to"].(string)
 		if !ok || got == "" {
 			out = append(out, r)
+			missing++
 			continue
 		}
 		if got == want {
 			out = append(out, r)
+			kept++
+		} else {
+			dropped++
 		}
 	}
+	recordAttributionOutcome(ctx, "kept", kept)
+	recordAttributionOutcome(ctx, "dropped", dropped)
+	recordAttributionOutcome(ctx, "missing", missing)
 	return out
 }
 

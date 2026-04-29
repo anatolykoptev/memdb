@@ -10,14 +10,25 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/handlers"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/rpc"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
 
 // New creates a fully configured HTTP server and returns a cleanup function
 // that closes all database connections on shutdown.
 // ctx is used to control the lifetime of background workers (scheduler).
 func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Server, func()) {
+	// Pre-warm every per-package metric singleton so /metrics exposes the
+	// full series space (with pre-registered zero values) before the first
+	// request lands. Without this, lazy sync.Once accessors leave Grafana
+	// panels blank and alert rules in "no data" until traffic naturally
+	// exercises each code path.
+	handlers.PrewarmMetrics()
+	search.PrewarmMetrics()
+	observability.PrewarmMetrics()
+
 	// Initialize cache client (non-fatal if unavailable)
 	var cacheClient *cache.Client
 	if cfg.CacheEnabled {
