@@ -65,6 +65,11 @@ type searchMetricsInstruments struct {
 	// RRFKGauge records the k constant used each time go-kit RRF fires.
 	// Lets operators confirm MEMDB_RRF_K override is picked up.
 	RRFKGauge metric.Float64Histogram
+	// CountingBoost (Task #100) — fires once per search request that triggered
+	// the counting-aware top-K boost (outcome=boosted) or was classified as a
+	// counting query but already had TopK ≥ countingTopK (outcome=skipped).
+	// Disabled queries (MEMDB_COUNTING_TOPK=0) also land in "skipped".
+	CountingBoost metric.Int64Counter
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -130,6 +135,8 @@ func searchMx() *searchMetricsInstruments {
 		rrfK, _ := m.Float64Histogram("memdb.search.rrf_k",
 			metric.WithDescription("RRF k constant used per go-kit RRF fusion call (set via MEMDB_RRF_K, default 60)"),
 			metric.WithExplicitBucketBoundaries(10, 20, 30, 60, 100, 200))
+		cntBoost, _ := m.Int64Counter("memdb.search.counting_boost_total",
+			metric.WithDescription("Task #100: counting-aware top-K boost outcome per search (outcome=boosted|skipped)"))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -155,6 +162,7 @@ func searchMx() *searchMetricsInstruments {
 			RewriteCacheMiss: rwMiss,
 			RRFEngaged:       rrfEng,
 			RRFKGauge:        rrfK,
+			CountingBoost:    cntBoost,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -215,6 +223,11 @@ func searchMx() *searchMetricsInstruments {
 		// series even when MEMDB_USE_GOKIT_RRF is not yet enabled.
 		rrfEng.Add(ctx, 0)
 		rrfK.Record(ctx, 0)
+		// Pre-register Task #100 counting boost outcomes so dashboards see both
+		// series from container start, before the first counting query arrives.
+		for _, oc := range []string{"boosted", "skipped"} {
+			cntBoost.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
+		}
 	})
 	return searchMetrics
 }
