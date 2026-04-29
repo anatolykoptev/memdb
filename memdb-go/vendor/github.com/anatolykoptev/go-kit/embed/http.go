@@ -12,7 +12,12 @@ import (
 	"time"
 )
 
-const httpEmbedTimeout = 30 * time.Second
+// httpEmbedDefaultTimeout is the default HTTP client timeout applied when
+// the caller does not pass WithHTTPTimeout (or WithTimeout via the v2
+// NewClient factory). 30s is sufficient for the internal embed-server
+// sidecar; v2 callers needing more (e.g. cold-start ONNX model load on a
+// shared host) override via WithTimeout.
+const httpEmbedDefaultTimeout = 30 * time.Second
 
 // HTTPEmbedder calls a remote OpenAI-compatible /v1/embeddings endpoint.
 // Designed for the Rust embed-server sidecar on the internal Docker network,
@@ -26,20 +31,46 @@ type HTTPEmbedder struct {
 	logger  *slog.Logger
 }
 
+// HTTPOption is a functional option for [NewHTTPEmbedder].
+//
+// Currently used by the factory wiring in [newFromInternal] to forward
+// cfg.timeout (set via [WithTimeout] on the v2 [NewClient]). Direct v1
+// callers can also use it for per-instance customisation without changing
+// the existing 4-arg constructor signature.
+type HTTPOption func(*HTTPEmbedder)
+
+// WithHTTPTimeout overrides the default HTTP client timeout (30s).
+// Pass d=0 to leave the default unchanged.
+func WithHTTPTimeout(d time.Duration) HTTPOption {
+	return func(h *HTTPEmbedder) {
+		if d > 0 {
+			h.client.Timeout = d
+		}
+	}
+}
+
 // NewHTTPEmbedder creates an HTTPEmbedder pointing at baseURL.
 // baseURL should not include /v1/embeddings — it will be appended automatically.
 // logger=nil falls back to slog.Default().
-func NewHTTPEmbedder(baseURL, model string, dim int, logger *slog.Logger) *HTTPEmbedder {
+//
+// opts is variadic and backwards-compatible: existing 4-arg callers
+// (e.g. MemDB's memdb-go embedder wrapper) continue to compile unchanged
+// and receive the default 30s timeout.
+func NewHTTPEmbedder(baseURL, model string, dim int, logger *slog.Logger, opts ...HTTPOption) *HTTPEmbedder {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &HTTPEmbedder{
+	h := &HTTPEmbedder{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		model:   model,
 		dim:     dim,
-		client:  &http.Client{Timeout: httpEmbedTimeout},
+		client:  &http.Client{Timeout: httpEmbedDefaultTimeout},
 		logger:  logger,
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 type httpEmbedRequest struct {

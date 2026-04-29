@@ -94,6 +94,9 @@ func WithModel(model string) Opt {
 }
 
 // WithDim sets the expected embedding dimension. Zero = auto-detect from response.
+// When non-zero, every backend response is validated against this value: a mismatch
+// returns *ErrDimMismatch and increments embed_dim_mismatch_total{model}. The error
+// is non-terminal — fallback chains continue to the next embedder.
 func WithDim(dim int) Opt {
 	return func(c *cfgInternal) { c.dim = dim }
 }

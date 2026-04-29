@@ -59,6 +59,12 @@ type searchMetricsInstruments struct {
 	// Label: stage = "d4" | "d7".
 	RewriteCacheHit  metric.Int64Counter
 	RewriteCacheMiss metric.Int64Counter
+	// RRFEngaged counts calls that went through the go-kit/rerank.RRF path
+	// (MEMDB_USE_GOKIT_RRF=1). Zero when env is unset (legacy path active).
+	RRFEngaged metric.Int64Counter
+	// RRFKGauge records the k constant used each time go-kit RRF fires.
+	// Lets operators confirm MEMDB_RRF_K override is picked up.
+	RRFKGauge metric.Float64Histogram
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -119,6 +125,11 @@ func searchMx() *searchMetricsInstruments {
 			metric.WithDescription("D4/D7 rewrite LRU cache hits by stage (stage=d4|d7)"))
 		rwMiss, _ := m.Int64Counter("memdb.search.rewrite_cache_miss_total",
 			metric.WithDescription("D4/D7 rewrite LRU cache misses by stage (stage=d4|d7)"))
+		rrfEng, _ := m.Int64Counter("memdb.search.rrf_engaged_total",
+			metric.WithDescription("go-kit/rerank.RRF fusion calls (MEMDB_USE_GOKIT_RRF=1 active); 0 when legacy path is used"))
+		rrfK, _ := m.Float64Histogram("memdb.search.rrf_k",
+			metric.WithDescription("RRF k constant used per go-kit RRF fusion call (set via MEMDB_RRF_K, default 60)"),
+			metric.WithExplicitBucketBoundaries(10, 20, 30, 60, 100, 200))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -142,6 +153,8 @@ func searchMx() *searchMetricsInstruments {
 			LinkedExpandCount: lexc,
 			RewriteCacheHit:  rwHit,
 			RewriteCacheMiss: rwMiss,
+			RRFEngaged:       rrfEng,
+			RRFKGauge:        rrfK,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -198,6 +211,10 @@ func searchMx() *searchMetricsInstruments {
 			rwHit.Add(ctx, 0, metric.WithAttributes(attribute.String("stage", stage)))
 			rwMiss.Add(ctx, 0, metric.WithAttributes(attribute.String("stage", stage)))
 		}
+		// Pre-register go-kit RRF counters at zero so dashboards see the
+		// series even when MEMDB_USE_GOKIT_RRF is not yet enabled.
+		rrfEng.Add(ctx, 0)
+		rrfK.Record(ctx, 0)
 	})
 	return searchMetrics
 }
