@@ -144,6 +144,7 @@ func TestBuildMemoryProperties_AllFieldsPresent(t *testing.T) {
 		"test-uuid", "hello world", "LongTermMemory",
 		"memos", "user-1", "", "session-1", "2026-02-16T10:00:00",
 		info, []string{"custom:tag"}, sources, "[working_binding:wm-uuid]",
+		extractionStateExtracted, "", "",
 	)
 
 	// Check all required fields
@@ -151,7 +152,7 @@ func TestBuildMemoryProperties_AllFieldsPresent(t *testing.T) {
 		"id", "memory", "memory_type", "status", "user_name", "user_id",
 		"session_id", "created_at", "updated_at", "delete_time", "delete_record_id",
 		"tags", "key", "usage", "sources", "background", "confidence", "type",
-		"info", "graph_id",
+		"info", "graph_id", "extraction_state",
 	}
 	for _, field := range requiredFields {
 		if _, ok := props[field]; !ok {
@@ -203,6 +204,7 @@ func TestBuildMemoryProperties_SourcesSerialized(t *testing.T) {
 	props := buildMemoryProperties(
 		"id", "text", "LongTermMemory", "user", "user", "", "", "now",
 		nil, nil, sources, "",
+		extractionStateExtracted, "", "",
 	)
 
 	serialized, ok := props["sources"].([]string)

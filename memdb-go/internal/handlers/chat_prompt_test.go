@@ -291,6 +291,7 @@ func TestBuildNodeProps_ObservationDateEmittedWhenSet(t *testing.T) {
 		CreatedAt:       "2026-04-26T12:00:00",
 		Info:            map[string]any{},
 		ObservationDate: "2023-05-08",
+		ExtractionState: extractionStateExtracted,
 	})
 	if got, ok := props["observation_date"].(string); !ok || got != "2023-05-08" {
 		t.Errorf("observation_date = %v, want \"2023-05-08\"", props["observation_date"])
@@ -302,14 +303,15 @@ func TestBuildNodeProps_ObservationDateOmittedWhenEmpty(t *testing.T) {
 	// the field. Keeps payload lean and prevents downstream consumers from
 	// reading "" as a sentinel.
 	props := buildNodeProps(memoryNodeProps{
-		ID:         "id1",
-		Memory:     "fact",
-		MemoryType: "LongTermMemory",
-		UserName:   "cube1",
-		Mode:       modeFast,
-		Now:        "2026-04-26T12:00:00",
-		CreatedAt:  "2026-04-26T12:00:00",
-		Info:       map[string]any{},
+		ID:              "id1",
+		Memory:          "fact",
+		MemoryType:      "LongTermMemory",
+		UserName:        "cube1",
+		Mode:            modeFast,
+		Now:             "2026-04-26T12:00:00",
+		CreatedAt:       "2026-04-26T12:00:00",
+		Info:            map[string]any{},
+		ExtractionState: extractionStateExtracted,
 	})
 	if _, ok := props["observation_date"]; ok {
 		t.Errorf("observation_date must be absent when ObservationDate is empty, got %v", props["observation_date"])
