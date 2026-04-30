@@ -292,4 +292,22 @@ type nativeChatRequest struct {
 
 	// MergeStrategy — same semantics as searchRequest.MergeStrategy.
 	MergeStrategy *string `json:"merge_strategy,omitempty"`
+
+	// MaxContextTokens — token budget for the memories block injected
+	// into the system prompt. When set, formatMemories adds rows in
+	// relativity-descending order until the budget is exhausted, then
+	// stops (still respecting chatMinPersonalMem floor). When 0 / nil,
+	// the legacy "all filtered memories pass through" behaviour stays
+	// — zero regression for existing callers.
+	//
+	// Karpathy-style RAM management: prompt input has finite "L1 cache",
+	// long unfiltered memory lists raise the noise floor and trigger the
+	// rerank-gate "high-confidence" skip on padded pools. Capping the
+	// memories block keeps the strongest evidence at the top of the
+	// prompt and shortens latency.
+	//
+	// Approximate token counter: ~chars/4 (no real tokenizer dependency)
+	// — within ±15% of tiktoken on English/Russian, plenty of headroom
+	// for budget enforcement.
+	MaxContextTokens *int `json:"max_context_tokens,omitempty"`
 }

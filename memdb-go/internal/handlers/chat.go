@@ -168,7 +168,7 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	// factual branch (LoCoMo dual-speaker harness etc.), populating decision
 	// AND injecting the variant-marked anti-refusal rules block. No post-hoc
 	// decideFactualPrompt call needed here.
-	prompt, decision := buildSystemPromptWithDecision(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
+	prompt, decision := buildSystemPromptWithBudget(*req.Query, memories, prefString, basePrompt, answerStyle, profileSection, derefIntOr(req.MaxContextTokens, 0))
 	recordChatPromptUsed(ctx, basePrompt, answerStyle, decision)
 	recordFactualPromptDecision(ctx, w, decision)
 	// M12.5: chat-path observability — top-1 cosine, context tokens. Recorded
@@ -249,7 +249,7 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 	profileSection := h.chatProfileSection(ctx, chatProfileUserID(&req), profileCubeIDForRequest(&req))
 	// M12.4: buildSystemPromptWithDecision routes the custom-prompt + factual
 	// branch and injects the anti-refusal rules block. See NativeChatComplete.
-	prompt, decision := buildSystemPromptWithDecision(ctx, *req.Query, memories, prefString, basePrompt, answerStyle, profileSection)
+	prompt, decision := buildSystemPromptWithBudget(*req.Query, memories, prefString, basePrompt, answerStyle, profileSection, derefIntOr(req.MaxContextTokens, 0))
 	recordChatPromptUsed(ctx, basePrompt, answerStyle, decision)
 	// Set debug header BEFORE rpc.SSEHeaders writes response status — once
 	// SSEHeaders fires the header set is frozen.

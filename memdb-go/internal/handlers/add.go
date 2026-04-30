@@ -397,6 +397,14 @@ func derefBoolOr(v *bool, def bool) bool {
 	return *v
 }
 
+// derefIntOr dereferences a *int, returning def if nil.
+func derefIntOr(v *int, def int) int {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
 // mapOrEmpty returns m if non-nil, otherwise an empty map.
 func mapOrEmpty(m map[string]any) map[string]any {
 	if m == nil {

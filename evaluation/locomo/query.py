@@ -655,6 +655,13 @@ def query_chat(
         # This exercises the production code path instead of the harness-side QA_SYSTEM_PROMPT
         # override that was used during M6 ablation experiments.
         "answer_style": "factual",
+        # Token-budget memories block (Karpathy RAM-style). Caps the
+        # numbered memories list at ~2000 tokens so the prompt stays
+        # under noise-floor pressure: full top_k=30/speaker dual-speaker
+        # fan-out otherwise lands ~3k+ tokens of mixed-relevance rows
+        # which inflate cosine spread → rerank_gate marks "high-confidence"
+        # → judge skips reranking → wrong top-1 sticks.
+        "max_context_tokens": int(os.getenv("LOCOMO_MAX_CONTEXT_TOKENS", "2000")),
     }
     start = time.time()
     resp = requests.post(
@@ -954,6 +961,12 @@ def query_chat_dual(
         # is "factual" — the dual-speaker harness path was silently bypassing
         # M12.4 because this flag was missing, leaving 48% chat_refused_with_evidence.
         "answer_style": "factual",
+        # Token-budget — same rationale as query_chat. system_prompt path
+        # already pre-trims memories per-speaker via the prompt builder, but
+        # the server still injects {memories} placeholder if templated; the
+        # cap is a no-op there and an active cap on legacy non-system_prompt
+        # callers, so it's safe to set unconditionally.
+        "max_context_tokens": int(os.getenv("LOCOMO_MAX_CONTEXT_TOKENS", "2000")),
     }
     start = time.time()
     resp = requests.post(
