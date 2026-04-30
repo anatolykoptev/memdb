@@ -43,11 +43,19 @@ func stagedRetrievalEnabled() bool {
 // Thin wrapper around rerank.Staged — see internal/search/rerank/staged.go
 // for the algorithm. Hooks fire the existing memdb.search.d5_staged and
 // memdb.search.d5_justified counters so dashboards stay green.
+//
+// Fast-path skip via stagedRetrievalEnabled — avoids the adaptItems /
+// rerank.Staged construction churn when the env gate is off (which is the
+// default). Without this, callers paid for a full no-op trip through
+// rerankpkg.Staged on every search.
 func RunStagedRetrieval(ctx context.Context, logger *slog.Logger, query string, items []map[string]any, cfg StagedRetrievalConfig) []map[string]any {
 	if items == nil {
 		return nil
 	}
 	if len(items) == 0 {
+		return items
+	}
+	if !stagedRetrievalEnabled() {
 		return items
 	}
 	adapted := adaptItems(items)
