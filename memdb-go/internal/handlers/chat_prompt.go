@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 )
@@ -77,7 +76,17 @@ func buildSystemPromptWithProfile(ctx context.Context, query string, memories []
 // The profile section is also prepended to custom basePrompt branches so the
 // two-section ordering contract holds regardless of which template wins.
 func buildSystemPromptWithDecision(_ context.Context, query string, memories []map[string]any, prefString, basePrompt, answerStyle, profileSection string) (string, factualPromptDecision) {
-	memCtx := formatMemories(memories, prefString)
+	return buildSystemPromptWithBudget(query, memories, prefString, basePrompt, answerStyle, profileSection, 0)
+}
+
+// buildSystemPromptWithBudget mirrors buildSystemPromptWithDecision but
+// honours a per-request token cap on the memories block. Callers that
+// expose MaxContextTokens to the API surface (chat.NativeChatComplete /
+// NativeChatStream) route through here; legacy callers stay on the
+// 7-arg wrapper above with maxContextTokens=0 (no cap, byte-identical
+// behaviour).
+func buildSystemPromptWithBudget(query string, memories []map[string]any, prefString, basePrompt, answerStyle, profileSection string, maxContextTokens int) (string, factualPromptDecision) {
+	memCtx := formatMemories(memories, prefString, maxContextTokens)
 
 	decision := factualPromptDecision{Variant: factualVariantNone, Reason: refusalReasonNone}
 
@@ -143,97 +152,7 @@ func buildSystemPromptWithDecision(_ context.Context, query string, memories []m
 	return rendered, decision
 }
 
-// formatMemories converts search result memories into numbered text for prompt injection.
-func formatMemories(memories []map[string]any, prefString string) string {
-	if len(memories) == 0 && prefString == "" {
-		return ""
-	}
-
-	lines := make([]string, 0, len(memories))
-	for i, m := range memories {
-		text, _ := m["memory"].(string)
-		lines = append(lines, fmt.Sprintf("%d. %s", i+1, text))
-	}
-
-	out := strings.Join(lines, "\n")
-	if prefString != "" {
-		out += "\n\n" + prefString
-	}
-	return out
-}
-
-// filterMemoriesByThreshold filters memories by relativity score.
-// Keeps all above threshold (OuterMemory excluded from the personal count),
-// ensures minimum minNum personal results.
-func filterMemoriesByThreshold(memories []map[string]any, threshold float64, minNum int) []map[string]any {
-	if len(memories) == 0 {
-		return nil
-	}
-
-	sorted := make([]map[string]any, len(memories))
-	copy(sorted, memories)
-	sortByRelativity(sorted)
-
-	var personal, outer []map[string]any
-	for _, m := range memories {
-		if memType(m) == memTypeOuter {
-			outer = append(outer, m)
-		} else {
-			personal = append(personal, m)
-		}
-	}
-
-	var filtered []map[string]any
-	perCount := 0
-	for _, m := range sorted {
-		if relativity(m) >= threshold {
-			if memType(m) != memTypeOuter {
-				perCount++
-			}
-			filtered = append(filtered, m)
-		}
-	}
-
-	if len(filtered) < minNum {
-		filtered = safeSlice(personal, minNum)
-		filtered = append(filtered, safeSlice(outer, minNum)...)
-	} else if perCount < minNum {
-		filtered = append(filtered, personal[perCount:min(len(personal), minNum)]...)
-	}
-
-	sortByRelativity(filtered)
-	return filtered
-}
-
-// --- helpers ---
-
-func relativity(m map[string]any) float64 {
-	if md, ok := m["metadata"].(map[string]any); ok {
-		if v, ok := md["relativity"].(float64); ok {
-			return v
-		}
-	}
-	return 0
-}
-
-func memType(m map[string]any) string {
-	if md, ok := m["metadata"].(map[string]any); ok {
-		if v, ok := md["memory_type"].(string); ok {
-			return v
-		}
-	}
-	return ""
-}
-
-func sortByRelativity(s []map[string]any) {
-	sort.Slice(s, func(i, j int) bool { return relativity(s[i]) > relativity(s[j]) })
-}
-
-func safeSlice(s []map[string]any, n int) []map[string]any {
-	if n > len(s) {
-		n = len(s)
-	}
-	out := make([]map[string]any, n)
-	copy(out, s[:n])
-	return out
-}
+// Memory list shaping (formatMemories, filterMemoriesByThreshold and the
+// relativity/memType/sortByRelativity/safeSlice helpers) lives in
+// chat_memories.go — same package, separate file so prompt assembly and
+// memory shaping evolve independently.
