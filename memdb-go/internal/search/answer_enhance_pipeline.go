@@ -100,10 +100,34 @@ func applyAnswerEnhancement(
 		observability.RecordD10EnhanceOutcome(ctx, "skipped")
 		return items
 	}
-	answer, sources, conf, hinted, err := EnhanceRetrievalAnswer(ctx, query, items, cfg, emb)
+	answer, sources, conf, hinted, trace, err := EnhanceRetrievalAnswer(ctx, query, items, cfg, emb)
+
+	// Routing observability — fired regardless of LLM outcome so the route
+	// distribution is attributable per request, not only on the answered
+	// path. recordD10Routing is a no-op for the no-signal branch (HasSignal
+	// gates the histogram emits internally).
+	recordD10Routing(ctx, trace)
+
+	// Sample log every D10 call (Debug level — captured by tracing pipeline,
+	// off in production unless slog level is bumped). Full distribution +
+	// chosen mode + outcome is what we need to reconstruct routing decisions
+	// from a replay log without re-running the classifier.
+	if logger != nil && logger.Enabled(ctx, slog.LevelDebug) {
+		logger.Debug("d10 routing decision",
+			slog.String("mode", string(trace.Mode)),
+			slog.String("top1_cat", trace.top1Label()),
+			slog.Float64("top1_conf", trace.Top1Conf),
+			slog.Float64("top2_conf", trace.Top2Conf),
+			slog.Float64("entropy", trace.Entropy),
+			slog.Bool("has_signal", trace.HasSignal),
+			slog.String("query", query),
+		)
+	}
+
 	if err != nil {
 		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("error", hinted))
 		observability.RecordD10EnhanceOutcome(ctx, "error")
+		recordD10OutcomeByCat(ctx, trace, "error")
 		if logger != nil {
 			logger.Debug("enhance failed, continuing without", slog.Any("error", err))
 		}
@@ -112,11 +136,13 @@ func applyAnswerEnhancement(
 	if answer == "" || answer == answerEnhanceUnknownAnswer {
 		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("unknown", hinted))
 		observability.RecordD10EnhanceOutcome(ctx, "unknown")
+		recordD10OutcomeByCat(ctx, trace, "unknown")
 		return items
 	}
 	searchMx().D10Enhance.Add(ctx, 1, d10Attrs("answered", hinted))
 	searchMx().D10Conf.Record(ctx, conf)
 	observability.RecordD10EnhanceOutcome(ctx, "answered")
+	recordD10OutcomeByCat(ctx, trace, "answered")
 	return prependEnhancedAnswer(items, answer, sources, conf, query)
 }
 
