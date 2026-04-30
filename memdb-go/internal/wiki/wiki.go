@@ -126,9 +126,20 @@ func CubeRoot(cubeID string) (string, error) {
 	return uploads.Bucket(uploadsService, filepath.Join(uploadsBucketPrefix, cubeID))
 }
 
-// validateSlug rejects slugs that try to escape the bucket directory.
+// ValidateSlug rejects slugs that try to escape the bucket directory.
 // Allowed: letters, digits, '_', '-', '/', '.'. Rejected: any '..'
 // segment, leading '/', backslashes, control characters.
+//
+// Exported for callers outside this package (HTTP handlers) so the FS
+// export contract and the API surface agree on what's allowed without
+// duplicating the rule.
+func ValidateSlug(slug string) error {
+	return validateSlug(slug)
+}
+
+// validateSlug is the internal worker — kept private so the wiki
+// package's own callers (ExportToFilesystem, AppendLog) don't pay the
+// indirection cost.
 func validateSlug(slug string) error {
 	if slug == "" {
 		return errors.New("wiki: empty slug")
