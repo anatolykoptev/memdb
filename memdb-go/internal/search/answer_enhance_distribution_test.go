@@ -148,7 +148,7 @@ func TestClassifyAndDistribute_SoftmaxNormalises(t *testing.T) {
 func TestBuildAnswerEnhanceSystemPrompt_NilEmbedder(t *testing.T) {
 	t.Setenv("MEMDB_D10_CLASSIFIER_ENABLED", "true")
 	got, hinted, trace := buildAnswerEnhanceSystemPrompt(context.Background(), "test", nil)
-	if got != answerEnhanceSystemPrompt {
+	if got != loadSkillPrompt() {
 		t.Errorf("nil embedder: expected base prompt unchanged")
 	}
 	if hinted {
@@ -163,7 +163,7 @@ func TestBuildAnswerEnhanceSystemPrompt_ClassifierDisabled(t *testing.T) {
 	t.Setenv("MEMDB_D10_CLASSIFIER_ENABLED", "false")
 	emb := &fakeEmbedder{dim: 8, vec: func(s string) []float32 { return hashVec(8, "x", s) }}
 	got, hinted, trace := buildAnswerEnhanceSystemPrompt(context.Background(), "test", emb)
-	if got != answerEnhanceSystemPrompt {
+	if got != loadSkillPrompt() {
 		t.Errorf("classifier disabled: expected base prompt unchanged")
 	}
 	if hinted {
@@ -184,7 +184,7 @@ func TestBuildAnswerEnhanceSystemPrompt_SoftPath(t *testing.T) {
 	if !hinted {
 		t.Errorf("soft path: expected hinted=true")
 	}
-	if !strings.HasPrefix(got, answerEnhanceSystemPrompt) {
+	if !strings.HasPrefix(got, loadSkillPrompt()) {
 		t.Errorf("soft path: prompt should still start with base prompt")
 	}
 	if !strings.Contains(got, "Likely question type") {
@@ -216,7 +216,7 @@ func TestBuildAnswerEnhanceSystemPrompt_HardPath(t *testing.T) {
 			break
 		}
 	}
-	isFallback := strings.HasPrefix(got, answerEnhanceSystemPrompt) // soft block path
+	isFallback := strings.HasPrefix(got, loadSkillPrompt()) // soft block path
 	if !isHardPrompt && !isFallback {
 		t.Errorf("hard path: prompt is neither a hard prompt nor base+soft block. Got prefix:\n%.120s",
 			got)

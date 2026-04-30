@@ -207,13 +207,17 @@ func EnhanceRetrievalAnswer(
 // the routing decision; the trace is recorded as observability metrics
 // downstream (see recordD10Routing in d10_metrics.go).
 func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb classifierEmbedder) (string, bool, d10RoutingTrace) {
+	// Resolve the base prompt ONCE per call: env override → bundled
+	// default → repo default → const fallback. mtime-cached so an
+	// operator edit hot-reloads next request, no rebuild needed.
+	base := loadSkillPrompt()
 	if emb == nil || !d10ClassifierEnabled() {
-		return answerEnhanceSystemPrompt, false, d10RoutingTrace{Mode: D10RouteBase}
+		return base, false, d10RoutingTrace{Mode: D10RouteBase}
 	}
 	classifier := classifierForEmbedder(emb)
 	dist, err := classifier.classifyAndDistribute(ctx, query)
 	if err != nil || len(dist) == 0 {
-		return answerEnhanceSystemPrompt, false, d10RoutingTrace{Mode: D10RouteBase}
+		return base, false, d10RoutingTrace{Mode: D10RouteBase}
 	}
 	// Build the trace bundle once — every return path below references
 	// these numbers, so computing them here keeps the routing branches
@@ -231,7 +235,7 @@ func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb class
 	// embed / single-entry zero-confidence — fall through to base.
 	if !trace.HasSignal {
 		trace.Mode = D10RouteBase
-		return answerEnhanceSystemPrompt, false, trace
+		return base, false, trace
 	}
 	// Hard routing: top-1 confidence saturates the gate.
 	// - Have a dedicated full prompt for this category → return it.
@@ -246,17 +250,17 @@ func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb class
 		}
 		if dist[0].Category == QueryCategoryOpenDomain {
 			trace.Mode = D10RouteBase
-			return answerEnhanceSystemPrompt, false, trace
+			return base, false, trace
 		}
 	}
 	// Soft routing: append distribution block to the base prompt.
 	block := distributionBlock(dist, d10SoftTopN())
 	if block == "" {
 		trace.Mode = D10RouteBase
-		return answerEnhanceSystemPrompt, false, trace
+		return base, false, trace
 	}
 	trace.Mode = D10RouteSoft
-	return answerEnhanceSystemPrompt + block, true, trace
+	return base + block, true, trace
 }
 
 // topAnchorMemory returns the verbatim text of the highest-relativity
