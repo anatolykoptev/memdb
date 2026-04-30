@@ -41,15 +41,21 @@ from pathlib import Path
 
 import requests
 
-# LoCoMo ingest mode. Two modes are supported:
-#   - "raw":  per-message granularity, no LLM (per CLAUDE.md add-mode contract).
-#             Best per-message cosine, but no graph / atomic-fact enrichment.
-#   - "fast": batched session-windowed chunking, no LLM. Default since 2026-04-30
-#             after the raw-default shipped before W2/W3.5 wiki layer needed
-#             tier-promotable cluster sizes — raw bypassed reorg's clustering
-#             threshold (MEMDB_D3_MIN_CLUSTER_RAW=2) and starved wiki_pages.
-# Env LOCOMO_INGEST_MODE overrides; set "raw" explicitly to reproduce pre-W2 baselines.
-INGEST_MODE = os.getenv("LOCOMO_INGEST_MODE", "fast")
+# LoCoMo ingest mode. Three modes are supported (per CLAUDE.md add-mode contract):
+#   - "raw":  per-message granularity, no LLM. Best per-message cosine, but no
+#             graph / atomic-fact enrichment. Use for pre-W2 baselines only.
+#   - "fast": batched session-windowed chunking, no LLM. Was default 2026-04-30
+#             → 2026-04-30 (replaced raw which starved wiki_pages clustering).
+#   - "fine": full graph extraction — entities, atomic facts, edges, event_dates,
+#             attributed_to, linked_memory_ids. Sync LLM call per session.
+#             Default since 2026-04-30 paired with MEMDB_ATOMIC_FACTS=true:
+#             cat-1 (single-hop) needs kind=atomic_fact; cat-2 (multi-hop)
+#             needs linked_memory_ids; cat-3 (temporal) needs event_dates;
+#             cat-4 (open-domain) needs attributed_to. LLM cost on Gemini Flash
+#             Lite ~$0.66/1k QA — negligible vs retrieval cost (audited
+#             2026-04-30). Resilience via fine→fast fallback (PR #246).
+# Env LOCOMO_INGEST_MODE overrides; set "raw"/"fast" explicitly to reproduce older baselines.
+INGEST_MODE = os.getenv("LOCOMO_INGEST_MODE", "fine")
 
 
 def build_headers() -> dict:
