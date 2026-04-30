@@ -40,6 +40,15 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler, serviceSecret strin
 	mux.HandleFunc("POST /product/add", h.NativeAdd)
 	mux.HandleFunc("POST /product/search", h.NativeSearch)
 
+	// LLM Wiki — per-cube markdown synthesis layer (Karpathy April-2025
+	// pattern). Authoritative storage in memos_graph.wiki_pages; every
+	// upsert/delete also mirrors to $UPLOADS_ROOT/memdb-go/wiki/<cube>/
+	// for Obsidian / git / rg browse.
+	mux.HandleFunc("POST /product/wiki/upsert", h.NativeWikiUpsert)
+	mux.HandleFunc("POST /product/wiki/get", h.NativeWikiGet)
+	mux.HandleFunc("POST /product/wiki/index", h.NativeWikiIndex)
+	mux.HandleFunc("POST /product/wiki/delete", h.NativeWikiDelete)
+
 	// Chat — native (playground removed 2026-04-18; see ROADMAP Phase 4.5 followup)
 	mux.HandleFunc("POST /product/chat/complete", h.NativeChatComplete)
 	mux.HandleFunc("POST /product/chat/stream", h.NativeChatStream)
