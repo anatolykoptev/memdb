@@ -10,7 +10,7 @@ require (
 	github.com/anatolykoptev/go-stealth v1.3.1
 	github.com/daulet/tokenizers v1.25.0
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.9.1
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/oapi-codegen/runtime v1.1.2
 	github.com/prometheus/client_golang v1.23.2
