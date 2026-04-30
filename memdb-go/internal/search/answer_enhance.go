@@ -46,22 +46,25 @@ const (
 // tuning.go as an env-readable accessor (MEMDB_D10_MIN_RELATIVITY).
 // Default: 0.4. See defaultAnswerEnhanceMinRelativity.
 
-// answerEnhanceSystemPrompt — D10 answer extractor, softened 2026-04-30 after
-// the M14 LoCoMo replay revealed 82% of D10 calls returned "UNKNOWN" while
-// retrieval hit@k=0.75 (33/50 turns where retrieval found the right memory
-// but D10 refused to surface it). Root cause: the prior prompt insisted on
-// "exact surface form from the memories" — atomic-fact rows ("Caroline is a
-// transgender woman") don't contain the question's surface form ("identity")
-// so the extractor returned UNKNOWN instead of synthesising the noun phrase.
+// answerEnhancePromptOpenDomain — D10 answer extractor open_domain branch
+// (catch-all in the hybrid classifier; see answer_enhance_types.go for the
+// per-category routing). Softened 2026-04-30 after the M14 LoCoMo replay
+// revealed 82% of D10 calls returned "UNKNOWN" while retrieval hit@k=0.75
+// (33/50 turns where retrieval found the right memory but D10 refused to
+// surface it). Root cause: the prior prompt insisted on "exact surface form
+// from the memories" — atomic-fact rows ("Caroline is a transgender woman")
+// don't contain the question's surface form ("identity") so the extractor
+// returned UNKNOWN instead of synthesising the noun phrase.
 //
 // New rules pull from the competitor audit (mem0 SoftExtract + zep "use only
 // context"): allow the LLM to synthesise the closest grounded fact, only
 // fall back to UNKNOWN when NO related evidence exists at all. Hallucination
-// guard stays — the LLM still cannot invent facts.
-const answerEnhanceSystemPrompt = `You are a precise answer extractor. Given a user's question and a list of retrieved memories, respond with the SHORTEST possible answer that directly answers the question.
+// guard stays — the LLM still cannot invent facts. Per-category prompts in
+// answer_enhance_types.go layer category-specific deltas on top of this base.
+const answerEnhancePromptOpenDomain = `You are a precise answer extractor. Given a user's question and a list of retrieved memories, respond with the SHORTEST possible answer that directly answers the question.
 
 Rules:
-- Ground every answer in the memories. Never invent facts not present.
+- Ground every answer in the memories. Never invent or hallucinate facts not present.
 - Prefer noun phrases or single words over full sentences (e.g., "social worker", "transgender woman", "3").
 - Atomic facts may not contain the question's surface form. That is fine — synthesise the answer from the closest grounded fact (e.g., the question "What is Caroline's identity?" answered from a memory "Caroline is a transgender woman" → "transgender woman", not "UNKNOWN").
 - If the memories contain partial evidence, return the most specific grounded answer you can extract. Do NOT default to "UNKNOWN" when related evidence is present.
@@ -91,6 +94,13 @@ type AnswerEnhanceResponse struct {
 
 // EnhanceRetrievalAnswer distills the top-K retrieved memories into a concise,
 // query-aligned answer. Returns (answer, sourceIDs, confidence, err).
+//
+// The system prompt is selected by classifying the query into one of the
+// LoCoMo-aligned categories (single_hop / multi_hop / temporal /
+// open_domain / adversarial) — see classifyQueryCategory. The classifier
+// is heuristic (regex + keyword, ~10µs) — no extra LLM call. If the
+// classifier returns an unknown value, we fall back to the open_domain
+// prompt (pre-hybrid behaviour).
 //
 // Semantics:
 //   - empty items → ("UNKNOWN", nil, 0, nil)
@@ -136,8 +146,16 @@ func EnhanceRetrievalAnswer(
 		query, memBlock.String(),
 	)
 
+	systemPrompt := selectAnswerEnhancePrompt(classifyQueryCategory(query))
+	if systemPrompt == "" {
+		// Defensive: classifier or selector returned empty → fall back
+		// to the open_domain default so we never call the LLM with no
+		// system prompt.
+		systemPrompt = answerEnhancePromptOpenDomain
+	}
+
 	var parsed AnswerEnhanceResponse
-	if err := callAnswerEnhanceLLM(ctx, userMsg, cfg, &parsed); err != nil {
+	if err := callAnswerEnhanceLLM(ctx, systemPrompt, userMsg, cfg, &parsed); err != nil {
 		return answerEnhanceUnknownAnswer, nil, 0, fmt.Errorf("enhance llm: %w", err)
 	}
 	if strings.TrimSpace(parsed.Answer) == "" {
@@ -150,10 +168,10 @@ func EnhanceRetrievalAnswer(
 // and unmarshals the response into target. Kept separate (not via the shared
 // *llm.Client retrying global) so we can enforce the tight 10s D10 timeout
 // without interfering with the shared 90s-timeout LLM client used elsewhere.
-func callAnswerEnhanceLLM(ctx context.Context, userMsg string, cfg AnswerEnhanceConfig, target *AnswerEnhanceResponse) error {
+func callAnswerEnhanceLLM(ctx context.Context, systemPrompt, userMsg string, cfg AnswerEnhanceConfig, target *AnswerEnhanceResponse) error {
 	client := llm.NewSimpleClient(cfg.APIURL, cfg.APIKey, cfg.Model)
 	return llm.ChatStructured(ctx, client, "d10_enhance", []llm.Message{
-		{Role: "system", Content: answerEnhanceSystemPrompt},
+		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userMsg},
 	}, target,
 		llm.WithMaxTokens(answerEnhanceMaxTokens),
@@ -207,6 +225,11 @@ func prependEnhancedAnswer(items []map[string]any, answer string, sourceIDs []st
 // (step 6.8) iff MEMDB_SEARCH_ENHANCE=true and a reranker LLM config is
 // available. On LLM failure it logs at Debug and returns items unchanged
 // (graceful degrade — never fails the whole search).
+//
+// Every D10Enhance counter emit carries a category label (single_hop |
+// multi_hop | temporal | open_domain | adversarial) derived from the
+// query via classifyQueryCategory, so dashboards can break down the
+// answered/unknown/skipped/error mix by question type.
 func applyAnswerEnhancement(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -214,8 +237,15 @@ func applyAnswerEnhancement(
 	items []map[string]any,
 	cfg AnswerEnhanceConfig,
 ) []map[string]any {
+	category := string(classifyQueryCategory(query))
+	d10Attrs := func(outcome string) metric.MeasurementOption {
+		return metric.WithAttributes(
+			attribute.String("outcome", outcome),
+			attribute.String("category", category),
+		)
+	}
 	if !answerEnhanceEnabled() || len(items) == 0 || cfg.APIURL == "" {
-		searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
+		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("skipped"))
 		observability.RecordD10EnhanceOutcome(ctx, "skipped")
 		return items
 	}
@@ -230,13 +260,13 @@ func applyAnswerEnhancement(
 		}
 	}
 	if !anyRelevant {
-		searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "skipped")))
+		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("skipped"))
 		observability.RecordD10EnhanceOutcome(ctx, "skipped")
 		return items
 	}
 	answer, sources, conf, err := EnhanceRetrievalAnswer(ctx, query, items, cfg)
 	if err != nil {
-		searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "error")))
+		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("error"))
 		observability.RecordD10EnhanceOutcome(ctx, "error")
 		if logger != nil {
 			logger.Debug("enhance failed, continuing without", slog.Any("error", err))
@@ -244,11 +274,11 @@ func applyAnswerEnhancement(
 		return items
 	}
 	if answer == "" || answer == answerEnhanceUnknownAnswer {
-		searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "unknown")))
+		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("unknown"))
 		observability.RecordD10EnhanceOutcome(ctx, "unknown")
 		return items
 	}
-	searchMx().D10Enhance.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "answered")))
+	searchMx().D10Enhance.Add(ctx, 1, d10Attrs("answered"))
 	searchMx().D10Conf.Record(ctx, conf)
 	observability.RecordD10EnhanceOutcome(ctx, "answered")
 	return prependEnhancedAnswer(items, answer, sources, conf, query)
