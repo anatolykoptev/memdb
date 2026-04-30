@@ -8,8 +8,13 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // nativeFineAddForCube implements the fine-mode add pipeline (v2) for a single cube.
@@ -19,9 +24,22 @@ import (
 // which uses mem0's verbatim ADDITIVE_EXTRACTION_PROMPT (atomic per-fact
 // extraction). Default-off preserves the legacy single-paragraph path
 // byte-identical.
+//
+// Resilience: any LLM timeout / unavailable error from the extraction stage
+// degrades the request to fast-mode (embed-only) instead of returning a 503.
+// Caller still gets memory rows — they just lack atomic / linked / event_dates
+// metadata. Counted into memdb_add_fine_fallback_total{reason}.
 func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
 	if atomicFactsEnabled() {
-		return h.runAtomicFineForCube(ctx, req, cubeID)
+		items, err := h.runAtomicFineForCube(ctx, req, cubeID)
+		if err == nil || !shouldFallbackToFast(err) {
+			return items, err
+		}
+		recordFineFallback(ctx, fineFallbackReason(err))
+		h.logger.Warn("fine add: atomic extractor failed, falling back to fast",
+			slog.String("cube_id", cubeID),
+			slog.Any("error", err))
+		return h.nativeFastAddForCube(ctx, req, cubeID)
 	}
 	if len(req.Messages) == 0 {
 		return nil, nil
@@ -47,6 +65,13 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 	facts, candOK, err := h.runFineExtraction(ctx, conversation, cubeID, req, &sig)
 	recordStageDuration(ctx, "extract", t)
 	if err != nil {
+		if shouldFallbackToFast(err) {
+			recordFineFallback(ctx, fineFallbackReason(err))
+			h.logger.Warn("fine add: legacy extractor failed, falling back to fast",
+				slog.String("cube_id", cubeID),
+				slog.Any("error", err))
+			return h.nativeFastAddForCube(ctx, req, cubeID)
+		}
 		return nil, err
 	}
 	if !candOK || len(facts) == 0 {
@@ -84,4 +109,69 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 	})
 	recordStageDuration(ctx, "fanout", t)
 	return items, nil
+}
+
+// shouldFallbackToFast returns true for LLM-availability errors that fast can
+// still serve through (embed-only). Hard contract violations (validation,
+// invalid request shape) propagate unchanged so callers see the real bug.
+//
+// Detection ladder:
+//
+//  1. context.DeadlineExceeded — timeout from llm.WithTimeout (60s atomic cap)
+//  2. context.Canceled — client cancelled request mid-extraction
+//  3. wrapped error containing "context deadline exceeded" — pgx/rerank
+//     drivers wrap before bubbling up; std errors.Is may miss those
+//  4. wrapped error containing "circuit breaker open" — go-kit CircuitBreaker
+//     trip on cascading LLM failures
+//
+// Anything else (parse error, dim mismatch, sql constraint) → no fallback.
+func shouldFallbackToFast(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "context deadline exceeded"):
+		return true
+	case strings.Contains(msg, "circuit breaker open"):
+		return true
+	case strings.Contains(msg, "circuit_open"):
+		return true
+	}
+	return false
+}
+
+// fineFallbackReason maps the trigger error onto a short metric label.
+// Keep label cardinality bounded — three reasons cover every fallback path.
+func fineFallbackReason(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "llm_timeout"
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "circuit"):
+		return "circuit_open"
+	case strings.Contains(msg, "context deadline exceeded"):
+		return "llm_timeout"
+	}
+	return "llm_error"
+}
+
+// recordFineFallback bumps memdb_add_fine_fallback_total{reason}. Pre-registered
+// for {llm_timeout, circuit_open, canceled, llm_error, unknown} in metrics_add.go.
+func recordFineFallback(ctx context.Context, reason string) {
+	mx := addMx()
+	if mx == nil || mx.FineFallback == nil {
+		return
+	}
+	mx.FineFallback.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
 }

@@ -13,6 +13,100 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
+// --- extractFastMemoriesPerMessage tests ---
+
+// TestExtractFastMemoriesPerMessage_OneRowPerMsg — granularity contract:
+// no aggregation, no sliding window. Two messages → two extractedMemory.
+func TestExtractFastMemoriesPerMessage_OneRowPerMsg(t *testing.T) {
+	msgs := []chatMessage{
+		{Role: "user", Content: "I have 3 kids", ChatTime: "2026-02-16T10:00:00"},
+		{Role: "user", Content: "My pets are Oliver, Luna, Bailey", ChatTime: "2026-02-16T10:00:01"},
+	}
+
+	got := extractFastMemoriesPerMessage(msgs)
+	if len(got) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(got))
+	}
+	if !strings.Contains(got[0].Text, "3 kids") {
+		t.Errorf("row 0 missing fact: %q", got[0].Text)
+	}
+	if !strings.Contains(got[1].Text, "Oliver") {
+		t.Errorf("row 1 missing fact: %q", got[1].Text)
+	}
+	for i, r := range got {
+		if len(r.Sources) != 1 {
+			t.Errorf("row %d expected 1 source, got %d", i, len(r.Sources))
+		}
+	}
+}
+
+// TestExtractFastMemoriesPerMessage_EmptyContentSkipped — keeps the contract
+// of skipping whitespace-only messages so cosine dedup doesn't see them.
+func TestExtractFastMemoriesPerMessage_EmptyContentSkipped(t *testing.T) {
+	msgs := []chatMessage{
+		{Role: "user", Content: "   "},
+		{Role: "user", Content: "real msg"},
+		{Role: "user", Content: ""},
+	}
+	got := extractFastMemoriesPerMessage(msgs)
+	if len(got) != 1 {
+		t.Fatalf("want 1 row (whitespace + empty skipped), got %d", len(got))
+	}
+}
+
+// TestExtractFastMemoriesPerMessage_MemTypeByRole — single-msg "windows"
+// can't be mixed-role, so the LongTermMemory class falls back to assistant
+// role. user role keeps UserMemory.
+func TestExtractFastMemoriesPerMessage_MemTypeByRole(t *testing.T) {
+	msgs := []chatMessage{
+		{Role: "user", Content: "user line"},
+		{Role: "assistant", Content: "assistant line"},
+	}
+	got := extractFastMemoriesPerMessage(msgs)
+	if len(got) != 2 {
+		t.Fatalf("want 2 rows, got %d", len(got))
+	}
+	if got[0].MemoryType != "UserMemory" {
+		t.Errorf("user row: want UserMemory, got %s", got[0].MemoryType)
+	}
+	if got[1].MemoryType != "LongTermMemory" {
+		t.Errorf("assistant row: want LongTermMemory, got %s", got[1].MemoryType)
+	}
+}
+
+// TestSelectFastExtractor_DefaultPerMessage — empty env routes through the
+// per-message extractor; same shape as TestExtractFastMemoriesPerMessage_*.
+func TestSelectFastExtractor_DefaultPerMessage(t *testing.T) {
+	t.Setenv(fastGranularityEnv, "")
+	msgs := []chatMessage{
+		{Role: "user", Content: "msg one"},
+		{Role: "user", Content: "msg two"},
+	}
+	got := selectFastExtractor(&fullAddRequest{Messages: msgs})
+	if len(got) != 2 {
+		t.Errorf("default route should be per-message, got %d rows", len(got))
+	}
+}
+
+// TestSelectFastExtractor_WindowOptIn — explicit MEMDB_FAST_GRANULARITY=window
+// re-routes through the legacy extractor for A/B + summary workloads.
+func TestSelectFastExtractor_WindowOptIn(t *testing.T) {
+	t.Setenv(fastGranularityEnv, "window")
+	msgs := []chatMessage{
+		{Role: "user", Content: "msg one"},
+		{Role: "user", Content: "msg two"},
+	}
+	got := selectFastExtractor(&fullAddRequest{Messages: msgs})
+	// Windowed extractor packs both messages into one window (~64 chars total
+	// is well under windowChars=4096), so 1 row is expected.
+	if len(got) != 1 {
+		t.Errorf("window route: want 1 windowed row, got %d", len(got))
+	}
+	if len(got[0].Sources) != 2 {
+		t.Errorf("window row should aggregate both sources, got %d", len(got[0].Sources))
+	}
+}
+
 // --- extractFastMemories tests ---
 
 func TestExtractFastMemories_SingleMessage(t *testing.T) {

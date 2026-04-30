@@ -35,6 +35,12 @@ type addMetricsStruct struct {
 	// Labels: same_session ∈ {true,false} so dashboards can split
 	// "legitimate same-session dedup" from "cross-session false-positive".
 	DuplicateDrop metric.Int64Counter
+	// FineFallback fires when nativeFineAddForCube degrades to fast-mode
+	// because the LLM extraction stage couldn't produce results. reason ∈
+	// {llm_timeout, circuit_open, canceled, llm_error, unknown}. The /add
+	// request still succeeds — caller gets fast-mode rows (no atomic /
+	// linked / event_dates metadata).
+	FineFallback metric.Int64Counter
 }
 
 func addMx() *addMetricsStruct {
@@ -66,10 +72,14 @@ func addMx() *addMetricsStruct {
 		dupDrop, _ := meter.Int64Counter("memdb.add.duplicate_drop_total",
 			metric.WithDescription("Writes silently dropped by isDuplicate (cosine ≥ dedupThreshold). Label same_session ∈ {true,false} splits legitimate same-session dedup from cross-session false-positives."),
 		)
+		fineFb, _ := meter.Int64Counter("memdb.add.fine_fallback_total",
+			metric.WithDescription("Fine→fast resilience fallback when LLM extraction unavailable (reason=llm_timeout|circuit_open|canceled|llm_error|unknown)"),
+		)
 		addInstruments = &addMetricsStruct{
 			Requests: reqs, Duration: dur, Memories: mems, EmbedBatchSize: batch,
 			StructuralEdges: structEdges, SameSessionCapped: capCounter,
 			StageDuration: stageDur, DuplicateDrop: dupDrop,
+			FineFallback: fineFb,
 		}
 		// Pre-register zero observations so the time series exists before the
 		// first real request lands. Keeps Grafana panels alive on a cold start.
@@ -77,6 +87,9 @@ func addMx() *addMetricsStruct {
 		for _, s := range fineStages {
 			stageDur.Record(ctx, 0,
 				metric.WithAttributes(attribute.String("stage", s)))
+		}
+		for _, r := range []string{"llm_timeout", "circuit_open", "canceled", "llm_error", "unknown"} {
+			fineFb.Add(ctx, 0, metric.WithAttributes(attribute.String("reason", r)))
 		}
 	})
 	return addInstruments

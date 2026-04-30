@@ -9,6 +9,8 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
@@ -47,14 +49,19 @@ type pendingFastMemory struct {
 
 // nativeFastAddForCube processes fast-mode add for a single cube/user.
 // Pipeline:
-//  1. Extract sliding-window memories from messages
+//  1. Extract memories — per-message (default) or sliding-window (legacy A/B)
 //  2. Hash dedup against existing rows (skip exact duplicates)
 //  3. Single batched embed call for all surviving memories (was: N sequential calls)
 //  4. Per memory: cosine dedup → build nodes
 //  5. Batch insert into Postgres
 //  6. Cleanup old WorkingMemory
+//
+// Granularity is per-message by default — fixes cat-1 simple-fact retrieval
+// loss observed when sliding windows averaged out individual facts (see
+// extractFastMemoriesPerMessage docstring). Set MEMDB_FAST_GRANULARITY=window
+// to fall back to the legacy windowed extractor for A/B comparison.
 func (h *Handler) nativeFastAddForCube(ctx context.Context, req *fullAddRequest, cubeID string) ([]addResponseItem, error) {
-	memories := extractFastMemories(req.Messages, windowSizeFor(req))
+	memories := selectFastExtractor(req)
 	if len(memories) == 0 {
 		return nil, nil
 	}
@@ -249,4 +256,27 @@ type debugLogger interface {
 // modeAttr returns the OTel attribute used to label add-pipeline metrics by mode.
 func modeAttr(mode string) attribute.KeyValue {
 	return attribute.String("mode", mode)
+}
+
+// fastGranularityEnv selects the fast-mode extractor.
+//   - "" / "per_message" / "msg" — one row per message (default since 2026-04-30).
+//   - "window" — legacy sliding-window. Honors req.WindowChars override.
+//
+// Per-message default lifted recall on cat-1 simple-fact LoCoMo questions
+// where window-averaged embeddings hid individual statements ("3 kids",
+// "Oliver Luna Bailey"). The window option stays for A/B + workloads where
+// turn-level context matters more than per-fact granularity (e.g. summaries
+// of long meetings).
+const fastGranularityEnv = "MEMDB_FAST_GRANULARITY"
+
+func selectFastExtractor(req *fullAddRequest) []extractedMemory {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv(fastGranularityEnv)))
+	switch mode {
+	case "window", "windowed", "sliding":
+		return extractFastMemories(req.Messages, windowSizeFor(req))
+	default:
+		// Per-message is the default. Empty env or any unrecognised value
+		// (including the explicit "per_message"/"msg") routes here.
+		return extractFastMemoriesPerMessage(req.Messages)
+	}
 }
