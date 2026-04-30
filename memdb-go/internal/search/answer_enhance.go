@@ -109,21 +109,21 @@ type AnswerEnhanceResponse struct {
 // EnhanceRetrievalAnswer distills the top-K retrieved memories into a concise,
 // query-aligned answer. Returns (answer, sourceIDs, confidence, hinted, err).
 //
-// The system prompt is the base extractor with an OPTIONAL category-shape
-// hint appended. The hint is built from a soft, embedding-based classifier
-// (see answer_enhance_classifier.go) and is suppressed when:
-//   - classifier is disabled (MEMDB_D10_CLASSIFIER_ENABLED=false)
-//   - emb is nil, returns an error, or no signal
-//   - top-1 confidence < MEMDB_D10_CLASSIFIER_THRESHOLD (default 0.5)
-//   - top-1 category is open_domain (no useful shape constraint)
+// The system prompt is selected by buildAnswerEnhanceSystemPrompt according
+// to the hybrid soft/hard routing strategy (full design + decision rules
+// live with that function). At a glance:
 //
-// In every suppressed case the prompt is byte-identical to the
-// post-revert single-prompt baseline — so the rollout cost on a
-// classifier mis-fire is exactly zero.
+//   - classifier disabled / nil embedder / no signal / top-1 == open_domain
+//     at hard threshold → unmodified base prompt (hinted=false). Byte-identical
+//     to the post-revert single-prompt baseline in every suppressed case.
+//   - top-1 confidence ≥ MEMDB_D10_HARD_ROUTING_THRESHOLD (default 0.97) AND
+//     a category-specific hard prompt exists → full-replacement hard prompt
+//     (hinted=true).
+//   - else → base prompt + soft distribution block (hinted=true).
 //
-// `hinted` reports whether the hint was actually appended; the caller
-// surfaces it as a metric label so we can compare hinted vs un-hinted
-// outcomes without burning category-cardinality on the counter.
+// `hinted` is surfaced as a metric label so we can compare classifier-
+// influenced vs base-prompt outcomes without burning category-cardinality
+// on the counter.
 //
 // Semantics:
 //   - empty items → ("UNKNOWN", nil, 0, false, nil)
@@ -182,29 +182,51 @@ func EnhanceRetrievalAnswer(
 	return parsed.Answer, parsed.SourceIDs, parsed.Confidence, hinted, nil
 }
 
-// buildAnswerEnhanceSystemPrompt assembles the D10 system prompt.
+// buildAnswerEnhanceSystemPrompt assembles the D10 system prompt with a
+// hybrid soft/hard routing strategy:
 //
-// When the embedding classifier is disabled, emb is nil, or the classifier
-// returns no useful hint (low confidence / open_domain), the function
-// returns the unmodified base prompt — the prompt is byte-identical to
-// post-revert main, the rollout-safety property of this design.
+//  1. Classifier disabled / no embedder / no signal → unmodified base
+//     prompt (byte-identical to main).
+//  2. Top-1 ≥ MEMDB_D10_HARD_ROUTING_THRESHOLD AND a hard prompt is
+//     registered for that category → full replacement with the
+//     category-specific hard prompt (shorter prompt + tighter rules).
+//  3. Otherwise → base prompt + soft-routing distribution block, so the
+//     LLM sees the classifier's full distribution and decides itself
+//     which shape rules apply.
 //
-// Otherwise the function appends a short hint block produced by
-// categoryHintBlock; the base prompt itself is never altered.
+// The boolean return ("hinted") is true whenever the classifier
+// influenced the prompt — both the hard-route and soft-distribution paths
+// flag it. Callers use this for the metric label so we can compare
+// classifier-influenced vs base-prompt outcomes.
 func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb classifierEmbedder) (string, bool) {
 	if emb == nil || !d10ClassifierEnabled() {
 		return answerEnhanceSystemPrompt, false
 	}
 	classifier := classifierForEmbedder(emb)
-	top, err := classifier.ClassifyTopN(ctx, query, 2)
-	if err != nil || len(top) == 0 {
+	dist, err := classifier.classifyAndDistribute(ctx, query)
+	if err != nil || len(dist) == 0 {
 		return answerEnhanceSystemPrompt, false
 	}
-	hint := categoryHintBlock(top, d10ClassifierThreshold())
-	if hint == "" {
+	// Hard routing: top-1 confidence saturates the gate.
+	// - Have a dedicated full prompt for this category → return it.
+	// - Top-1 == open_domain at hard confidence → 97/1/1/1/0 distribution
+	//   carries no actionable shape signal; spending ~125 tokens on it would
+	//   just dilute the base prompt. Return base prompt unmodified
+	//   (hinted=false) so the caller's metric labels stay accurate.
+	if dist[0].Confidence >= d10HardRoutingThreshold() {
+		if hardPrompt, ok := hardCategoryPrompts[dist[0].Category]; ok {
+			return hardPrompt, true
+		}
+		if dist[0].Category == QueryCategoryOpenDomain {
+			return answerEnhanceSystemPrompt, false
+		}
+	}
+	// Soft routing: append distribution block to the base prompt.
+	block := distributionBlock(dist, d10SoftTopN())
+	if block == "" {
 		return answerEnhanceSystemPrompt, false
 	}
-	return answerEnhanceSystemPrompt + hint, true
+	return answerEnhanceSystemPrompt + block, true
 }
 
 // callAnswerEnhanceLLM performs the single chat-completion round trip for D10
