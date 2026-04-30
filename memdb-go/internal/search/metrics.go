@@ -192,17 +192,11 @@ func searchMx() *searchMetricsInstruments {
 		for _, c := range []metric.Int64Counter{d4, d7, mh, d11} {
 			c.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", "")))
 		}
-		// D10 hybrid extractor: pre-register every (category × outcome)
-		// pair so all 5 × 4 series appear at zero on cold start.
-		// Cardinality stays bounded (20 series) because both label sets
-		// are closed enums (AllQueryCategories + d10EnhanceOutcomes).
-		for _, cat := range AllQueryCategories {
-			for _, oc := range []string{"answered", "unknown", "skipped", "error"} {
-				d10.Add(ctx, 0, metric.WithAttributes(
-					attribute.String("outcome", oc),
-					attribute.String("category", string(cat)),
-				))
-			}
+		// D10 enhance: pre-register every outcome at zero. The category
+		// label was added in PR #250 and reverted after the cefix4 replay
+		// regression — outcome is the single closed enum.
+		for _, oc := range []string{"answered", "unknown", "skipped", "error"} {
+			d10.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
 		}
 		d5.Add(ctx, 0, metric.WithAttributes(
 			attribute.String("stage", ""),
