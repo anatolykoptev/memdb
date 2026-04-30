@@ -18,4 +18,5 @@ package observability
 func PrewarmMetrics() {
 	M12()
 	DualSpeaker()
+	Cache()
 }
