@@ -93,6 +93,18 @@ func recordFactualPromptDecision(ctx context.Context, w http.ResponseWriter, dec
 		attribute.String("variant", string(decision.Variant)),
 	))
 	mx.TopRetrievalScore.Record(ctx, decision.TopScore)
+	// Per-term confidence histogram. Emitted only when components are
+	// populated (decideFactualPrompt always populates them, but be defensive
+	// for callers that synthesise their own decision struct in tests).
+	if decision.Components != nil {
+		for _, comp := range []string{"top1", "spread", "density", "median", "combined"} {
+			if v, ok := decision.Components[comp]; ok {
+				mx.ConfidenceComponents.Record(ctx, v,
+					metric.WithAttributes(attribute.String("component", comp)),
+				)
+			}
+		}
+	}
 	if w != nil && decision.Reason != "" {
 		w.Header().Set(refusalDebugHeader, string(decision.Reason))
 	}

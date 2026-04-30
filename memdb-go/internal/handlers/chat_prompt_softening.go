@@ -45,11 +45,18 @@ const (
 // slice is empty). Variant is the chosen template family. Reason is the
 // classification used for the X-Memdb-Refusal-Reason header. Threshold is
 // the threshold value applied (env-overridable; copied here for observability).
+//
+// Components carries the per-term contributions of the multi-feature
+// confidence formula (top1, spread, density, median, combined). Populated
+// for both top1 and multifeature paths so operators can A/B without a code
+// change. May be nil on legacy callers — the metric path treats nil as
+// "skip per-component emission".
 type factualPromptDecision struct {
-	Variant   factualPromptVariant
-	Reason    chatRefusalReason
-	TopScore  float64
-	Threshold float64
+	Variant    factualPromptVariant
+	Reason     chatRefusalReason
+	TopScore   float64
+	Threshold  float64
+	Components map[string]float64
 }
 
 // defaultFactualConfidenceThreshold is the lower bound on top-1
@@ -101,13 +108,25 @@ func topRetrievalScore(memories []map[string]any) float64 {
 
 // decideFactualPrompt picks the factual prompt variant and classifies the
 // refusal-bias reason for a given memory pool. Pure: no I/O beyond the env
-// read inside factualConfidenceThreshold().
+// reads inside factualConfidenceThreshold() / confidenceFormulaFromEnv() /
+// densityFloorFromEnv() / confidenceWeightsFromEnv().
 //
 // Decision matrix:
 //
 //	len(memories) == 0          → variant=zero, reason=no_memories
-//	top >= threshold            → variant=high, reason=none
-//	otherwise (top < threshold) → variant=low,  reason=low_confidence
+//	score >= threshold          → variant=high, reason=none
+//	otherwise (score < threshold) → variant=low, reason=low_confidence
+//
+// `score` is either:
+//   - max(metadata.relativity) — when MEMDB_FACTUAL_CONFIDENCE_FORMULA=top1
+//     (legacy M12.2 behaviour, safe-rollback path).
+//   - multi-feature combined score — when MEMDB_FACTUAL_CONFIDENCE_FORMULA=
+//     multifeature (default). See chat_prompt_confidence.go.
+//
+// TopScore on the returned struct is ALWAYS the multi-feature combined score
+// when the multi-feature formula is active, and the top-1 cosine when the
+// legacy formula is active. This is what gets compared to threshold and
+// what dashboards interpret as "the gate input".
 //
 // The "other" reason is reserved for future post-hoc classifiers (e.g. when
 // the LLM returns "no answer" against a high-confidence prompt).
@@ -115,26 +134,50 @@ func decideFactualPrompt(memories []map[string]any) factualPromptDecision {
 	threshold := factualConfidenceThreshold()
 	if len(memories) == 0 {
 		return factualPromptDecision{
-			Variant:   factualVariantZero,
-			Reason:    refusalReasonNoMemories,
-			TopScore:  0,
-			Threshold: threshold,
+			Variant:    factualVariantZero,
+			Reason:     refusalReasonNoMemories,
+			TopScore:   0,
+			Threshold:  threshold,
+			Components: map[string]float64{"top1": 0, "spread": 0, "density": 0, "median": 0, "combined": 0},
 		}
 	}
-	top := topRetrievalScore(memories)
-	if top >= threshold {
+
+	// Compute the multi-feature components unconditionally — they are cheap
+	// and let dashboards see the full feature vector even when the gate
+	// uses the legacy top1 path. This is what makes the A/B comparison
+	// possible without a code change.
+	comps := computeRetrievalConfidenceWithComponents(memories)
+	componentMap := map[string]float64{
+		"top1":     comps.Top1,
+		"spread":   comps.Spread,
+		"density":  comps.Density,
+		"median":   comps.Median,
+		"combined": comps.Combined,
+	}
+
+	var score float64
+	switch confidenceFormulaFromEnv() {
+	case confidenceFormulaTop1:
+		score = topRetrievalScore(memories)
+	default:
+		score = comps.Combined
+	}
+
+	if score >= threshold {
 		return factualPromptDecision{
-			Variant:   factualVariantHigh,
-			Reason:    refusalReasonNone,
-			TopScore:  top,
-			Threshold: threshold,
+			Variant:    factualVariantHigh,
+			Reason:     refusalReasonNone,
+			TopScore:   score,
+			Threshold:  threshold,
+			Components: componentMap,
 		}
 	}
 	return factualPromptDecision{
-		Variant:   factualVariantLow,
-		Reason:    refusalReasonLowConfidence,
-		TopScore:  top,
-		Threshold: threshold,
+		Variant:    factualVariantLow,
+		Reason:     refusalReasonLowConfidence,
+		TopScore:   score,
+		Threshold:  threshold,
+		Components: componentMap,
 	}
 }
 
