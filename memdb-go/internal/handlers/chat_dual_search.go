@@ -236,12 +236,7 @@ func (h *Handler) logDualLegFailures(legs []chatDualSpeakerLeg) {
 func mergeDualLegs(legs []chatDualSpeakerLeg, p dualSpeakerMergeParams) []map[string]any {
 	results := make([]dualSpeakerSearchResult, len(legs))
 	for i, l := range legs {
-		results[i] = dualSpeakerSearchResult{
-			speaker:  l.speaker,
-			memories: l.memories,
-			pref:     l.pref,
-			err:      l.err,
-		}
+		results[i] = dualSpeakerSearchResult(l)
 	}
 	return mergeDualSpeakerResults(results, p.mergeStrategy, p.topK)
 }
