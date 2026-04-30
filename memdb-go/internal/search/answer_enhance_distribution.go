@@ -33,6 +33,12 @@ import (
 	"strings"
 )
 
+// distLongTailPctMin is the inclusive percentage cutoff below which a
+// distribution entry is treated as long-tail noise and dropped from the
+// soft-routing block (provided ≥ 2 entries already passed). 10% in a
+// 5-way distribution is uniform-floor and carries no shape signal.
+const distLongTailPctMin = 10
+
 // classifyAndDistribute returns a length-5 distribution over every category,
 // normalised so the confidences sum to 1 (softmax over the cosine
 // similarities). The returned slice is sorted desc by confidence so callers
@@ -101,12 +107,14 @@ func distributionBlock(dist []CategoryConfidence, topN int) string {
 	if topN < 1 || topN > len(dist) {
 		topN = len(dist)
 	}
-	// Trim long-tail entries that contribute < 10% — they're noise to the
-	// LLM and bloat the prompt.
+	// Trim long-tail entries that contribute ≤ distLongTailPctMin —
+	// they're noise to the LLM and bloat the prompt. Inclusive bound
+	// matches PR #257 doc claim "drops < 10%" (a 10% entry contributes
+	// no shape signal in a 5-way distribution and is just noise).
 	parts := make([]string, 0, topN)
 	for i := 0; i < topN; i++ {
 		p := percentRound(dist[i].Confidence)
-		if p < 10 && len(parts) >= 2 {
+		if p <= distLongTailPctMin && len(parts) >= 2 {
 			break
 		}
 		parts = append(parts, fmt.Sprintf("%s %d%%", dist[i].Category, p))

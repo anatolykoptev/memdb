@@ -14,6 +14,8 @@ package search
 
 const answerEnhanceHardPromptSingleHop = `Single-hop factoid question. Return ONLY a number, name, or single noun. Strip "a"/"the". Synthesise to gold form ("three kids" → "3"). Every token from memories. UNKNOWN only if no memory relates.
 
+Example: Q "How many kids does Melanie have?" + M "Melanie has three kids" → "3".
+
 Return JSON: {"answer": string, "source_ids": [string...], "confidence": float 0.0-1.0}`
 
 const answerEnhanceHardPromptMultiHop = `Multi-hop question — answer by linking facts across memories. Return a noun phrase or short clause derived from the chain. Cite source_ids in linking order. Do not invent. UNKNOWN only if the chain breaks.
@@ -22,9 +24,13 @@ Return JSON: {"answer": string, "source_ids": [string...], "confidence": float 0
 
 const answerEnhanceHardPromptTemporal = `Temporal question. Return a date (YYYY-MM-DD), a year (4 digits), or a duration ("3 days", "2 years"). Use the closest form to memory's surface form. Every value from memories. UNKNOWN only if no time anchor exists.
 
+Example: Q "When did Alice come out?" + M "Alice came out on 2023-04-15" → "2023-04-15".
+
 Return JSON: {"answer": string, "source_ids": [string...], "confidence": float 0.0-1.0}`
 
 const answerEnhanceHardPromptAdversarial = `Truth-value or negated-premise question. If memory contradicts the premise, return the contradicting fact (shortest form). If supported, return the supporting noun. If unsupported, UNKNOWN with confidence ≤ 0.3. Do not invent.
+
+Example: Q "Did Alice never travel to Japan?" + M "Alice flew to Tokyo last spring" → "Tokyo" (premise contradicted).
 
 Return JSON: {"answer": string, "source_ids": [string...], "confidence": float 0.0-1.0}`
 
