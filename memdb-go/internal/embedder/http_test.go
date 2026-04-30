@@ -126,6 +126,67 @@ func TestHTTPEmbedder_Close(t *testing.T) {
 	}
 }
 
+// TestHTTPEmbedder_DimMismatch verifies G7-style validation: a server that
+// returns vectors of unexpected dimension surfaces a typed *DimMismatchError
+// instead of silently corrupting downstream pgvector writes.
+func TestHTTPEmbedder_DimMismatch(t *testing.T) {
+	// Server returns 5-dim vectors; embedder configured for 3 → must error.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := testEmbedResponse{
+			Data: []testEmbedData{
+				{Embedding: []float32{0.1, 0.2, 0.3, 0.4, 0.5}, Index: 0},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	e := NewHTTPEmbedder(srv.URL, "rogue-model", 3, testLogger())
+	_, err := e.Embed(context.Background(), []string{"hello"})
+	if err == nil {
+		t.Fatal("expected DimMismatchError, got nil")
+	}
+	dme, ok := err.(*DimMismatchError)
+	if !ok {
+		t.Fatalf("want *DimMismatchError, got %T (%v)", err, err)
+	}
+	if dme.Got != 5 || dme.Want != 3 {
+		t.Errorf("want got=5 want=3, got got=%d want=%d", dme.Got, dme.Want)
+	}
+	if dme.Model != "rogue-model" {
+		t.Errorf("want model=rogue-model, got %q", dme.Model)
+	}
+	if dme.Index != 0 {
+		t.Errorf("want index=0, got %d", dme.Index)
+	}
+}
+
+// TestHTTPEmbedder_DimZeroDisablesCheck verifies that dim=0 (auto-detect
+// convention from go-kit) skips validation, so callers that don't know
+// the dim ahead of time aren't blocked.
+func TestHTTPEmbedder_DimZeroDisablesCheck(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := testEmbedResponse{
+			Data: []testEmbedData{
+				{Embedding: []float32{0.1, 0.2, 0.3, 0.4}, Index: 0},
+			},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	e := NewHTTPEmbedder(srv.URL, "any", 0, testLogger())
+	got, err := e.Embed(context.Background(), []string{"hello"})
+	if err != nil {
+		t.Fatalf("unexpected error with dim=0: %v", err)
+	}
+	if len(got) != 1 || len(got[0]) != 4 {
+		t.Errorf("unexpected result shape: %v", got)
+	}
+}
+
 // TestHTTPEmbedder_ImplementsEmbedder verifies compile-time interface compliance.
 func TestHTTPEmbedder_ImplementsEmbedder(t *testing.T) {
 	var _ Embedder = (*HTTPEmbedder)(nil)
