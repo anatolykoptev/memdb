@@ -18,6 +18,17 @@ type cubeStoreClient interface {
 	EnsureCubeExists(ctx context.Context, cubeID, ownerID string) (bool, error)
 }
 
+// workingMemoryCacher is the narrow interface used by handlers that need to
+// manage the Redis VSET hot-cache for WorkingMemory nodes.
+// Implemented by *db.WorkingMemoryCache in production and by fakeWMCache in tests.
+type workingMemoryCacher interface {
+	VAdd(ctx context.Context, cubeID, nodeID, memoryText string, embedding []float32, ts int64) error
+	VRem(ctx context.Context, cubeID, nodeID string) error
+	VRemBatch(ctx context.Context, cubeID string, nodeIDs []string) error
+	VSim(ctx context.Context, cubeID string, queryEmbedding []float32, topN int) ([]db.VSetCandidate, error)
+	VDrop(ctx context.Context, cubeID string) error
+}
+
 // createCubeRequest is the body of POST /product/create_cube.
 type createCubeRequest struct {
 	CubeID      string         `json:"cube_id"`
