@@ -137,9 +137,9 @@ func EnhanceRetrievalAnswer(
 	items []map[string]any,
 	cfg AnswerEnhanceConfig,
 	emb classifierEmbedder,
-) (string, []string, float64, bool, error) {
+) (string, []string, float64, bool, d10RoutingTrace, error) {
 	if len(items) == 0 || cfg.APIURL == "" {
-		return answerEnhanceUnknownAnswer, nil, 0, false, nil
+		return answerEnhanceUnknownAnswer, nil, 0, false, d10RoutingTrace{Mode: D10RouteBase}, nil
 	}
 
 	// Keep only items above the relativity floor, cap at top-N.
@@ -155,7 +155,7 @@ func EnhanceRetrievalAnswer(
 		candidates = append(candidates, it)
 	}
 	if len(candidates) == 0 {
-		return answerEnhanceUnknownAnswer, nil, 0, false, nil
+		return answerEnhanceUnknownAnswer, nil, 0, false, d10RoutingTrace{Mode: D10RouteBase}, nil
 	}
 
 	var memBlock strings.Builder
@@ -170,16 +170,16 @@ func EnhanceRetrievalAnswer(
 		query, memBlock.String(),
 	)
 
-	systemPrompt, hinted := buildAnswerEnhanceSystemPrompt(ctx, query, emb)
+	systemPrompt, hinted, trace := buildAnswerEnhanceSystemPrompt(ctx, query, emb)
 
 	var parsed AnswerEnhanceResponse
 	if err := callAnswerEnhanceLLM(ctx, systemPrompt, userMsg, cfg, &parsed); err != nil {
-		return answerEnhanceUnknownAnswer, nil, 0, hinted, fmt.Errorf("enhance llm: %w", err)
+		return answerEnhanceUnknownAnswer, nil, 0, hinted, trace, fmt.Errorf("enhance llm: %w", err)
 	}
 	if strings.TrimSpace(parsed.Answer) == "" {
-		return answerEnhanceUnknownAnswer, nil, 0, hinted, nil
+		return answerEnhanceUnknownAnswer, nil, 0, hinted, trace, nil
 	}
-	return parsed.Answer, parsed.SourceIDs, parsed.Confidence, hinted, nil
+	return parsed.Answer, parsed.SourceIDs, parsed.Confidence, hinted, trace, nil
 }
 
 // buildAnswerEnhanceSystemPrompt assembles the D10 system prompt with a
@@ -198,14 +198,36 @@ func EnhanceRetrievalAnswer(
 // influenced the prompt — both the hard-route and soft-distribution paths
 // flag it. Callers use this for the metric label so we can compare
 // classifier-influenced vs base-prompt outcomes.
-func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb classifierEmbedder) (string, bool) {
+//
+// Returns also a d10RoutingTrace capturing the numeric signals that fed
+// the routing decision; the trace is recorded as observability metrics
+// downstream (see recordD10Routing in d10_metrics.go).
+func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb classifierEmbedder) (string, bool, d10RoutingTrace) {
 	if emb == nil || !d10ClassifierEnabled() {
-		return answerEnhanceSystemPrompt, false
+		return answerEnhanceSystemPrompt, false, d10RoutingTrace{Mode: D10RouteBase}
 	}
 	classifier := classifierForEmbedder(emb)
 	dist, err := classifier.classifyAndDistribute(ctx, query)
 	if err != nil || len(dist) == 0 {
-		return answerEnhanceSystemPrompt, false
+		return answerEnhanceSystemPrompt, false, d10RoutingTrace{Mode: D10RouteBase}
+	}
+	// Build the trace bundle once — every return path below references
+	// these numbers, so computing them here keeps the routing branches
+	// aligned with what the metrics show.
+	trace := d10RoutingTrace{
+		Top1Cat:   dist[0].Category,
+		Top1Conf:  dist[0].Confidence,
+		Entropy:   distributionEntropy(dist),
+		HasSignal: !(len(dist) == 1 && dist[0].Confidence == 0),
+	}
+	if len(dist) > 1 {
+		trace.Top2Conf = dist[1].Confidence
+	}
+	// No-signal sentinel from classifyAndDistribute: nil emb / empty
+	// embed / single-entry zero-confidence — fall through to base.
+	if !trace.HasSignal {
+		trace.Mode = D10RouteBase
+		return answerEnhanceSystemPrompt, false, trace
 	}
 	// Hard routing: top-1 confidence saturates the gate.
 	// - Have a dedicated full prompt for this category → return it.
@@ -215,18 +237,22 @@ func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb class
 	//   (hinted=false) so the caller's metric labels stay accurate.
 	if dist[0].Confidence >= d10HardRoutingThreshold() {
 		if hardPrompt, ok := hardCategoryPrompts[dist[0].Category]; ok {
-			return hardPrompt, true
+			trace.Mode = D10RouteHard
+			return hardPrompt, true, trace
 		}
 		if dist[0].Category == QueryCategoryOpenDomain {
-			return answerEnhanceSystemPrompt, false
+			trace.Mode = D10RouteBase
+			return answerEnhanceSystemPrompt, false, trace
 		}
 	}
 	// Soft routing: append distribution block to the base prompt.
 	block := distributionBlock(dist, d10SoftTopN())
 	if block == "" {
-		return answerEnhanceSystemPrompt, false
+		trace.Mode = D10RouteBase
+		return answerEnhanceSystemPrompt, false, trace
 	}
-	return answerEnhanceSystemPrompt + block, true
+	trace.Mode = D10RouteSoft
+	return answerEnhanceSystemPrompt + block, true, trace
 }
 
 // callAnswerEnhanceLLM performs the single chat-completion round trip for D10
