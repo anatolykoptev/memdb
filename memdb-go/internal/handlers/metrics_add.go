@@ -28,6 +28,13 @@ type addMetricsStruct struct {
 	// M11 R1 — per-stage timing for the fine-add pipeline.
 	// stage label is one of: classify | extract | embed | apply | fanout.
 	StageDuration metric.Float64Histogram
+	// 2026-04-29 cross-session-dedup fix — counter that fires every time
+	// isDuplicate skips an incoming write. Previously this was a silent
+	// drop (only Debug log), so the cross-session false-positive that
+	// killed 5/6 LoCoMo conv-26 sessions went unnoticed for 20 days.
+	// Labels: same_session ∈ {true,false} so dashboards can split
+	// "legitimate same-session dedup" from "cross-session false-positive".
+	DuplicateDrop metric.Int64Counter
 }
 
 func addMx() *addMetricsStruct {
@@ -56,10 +63,13 @@ func addMx() *addMetricsStruct {
 			metric.WithDescription("Per-stage duration of the fine-add pipeline (classify/extract/embed/apply/fanout)"),
 			metric.WithUnit("ms"),
 		)
+		dupDrop, _ := meter.Int64Counter("memdb.add.duplicate_drop_total",
+			metric.WithDescription("Writes silently dropped by isDuplicate (cosine ≥ dedupThreshold). Label same_session ∈ {true,false} splits legitimate same-session dedup from cross-session false-positives."),
+		)
 		addInstruments = &addMetricsStruct{
 			Requests: reqs, Duration: dur, Memories: mems, EmbedBatchSize: batch,
 			StructuralEdges: structEdges, SameSessionCapped: capCounter,
-			StageDuration: stageDur,
+			StageDuration: stageDur, DuplicateDrop: dupDrop,
 		}
 		// Pre-register zero observations so the time series exists before the
 		// first real request lands. Keeps Grafana panels alive on a cold start.

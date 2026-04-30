@@ -157,7 +157,7 @@ func (h *Handler) processRawMemory(
 		return db.MemoryInsertNode{}, addResponseItem{}, nil, false, err
 	}
 
-	if h.isDuplicate(ctx, embedding, fac.cubeID, fac.agentID) {
+	if h.isDuplicate(ctx, embedding, fac.cubeID, fac.agentID, fac.sessionID) {
 		return db.MemoryInsertNode{}, addResponseItem{}, nil, true, nil
 	}
 
