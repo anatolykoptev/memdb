@@ -19,18 +19,12 @@ package search
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
-	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/metric"
 )
 
 const (
@@ -113,28 +107,39 @@ type AnswerEnhanceResponse struct {
 }
 
 // EnhanceRetrievalAnswer distills the top-K retrieved memories into a concise,
-// query-aligned answer. Returns (answer, sourceIDs, confidence, err).
+// query-aligned answer. Returns (answer, sourceIDs, confidence, hinted, err).
 //
-// Single system prompt for all queries — the hybrid classifier from PR #250
-// was reverted after the cefix4 replay (2026-04-30) showed it mis-routed
-// most cat-1 questions into a soft open_domain branch and tanked F1 by 25%.
-// See the answerEnhanceSystemPrompt comment for the post-revert prompt
-// design.
+// The system prompt is the base extractor with an OPTIONAL category-shape
+// hint appended. The hint is built from a soft, embedding-based classifier
+// (see answer_enhance_classifier.go) and is suppressed when:
+//   - classifier is disabled (MEMDB_D10_CLASSIFIER_ENABLED=false)
+//   - emb is nil, returns an error, or no signal
+//   - top-1 confidence < MEMDB_D10_CLASSIFIER_THRESHOLD (default 0.5)
+//   - top-1 category is open_domain (no useful shape constraint)
+//
+// In every suppressed case the prompt is byte-identical to the
+// post-revert single-prompt baseline — so the rollout cost on a
+// classifier mis-fire is exactly zero.
+//
+// `hinted` reports whether the hint was actually appended; the caller
+// surfaces it as a metric label so we can compare hinted vs un-hinted
+// outcomes without burning category-cardinality on the counter.
 //
 // Semantics:
-//   - empty items → ("UNKNOWN", nil, 0, nil)
-//   - no items with relativity ≥ answerEnhanceMinRelativity() → ("UNKNOWN", nil, 0, nil)
-//   - LLM error or malformed JSON → ("UNKNOWN", nil, 0, err) (caller should
-//     log Debug and continue without enhancement)
+//   - empty items → ("UNKNOWN", nil, 0, false, nil)
+//   - no items with relativity ≥ answerEnhanceMinRelativity() → ("UNKNOWN", nil, 0, false, nil)
+//   - LLM error or malformed JSON → ("UNKNOWN", nil, 0, hinted, err) (caller
+//     should log Debug and continue without enhancement)
 //   - LLM returns literal "UNKNOWN" → propagated as-is, err = nil
 func EnhanceRetrievalAnswer(
 	ctx context.Context,
 	query string,
 	items []map[string]any,
 	cfg AnswerEnhanceConfig,
-) (string, []string, float64, error) {
+	emb classifierEmbedder,
+) (string, []string, float64, bool, error) {
 	if len(items) == 0 || cfg.APIURL == "" {
-		return answerEnhanceUnknownAnswer, nil, 0, nil
+		return answerEnhanceUnknownAnswer, nil, 0, false, nil
 	}
 
 	// Keep only items above the relativity floor, cap at top-N.
@@ -150,7 +155,7 @@ func EnhanceRetrievalAnswer(
 		candidates = append(candidates, it)
 	}
 	if len(candidates) == 0 {
-		return answerEnhanceUnknownAnswer, nil, 0, nil
+		return answerEnhanceUnknownAnswer, nil, 0, false, nil
 	}
 
 	var memBlock strings.Builder
@@ -165,14 +170,41 @@ func EnhanceRetrievalAnswer(
 		query, memBlock.String(),
 	)
 
+	systemPrompt, hinted := buildAnswerEnhanceSystemPrompt(ctx, query, emb)
+
 	var parsed AnswerEnhanceResponse
-	if err := callAnswerEnhanceLLM(ctx, answerEnhanceSystemPrompt, userMsg, cfg, &parsed); err != nil {
-		return answerEnhanceUnknownAnswer, nil, 0, fmt.Errorf("enhance llm: %w", err)
+	if err := callAnswerEnhanceLLM(ctx, systemPrompt, userMsg, cfg, &parsed); err != nil {
+		return answerEnhanceUnknownAnswer, nil, 0, hinted, fmt.Errorf("enhance llm: %w", err)
 	}
 	if strings.TrimSpace(parsed.Answer) == "" {
-		return answerEnhanceUnknownAnswer, nil, 0, nil
+		return answerEnhanceUnknownAnswer, nil, 0, hinted, nil
 	}
-	return parsed.Answer, parsed.SourceIDs, parsed.Confidence, nil
+	return parsed.Answer, parsed.SourceIDs, parsed.Confidence, hinted, nil
+}
+
+// buildAnswerEnhanceSystemPrompt assembles the D10 system prompt.
+//
+// When the embedding classifier is disabled, emb is nil, or the classifier
+// returns no useful hint (low confidence / open_domain), the function
+// returns the unmodified base prompt — the prompt is byte-identical to
+// post-revert main, the rollout-safety property of this design.
+//
+// Otherwise the function appends a short hint block produced by
+// categoryHintBlock; the base prompt itself is never altered.
+func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb classifierEmbedder) (string, bool) {
+	if emb == nil || !d10ClassifierEnabled() {
+		return answerEnhanceSystemPrompt, false
+	}
+	classifier := classifierForEmbedder(emb)
+	top, err := classifier.ClassifyTopN(ctx, query, 2)
+	if err != nil || len(top) == 0 {
+		return answerEnhanceSystemPrompt, false
+	}
+	hint := categoryHintBlock(top, d10ClassifierThreshold())
+	if hint == "" {
+		return answerEnhanceSystemPrompt, false
+	}
+	return answerEnhanceSystemPrompt + hint, true
 }
 
 // callAnswerEnhanceLLM performs the single chat-completion round trip for D10
@@ -191,97 +223,6 @@ func callAnswerEnhanceLLM(ctx context.Context, systemPrompt, userMsg string, cfg
 	)
 }
 
-// prependEnhancedAnswer inserts a synthetic EnhancedAnswer item at position 0
-// of items. Downstream formatting treats this as the top result, but the
-// ordering of all other items is preserved.
-//
-// The synthetic id is "enhanced-" + first 12 hex chars of sha256(query), so
-// identical queries yield stable ids across requests.
-func prependEnhancedAnswer(items []map[string]any, answer string, sourceIDs []string, conf float64, query string) []map[string]any {
-	sum := sha256.Sum256([]byte(query))
-	id := "enhanced-" + hex.EncodeToString(sum[:])[:answerEnhanceSynthIDHexLen]
-
-	synth := map[string]any{
-		"id":     id,
-		"memory": answer,
-		"metadata": map[string]any{
-			"memory_type": "EnhancedAnswer",
-			"id":          id,
-			"user_name":   "",
-			"confidence":  conf,
-			"source_ids":  sourceIDs,
-			"relativity":  1.0,
-			"enhanced":    true,
-		},
-		"ref_id": "[enhanced]",
-	}
-
-	// Also mark downstream items with the enhanced_answer / enhanced_confidence hints.
-	for _, it := range items {
-		meta, ok := it["metadata"].(map[string]any)
-		if !ok {
-			continue
-		}
-		meta["enhanced_answer"] = answer
-		meta["enhanced_confidence"] = conf
-	}
-
-	out := make([]map[string]any, 0, len(items)+1)
-	out = append(out, synth)
-	out = append(out, items...)
-	return out
-}
-
-// applyAnswerEnhancement is the pipeline hook. Called from postProcessResults
-// (step 6.8) iff MEMDB_SEARCH_ENHANCE=true and a reranker LLM config is
-// available. On LLM failure it logs at Debug and returns items unchanged
-// (graceful degrade — never fails the whole search).
-func applyAnswerEnhancement(
-	ctx context.Context,
-	logger *slog.Logger,
-	query string,
-	items []map[string]any,
-	cfg AnswerEnhanceConfig,
-) []map[string]any {
-	d10Attrs := func(outcome string) metric.MeasurementOption {
-		return metric.WithAttributes(attribute.String("outcome", outcome))
-	}
-	if !answerEnhanceEnabled() || len(items) == 0 || cfg.APIURL == "" {
-		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("skipped"))
-		observability.RecordD10EnhanceOutcome(ctx, "skipped")
-		return items
-	}
-	// Pre-check relativity floor to distinguish "threshold below" (skipped)
-	// from a genuine LLM UNKNOWN response.
-	minRel := answerEnhanceMinRelativity()
-	anyRelevant := false
-	for _, it := range items {
-		if getRelativity(it) >= minRel {
-			anyRelevant = true
-			break
-		}
-	}
-	if !anyRelevant {
-		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("skipped"))
-		observability.RecordD10EnhanceOutcome(ctx, "skipped")
-		return items
-	}
-	answer, sources, conf, err := EnhanceRetrievalAnswer(ctx, query, items, cfg)
-	if err != nil {
-		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("error"))
-		observability.RecordD10EnhanceOutcome(ctx, "error")
-		if logger != nil {
-			logger.Debug("enhance failed, continuing without", slog.Any("error", err))
-		}
-		return items
-	}
-	if answer == "" || answer == answerEnhanceUnknownAnswer {
-		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("unknown"))
-		observability.RecordD10EnhanceOutcome(ctx, "unknown")
-		return items
-	}
-	searchMx().D10Enhance.Add(ctx, 1, d10Attrs("answered"))
-	searchMx().D10Conf.Record(ctx, conf)
-	observability.RecordD10EnhanceOutcome(ctx, "answered")
-	return prependEnhancedAnswer(items, answer, sources, conf, query)
-}
+// prependEnhancedAnswer, applyAnswerEnhancement and hintedLabel — see
+// answer_enhance_pipeline.go (postProcessResults integration concern, kept
+// separate from the prompt + LLM call concerns above).

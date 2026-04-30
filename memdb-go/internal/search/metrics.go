@@ -192,11 +192,23 @@ func searchMx() *searchMetricsInstruments {
 		for _, c := range []metric.Int64Counter{d4, d7, mh, d11} {
 			c.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", "")))
 		}
-		// D10 enhance: pre-register every outcome at zero. The category
-		// label was added in PR #250 and reverted after the cefix4 replay
-		// regression — outcome is the single closed enum.
+		// D10 enhance: pre-register every (outcome × hinted) at zero.
+		//
+		// Label history:
+		//   - PR #250: added a `category` label, reverted alongside the
+		//     hybrid extractor in PR #251.
+		//   - This PR: re-introduced labels but in the form of a bounded
+		//     2-value `hinted` (yes/no) flag — total cardinality stays at
+		//     4 outcomes × 2 = 8 series. `category` is intentionally NOT
+		//     a label here so we do not regress to the pre-revert
+		//     5×4 grid.
 		for _, oc := range []string{"answered", "unknown", "skipped", "error"} {
-			d10.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
+			for _, h := range []string{"yes", "no"} {
+				d10.Add(ctx, 0, metric.WithAttributes(
+					attribute.String("outcome", oc),
+					attribute.String("hinted", h),
+				))
+			}
 		}
 		d5.Add(ctx, 0, metric.WithAttributes(
 			attribute.String("stage", ""),

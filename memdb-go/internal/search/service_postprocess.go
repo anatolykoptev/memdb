@@ -99,7 +99,7 @@ func (s *SearchService) postProcessResults(
 		APIURL: s.LLMReranker.APIURL,
 		APIKey: s.LLMReranker.APIKey,
 		Model:  s.LLMReranker.Model,
-	})
+	}, s.embedder)
 
 	// Step 11: Trim each type to its budget
 	text = TrimSlice(text, p.TopK)
