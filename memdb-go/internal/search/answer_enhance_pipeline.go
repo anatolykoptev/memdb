@@ -66,6 +66,10 @@ func prependEnhancedAnswer(items []map[string]any, answer string, sourceIDs []st
 //
 // emb may be nil; in that case the soft-routing classifier is bypassed and
 // the call is byte-identical to the post-revert single-prompt path.
+//
+// LoadD10Config is called once at the top so every accessor downstream of
+// here sees a coherent snapshot (per-knob env reads cannot drift relative
+// to the hardness preset between sub-calls).
 func applyAnswerEnhancement(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -74,10 +78,12 @@ func applyAnswerEnhancement(
 	cfg AnswerEnhanceConfig,
 	emb classifierEmbedder,
 ) []map[string]any {
+	d10cfg := LoadD10Config()
 	d10Attrs := func(outcome string, hinted bool) metric.MeasurementOption {
 		return metric.WithAttributes(
 			attribute.String("outcome", outcome),
 			attribute.String("hinted", hintedLabel(hinted)),
+			attribute.String("mode", string(d10cfg.Mode)),
 		)
 	}
 	if !answerEnhanceEnabled() || len(items) == 0 || cfg.APIURL == "" {
@@ -87,10 +93,9 @@ func applyAnswerEnhancement(
 	}
 	// Pre-check relativity floor to distinguish "threshold below" (skipped)
 	// from a genuine LLM UNKNOWN response.
-	minRel := answerEnhanceMinRelativity()
 	anyRelevant := false
 	for _, it := range items {
-		if getRelativity(it) >= minRel {
+		if getRelativity(it) >= d10cfg.MinRelativity {
 			anyRelevant = true
 			break
 		}
@@ -100,7 +105,7 @@ func applyAnswerEnhancement(
 		observability.RecordD10EnhanceOutcome(ctx, "skipped")
 		return items
 	}
-	answer, sources, conf, hinted, err := EnhanceRetrievalAnswer(ctx, query, items, cfg, emb)
+	answer, sources, conf, hinted, err := EnhanceRetrievalAnswerWithConfig(ctx, query, items, cfg, emb, d10cfg)
 	if err != nil {
 		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("error", hinted))
 		observability.RecordD10EnhanceOutcome(ctx, "error")

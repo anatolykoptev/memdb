@@ -40,35 +40,74 @@ const (
 // tuning.go as an env-readable accessor (MEMDB_D10_MIN_RELATIVITY).
 // Default: 0.4. See defaultAnswerEnhanceMinRelativity.
 
-// answerEnhanceSystemPrompt — D10 answer extractor.
+// D10 prompt variants. Three operator-selectable shapes, exposed via
+// MEMDB_D10_PROMPT_MODE (see d10_config.go::PromptMode). The historical
+// arc that produced this menu is recorded once per variant below; the
+// runtime selector lives in D10Config.PromptForQuery.
 //
-// History:
-//   - PR #249 (2026-04-30) softened the original "exact surface form" rule
-//     after observing 82% UNKNOWN on atomic-fact rows. The replacement
-//     example ("transgender woman" answer) inadvertently primed the model
-//     toward 2-token paraphrase pulled verbatim from memory text.
-//   - PR #250 (2026-04-30) added a regex-based hybrid classifier with
-//     per-category prompts. The classifier mis-routed most cat-1 questions
-//     ("what are X's pets' names", "did X do Y", etc.) into the soft
-//     open_domain branch, compounding #249's overshoot.
-//   - Replay cefix4 (2026-04-30) showed F1 -25% (cat-1 -71%, cat-5 -72%);
-//     advisor + reviewer agreed the regression is real on single-token
-//     gold ("3", "Oliver"), not just paraphrase drift. semsim flat at
-//     0.78 confirms the model still answers semantically — it just adds
-//     memory-text modifiers that miss the gold token-overlap.
+// Naming convention: answerEnhancePrompt<Variant>. The legacy identifier
+// answerEnhanceSystemPrompt is kept as an alias to PromptModeProbabilistic
+// (the post-#252 default) so any downstream code that still references it
+// — including external tests — continues to compile and behave identically.
+
+// answerEnhancePromptStrict — pre-#249 verbatim. Highest LLM-Judge in the
+// claude_NS replay (0.35). Insists on the exact surface form from the
+// memories and explicit UNKNOWN when no answer is present. Best for
+// extraction-style benchmarks where gold answers are short noun phrases
+// pulled verbatim from the source. Underperforms on atomic-fact rows
+// where the question's surface form differs from the memory's (synthesis
+// is forbidden — model returns UNKNOWN instead).
+const answerEnhancePromptStrict = `You are a precise answer extractor. Given a user's question and a list of retrieved memories, respond with the SHORTEST possible answer that directly answers the question.
+
+Rules:
+- Use the exact surface form from the memories where possible (e.g., "social worker", not "working as a social worker").
+- Prefer noun phrases or single words over full sentences.
+- If the memories do not contain the answer, respond with "UNKNOWN".
+- Never hallucinate facts not present in the memories.
+
+Return strict JSON: {"answer": string, "source_ids": [string...], "confidence": float between 0.0 and 1.0}`
+
+// answerEnhancePromptSoft — PR #249 verbatim. Allows synthesis from the
+// closest grounded fact when the question's surface form differs from the
+// memory's. Reduced UNKNOWN rate on atomic-fact rows but tended to over-
+// paraphrase ("transgender woman" instead of "transgender") which costs
+// F1 against single-token gold. Best for benchmarks that score on semantic
+// similarity rather than token overlap.
+const answerEnhancePromptSoft = `You are a precise answer extractor. Given a user's question and a list of retrieved memories, respond with the SHORTEST possible answer that directly answers the question.
+
+Rules:
+- Ground every answer in the memories. Never invent facts not present.
+- Prefer noun phrases or single words over full sentences (e.g., "social worker", "transgender woman", "3").
+- Atomic facts may not contain the question's surface form. That is fine — synthesise the answer from the closest grounded fact (e.g., the question "What is Caroline's identity?" answered from a memory "Caroline is a transgender woman" → "transgender woman", not "UNKNOWN").
+- If the memories contain partial evidence, return the most specific grounded answer you can extract. Do NOT default to "UNKNOWN" when related evidence is present.
+- Only respond with "UNKNOWN" when NO related information exists in the memories at all.
+
+Return strict JSON: {"answer": string, "source_ids": [string...], "confidence": float between 0.0 and 1.0}`
+
+// answerEnhancePromptProbabilistic — PR #252 verbatim. Single base prompt
+// with optional category-shape hint appended at runtime by the embedding
+// classifier. The base is a tightened extractive form that strips memory
+// modifiers ("a"/"the") while still allowing synthesis. This is the
+// default mode shipping in production since #252.
 //
-// This rewrite restores extractive discipline while keeping the synthesis
-// permission for atomic-fact rows. Two principles:
+// History (verbatim from the original #252 doc-comment):
+//   - PR #249 softened the original "exact surface form" rule after
+//     observing 82% UNKNOWN on atomic-fact rows. The replacement example
+//     ("transgender woman") inadvertently primed the model toward 2-token
+//     paraphrase pulled verbatim from memory text.
+//   - PR #250 added a regex-based hybrid classifier with per-category
+//     prompts. The classifier mis-routed most cat-1 questions into the
+//     soft open_domain branch, compounding #249's overshoot.
+//   - Replay cefix4 showed F1 -25% (cat-1 -71%, cat-5 -72%); semsim flat
+//     at 0.78 confirms the model still answers semantically — it just
+//     adds memory-text modifiers that miss gold token-overlap.
+//
+// Two principles encoded in the rules:
 //   1. SHORTEST surface form — single noun / name / number / count.
 //      No "a"/"the"/"works as", no qualifiers from the memory.
 //   2. Allow synthesis when surface form differs, but the OUTPUT shape
 //      must be the gold-style minimum, not the verbatim memory phrase.
-//
-// The hallucination guard is now grounded in a stronger rule: every
-// returned token must be derivable from the memories — adjectives /
-// modifiers / framing words that are not strictly necessary to answer
-// must be omitted.
-const answerEnhanceSystemPrompt = `You are a precise answer extractor. Given a user's question and a list of retrieved memories, respond with the SHORTEST surface form that answers the question.
+const answerEnhancePromptProbabilistic = `You are a precise answer extractor. Given a user's question and a list of retrieved memories, respond with the SHORTEST surface form that answers the question.
 
 Rules:
 - Return ONLY a single noun, name, number, count, short list, or short noun phrase — no full sentences, no preamble, no framing.
@@ -85,6 +124,11 @@ Examples:
 - question: "Did Caroline make the bowl?"  memory: "Caroline shaped the black-and-white bowl in pottery class" → "Yes"
 
 Return strict JSON: {"answer": string, "source_ids": [string...], "confidence": float between 0.0 and 1.0}`
+
+// answerEnhanceSystemPrompt is the legacy identifier. Aliased to the
+// probabilistic variant to preserve byte-identical behaviour for the
+// post-#252 default and any external code that still references it.
+const answerEnhanceSystemPrompt = answerEnhancePromptProbabilistic
 
 // AnswerEnhanceConfig configures the post-retrieval answer-extraction LLM call.
 // Mirrors LLMRerankConfig shape so the service can reuse the same proxy credentials.
@@ -138,12 +182,34 @@ func EnhanceRetrievalAnswer(
 	cfg AnswerEnhanceConfig,
 	emb classifierEmbedder,
 ) (string, []string, float64, bool, error) {
+	// Backwards-compatible entry point — load the per-request D10Config
+	// snapshot inline. Newer call sites can use EnhanceRetrievalAnswerWithConfig
+	// directly to amortise the env reads across multiple calls.
+	return EnhanceRetrievalAnswerWithConfig(ctx, query, items, cfg, emb, LoadD10Config())
+}
+
+// EnhanceRetrievalAnswerWithConfig is the explicit-config variant — used by
+// applyAnswerEnhancement in the post-processing pipeline so the per-request
+// LoadD10Config call lives at exactly one site (the pipeline hook), not
+// re-evaluated by every helper.
+//
+// Behaviour matches EnhanceRetrievalAnswer's contract; the only change is
+// that MinRelativity, classifier threshold, and prompt selection come from
+// d10cfg instead of fresh env reads.
+func EnhanceRetrievalAnswerWithConfig(
+	ctx context.Context,
+	query string,
+	items []map[string]any,
+	cfg AnswerEnhanceConfig,
+	emb classifierEmbedder,
+	d10cfg D10Config,
+) (string, []string, float64, bool, error) {
 	if len(items) == 0 || cfg.APIURL == "" {
 		return answerEnhanceUnknownAnswer, nil, 0, false, nil
 	}
 
 	// Keep only items above the relativity floor, cap at top-N.
-	minRel := answerEnhanceMinRelativity()
+	minRel := d10cfg.MinRelativity
 	candidates := make([]map[string]any, 0, answerEnhanceTopN)
 	for _, it := range items {
 		if len(candidates) >= answerEnhanceTopN {
@@ -170,7 +236,7 @@ func EnhanceRetrievalAnswer(
 		query, memBlock.String(),
 	)
 
-	systemPrompt, hinted := buildAnswerEnhanceSystemPrompt(ctx, query, emb)
+	systemPrompt, hinted := d10cfg.PromptForQuery(ctx, query, emb)
 
 	var parsed AnswerEnhanceResponse
 	if err := callAnswerEnhanceLLM(ctx, systemPrompt, userMsg, cfg, &parsed); err != nil {

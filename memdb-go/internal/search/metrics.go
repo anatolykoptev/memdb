@@ -192,22 +192,32 @@ func searchMx() *searchMetricsInstruments {
 		for _, c := range []metric.Int64Counter{d4, d7, mh, d11} {
 			c.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", "")))
 		}
-		// D10 enhance: pre-register every (outcome × hinted) at zero.
+		// D10 enhance: pre-register every (outcome × hinted × mode) at zero.
 		//
 		// Label history:
 		//   - PR #250: added a `category` label, reverted alongside the
 		//     hybrid extractor in PR #251.
-		//   - This PR: re-introduced labels but in the form of a bounded
+		//   - PR #252: re-introduced labels in the form of a bounded
 		//     2-value `hinted` (yes/no) flag — total cardinality stays at
 		//     4 outcomes × 2 = 8 series. `category` is intentionally NOT
 		//     a label here so we do not regress to the pre-revert
 		//     5×4 grid.
+		//   - This PR: added `mode` label so dashboards see which prompt
+		//     variant is running (strict/soft/probabilistic). Hinted is
+		//     always "no" for strict + soft (those modes do not call the
+		//     classifier), so the realised series count is
+		//     4 outcomes × (1 + 1 + 2) = 16 — the loop pre-registers all
+		//     4 × 2 × 3 = 24 cells so dashboards see the full grid even
+		//     before the first request fires.
 		for _, oc := range []string{"answered", "unknown", "skipped", "error"} {
 			for _, h := range []string{"yes", "no"} {
-				d10.Add(ctx, 0, metric.WithAttributes(
-					attribute.String("outcome", oc),
-					attribute.String("hinted", h),
-				))
+				for _, mode := range []string{"strict", "soft", "probabilistic"} {
+					d10.Add(ctx, 0, metric.WithAttributes(
+						attribute.String("outcome", oc),
+						attribute.String("hinted", h),
+						attribute.String("mode", mode),
+					))
+				}
 			}
 		}
 		d5.Add(ctx, 0, metric.WithAttributes(

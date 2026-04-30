@@ -113,18 +113,29 @@ const (
 
 // answerEnhanceMinRelativity returns the minimum relativity threshold below
 // which candidate memories are excluded from D10 answer enhancement.
-// Env: MEMDB_D10_MIN_RELATIVITY in [0, 1].
+// Resolved via LoadD10Config so the MEMDB_D10_HARDNESS preset bundle (tight/
+// balanced/loose) seeds the value, and MEMDB_D10_MIN_RELATIVITY remains the
+// per-knob override.
+//
+// Kept as a free function (not a method on D10Config) for the small number
+// of legacy call sites that don't yet have a config snapshot in scope.
+// The pipeline hook (applyAnswerEnhancement) reads the value off its own
+// snapshot to avoid one extra env-read pass per call.
 func answerEnhanceMinRelativity() float64 {
-	return parseEnvFloat("MEMDB_D10_MIN_RELATIVITY", 0, 1, defaultAnswerEnhanceMinRelativity)
+	return LoadD10Config().MinRelativity
 }
 
 // d10ClassifierThreshold returns the minimum top-1 confidence the embedding
 // classifier must report before its category hint is appended to the D10
 // system prompt. Below threshold the prompt collapses to the base extractor
 // (i.e. byte-identical to current main behaviour) — the soft-routing safety
-// net.  Env: MEMDB_D10_CLASSIFIER_THRESHOLD in [0, 1].
+// net.
+//
+// Resolved via LoadD10Config: MEMDB_D10_HARDNESS seeds the value (tight=0.70,
+// balanced=0.50, loose=0.40); MEMDB_D10_CLASSIFIER_THRESHOLD overrides per
+// knob. See d10_config.go for the preset table.
 func d10ClassifierThreshold() float64 {
-	return parseEnvFloat("MEMDB_D10_CLASSIFIER_THRESHOLD", 0, 1, defaultD10ClassifierThreshold)
+	return LoadD10Config().ClassifierThreshold
 }
 
 // d10ClassifierEnabled reports whether the embedding-based query classifier

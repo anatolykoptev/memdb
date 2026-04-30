@@ -8,9 +8,7 @@ package handlers
 // triggers". Tested by chat_prompt_softening_test.go.
 
 import (
-	"math"
-	"os"
-	"strconv"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
 
 // factualPromptVariant identifies which factualQAPrompt* template was used.
@@ -65,31 +63,27 @@ type factualPromptDecision struct {
 //
 // Default 0.5 picked from M11 RCA: 220/841 cat-4 wrong predictions had
 // hit@k=1 (gold doc top-retrieved) AND model refused — those have median
-// top-1 cosine well above 0.5. Value can be tuned via
-// MEMDB_FACTUAL_CONFIDENCE_THRESHOLD ∈ [0, 1].
+// top-1 cosine well above 0.5. The value can be tuned via:
+//   - MEMDB_D10_HARDNESS=tight|balanced|loose (preset bundle).
+//   - MEMDB_FACTUAL_CONFIDENCE_THRESHOLD ∈ [0, 1] (per-knob override).
+//
+// MUST stay in sync with search.defaultFactualConfidenceThresholdPreset —
+// tested by TestD10ConfigDefaultsMatchHandlers in d10_config_test.go.
 const defaultFactualConfidenceThreshold = 0.5
 
-// factualConfidenceThreshold returns the env-overridable threshold used by
-// decideFactualPrompt. Mirrors the parseEnvFloat pattern in search/tuning.go
-// (kept local to avoid an import cycle: search → handlers is forbidden).
+// factualConfidenceThreshold returns the threshold used by decideFactualPrompt.
+// Sources, in priority order:
 //
-// Env: MEMDB_FACTUAL_CONFIDENCE_THRESHOLD in [0, 1]. Out-of-range / unparseable
-// / NaN / Inf values fall back silently to the compile-time default.
+//   1. MEMDB_FACTUAL_CONFIDENCE_THRESHOLD (per-knob env override).
+//   2. The hardness preset (MEMDB_D10_HARDNESS) seeded ConfidenceThreshold.
+//   3. Compile-time defaultFactualConfidenceThreshold (0.5, balanced).
+//
+// Implementation delegates to search.LoadD10Config so the value is read from
+// exactly one place and stays consistent with what the D10 extractor uses
+// for the same env. Loading the snapshot is cheap (only env reads) and the
+// handlers→search direction is the legitimate one across the codebase.
 func factualConfidenceThreshold() float64 {
-	raw := os.Getenv("MEMDB_FACTUAL_CONFIDENCE_THRESHOLD")
-	if raw == "" {
-		return defaultFactualConfidenceThreshold
-	}
-	v, err := strconv.ParseFloat(raw, 64)
-	// Reject NaN / ±Inf explicitly: ParseFloat accepts "NaN" / "Inf" but
-	// they propagate through `>=` comparisons in unhelpful ways
-	// (NaN >= threshold is always false → would always pick the
-	// low-confidence variant, which is technically safe but masks the
-	// misconfiguration). Fall back to the default in those cases.
-	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1 {
-		return defaultFactualConfidenceThreshold
-	}
-	return v
+	return search.LoadD10Config().ConfidenceThreshold
 }
 
 // topRetrievalScore returns max(metadata.relativity) across memories, or 0
