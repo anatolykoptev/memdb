@@ -162,6 +162,7 @@ func (h *Handler) runAtomicFineForCube(ctx context.Context, req *fullAddRequest,
 	sig := classifyContent(req.Messages, conversation)
 	recordStageDuration(ctx, "classify", t)
 	if sig.Skip {
+		recordAtomicExtractOutcome(ctx, atomicOutcomeClassifySkip)
 		h.logger.Debug("atomic fine add: skipped extraction",
 			slog.String("reason", sig.SkipReason), slog.String("cube_id", cubeID))
 		return nil, nil
@@ -184,7 +185,18 @@ func (h *Handler) runAtomicFineForCube(ctx context.Context, req *fullAddRequest,
 	// short-circuits on ContentHash dedup and DELETE actions (none apply
 	// in the atomic path).
 	t = time.Now()
+	preDedup := len(extracted)
 	extracted = h.filterAddsByContentHash(ctx, extracted, cubeID)
+	if preDedup > 0 && len(extracted) == 0 {
+		// Every fact already lives in the cube under the same content_hash.
+		// Without this counter the empty-extracted path is silent and looks
+		// identical to "atomic returned no facts" in metrics.
+		recordAtomicExtractOutcome(ctx, atomicOutcomeHashDedupSkip)
+		h.logger.Debug("atomic fine add: all facts hash-deduped",
+			slog.Int("pre_dedup", preDedup), slog.String("cube_id", cubeID))
+		recordStageDuration(ctx, "embed", t)
+		return nil, nil
+	}
 	embedded := h.embedFacts(ctx, extracted)
 	recordStageDuration(ctx, "embed", t)
 
@@ -237,6 +249,7 @@ func (h *Handler) runAtomicFineExtractionFull(
 
 	candidates, topScore := h.fetchFineCandidates(ctx, conversation, cubeID, stringOrEmpty(req.AgentID))
 	if topScore > nearDuplicateThreshold {
+		recordAtomicExtractOutcome(ctx, atomicOutcomeNearDupSkip)
 		h.logger.Debug("atomic fine add: skipped — near-duplicate",
 			slog.Float64("top_score", topScore), slog.String("cube_id", cubeID))
 		return nil, nil, false, nil
