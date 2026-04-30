@@ -14,6 +14,7 @@ package handlers
 // chat_prompt_factual_test.go.
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -29,7 +30,7 @@ func TestChatPrompt_YesNoQuestion_HighConf_HasCommitInstruction(t *testing.T) {
 		memWithScore("Melanie made the black and white bowl herself", 0.82),
 	}
 	prompt, _ := buildSystemPromptWithDecision(
-		nil,
+		context.TODO(),
 		"Did Melanie make the black and white bowl?",
 		memories,
 		"", "", "factual", "",
@@ -56,7 +57,7 @@ func TestChatPrompt_YesNoQuestion_LowConf_HasActiveSearchInstruction(t *testing.
 		memWithScore("Caroline felt grateful and thankful after the accident", 0.35),
 	}
 	prompt, _ := buildSystemPromptWithDecision(
-		nil,
+		context.TODO(),
 		"How did Caroline feel after the accident?",
 		memories,
 		"", "", "factual", "",
@@ -81,7 +82,7 @@ func TestChatPrompt_CountQuestion_HighConf_HasAggregationInstruction(t *testing.
 		memWithScore("Melanie talked about her youngest child learning to walk", 0.60),
 	}
 	prompt, _ := buildSystemPromptWithDecision(
-		nil,
+		context.TODO(),
 		"How many children does Melanie have?",
 		memories,
 		"", "", "factual", "",
@@ -102,7 +103,7 @@ func TestChatPrompt_CountQuestion_LowConf_HasAggregationInstruction(t *testing.T
 		memWithScore("Melanie mentioned her son had a bad day at school", 0.22),
 	}
 	prompt, _ := buildSystemPromptWithDecision(
-		nil,
+		context.TODO(),
 		"How many children does Melanie have?",
 		memories,
 		"", "", "factual", "",
@@ -122,7 +123,7 @@ func TestChatPrompt_CountQuestion_LowConf_HasAggregationInstruction(t *testing.T
 // This ensures the anti-refusal changes do NOT break the empty-context path.
 func TestChatPrompt_NoContext_StillRefuses(t *testing.T) {
 	prompt, decision := buildSystemPromptWithDecision(
-		nil,
+		context.TODO(),
 		"Did Melanie make the bowl?",
 		nil,
 		"", "", "factual", "",
@@ -148,7 +149,7 @@ func TestChatPrompt_TemporalQuestion_HighConf_HasApproximateGuidance(t *testing.
 		memWithScore("In March she started her new job", 0.75),
 	}
 	prompt, _ := buildSystemPromptWithDecision(
-		nil,
+		context.TODO(),
 		"When did she start her new job?",
 		memories,
 		"", "", "factual", "",
@@ -163,7 +164,7 @@ func TestChatPrompt_TemporalQuestion_LowConf_HasApproximateGuidance(t *testing.T
 		memWithScore("In March she started her new job", 0.31),
 	}
 	prompt, _ := buildSystemPromptWithDecision(
-		nil,
+		context.TODO(),
 		"When did she start her new job?",
 		memories,
 		"", "", "factual", "",
@@ -187,7 +188,7 @@ func TestChatPrompt_SynthesisInstruction_HighConf(t *testing.T) {
 		memWithScore("Caroline made stained glass windows for a church fundraiser", 0.77),
 	}
 	prompt, _ := buildSystemPromptWithDecision(
-		nil,
+		context.TODO(),
 		"Would Caroline be considered religious?",
 		memories,
 		"", "", "factual", "",
@@ -211,7 +212,7 @@ func TestChatPrompt_SynthesisInstruction_LowConf(t *testing.T) {
 		memWithScore("Caroline attended Sunday services regularly last year", 0.38),
 	}
 	prompt, _ := buildSystemPromptWithDecision(
-		nil,
+		context.TODO(),
 		"Would Caroline be considered religious?",
 		memories,
 		"", "", "factual", "",
@@ -235,7 +236,7 @@ func TestChatPrompt_CharCrossRef_HighConf(t *testing.T) {
 		memWithScore("Melanie's family was scared but resilient after the accident", 0.81),
 	}
 	prompt, _ := buildSystemPromptWithDecision(
-		nil,
+		context.TODO(),
 		"How did Caroline feel after the accident?",
 		memories,
 		"", "", "factual", "",
@@ -258,7 +259,7 @@ func TestChatPrompt_CharCrossRef_LowConf(t *testing.T) {
 		memWithScore("Melanie's family was scared but resilient after the accident", 0.34),
 	}
 	prompt, _ := buildSystemPromptWithDecision(
-		nil,
+		context.TODO(),
 		"How did Caroline feel after the accident?",
 		memories,
 		"", "", "factual", "",
@@ -281,7 +282,7 @@ func TestChatPrompt_LowConf_PartialMatchInstruction(t *testing.T) {
 		memWithScore("Melanie's son was scared after the car accident", 0.38),
 	}
 	prompt, _ := buildSystemPromptWithDecision(
-		nil,
+		context.TODO(),
 		"How did Melanie's son handle the accident?",
 		memories,
 		"", "", "factual", "",
