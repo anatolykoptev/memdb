@@ -134,7 +134,7 @@ func (h *Handler) fetchWikiSynthesis(ctx context.Context, cubeID, query string) 
 		return ""
 	}
 
-	pages, err := h.postgres.SearchWikiByCosine(ctx, cubeID, vecs[0], wikiInjectTopK())
+	hits, err := h.postgres.SearchWikiByCosine(ctx, cubeID, vecs[0], wikiInjectTopK())
 	if err != nil {
 		h.logger.Warn("wiki inject: search failed",
 			slog.String("cube_id", cubeID),
@@ -142,18 +142,18 @@ func (h *Handler) fetchWikiSynthesis(ctx context.Context, cubeID, query string) 
 		recordWikiInjectOutcome(ctx, wikiInjectOutcomeSearchError)
 		return ""
 	}
-	if len(pages) == 0 {
+	if len(hits) == 0 {
 		recordWikiInjectOutcome(ctx, wikiInjectOutcomeNoResults)
 		return ""
 	}
 
-	view := make([]dbWikiPage, 0, len(pages))
-	for _, p := range pages {
-		view = append(view, dbWikiPage{slug: p.Slug, title: p.Title, body: p.Body})
+	view := make([]dbWikiPage, 0, len(hits))
+	for _, hit := range hits {
+		view = append(view, dbWikiPage{slug: hit.Page.Slug, title: hit.Page.Title, body: hit.Page.Body})
 	}
 	block := renderWikiInjectBlock(view, wikiInjectMaxBodyTokens())
 	recordWikiInjectOutcome(ctx, wikiInjectOutcomeInjected)
-	recordWikiInjectPages(ctx, len(pages))
+	recordWikiInjectPages(ctx, len(hits))
 	recordWikiInjectBodyChars(ctx, len(block))
 	return block
 }

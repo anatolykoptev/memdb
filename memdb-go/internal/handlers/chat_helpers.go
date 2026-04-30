@@ -82,6 +82,17 @@ func (h *Handler) chatSearchMemories(ctx context.Context, req *nativeChatRequest
 	// Post-retrieval enhancement: disambiguate pronouns, resolve relative times, merge related.
 	enhanced := search.EnhanceMemories(ctx, *req.Query, filtered, h.searchService.Enhance)
 
+	// W3.5: wiki retrieval slot — synthesized pages merged into the ranked
+	// memory list. Env-gated by MEMDB_WIKI_RETRIEVAL_SLOT. Each wiki entry
+	// arrives with metadata.relativity already populated from cosine score,
+	// so the next sortByRelativity sees them as first-class candidates.
+	if cubeID := profileCubeIDForRequest(req); cubeID != "" {
+		if wikiMems := h.fetchWikiAsMemories(ctx, cubeID, *req.Query); len(wikiMems) > 0 {
+			enhanced = append(enhanced, wikiMems...)
+			sortByRelativity(enhanced)
+		}
+	}
+
 	return enhanced, prefString, nil
 }
 
