@@ -37,7 +37,7 @@ type Handler struct {
 	postgres      *db.Postgres                 // nil = not initialized, fall back to proxy
 	qdrant        *db.Qdrant                   // nil = not initialized
 	redis         *db.Redis                    // nil = not initialized
-	wmCache       *db.WorkingMemoryCache       // nil = VSET disabled, use postgres for candidates
+	wmCache       workingMemoryCacher          // nil = VSET disabled, use postgres for candidates
 	embedder      embedder.Embedder            // nil = native search disabled
 	embedRegistry *embedder.Registry           // nil = single-model mode (uses embedder field)
 	searchService *search.SearchService        // nil = search falls back to proxy
@@ -133,7 +133,8 @@ func (h *Handler) SetAddQueue(workers, queueSize int) {
 
 // SetWorkingMemoryCache sets the Redis VSET hot cache for WorkingMemory.
 // When set, fine-mode dedup candidate lookup uses VSET (HNSW in-memory) instead of pgvector.
-func (h *Handler) SetWorkingMemoryCache(c *db.WorkingMemoryCache) {
+// Accepts *db.WorkingMemoryCache (production) or any workingMemoryCacher (tests).
+func (h *Handler) SetWorkingMemoryCache(c workingMemoryCacher) {
 	h.wmCache = c
 }
 
