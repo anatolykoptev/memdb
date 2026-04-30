@@ -41,11 +41,15 @@ from pathlib import Path
 
 import requests
 
-# LoCoMo is a factual QA benchmark; per-message granularity (raw) lets question
-# embeddings match atomic facts instead of 4096-char aggregated windows that
-# collapse 58 messages into ~3 coarse chunks, killing per-question cosine match.
-# Env LOCOMO_INGEST_MODE overrides for experiments (e.g. "fast" to compare).
-INGEST_MODE = os.getenv("LOCOMO_INGEST_MODE", "raw")
+# LoCoMo ingest mode. Two modes are supported:
+#   - "raw":  per-message granularity, no LLM (per CLAUDE.md add-mode contract).
+#             Best per-message cosine, but no graph / atomic-fact enrichment.
+#   - "fast": batched session-windowed chunking, no LLM. Default since 2026-04-30
+#             after the raw-default shipped before W2/W3.5 wiki layer needed
+#             tier-promotable cluster sizes — raw bypassed reorg's clustering
+#             threshold (MEMDB_D3_MIN_CLUSTER_RAW=2) and starved wiki_pages.
+# Env LOCOMO_INGEST_MODE overrides; set "raw" explicitly to reproduce pre-W2 baselines.
+INGEST_MODE = os.getenv("LOCOMO_INGEST_MODE", "fast")
 
 
 def build_headers() -> dict:
