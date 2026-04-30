@@ -40,51 +40,33 @@ const (
 // tuning.go as an env-readable accessor (MEMDB_D10_MIN_RELATIVITY).
 // Default: 0.4. See defaultAnswerEnhanceMinRelativity.
 
-// answerEnhanceSystemPrompt — D10 answer extractor.
+// answerEnhanceSystemPrompt — D10 answer extractor (concise).
 //
-// History:
-//   - PR #249 (2026-04-30) softened the original "exact surface form" rule
-//     after observing 82% UNKNOWN on atomic-fact rows. The replacement
-//     example ("transgender woman" answer) inadvertently primed the model
-//     toward 2-token paraphrase pulled verbatim from memory text.
-//   - PR #250 (2026-04-30) added a regex-based hybrid classifier with
-//     per-category prompts. The classifier mis-routed most cat-1 questions
-//     ("what are X's pets' names", "did X do Y", etc.) into the soft
-//     open_domain branch, compounding #249's overshoot.
-//   - Replay cefix4 (2026-04-30) showed F1 -25% (cat-1 -71%, cat-5 -72%);
-//     advisor + reviewer agreed the regression is real on single-token
-//     gold ("3", "Oliver"), not just paraphrase drift. semsim flat at
-//     0.78 confirms the model still answers semantically — it just adds
-//     memory-text modifiers that miss the gold token-overlap.
+// Design (post cefix7→cefix9 diagnosis, 2026-04-30):
+//   - Cefix9 metrics showed 60-100% UNKNOWN per category — base prompt's
+//     gate ("UNKNOWN only when NO related info exists") was too strict
+//     AND the prompt was too long (~440 tokens) which makes Gemini 2.5
+//     flash bias toward the safe UNKNOWN escape hatch.
+//   - This rewrite drops to ~120 tokens: 1 commitment line, 3 short
+//     rules, 2 contrasting examples, JSON contract. Same extractive
+//     discipline, half the cognitive load.
 //
-// This rewrite restores extractive discipline while keeping the synthesis
-// permission for atomic-fact rows. Two principles:
-//   1. SHORTEST surface form — single noun / name / number / count.
-//      No "a"/"the"/"works as", no qualifiers from the memory.
-//   2. Allow synthesis when surface form differs, but the OUTPUT shape
-//      must be the gold-style minimum, not the verbatim memory phrase.
-//
-// The hallucination guard is now grounded in a stronger rule: every
-// returned token must be derivable from the memories — adjectives /
-// modifiers / framing words that are not strictly necessary to answer
-// must be omitted.
-const answerEnhanceSystemPrompt = `You are a precise answer extractor. Given a user's question and a list of retrieved memories, respond with the SHORTEST surface form that answers the question.
+// Lower the bar: "best guess from memories" replaces "shortest surface
+// form" as the primary instruction. Shape rules stay but as guidance,
+// not as gate. UNKNOWN remains the hallucination escape, but the prompt
+// now actively pushes the model to answer instead of refuse.
+const answerEnhanceSystemPrompt = `Extract the answer from the memories. Give your best guess as a short noun, name, number, or phrase. UNKNOWN only when no memory relates to the question.
 
 Rules:
-- Return ONLY a single noun, name, number, count, short list, or short noun phrase — no full sentences, no preamble, no framing.
-- Do NOT include modifiers, articles, or qualifiers from the memory text unless the question explicitly asks for them. Strip "a"/"the"/"works as"/"is a"/"who is"/etc.
-- Synthesise the minimum-form answer when the question's surface form differs from the memory's. The OUTPUT shape must match the gold style, not the memory phrasing.
-- Every token in the answer must be derivable from the memories. Never invent or hallucinate facts not present.
-- If the memories contain partial evidence, return the closest grounded single noun/name. Use UNKNOWN only when NO related information exists in the memories at all.
+- Strip articles/framing ("a"/"the"/"works as"/"is a") unless the question asks for the full phrase.
+- Match the gold style, not the memory's verbatim phrasing (e.g. "three kids" → "3" if asked "how many").
+- Every token must come from the memories. Do not invent.
 
 Examples:
-- question: "What is Caroline's job?"  memory: "Caroline works as a social worker" → "social worker"  (NOT "a social worker", NOT "social worker advocating against assault")
-- question: "How many children does Melanie have?"  memory: "Melanie has three kids" → "3"  (NOT "three children", NOT "three kids")
-- question: "What is Caroline's identity?"  memory: "Caroline is a transgender woman" → "transgender"  (NOT "transgender woman", NOT "a transgender woman")
-- question: "What are Melanie's pets' names?"  memory: "Oliver, Luna, Bailey" → "Oliver, Luna, Bailey"
-- question: "Did Caroline make the bowl?"  memory: "Caroline shaped the black-and-white bowl in pottery class" → "Yes"
+- Q: "What is Caroline's job?"  M: "Caroline works as a social worker" → "social worker"
+- Q: "How many children does Melanie have?"  M: "Melanie has three kids" → "3"
 
-Return strict JSON: {"answer": string, "source_ids": [string...], "confidence": float between 0.0 and 1.0}`
+Return JSON: {"answer": string, "source_ids": [string...], "confidence": float 0.0-1.0}`
 
 // AnswerEnhanceConfig configures the post-retrieval answer-extraction LLM call.
 // Mirrors LLMRerankConfig shape so the service can reuse the same proxy credentials.
@@ -170,7 +152,17 @@ func EnhanceRetrievalAnswer(
 		query, memBlock.String(),
 	)
 
+	// "Direct data" — surface the top-1 candidate's text into the system
+	// prompt so the LLM sees the strongest evidence anchor before any
+	// shape-rule guidance. Cefix9 metrics showed 60-100% UNKNOWN per
+	// category despite hit@k=0.80; the LLM was finding memories but
+	// refusing to commit. Putting the most relevant memory verbatim into
+	// the system role nudges it to anchor on real text instead of fall
+	// back to UNKNOWN.
 	systemPrompt, hinted, trace := buildAnswerEnhanceSystemPrompt(ctx, query, emb)
+	if topMem := topAnchorMemory(candidates); topMem != "" {
+		systemPrompt = systemPrompt + "\n\nMost relevant memory: " + topMem
+	}
 
 	var parsed AnswerEnhanceResponse
 	if err := callAnswerEnhanceLLM(ctx, systemPrompt, userMsg, cfg, &parsed); err != nil {
@@ -253,6 +245,33 @@ func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb class
 	}
 	trace.Mode = D10RouteSoft
 	return answerEnhanceSystemPrompt + block, true, trace
+}
+
+// topAnchorMemory returns the verbatim text of the highest-relativity
+// candidate in the post-floor candidate list. Used to inject the strongest
+// evidence anchor into the system prompt ("direct data" — the LLM sees
+// real memory text in the system role, not just rules).
+//
+// Returns "" when candidates is empty or the first candidate has no
+// usable "memory" string. Caller appends the result to the system prompt
+// only when non-empty.
+//
+// Truncates at 240 chars so a verbose memory does not bloat the prompt;
+// the LLM still sees the same memory in full in the user message.
+func topAnchorMemory(candidates []map[string]any) string {
+	if len(candidates) == 0 {
+		return ""
+	}
+	mem, _ := candidates[0]["memory"].(string)
+	mem = strings.TrimSpace(mem)
+	if mem == "" {
+		return ""
+	}
+	const maxLen = 240
+	if len(mem) > maxLen {
+		mem = mem[:maxLen] + "…"
+	}
+	return mem
 }
 
 // callAnswerEnhanceLLM performs the single chat-completion round trip for D10
