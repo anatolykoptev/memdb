@@ -144,10 +144,17 @@ func buildTextRerankPrefix(s *SearchService, queryVec []float32, embByID map[str
 			Client:         s.RerankClient,
 			OnLiveCall:     ceLiveHook,
 			OnPrecompute:   cePrecomputeHook,
+			OnMathFallback: ceMathFallbackHook,
 			QueryUserID:    p.UserName,
 			QuerySessionID: p.AgentID,
 			QueryTags:      p.Tags,
 			BoostWeights:   rerankpkg.DefaultBoostWeights(),
+			// Math-fallback inputs (go-search PRs #10 + #14 pattern).
+			// embByID holds the same vectors the cosine and MathPrefilter
+			// stages already computed; reusing them adds zero embed-server
+			// load and gives the fallback path real cosine signal.
+			QueryVec:       queryVec,
+			EmbeddingsByID: embByID,
 		})
 	}
 	return chain
