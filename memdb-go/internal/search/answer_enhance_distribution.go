@@ -33,6 +33,12 @@ import (
 	"strings"
 )
 
+// distLongTailPctMin is the inclusive percentage cutoff below which a
+// distribution entry is treated as long-tail noise and dropped from the
+// soft-routing block (provided ≥ 2 entries already passed). 10% in a
+// 5-way distribution is uniform-floor and carries no shape signal.
+const distLongTailPctMin = 10
+
 // classifyAndDistribute returns a length-5 distribution over every category,
 // normalised so the confidences sum to 1 (softmax over the cosine
 // similarities). The returned slice is sorted desc by confidence so callers
@@ -81,24 +87,13 @@ func (c *lazyEmbedClassifier) classifyAndDistribute(ctx context.Context, query s
 	return out, nil
 }
 
-// distributionBlock formats the top-N classifier distribution as a soft
-// guidance block appended to the base D10 extractor prompt.
+// distributionBlock formats the top-N classifier distribution as a one-line
+// guidance hint appended to the base D10 extractor prompt.
 //
-// Format (intentionally compact — every token costs):
+// Format (compact — under 50 tokens):
 //
-//	=== Question type signal ===
-//	Classifier distribution (probabilities sum to 1):
-//	  - temporal: 62%
-//	  - single_hop: 28%
-//	  - multi_hop: 7%
-//	  - open_domain: 2%
-//	  - adversarial: 1%
-//	Use this as soft guidance on answer shape:
-//	- If one category clearly dominates (>60%), prefer its answer shape.
-//	- If two are close (e.g. 50/40), consider both shapes; pick the one
-//	  the memories support best.
-//	- Diffuse signal (top1 < 40%) — fall back to the SHORTEST surface
-//	  form rule above. Do not force a category-specific shape.
+//	Likely question type: temporal 62%, single_hop 28%. Pick the fitting
+//	answer shape; ignore if mixed.
 //
 // Returns "" when dist is empty / no-signal sentinel — caller then keeps
 // the base prompt unchanged.
@@ -112,16 +107,25 @@ func distributionBlock(dist []CategoryConfidence, topN int) string {
 	if topN < 1 || topN > len(dist) {
 		topN = len(dist)
 	}
-	var b strings.Builder
-	b.WriteString("\n\n=== Question type signal ===\n")
-	b.WriteString("Classifier distribution (probabilities sum to 1):\n")
+	// Trim long-tail entries that contribute ≤ distLongTailPctMin —
+	// they're noise to the LLM and bloat the prompt. Inclusive bound
+	// matches PR #257 doc claim "drops < 10%" (a 10% entry contributes
+	// no shape signal in a 5-way distribution and is just noise).
+	parts := make([]string, 0, topN)
 	for i := 0; i < topN; i++ {
-		fmt.Fprintf(&b, "  - %s: %d%%\n", dist[i].Category, percentRound(dist[i].Confidence))
+		p := percentRound(dist[i].Confidence)
+		if p <= distLongTailPctMin && len(parts) >= 2 {
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s %d%%", dist[i].Category, p))
 	}
-	b.WriteString("Use this as soft guidance on answer shape:\n")
-	b.WriteString("- If one category clearly dominates (>60%), prefer its answer shape.\n")
-	b.WriteString("- If two are close (e.g. 50/40), consider both shapes; pick the one the memories support best.\n")
-	b.WriteString("- Diffuse signal (top1 < 40%) — fall back to the SHORTEST surface form rule above. Do not force a category-specific shape.")
+	if len(parts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\nLikely question type: ")
+	b.WriteString(strings.Join(parts, ", "))
+	b.WriteString(". Pick the fitting answer shape; ignore if mixed.")
 	return b.String()
 }
 

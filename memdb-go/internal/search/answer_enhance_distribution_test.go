@@ -64,13 +64,13 @@ func TestDistributionBlock_FormatsAllCategories(t *testing.T) {
 		t.Fatal("expected non-empty block")
 	}
 	wantSubs := []string{
-		"Question type signal",
-		"temporal: 62%",
-		"single_hop: 28%",
-		"multi_hop: 7%",
-		"open_domain: 2%",
-		"adversarial: 1%",
-		"SHORTEST surface form",
+		"Likely question type",
+		"temporal 62%",
+		"single_hop 28%",
+		// long-tail entries (<10%) are trimmed once at least 2 entries
+		// are present; multi_hop / open_domain / adversarial drop out
+		// of the formatted block.
+		"Pick the fitting answer shape",
 	}
 	for _, w := range wantSubs {
 		if !strings.Contains(got, w) {
@@ -89,11 +89,11 @@ func TestDistributionBlock_TopNTrim(t *testing.T) {
 	}
 	got := distributionBlock(dist, 2)
 	// top-2: temporal + single_hop. multi_hop must NOT appear.
-	if !strings.Contains(got, "temporal: 70%") {
-		t.Errorf("missing temporal: 70%%, block:\n%s", got)
+	if !strings.Contains(got, "temporal 70%") {
+		t.Errorf("missing temporal 70%%, block:\n%s", got)
 	}
-	if !strings.Contains(got, "single_hop: 20%") {
-		t.Errorf("missing single_hop: 20%%, block:\n%s", got)
+	if !strings.Contains(got, "single_hop 20%") {
+		t.Errorf("missing single_hop 20%%, block:\n%s", got)
 	}
 	if strings.Contains(got, "multi_hop") {
 		t.Errorf("topN=2 should hide multi_hop, block:\n%s", got)
@@ -187,7 +187,7 @@ func TestBuildAnswerEnhanceSystemPrompt_SoftPath(t *testing.T) {
 	if !strings.HasPrefix(got, answerEnhanceSystemPrompt) {
 		t.Errorf("soft path: prompt should still start with base prompt")
 	}
-	if !strings.Contains(got, "Question type signal") {
+	if !strings.Contains(got, "Likely question type") {
 		t.Errorf("soft path: missing distribution block")
 	}
 	if trace.Mode != D10RouteSoft {
