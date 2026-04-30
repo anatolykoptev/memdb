@@ -18,6 +18,13 @@ const (
 	modeFine        = "fine"
 	modeAsync       = "async"
 	modeRaw         = "raw"
+
+	// fastMsgKind is the value stamped into properties.kind for every
+	// per-message fast row. Sibling discriminator to atomicFactKind on the
+	// atomic path. Without this, fast rows fall through to migration 0022's
+	// COALESCE default 'paragraph_legacy' and search filters like
+	// kind='fast_msg' silently exclude them.
+	fastMsgKind = "fast_msg"
 )
 
 // extractedMemory is a single memory unit produced by the fast-add extractor.
