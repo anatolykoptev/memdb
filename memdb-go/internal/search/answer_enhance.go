@@ -46,13 +46,26 @@ const (
 // tuning.go as an env-readable accessor (MEMDB_D10_MIN_RELATIVITY).
 // Default: 0.4. See defaultAnswerEnhanceMinRelativity.
 
+// answerEnhanceSystemPrompt — D10 answer extractor, softened 2026-04-30 after
+// the M14 LoCoMo replay revealed 82% of D10 calls returned "UNKNOWN" while
+// retrieval hit@k=0.75 (33/50 turns where retrieval found the right memory
+// but D10 refused to surface it). Root cause: the prior prompt insisted on
+// "exact surface form from the memories" — atomic-fact rows ("Caroline is a
+// transgender woman") don't contain the question's surface form ("identity")
+// so the extractor returned UNKNOWN instead of synthesising the noun phrase.
+//
+// New rules pull from the competitor audit (mem0 SoftExtract + zep "use only
+// context"): allow the LLM to synthesise the closest grounded fact, only
+// fall back to UNKNOWN when NO related evidence exists at all. Hallucination
+// guard stays — the LLM still cannot invent facts.
 const answerEnhanceSystemPrompt = `You are a precise answer extractor. Given a user's question and a list of retrieved memories, respond with the SHORTEST possible answer that directly answers the question.
 
 Rules:
-- Use the exact surface form from the memories where possible (e.g., "social worker", not "working as a social worker").
-- Prefer noun phrases or single words over full sentences.
-- If the memories do not contain the answer, respond with "UNKNOWN".
-- Never hallucinate facts not present in the memories.
+- Ground every answer in the memories. Never invent facts not present.
+- Prefer noun phrases or single words over full sentences (e.g., "social worker", "transgender woman", "3").
+- Atomic facts may not contain the question's surface form. That is fine — synthesise the answer from the closest grounded fact (e.g., the question "What is Caroline's identity?" answered from a memory "Caroline is a transgender woman" → "transgender woman", not "UNKNOWN").
+- If the memories contain partial evidence, return the most specific grounded answer you can extract. Do NOT default to "UNKNOWN" when related evidence is present.
+- Only respond with "UNKNOWN" when NO related information exists in the memories at all.
 
 Return strict JSON: {"answer": string, "source_ids": [string...], "confidence": float between 0.0 and 1.0}`
 
