@@ -117,14 +117,14 @@ func TestBuildSystemPrompt_WithPrefString(t *testing.T) {
 }
 
 func TestFormatMemories_Empty(t *testing.T) {
-	result := formatMemories(nil, "")
+	result := formatMemories(nil, "", 0)
 	if result != "" {
 		t.Errorf("formatMemories(nil, '') = %q, want empty", result)
 	}
 }
 
 func TestFormatMemories_WithPrefOnly(t *testing.T) {
-	result := formatMemories(nil, "short answers please")
+	result := formatMemories(nil, "short answers please", 0)
 	// No memories → output is just "\n\n" + prefString
 	if !strings.Contains(result, "short answers please") {
 		t.Errorf("result = %q, want to contain pref string", result)
