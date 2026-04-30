@@ -121,8 +121,16 @@ def iter_sessions(conversation: dict):
 
 
 def user_ids_for(sample_id: str) -> tuple[str, str]:
-    """Stable per-conv user IDs for both speakers (conversation is 2-speaker)."""
-    return f"{sample_id}__speaker_a", f"{sample_id}__speaker_b"
+    """Stable per-conv user IDs for both speakers (conversation is 2-speaker).
+
+    LOCOMO_CUBE_NAMESPACE env optionally prepends a per-session prefix so
+    parallel Claude / CI runs don't trample each other's cube data. Empty
+    (default) preserves the legacy "<sample_id>__speaker_X" IDs that the
+    test suite asserts against.
+    """
+    ns = os.getenv("LOCOMO_CUBE_NAMESPACE", "").strip()
+    prefix = f"{ns}__" if ns else ""
+    return f"{prefix}{sample_id}__speaker_a", f"{prefix}{sample_id}__speaker_b"
 
 
 def ingest_one_session(
