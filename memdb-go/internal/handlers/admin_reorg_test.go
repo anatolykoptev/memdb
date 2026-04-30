@@ -281,3 +281,88 @@ func TestAdminReorg_TreeHierarchyGate(t *testing.T) {
 		})
 	}
 }
+
+// TestAdminReorgSyncWait — W3.5: wait=true must run the pipeline synchronously
+// (no background goroutine) and return 200 + a body that confirms tree_reorg_ran.
+// LoCoMo harness depends on this contract to fence ingest → reorg → eval.
+func TestAdminReorgSyncWait(t *testing.T) {
+	restore := SetTreeHierarchyEnabledForTest(func() bool { return true })
+	defer restore()
+
+	mock := newMockReorg()
+	h := newTestHandler(mock)
+
+	body := map[string]any{"cube_id": "memos", "wait": true}
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(body); err != nil {
+		t.Fatalf("encode body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/product/admin/reorg", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.AdminReorg(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("sync mode status = %d, want 200", w.Code)
+	}
+
+	// Sync path returns ONLY after the pipeline finished, so the mock's
+	// tree-call list must already be populated by the time we read it —
+	// no waitTree() polling needed.
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.runCalls) != 1 || mock.runCalls[0] != "memos" {
+		t.Errorf("sync path Run calls = %v, want [memos]", mock.runCalls)
+	}
+	if len(mock.treeCalls) != 1 || mock.treeCalls[0] != "memos" {
+		t.Errorf("sync path tree calls = %v, want [memos]", mock.treeCalls)
+	}
+
+	var resp reorgResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "completed" {
+		t.Errorf("status = %q, want completed", resp.Status)
+	}
+	if !resp.TreeRan {
+		t.Errorf("tree_reorg_ran = false, want true")
+	}
+	if resp.CubeID != "memos" {
+		t.Errorf("cube_id = %q, want memos", resp.CubeID)
+	}
+}
+
+// TestAdminReorgSyncWaitQueryParam — sync mode also accepts ?wait=true on
+// the query string (curl-friendly path).
+func TestAdminReorgSyncWaitQueryParam(t *testing.T) {
+	restore := SetTreeHierarchyEnabledForTest(func() bool { return false })
+	defer restore()
+
+	mock := newMockReorg()
+	h := newTestHandler(mock)
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(map[string]any{"cube_id": "memos"}); err != nil {
+		t.Fatalf("encode body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/product/admin/reorg?wait=1", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.AdminReorg(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	if len(mock.runCalls) != 1 {
+		t.Errorf("query-param wait did not run synchronously: runCalls=%v", mock.runCalls)
+	}
+	// tree gate off → no tree call
+	if len(mock.treeCalls) != 0 {
+		t.Errorf("expected no tree calls when gate off, got %v", mock.treeCalls)
+	}
+}

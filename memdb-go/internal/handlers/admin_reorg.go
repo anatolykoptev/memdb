@@ -8,6 +8,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -57,9 +58,16 @@ func SetTreeHierarchyEnabledForTest(fn func() bool) (restore func()) {
 }
 
 // reorgRequest is the JSON body for POST /product/admin/reorg.
+//
+// Wait toggles synchronous execution: when true, the handler blocks until
+// the reorg pipeline (Run / RunTargeted + RunTreeReorgForCube) completes
+// and returns 200 OK with the final status, instead of the legacy 202
+// Accepted + background goroutine. Used by the LoCoMo harness to fence
+// ingest → reorg → eval without polling.
 type reorgRequest struct {
 	CubeID string   `json:"cube_id"`
 	IDs    []string `json:"ids"`
+	Wait   bool     `json:"wait"`
 }
 
 // reorgResponse is the JSON response for POST /product/admin/reorg.
@@ -68,6 +76,7 @@ type reorgResponse struct {
 	CubeID      string `json:"cube_id"`
 	Mode        string `json:"mode"`
 	TriggeredAt string `json:"triggered_at"`
+	TreeRan     bool   `json:"tree_reorg_ran,omitempty"`
 }
 
 // AdminReorg triggers the Memory Reorganizer for a cube, returning 202 Accepted immediately.
@@ -87,7 +96,7 @@ func (h *Handler) AdminReorg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cubeID, ids, ok := h.parseReorgRequest(w, r)
+	cubeID, ids, wait, ok := h.parseReorgRequest(w, r)
 	if !ok {
 		return
 	}
@@ -102,7 +111,30 @@ func (h *Handler) AdminReorg(w http.ResponseWriter, r *http.Request) {
 		slog.String("cube_id", cubeID),
 		slog.String("mode", mode),
 		slog.Int("ids_count", len(ids)),
+		slog.Bool("wait", wait),
 	)
+
+	if wait {
+		// Synchronous path — caller (LoCoMo harness) needs to fence ingest →
+		// reorg → eval. 10-minute deadline matches the background path so
+		// behavior is identical apart from when the response fires.
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
+		defer cancel()
+		treeRan := h.runReorgPipeline(ctx, mode, cubeID, ids)
+		h.logger.Info("admin reorg: sync run finished",
+			slog.String("cube_id", cubeID),
+			slog.String("mode", mode),
+			slog.Bool("tree_reorg_ran", treeRan),
+		)
+		h.writeJSON(w, http.StatusOK, reorgResponse{
+			Status:      "completed",
+			CubeID:      cubeID,
+			Mode:        mode,
+			TriggeredAt: triggeredAt,
+			TreeRan:     treeRan,
+		})
+		return
+	}
 
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -115,25 +147,7 @@ func (h *Handler) AdminReorg(w http.ResponseWriter, r *http.Request) {
 				)
 			}
 		}()
-
-		if mode == "targeted" {
-			h.reorg.RunTargeted(ctx, cubeID, ids)
-		} else {
-			h.reorg.Run(ctx, cubeID)
-		}
-
-		// D3 tree reorganizer — raw → episodic → semantic promotion. Emits
-		// CONSOLIDATED_INTO edges that D2's recursive CTE traverses for
-		// multi-hop recall. Mirrors the sequencing in
-		// scheduler.runPeriodicReorg (Run → RunTreeReorgForCube). Targeted
-		// mode still invokes it so operators can force a cube-wide tree
-		// promotion from the admin endpoint when iterating on D3 tuning.
-		treeRan := false
-		if treeHierarchyEnabledFn() {
-			h.reorg.RunTreeReorgForCube(ctx, cubeID)
-			treeRan = true
-		}
-
+		treeRan := h.runReorgPipeline(ctx, mode, cubeID, ids)
 		h.logger.Info("admin reorg: background goroutine finished",
 			slog.String("cube_id", cubeID),
 			slog.String("mode", mode),
@@ -149,8 +163,25 @@ func (h *Handler) AdminReorg(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// parseReorgRequest validates and returns cube_id and ids from the request.
-func (h *Handler) parseReorgRequest(w http.ResponseWriter, r *http.Request) (cubeID string, ids []string, ok bool) {
+// runReorgPipeline executes the reorganizer steps shared between sync and
+// async paths. Returns whether the D3 tree reorganizer ran (gated by
+// MEMDB_REORG_HIERARCHY).
+func (h *Handler) runReorgPipeline(ctx context.Context, mode, cubeID string, ids []string) bool {
+	if mode == "targeted" {
+		h.reorg.RunTargeted(ctx, cubeID, ids)
+	} else {
+		h.reorg.Run(ctx, cubeID)
+	}
+	if treeHierarchyEnabledFn() {
+		h.reorg.RunTreeReorgForCube(ctx, cubeID)
+		return true
+	}
+	return false
+}
+
+// parseReorgRequest validates and returns cube_id, ids, and wait flag from
+// the request. Wait can be set via JSON body or "wait=true" query param.
+func (h *Handler) parseReorgRequest(w http.ResponseWriter, r *http.Request) (cubeID string, ids []string, wait, ok bool) {
 	var req reorgRequest
 
 	// Try JSON body first
@@ -158,7 +189,7 @@ func (h *Handler) parseReorgRequest(w http.ResponseWriter, r *http.Request) (cub
 		h.writeJSON(w, http.StatusBadRequest, map[string]any{
 			"code": 400, "message": "invalid JSON: " + err.Error(),
 		})
-		return "", nil, false
+		return "", nil, false, false
 	}
 
 	// Fall back to query param if body had no cube_id
@@ -170,8 +201,17 @@ func (h *Handler) parseReorgRequest(w http.ResponseWriter, r *http.Request) (cub
 		h.writeJSON(w, http.StatusBadRequest, map[string]any{
 			"code": 400, "message": "cube_id is required",
 		})
-		return "", nil, false
+		return "", nil, false, false
 	}
 
-	return req.CubeID, req.IDs, true
+	// Wait can also come from query string for curl-friendliness.
+	wait = req.Wait
+	if !wait {
+		switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("wait"))) {
+		case "1", "true", "yes":
+			wait = true
+		}
+	}
+
+	return req.CubeID, req.IDs, wait, true
 }

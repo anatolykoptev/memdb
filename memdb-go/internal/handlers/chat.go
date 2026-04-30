@@ -162,6 +162,12 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	basePrompt := h.resolveBasePrompt(&req, dualLegs)
+	// W3 (LLM Wiki): prepend "## Wiki Synthesis" block sourced from
+	// memos_graph.wiki_pages cosine-search. Env-gated by
+	// MEMDB_WIKI_SEARCH_INJECT — no-op when disabled.
+	if wikiBlock := h.fetchWikiSynthesis(ctx, profileCubeIDForRequest(&req), *req.Query); wikiBlock != "" {
+		basePrompt = wikiBlock + "\n" + basePrompt
+	}
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
 	profileSection := h.chatProfileSection(ctx, chatProfileUserID(&req), profileCubeIDForRequest(&req))
 	// M12.4: buildSystemPromptWithDecision now also routes the custom-prompt +
@@ -245,6 +251,11 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	basePrompt := h.resolveBasePrompt(&req, dualLegs)
+	// W3 (LLM Wiki): same wiki-synthesis prepend as the non-streaming branch.
+	// Env-gated by MEMDB_WIKI_SEARCH_INJECT.
+	if wikiBlock := h.fetchWikiSynthesis(ctx, profileCubeIDForRequest(&req), *req.Query); wikiBlock != "" {
+		basePrompt = wikiBlock + "\n" + basePrompt
+	}
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
 	profileSection := h.chatProfileSection(ctx, chatProfileUserID(&req), profileCubeIDForRequest(&req))
 	// M12.4: buildSystemPromptWithDecision routes the custom-prompt + factual
