@@ -49,15 +49,6 @@ func extractIDs(results []db.VectorSearchResult) []string {
 	return ids
 }
 
-// extractGraphIDs returns a slice of IDs from a GraphRecallResult slice.
-func extractGraphIDs(results []db.GraphRecallResult) []string {
-	ids := make([]string, len(results))
-	for i, r := range results {
-		ids[i] = r.ID
-	}
-	return ids
-}
-
 // buildPropsIndex builds a map from ID to (Properties, Embedding) for fast
 // lookup when reconstructing MergedResult from fused IDs.
 func buildPropsIndex(vec, ft []db.VectorSearchResult) map[string]db.VectorSearchResult {
