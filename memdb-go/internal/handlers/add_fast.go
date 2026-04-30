@@ -181,7 +181,7 @@ func (h *Handler) buildFastBatch(
 
 	for j, p := range pending {
 		embedding := vecs[j]
-		if h.isDuplicate(ctx, embedding, fac.cubeID, fac.agentID) {
+		if h.isDuplicate(ctx, embedding, fac.cubeID, fac.agentID, fac.sessionID) {
 			continue
 		}
 		memInfo := mergeInfo(fac.info, p.hash)
