@@ -147,24 +147,30 @@ func TestClassifyAndDistribute_SoftmaxNormalises(t *testing.T) {
 
 func TestBuildAnswerEnhanceSystemPrompt_NilEmbedder(t *testing.T) {
 	t.Setenv("MEMDB_D10_CLASSIFIER_ENABLED", "true")
-	got, hinted := buildAnswerEnhanceSystemPrompt(context.Background(), "test", nil)
+	got, hinted, trace := buildAnswerEnhanceSystemPrompt(context.Background(), "test", nil)
 	if got != answerEnhanceSystemPrompt {
 		t.Errorf("nil embedder: expected base prompt unchanged")
 	}
 	if hinted {
 		t.Errorf("nil embedder: hinted should be false")
 	}
+	if trace.Mode != D10RouteBase {
+		t.Errorf("nil embedder: expected mode=base, got %s", trace.Mode)
+	}
 }
 
 func TestBuildAnswerEnhanceSystemPrompt_ClassifierDisabled(t *testing.T) {
 	t.Setenv("MEMDB_D10_CLASSIFIER_ENABLED", "false")
 	emb := &fakeEmbedder{dim: 8, vec: func(s string) []float32 { return hashVec(8, "x", s) }}
-	got, hinted := buildAnswerEnhanceSystemPrompt(context.Background(), "test", emb)
+	got, hinted, trace := buildAnswerEnhanceSystemPrompt(context.Background(), "test", emb)
 	if got != answerEnhanceSystemPrompt {
 		t.Errorf("classifier disabled: expected base prompt unchanged")
 	}
 	if hinted {
 		t.Errorf("classifier disabled: hinted should be false")
+	}
+	if trace.Mode != D10RouteBase {
+		t.Errorf("classifier disabled: expected mode=base, got %s", trace.Mode)
 	}
 }
 
@@ -174,7 +180,7 @@ func TestBuildAnswerEnhanceSystemPrompt_SoftPath(t *testing.T) {
 	// regardless of what the hashed centroids produce. Forces soft.
 	t.Setenv("MEMDB_D10_HARD_ROUTING_THRESHOLD", "1")
 	emb := &fakeEmbedder{dim: 8, vec: func(s string) []float32 { return hashVec(8, "soft-path", s) }}
-	got, hinted := buildAnswerEnhanceSystemPrompt(context.Background(), "How many kids?", emb)
+	got, hinted, trace := buildAnswerEnhanceSystemPrompt(context.Background(), "How many kids?", emb)
 	if !hinted {
 		t.Errorf("soft path: expected hinted=true")
 	}
@@ -183,6 +189,9 @@ func TestBuildAnswerEnhanceSystemPrompt_SoftPath(t *testing.T) {
 	}
 	if !strings.Contains(got, "Question type signal") {
 		t.Errorf("soft path: missing distribution block")
+	}
+	if trace.Mode != D10RouteSoft {
+		t.Errorf("soft path: expected mode=soft, got %s", trace.Mode)
 	}
 }
 
@@ -194,7 +203,7 @@ func TestBuildAnswerEnhanceSystemPrompt_HardPath(t *testing.T) {
 	// is the only such category, by design).
 	t.Setenv("MEMDB_D10_HARD_ROUTING_THRESHOLD", "0")
 	emb := &fakeEmbedder{dim: 8, vec: func(s string) []float32 { return hashVec(8, "hard-path", s) }}
-	got, hinted := buildAnswerEnhanceSystemPrompt(context.Background(), "How many kids?", emb)
+	got, hinted, _ := buildAnswerEnhanceSystemPrompt(context.Background(), "How many kids?", emb)
 	if !hinted {
 		t.Errorf("hard path: expected hinted=true")
 	}

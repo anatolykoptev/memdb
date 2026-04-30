@@ -58,7 +58,7 @@ func TestEnhance_Disabled(t *testing.T) {
 }
 
 func TestEnhance_EmptyItems(t *testing.T) {
-	ans, src, conf, hinted, err := EnhanceRetrievalAnswer(
+	ans, src, conf, hinted, _, err := EnhanceRetrievalAnswer(
 		context.Background(),
 		"anything",
 		nil,
@@ -89,7 +89,7 @@ func TestEnhance_BelowThreshold(t *testing.T) {
 		itemWithRel("a", "mem A", 0.2),
 		itemWithRel("b", "mem B", 0.35),
 	}
-	ans, _, _, _, err := EnhanceRetrievalAnswer(
+	ans, _, _, _, _, err := EnhanceRetrievalAnswer(
 		context.Background(), "q", items,
 		AnswerEnhanceConfig{APIURL: ts.URL, Model: "m"},
 		nil,
@@ -122,7 +122,7 @@ func TestEnhance_ParsesLLMResponse(t *testing.T) {
 			0.82),
 	}
 
-	ans, srcs, conf, _, err := EnhanceRetrievalAnswer(
+	ans, srcs, conf, _, _, err := EnhanceRetrievalAnswer(
 		context.Background(), "what is Caroline's job?", items,
 		AnswerEnhanceConfig{APIURL: ts.URL, Model: "m"},
 		nil,
@@ -150,7 +150,7 @@ func TestEnhance_HandlesMarkdownFencedResponse(t *testing.T) {
 	defer ts.Close()
 
 	items := []map[string]any{itemWithRel("uuid1", "a social worker", 0.9)}
-	ans, _, _, _, err := EnhanceRetrievalAnswer(
+	ans, _, _, _, _, err := EnhanceRetrievalAnswer(
 		context.Background(), "job?", items,
 		AnswerEnhanceConfig{APIURL: ts.URL, Model: "m"},
 		nil,
@@ -170,7 +170,7 @@ func TestEnhance_UnknownOnNoMemories(t *testing.T) {
 	defer ts.Close()
 
 	items := []map[string]any{itemWithRel("x", "irrelevant memory", 0.9)}
-	ans, _, _, _, err := EnhanceRetrievalAnswer(
+	ans, _, _, _, _, err := EnhanceRetrievalAnswer(
 		context.Background(), "q", items,
 		AnswerEnhanceConfig{APIURL: ts.URL, Model: "m"},
 		nil,
