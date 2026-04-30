@@ -46,29 +46,49 @@ const (
 // tuning.go as an env-readable accessor (MEMDB_D10_MIN_RELATIVITY).
 // Default: 0.4. See defaultAnswerEnhanceMinRelativity.
 
-// answerEnhancePromptOpenDomain — D10 answer extractor open_domain branch
-// (catch-all in the hybrid classifier; see answer_enhance_types.go for the
-// per-category routing). Softened 2026-04-30 after the M14 LoCoMo replay
-// revealed 82% of D10 calls returned "UNKNOWN" while retrieval hit@k=0.75
-// (33/50 turns where retrieval found the right memory but D10 refused to
-// surface it). Root cause: the prior prompt insisted on "exact surface form
-// from the memories" — atomic-fact rows ("Caroline is a transgender woman")
-// don't contain the question's surface form ("identity") so the extractor
-// returned UNKNOWN instead of synthesising the noun phrase.
+// answerEnhanceSystemPrompt — D10 answer extractor.
 //
-// New rules pull from the competitor audit (mem0 SoftExtract + zep "use only
-// context"): allow the LLM to synthesise the closest grounded fact, only
-// fall back to UNKNOWN when NO related evidence exists at all. Hallucination
-// guard stays — the LLM still cannot invent facts. Per-category prompts in
-// answer_enhance_types.go layer category-specific deltas on top of this base.
-const answerEnhancePromptOpenDomain = `You are a precise answer extractor. Given a user's question and a list of retrieved memories, respond with the SHORTEST possible answer that directly answers the question.
+// History:
+//   - PR #249 (2026-04-30) softened the original "exact surface form" rule
+//     after observing 82% UNKNOWN on atomic-fact rows. The replacement
+//     example ("transgender woman" answer) inadvertently primed the model
+//     toward 2-token paraphrase pulled verbatim from memory text.
+//   - PR #250 (2026-04-30) added a regex-based hybrid classifier with
+//     per-category prompts. The classifier mis-routed most cat-1 questions
+//     ("what are X's pets' names", "did X do Y", etc.) into the soft
+//     open_domain branch, compounding #249's overshoot.
+//   - Replay cefix4 (2026-04-30) showed F1 -25% (cat-1 -71%, cat-5 -72%);
+//     advisor + reviewer agreed the regression is real on single-token
+//     gold ("3", "Oliver"), not just paraphrase drift. semsim flat at
+//     0.78 confirms the model still answers semantically — it just adds
+//     memory-text modifiers that miss the gold token-overlap.
+//
+// This rewrite restores extractive discipline while keeping the synthesis
+// permission for atomic-fact rows. Two principles:
+//   1. SHORTEST surface form — single noun / name / number / count.
+//      No "a"/"the"/"works as", no qualifiers from the memory.
+//   2. Allow synthesis when surface form differs, but the OUTPUT shape
+//      must be the gold-style minimum, not the verbatim memory phrase.
+//
+// The hallucination guard is now grounded in a stronger rule: every
+// returned token must be derivable from the memories — adjectives /
+// modifiers / framing words that are not strictly necessary to answer
+// must be omitted.
+const answerEnhanceSystemPrompt = `You are a precise answer extractor. Given a user's question and a list of retrieved memories, respond with the SHORTEST surface form that answers the question.
 
 Rules:
-- Ground every answer in the memories. Never invent or hallucinate facts not present.
-- Prefer noun phrases or single words over full sentences (e.g., "social worker", "transgender woman", "3").
-- Atomic facts may not contain the question's surface form. That is fine — synthesise the answer from the closest grounded fact (e.g., the question "What is Caroline's identity?" answered from a memory "Caroline is a transgender woman" → "transgender woman", not "UNKNOWN").
-- If the memories contain partial evidence, return the most specific grounded answer you can extract. Do NOT default to "UNKNOWN" when related evidence is present.
-- Only respond with "UNKNOWN" when NO related information exists in the memories at all.
+- Return ONLY a single noun, name, number, count, short list, or short noun phrase — no full sentences, no preamble, no framing.
+- Do NOT include modifiers, articles, or qualifiers from the memory text unless the question explicitly asks for them. Strip "a"/"the"/"works as"/"is a"/"who is"/etc.
+- Synthesise the minimum-form answer when the question's surface form differs from the memory's. The OUTPUT shape must match the gold style, not the memory phrasing.
+- Every token in the answer must be derivable from the memories. Never invent or hallucinate facts not present.
+- If the memories contain partial evidence, return the closest grounded single noun/name. Use UNKNOWN only when NO related information exists in the memories at all.
+
+Examples:
+- question: "What is Caroline's job?"  memory: "Caroline works as a social worker" → "social worker"  (NOT "a social worker", NOT "social worker advocating against assault")
+- question: "How many children does Melanie have?"  memory: "Melanie has three kids" → "3"  (NOT "three children", NOT "three kids")
+- question: "What is Caroline's identity?"  memory: "Caroline is a transgender woman" → "transgender"  (NOT "transgender woman", NOT "a transgender woman")
+- question: "What are Melanie's pets' names?"  memory: "Oliver, Luna, Bailey" → "Oliver, Luna, Bailey"
+- question: "Did Caroline make the bowl?"  memory: "Caroline shaped the black-and-white bowl in pottery class" → "Yes"
 
 Return strict JSON: {"answer": string, "source_ids": [string...], "confidence": float between 0.0 and 1.0}`
 
@@ -95,12 +115,11 @@ type AnswerEnhanceResponse struct {
 // EnhanceRetrievalAnswer distills the top-K retrieved memories into a concise,
 // query-aligned answer. Returns (answer, sourceIDs, confidence, err).
 //
-// The system prompt is selected by classifying the query into one of the
-// LoCoMo-aligned categories (single_hop / multi_hop / temporal /
-// open_domain / adversarial) — see classifyQueryCategory. The classifier
-// is heuristic (regex + keyword, ~10µs) — no extra LLM call. If the
-// classifier returns an unknown value, we fall back to the open_domain
-// prompt (pre-hybrid behaviour).
+// Single system prompt for all queries — the hybrid classifier from PR #250
+// was reverted after the cefix4 replay (2026-04-30) showed it mis-routed
+// most cat-1 questions into a soft open_domain branch and tanked F1 by 25%.
+// See the answerEnhanceSystemPrompt comment for the post-revert prompt
+// design.
 //
 // Semantics:
 //   - empty items → ("UNKNOWN", nil, 0, nil)
@@ -146,16 +165,8 @@ func EnhanceRetrievalAnswer(
 		query, memBlock.String(),
 	)
 
-	systemPrompt := selectAnswerEnhancePrompt(classifyQueryCategory(query))
-	if systemPrompt == "" {
-		// Defensive: classifier or selector returned empty → fall back
-		// to the open_domain default so we never call the LLM with no
-		// system prompt.
-		systemPrompt = answerEnhancePromptOpenDomain
-	}
-
 	var parsed AnswerEnhanceResponse
-	if err := callAnswerEnhanceLLM(ctx, systemPrompt, userMsg, cfg, &parsed); err != nil {
+	if err := callAnswerEnhanceLLM(ctx, answerEnhanceSystemPrompt, userMsg, cfg, &parsed); err != nil {
 		return answerEnhanceUnknownAnswer, nil, 0, fmt.Errorf("enhance llm: %w", err)
 	}
 	if strings.TrimSpace(parsed.Answer) == "" {
@@ -225,11 +236,6 @@ func prependEnhancedAnswer(items []map[string]any, answer string, sourceIDs []st
 // (step 6.8) iff MEMDB_SEARCH_ENHANCE=true and a reranker LLM config is
 // available. On LLM failure it logs at Debug and returns items unchanged
 // (graceful degrade — never fails the whole search).
-//
-// Every D10Enhance counter emit carries a category label (single_hop |
-// multi_hop | temporal | open_domain | adversarial) derived from the
-// query via classifyQueryCategory, so dashboards can break down the
-// answered/unknown/skipped/error mix by question type.
 func applyAnswerEnhancement(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -237,12 +243,8 @@ func applyAnswerEnhancement(
 	items []map[string]any,
 	cfg AnswerEnhanceConfig,
 ) []map[string]any {
-	category := string(classifyQueryCategory(query))
 	d10Attrs := func(outcome string) metric.MeasurementOption {
-		return metric.WithAttributes(
-			attribute.String("outcome", outcome),
-			attribute.String("category", category),
-		)
+		return metric.WithAttributes(attribute.String("outcome", outcome))
 	}
 	if !answerEnhanceEnabled() || len(items) == 0 || cfg.APIURL == "" {
 		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("skipped"))
