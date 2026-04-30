@@ -41,16 +41,24 @@ func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID,
 	seen := make(map[string]struct{})
 	out := make([]llm.Candidate, 0, 10)
 	var topScore float64
+	var vsetTop, pgTop float64
+	var vsetCount, pgCount int
 
 	// Tier 1: VSET hot cache (WorkingMemory, HNSW in-memory).
-	if h.wmCache != nil {
+	if h.wmCache == nil {
+		h.logger.Info("fine add: vset disabled", slog.String("cube_id", cubeID))
+	} else {
 		if vsetResults, err := h.wmCache.VSim(ctx, cubeID, embedding, 10); err != nil {
 			h.logger.Debug("fine add: vset vsim failed, falling back",
 				slog.String("cube_id", cubeID), slog.Any("error", err))
 		} else {
+			vsetCount = len(vsetResults)
 			for _, r := range vsetResults {
 				if r.Score > topScore {
 					topScore = r.Score
+				}
+				if r.Score > vsetTop {
+					vsetTop = r.Score
 				}
 				if r.ID != "" && r.Memory != "" {
 					out = append(out, llm.Candidate{ID: r.ID, Memory: r.Memory})
@@ -65,13 +73,26 @@ func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID,
 	results, err := h.postgres.VectorSearch(ctx, embedding, cubeID, cubeID,
 		[]string{"LongTermMemory", "UserMemory"}, agentID, 10)
 	if err != nil {
-		h.logger.Debug("fine add: postgres vector search failed",
+		h.logger.Info("fine add: postgres vector search failed",
 			slog.String("cube_id", cubeID), slog.Any("error", err))
+		// TODO: revert after diagnosing #X
+		h.logger.Info("fine add: fetchFineCandidates result",
+			slog.String("cube_id", cubeID),
+			slog.Float64("top_score", topScore),
+			slog.Int("vset_count", vsetCount),
+			slog.Int("pg_count", 0),
+			slog.Float64("vset_top", vsetTop),
+			slog.Float64("pg_top", 0),
+		)
 		return out, topScore
 	}
+	pgCount = len(results)
 	for _, r := range results {
 		if r.Score > topScore {
 			topScore = r.Score
+		}
+		if r.Score > pgTop {
+			pgTop = r.Score
 		}
 		id, mem := extractIDAndMemory(r.Properties)
 		if id == "" || mem == "" {
@@ -83,6 +104,15 @@ func (h *Handler) fetchFineCandidates(ctx context.Context, conversation, cubeID,
 		out = append(out, llm.Candidate{ID: id, Memory: mem})
 		seen[id] = struct{}{}
 	}
+	// TODO: revert after diagnosing #X
+	h.logger.Info("fine add: fetchFineCandidates result",
+		slog.String("cube_id", cubeID),
+		slog.Float64("top_score", topScore),
+		slog.Int("vset_count", vsetCount),
+		slog.Int("pg_count", pgCount),
+		slog.Float64("vset_top", vsetTop),
+		slog.Float64("pg_top", pgTop),
+	)
 	return out, topScore
 }
 
