@@ -111,12 +111,15 @@ type dbWikiPage struct {
 // best-effort augmentation; a flaky pgvector query must never break chat.
 func (h *Handler) fetchWikiSynthesis(ctx context.Context, cubeID, query string) string {
 	if !wikiInjectEnabled() {
+		recordWikiInjectOutcome(ctx, wikiInjectOutcomeGateOff)
 		return ""
 	}
 	if h.postgres == nil || h.embedder == nil {
+		recordWikiInjectOutcome(ctx, wikiInjectOutcomeNoHandles)
 		return ""
 	}
 	if cubeID == "" || strings.TrimSpace(query) == "" {
+		recordWikiInjectOutcome(ctx, wikiInjectOutcomeNoQuery)
 		return ""
 	}
 
@@ -127,6 +130,7 @@ func (h *Handler) fetchWikiSynthesis(ctx context.Context, cubeID, query string) 
 				slog.String("cube_id", cubeID),
 				slog.Any("error", err))
 		}
+		recordWikiInjectOutcome(ctx, wikiInjectOutcomeEmbedError)
 		return ""
 	}
 
@@ -135,9 +139,11 @@ func (h *Handler) fetchWikiSynthesis(ctx context.Context, cubeID, query string) 
 		h.logger.Warn("wiki inject: search failed",
 			slog.String("cube_id", cubeID),
 			slog.Any("error", err))
+		recordWikiInjectOutcome(ctx, wikiInjectOutcomeSearchError)
 		return ""
 	}
 	if len(pages) == 0 {
+		recordWikiInjectOutcome(ctx, wikiInjectOutcomeNoResults)
 		return ""
 	}
 
@@ -145,7 +151,11 @@ func (h *Handler) fetchWikiSynthesis(ctx context.Context, cubeID, query string) 
 	for _, p := range pages {
 		view = append(view, dbWikiPage{slug: p.Slug, title: p.Title, body: p.Body})
 	}
-	return renderWikiInjectBlock(view, wikiInjectMaxBodyTokens())
+	block := renderWikiInjectBlock(view, wikiInjectMaxBodyTokens())
+	recordWikiInjectOutcome(ctx, wikiInjectOutcomeInjected)
+	recordWikiInjectPages(ctx, len(pages))
+	recordWikiInjectBodyChars(ctx, len(block))
+	return block
 }
 
 // renderWikiInjectBlock formats the cosine-matched pages into a single
