@@ -182,29 +182,45 @@ func EnhanceRetrievalAnswer(
 	return parsed.Answer, parsed.SourceIDs, parsed.Confidence, hinted, nil
 }
 
-// buildAnswerEnhanceSystemPrompt assembles the D10 system prompt.
+// buildAnswerEnhanceSystemPrompt assembles the D10 system prompt with a
+// hybrid soft/hard routing strategy:
 //
-// When the embedding classifier is disabled, emb is nil, or the classifier
-// returns no useful hint (low confidence / open_domain), the function
-// returns the unmodified base prompt — the prompt is byte-identical to
-// post-revert main, the rollout-safety property of this design.
+//  1. Classifier disabled / no embedder / no signal → unmodified base
+//     prompt (byte-identical to main).
+//  2. Top-1 ≥ MEMDB_D10_HARD_ROUTING_THRESHOLD AND a hard prompt is
+//     registered for that category → full replacement with the
+//     category-specific hard prompt (shorter prompt + tighter rules).
+//  3. Otherwise → base prompt + soft-routing distribution block, so the
+//     LLM sees the classifier's full distribution and decides itself
+//     which shape rules apply.
 //
-// Otherwise the function appends a short hint block produced by
-// categoryHintBlock; the base prompt itself is never altered.
+// The boolean return ("hinted") is true whenever the classifier
+// influenced the prompt — both the hard-route and soft-distribution paths
+// flag it. Callers use this for the metric label so we can compare
+// classifier-influenced vs base-prompt outcomes.
 func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb classifierEmbedder) (string, bool) {
 	if emb == nil || !d10ClassifierEnabled() {
 		return answerEnhanceSystemPrompt, false
 	}
 	classifier := classifierForEmbedder(emb)
-	top, err := classifier.ClassifyTopN(ctx, query, 2)
-	if err != nil || len(top) == 0 {
+	dist, err := classifier.classifyAndDistribute(ctx, query)
+	if err != nil || len(dist) == 0 {
 		return answerEnhanceSystemPrompt, false
 	}
-	hint := categoryHintBlock(top, d10ClassifierThreshold())
-	if hint == "" {
+	// Hard routing: top-1 confidence saturates the gate AND we have a
+	// dedicated full prompt for that category. open_domain has no hard
+	// prompt by design — it falls through to the soft block.
+	if dist[0].Confidence >= d10HardRoutingThreshold() {
+		if hardPrompt, ok := hardCategoryPrompts[dist[0].Category]; ok {
+			return hardPrompt, true
+		}
+	}
+	// Soft routing: append distribution block to the base prompt.
+	block := distributionBlock(dist, d10SoftTopN())
+	if block == "" {
 		return answerEnhanceSystemPrompt, false
 	}
-	return answerEnhanceSystemPrompt + hint, true
+	return answerEnhanceSystemPrompt + block, true
 }
 
 // callAnswerEnhanceLLM performs the single chat-completion round trip for D10

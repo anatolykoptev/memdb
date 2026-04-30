@@ -109,6 +109,16 @@ const (
 	defaultAnswerEnhanceMinRelativity   = 0.4
 	defaultD10ClassifierThreshold       = 0.5
 	defaultD10ClassifierEnabled         = true
+	// defaultD10HardRoutingThreshold — top-1 softmax probability above which
+	// the soft-routing distribution block is replaced by a category-specific
+	// full system prompt. 0.97 is "near-verbatim anchor match" territory;
+	// false-positive risk is empirically near zero.
+	defaultD10HardRoutingThreshold      = 0.97
+	// defaultD10SoftTopN — how many categories to surface in the
+	// distribution block. 5 == all of them; lowering trims tokens at the
+	// cost of hiding the long tail (which a calibrated classifier puts at
+	// ~1-3% each anyway).
+	defaultD10SoftTopN                  = 5
 )
 
 // answerEnhanceMinRelativity returns the minimum relativity threshold below
@@ -136,6 +146,27 @@ func d10ClassifierThreshold() float64 {
 // 0/false/no (off). Anything else falls back to the default.
 func d10ClassifierEnabled() bool {
 	return parseEnvBool("MEMDB_D10_CLASSIFIER_ENABLED", defaultD10ClassifierEnabled)
+}
+
+// d10HardRoutingThreshold returns the top-1 softmax probability above which
+// the soft-routing distribution block is replaced by a category-specific
+// full system prompt. At ≥0.97 the classifier has matched the query to an
+// anchor near-verbatim and false-positive risk is negligible.
+//
+// Env: MEMDB_D10_HARD_ROUTING_THRESHOLD in [0, 1]. Set to 1.0 to disable
+// hard routing entirely (always soft); set to 0.0 to always hard-route on
+// top-1 (legacy PR #250 behaviour, not recommended).
+func d10HardRoutingThreshold() float64 {
+	return parseEnvFloat("MEMDB_D10_HARD_ROUTING_THRESHOLD", 0, 1, defaultD10HardRoutingThreshold)
+}
+
+// d10SoftTopN returns how many categories to surface in the soft-routing
+// distribution block. Lower trims tokens at the cost of hiding the long
+// tail (which a calibrated classifier puts at ~1-3% each anyway).
+//
+// Env: MEMDB_D10_SOFT_TOP_N in [1, 5]. Default 5 (all categories).
+func d10SoftTopN() int {
+	return parseEnvInt("MEMDB_D10_SOFT_TOP_N", 1, 5, defaultD10SoftTopN)
 }
 
 // ---- D5 — staged_retrieval -------------------------------------------------
