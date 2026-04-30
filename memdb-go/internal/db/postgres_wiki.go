@@ -143,6 +143,46 @@ LIMIT $2`, cubeID, limit)
 	return out, rows.Err()
 }
 
+// SearchWikiByCosine returns the top-K wiki pages most similar to the supplied
+// query embedding for a cube, ordered by pgvector halfvec_cosine distance
+// ascending (closest first). Pages without an embedding are skipped. Body is
+// returned alongside metadata so callers (chat prompt injector) can paste the
+// markdown straight into the system prompt.
+//
+// Empty embedding or limit ≤ 0 → returns nil, nil. Limit clamped to 50 to
+// bound prompt growth — chat injector typically wants top-1.
+func (p *Postgres) SearchWikiByCosine(ctx context.Context, cubeID string, query []float32, limit int) ([]WikiPage, error) {
+	if cubeID == "" {
+		return nil, errors.New("SearchWikiByCosine: empty cube_id")
+	}
+	if len(query) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	rows, err := p.pool.Query(ctx, `
+SELECT `+wikiPageColumns+`
+FROM memos_graph.wiki_pages
+WHERE cube_id = $1
+  AND embedding IS NOT NULL
+ORDER BY embedding::halfvec(1024) <=> $2::halfvec(1024)
+LIMIT $3`, cubeID, FormatVector(query), limit)
+	if err != nil {
+		return nil, fmt.Errorf("SearchWikiByCosine: %w", err)
+	}
+	defer rows.Close()
+	var out []WikiPage
+	for rows.Next() {
+		page, err := scanWikiPageRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page)
+	}
+	return out, rows.Err()
+}
+
 // DeleteWikiPage removes one page by (cube_id, slug). Returns
 // ErrWikiPageNotFound when no row matched. Used only for cube
 // tear-down or explicit operator action — wiki maintenance should
