@@ -2,9 +2,16 @@
 """
 cleanup_locomo_cubes.py — idempotent cleanup of LoCoMo test cubes before re-ingest.
 
-Lists all mem_cubes whose owner_id matches locomo*__speaker_* pattern, then
-hard-deletes them via POST /product/delete_cube. Running twice is safe: second
-run finds no cubes and exits cleanly.
+Uses the conversation source file as the source of truth instead of
+/product/list_cubes registry, since the registry is not populated by the
+LoCoMo ingest flow (list_cubes returns empty → silent no-op if used for enum).
+
+Cube IDs are derived deterministically from the conversation file the same way
+ingest.py writes them: f"{conv_id}__speaker_{speaker_a/b}". Each cube_id also
+doubles as user_id in the LoCoMo context.
+
+Running twice is safe: second run issues delete_cube calls that return 404/410
+(not_found) and exit cleanly with deleted=0, errors=[].
 
 Usage:
     python3 cleanup_locomo_cubes.py --sample                  # 1 conv (default data)
@@ -50,16 +57,42 @@ def build_headers() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Cube enumeration via /product/list_cubes
+# Cube ID helpers — mirror ingest.py user_ids_for / first_two_speakers
 # ---------------------------------------------------------------------------
 
 class CubeInfo(NamedTuple):
     cube_id: str
-    owner_id: str
+    user_id: str
 
+
+def user_ids_for(sample_id: str) -> tuple[str, str]:
+    """Stable per-conv user IDs for both speakers (mirrors ingest.py)."""
+    return f"{sample_id}__speaker_a", f"{sample_id}__speaker_b"
+
+
+def cubes_from_conversations(conversations: list[dict]) -> list[CubeInfo]:
+    """Build the full list of cube IDs from the conversation file.
+
+    Mirrors the exact IDs that ingest.py writes: f"{sample_id}__speaker_a" /
+    f"{sample_id}__speaker_b". cube_id == user_id in the LoCoMo context.
+    """
+    result: list[CubeInfo] = []
+    for conv in conversations:
+        sample_id = conv.get("sample_id", "locomo_unknown")
+        ua, ub = user_ids_for(sample_id)
+        result.append(CubeInfo(cube_id=ua, user_id=ua))
+        result.append(CubeInfo(cube_id=ub, user_id=ub))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Kept for ops debugging (not called by default cleanup flow).
+# Not used in the main path — list_cubes registry is not populated by
+# the LoCoMo ingest flow and returns {} for all LoCoMo user IDs.
+# ---------------------------------------------------------------------------
 
 def list_locomo_cubes_for_user(memdb_url: str, user_id: str) -> list[CubeInfo]:
-    """Return cubes owned by user_id that look like LoCoMo test cubes."""
+    """Query /product/list_cubes for user_id (unused by default, kept for debugging)."""
     url = f"{memdb_url.rstrip('/')}/product/list_cubes"
     try:
         resp = requests.post(
@@ -80,34 +113,15 @@ def list_locomo_cubes_for_user(memdb_url: str, user_id: str) -> list[CubeInfo]:
         cid = c.get("cube_id") or c.get("id", "")
         oid = c.get("owner_id", "")
         if cid:
-            result.append(CubeInfo(cube_id=cid, owner_id=oid or user_id))
+            result.append(CubeInfo(cube_id=cid, user_id=oid or user_id))
     return result
-
-
-# ---------------------------------------------------------------------------
-# Speaker ID helpers — mirror ingest.py user_ids_for
-# ---------------------------------------------------------------------------
-
-def user_ids_for(sample_id: str) -> tuple[str, str]:
-    """Stable per-conv user IDs for both speakers."""
-    return f"{sample_id}__speaker_a", f"{sample_id}__speaker_b"
-
-
-def collect_user_ids(conversations: list[dict]) -> list[str]:
-    """Return all (user_a, user_b) pairs across conversations."""
-    ids: list[str] = []
-    for conv in conversations:
-        sample_id = conv.get("sample_id", "locomo_unknown")
-        ua, ub = user_ids_for(sample_id)
-        ids.extend([ua, ub])
-    return ids
 
 
 # ---------------------------------------------------------------------------
 # Delete logic
 # ---------------------------------------------------------------------------
 
-def delete_cube(memdb_url: str, cube_id: str, owner_id: str, dry_run: bool) -> str:
+def delete_cube(memdb_url: str, cube_id: str, user_id: str, dry_run: bool) -> str:
     """Delete one cube. Returns 'deleted', 'not_found', 'dry_run', or 'error:<msg>'."""
     if dry_run:
         return "dry_run"
@@ -115,7 +129,7 @@ def delete_cube(memdb_url: str, cube_id: str, owner_id: str, dry_run: bool) -> s
     try:
         resp = requests.post(
             url,
-            json={"cube_id": cube_id, "user_id": owner_id, "hard_delete": True},
+            json={"cube_id": cube_id, "user_id": user_id, "hard_delete": True},
             headers=build_headers(),
             timeout=30,
         )
@@ -158,25 +172,23 @@ def main() -> int:
         data = json.load(f)
     conversations = list(data.values()) if isinstance(data, dict) else data
 
-    user_ids = collect_user_ids(conversations)
+    cubes = cubes_from_conversations(conversations)
     print(f"[cleanup] memdb_url={args.memdb_url!r} dry_run={args.dry_run}", flush=True)
-    print(f"[cleanup] scanning {len(user_ids)} user IDs across {len(conversations)} conv(s)", flush=True)
+    print(f"[cleanup] {len(cubes)} cubes to delete across {len(conversations)} conv(s)", flush=True)
 
     scanned = 0
     deleted = 0
     errors: list[str] = []
 
-    for uid in user_ids:
-        cubes = list_locomo_cubes_for_user(args.memdb_url, uid)
-        scanned += len(cubes)
-        for cube in cubes:
-            outcome = delete_cube(args.memdb_url, cube.cube_id, cube.owner_id, args.dry_run)
-            tag = "[DRY-RUN]" if args.dry_run else ""
-            print(f"  {tag} cube_id={cube.cube_id!r} owner={cube.owner_id!r} → {outcome}", flush=True)
-            if outcome == "deleted":
-                deleted += 1
-            elif outcome.startswith("error:"):
-                errors.append(f"{cube.cube_id}/{cube.owner_id}: {outcome}")
+    for cube in cubes:
+        scanned += 1
+        outcome = delete_cube(args.memdb_url, cube.cube_id, cube.user_id, args.dry_run)
+        tag = "[DRY-RUN]" if args.dry_run else ""
+        print(f"  {tag} cube_id={cube.cube_id!r} user_id={cube.user_id!r} → {outcome}", flush=True)
+        if outcome == "deleted":
+            deleted += 1
+        elif outcome.startswith("error:"):
+            errors.append(f"{cube.cube_id}: {outcome}")
 
     summary = {"scanned": scanned, "deleted": deleted, "errors": errors}
     print(json.dumps(summary, indent=2))
