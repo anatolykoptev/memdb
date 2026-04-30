@@ -145,6 +145,14 @@ func (s *treeStub) DecayAndArchiveImportance(_ context.Context, _ string, _, _ f
 	return 0, nil
 }
 
+// UpsertWikiPage is a no-op stub: tests cover wiki auto-update via
+// MEMDB_WIKI_AUTO_UPDATE=true paths in dedicated tests, and the tree
+// reorg fast-path leaves the env unset so the real implementation
+// short-circuits before touching the DB.
+func (s *treeStub) UpsertWikiPage(_ context.Context, _ db.UpsertWikiPageParams) (db.WikiPage, error) {
+	return db.WikiPage{}, nil
+}
+
 // compile-time interface check.
 var _ reorgPostgres = (*treeStub)(nil)
 
