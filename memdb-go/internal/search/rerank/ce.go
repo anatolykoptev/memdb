@@ -1,7 +1,6 @@
 // Package rerank — cross-encoder strategy (precompute lookup + live fallback).
 //
-// Ports cross_encoder_adapter.go + cross_encoder_precompute.go from the
-// parent search pkg into a typed Reranker. Three execution paths:
+// Three execution paths handled by the dispatcher in this file:
 //
 //  1. Full hit (M10 Stream 6, default ON): if items[0] (the cosine
 //     anchor) has a ce_score_topk cache covering every other item, we
@@ -12,17 +11,20 @@
 //  3. Live fallback: anchor without cache / env-disabled / too-few items /
 //     stale cache → full live HTTP call.
 //
-// Metric hooks (OnLiveCall, OnPrecompute) let the parent search pkg attach
-// the legacy memdb.search.ce_live_call_total + .ce_precompute_hit_total
-// counters without leaking otel imports into this package's caller paths.
-// nil hooks are no-ops.
+// File map (single-responsibility split, 2026-04-30):
+//
+//   ce.go                  — type CrossEncoder + Rerank/rerank dispatcher
+//   ce_live.go             — runLive / runLiveSubset (HTTP transport)
+//   ce_math_fallback.go    — degraded / low-quality CE → MathReranker
+//   ce_precompute.go       — fireOnPrecompute, cache extraction helpers
+//
+// Metric hooks (OnLiveCall, OnPrecompute, OnMathFallback) let the parent
+// search pkg attach memdb.search.* counters without leaking otel imports
+// into this package's caller paths. nil hooks are no-ops.
 package rerank
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"os"
 
 	"github.com/anatolykoptev/go-kit/rerank"
 )
@@ -39,6 +41,11 @@ type CrossEncoder struct {
 	OnLiveCall func(ctx context.Context)
 	// OnPrecompute fires for every lookup outcome (hit | partial | miss | stale).
 	OnPrecompute func(ctx context.Context, outcome string)
+	// OnMathFallback fires when the live CE call routes through MathReranker
+	// (cosine on QueryVec) — either because go-kit returned StatusDegraded
+	// (timeout, 5xx, ErrCircuitOpen) OR because top-1 score fell below the
+	// quality floor. Reason is "degraded" or "low_quality"; nil = skip metric.
+	OnMathFallback func(ctx context.Context, reason string)
 	// QueryUserID, QuerySessionID, QueryTags carry the query-time identity
 	// context used by the metadata boost post-step (Q3 stream). Empty
 	// strings / nil slice = no boost for that factor.
@@ -49,6 +56,18 @@ type CrossEncoder struct {
 	// (all fields = 0) disables all boosting silently. Use
 	// DefaultBoostWeights() for MemOS-parity defaults.
 	BoostWeights BoostWeights
+	// QueryVec and EmbeddingsByID enable the math fallback path: when the
+	// live CE call returns degraded or near-zero scores, MathReranker
+	// reorders items by cosine on these vectors. Nil/empty = math fallback
+	// disabled (CE-only behavior, parity with pre-fallback ports).
+	//
+	// Pattern lifted from go-search ce_rerank.go (PRs #10 + #14): CE
+	// hallucinates near-zero scores on narrow OOD queries even when cosine
+	// says the docs are highly relevant. On those queries the
+	// require_positive_ce / threshold gate downstream drops every result —
+	// math fallback keeps the pipeline producing scores.
+	QueryVec       []float32
+	EmbeddingsByID map[string][]float32
 }
 
 // Name implements Reranker.
@@ -64,7 +83,7 @@ func (CrossEncoder) Name() string { return "cross_encoder" }
 //
 // After CE scoring (whichever path), applyMetadataBoost multiplies scores
 // by (1 + matched weight factors) per the Q3 spec. Zero BoostWeights or
-// empty query identity strings produce no-ops without branches.
+// missing query identity fields → boost is a no-op.
 func (ce CrossEncoder) Rerank(ctx context.Context, query string, items []Item) ([]Item, error) {
 	out, err := ce.rerank(ctx, query, items)
 	if err != nil || out == nil {
@@ -186,170 +205,4 @@ func (ce CrossEncoder) rerank(ctx context.Context, query string, items []Item) (
 
 	RecordSuccess(ctx, ce.Name())
 	return out, nil
-}
-
-// runLive performs the live HTTP rerank call. Mirrors rerankMemoryItems
-// from the legacy adapter.
-func (ce CrossEncoder) runLive(ctx context.Context, query string, items []Item) []Item {
-	if len(items) == 0 {
-		return items
-	}
-	docs := make([]rerank.Doc, 0, len(items))
-	idxByID := make(map[string]int, len(items))
-	for i, it := range items {
-		text := it.EmbeddingText()
-		if text == "" {
-			continue
-		}
-		id := fmt.Sprintf("%d", i)
-		docs = append(docs, rerank.Doc{ID: id, Text: text})
-		idxByID[id] = i
-	}
-	if len(docs) == 0 {
-		return items
-	}
-
-	if ce.OnLiveCall != nil {
-		ce.OnLiveCall(ctx)
-	}
-	scored := ce.Client.Rerank(ctx, query, docs)
-
-	seen := make(map[int]bool, len(scored))
-	out := make([]Item, 0, len(items))
-	for _, s := range scored {
-		origIdx, ok := idxByID[s.ID]
-		if !ok {
-			continue
-		}
-		items[origIdx].SetScore(float64(s.Score))
-		items[origIdx].SetMeta("cross_encoder_reranked", true)
-		out = append(out, items[origIdx])
-		seen[origIdx] = true
-	}
-	for i, it := range items {
-		if !seen[i] {
-			out = append(out, it)
-		}
-	}
-	return out
-}
-
-// runLiveSubset calls the live HTTP rerank backend for a subset of items
-// (the uncached portion in a partial-hit). Returns items in the order the
-// CE backend scored them, with SetScore applied. Items without text are
-// returned with score 0 and no mutation — mirrors runLive behaviour for
-// no-text items. Fires OnLiveCall exactly once.
-func (ce CrossEncoder) runLiveSubset(ctx context.Context, query string, items []Item) []Item {
-	if len(items) == 0 {
-		return items
-	}
-	docs := make([]rerank.Doc, 0, len(items))
-	idxByID := make(map[string]int, len(items))
-	for i, it := range items {
-		text := it.EmbeddingText()
-		if text == "" {
-			continue
-		}
-		id := fmt.Sprintf("%d", i)
-		docs = append(docs, rerank.Doc{ID: id, Text: text})
-		idxByID[id] = i
-	}
-
-	out := make([]Item, len(items))
-	copy(out, items)
-
-	if len(docs) == 0 {
-		return out
-	}
-
-	if ce.OnLiveCall != nil {
-		ce.OnLiveCall(ctx)
-	}
-	scored := ce.Client.Rerank(ctx, query, docs)
-
-	for _, s := range scored {
-		origIdx, ok := idxByID[s.ID]
-		if !ok {
-			continue
-		}
-		out[origIdx].SetScore(float64(s.Score))
-	}
-	return out
-}
-
-func (ce CrossEncoder) fireOnPrecompute(ctx context.Context, outcome string) {
-	if ce.OnPrecompute != nil {
-		ce.OnPrecompute(ctx, outcome)
-	}
-}
-
-// cePrecomputeEnabled gates the lookup-first path. Default TRUE.
-// Set MEMDB_CE_PRECOMPUTE=false to force live every time (used for A/B).
-func cePrecomputeEnabled() bool {
-	return os.Getenv("MEMDB_CE_PRECOMPUTE") != "false"
-}
-
-// extractCEScoreTopK pulls the cached neighbour map out of an item's
-// ce_score_topk metadata field. Returns (nil, false) when absent;
-// (nil, true) when present but every entry malformed; (scores, true)
-// for partial parse; (scores, false) when fully clean.
-//
-// Tolerates float64 / float32 / json.Number for the score field — covers
-// in-process map[string]any and JSON-decoded paths.
-func extractCEScoreTopK(item Item) (map[string]float32, bool) {
-	raw, ok := item.GetMeta("ce_score_topk")
-	if !ok || raw == nil {
-		return nil, false
-	}
-	var entries []map[string]any
-	switch v := raw.(type) {
-	case []any:
-		entries = make([]map[string]any, 0, len(v))
-		for _, e := range v {
-			if m, ok := e.(map[string]any); ok {
-				entries = append(entries, m)
-			}
-		}
-	case []map[string]any:
-		entries = v
-	case string:
-		if v == "" {
-			return nil, false
-		}
-		_ = json.Unmarshal([]byte(v), &entries)
-	default:
-		return nil, false
-	}
-
-	if len(entries) == 0 {
-		return nil, false
-	}
-	out := make(map[string]float32, len(entries))
-	hasInvalid := false
-	for _, e := range entries {
-		nid, _ := e["neighbor_id"].(string)
-		if nid == "" {
-			hasInvalid = true
-			continue
-		}
-		switch s := e["score"].(type) {
-		case float64:
-			out[nid] = float32(s)
-		case float32:
-			out[nid] = s
-		case json.Number:
-			f, err := s.Float64()
-			if err == nil {
-				out[nid] = float32(f)
-			} else {
-				hasInvalid = true
-			}
-		default:
-			hasInvalid = true
-		}
-	}
-	if len(out) == 0 {
-		return nil, hasInvalid
-	}
-	return out, hasInvalid
 }

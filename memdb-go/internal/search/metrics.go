@@ -77,6 +77,14 @@ type searchMetricsInstruments struct {
 	// retained (legacy memories). "disabled" emits once per search call when
 	// AttributedTo is empty so the absence-of-filter baseline is visible.
 	AttributionFilter metric.Int64Counter
+	// CEMathFallback — fired when CrossEncoder.runLive routes through the
+	// MathReranker (cosine) fallback instead of returning live CE scores.
+	// reason ∈ {degraded, low_quality}. degraded = ceClient returned
+	// StatusDegraded (timeout, 5xx, ErrCircuitOpen). low_quality = CE
+	// returned StatusOk but top-1 score < MEMDB_CE_QUALITY_FLOOR (default
+	// 0.1) — known gte-multi-rerank failure mode on narrow OOD queries.
+	// Pattern lifted from go-search PRs #10 + #14.
+	CEMathFallback metric.Int64Counter
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -146,6 +154,8 @@ func searchMx() *searchMetricsInstruments {
 			metric.WithDescription("Task #100: counting-aware top-K boost outcome per search (outcome=boosted|skipped)"))
 		attrFilter, _ := m.Int64Counter("memdb.search.attribution_filter_total",
 			metric.WithDescription("Memobase attributed_to post-filter outcomes per row (outcome=kept|dropped|missing|disabled)"))
+		ceMath, _ := m.Int64Counter("memdb.search.ce_math_fallback_total",
+			metric.WithDescription("CE→MathReranker fallback invocations per live CE call (reason=degraded|low_quality). degraded = ceClient StatusDegraded; low_quality = top-1 CE score below MEMDB_CE_QUALITY_FLOOR."))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -173,6 +183,7 @@ func searchMx() *searchMetricsInstruments {
 			RRFKGauge:         rrfK,
 			CountingBoost:     cntBoost,
 			AttributionFilter: attrFilter,
+			CEMathFallback:    ceMath,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -197,6 +208,11 @@ func searchMx() *searchMetricsInstruments {
 			ceph.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
 		}
 		celive.Add(ctx, 0)
+		// CE→Math fallback reasons. Both pre-registered so an idle box still
+		// shows the series and operators can confirm the gate is wired.
+		for _, reason := range []string{"degraded", "low_quality"} {
+			ceMath.Add(ctx, 0, metric.WithAttributes(attribute.String("reason", reason)))
+		}
 		// Pre-register D1 boost magnitude so the formula=combined bucket-set is
 		// visible from the first Prometheus scrape.
 		d1boost.Record(ctx, 0, metric.WithAttributes(attribute.String("formula", "combined")))

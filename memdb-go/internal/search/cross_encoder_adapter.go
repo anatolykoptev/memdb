@@ -11,7 +11,12 @@ package search
 // The ceLiveHook keeps the legacy memdb.search.ce_live_call_total
 // counter wired without leaking otel imports into the rerank package.
 
-import "context"
+import (
+	"context"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+)
 
 // ceLiveHook bumps the legacy CE-live counter on every live HTTP call.
 // Wired into rerank.CrossEncoder.OnLiveCall by the precompute wrapper +
@@ -19,5 +24,15 @@ import "context"
 func ceLiveHook(ctx context.Context) {
 	if mx := searchMx(); mx != nil && mx.CELiveCall != nil {
 		mx.CELiveCall.Add(ctx, 1)
+	}
+}
+
+// ceMathFallbackHook bumps the CE→MathReranker fallback counter. reason ∈
+// {"degraded", "low_quality"}. Wired into rerank.CrossEncoder.OnMathFallback
+// by the postProcessResults chain construction; precompute_wrapper does NOT
+// route through this path (offline, no live cosine signal needed).
+func ceMathFallbackHook(ctx context.Context, reason string) {
+	if mx := searchMx(); mx != nil && mx.CEMathFallback != nil {
+		mx.CEMathFallback.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
 	}
 }
