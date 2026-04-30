@@ -16,10 +16,9 @@ import (
 func resetGlobalRewriteCache(t *testing.T) {
 	t.Helper()
 	oldCache := globalRewriteCache
-	oldOnce := globalRewriteCacheOnce
 	t.Cleanup(func() {
 		globalRewriteCache = oldCache
-		globalRewriteCacheOnce = oldOnce
+		globalRewriteCacheOnce = sync.Once{}
 	})
 	globalRewriteCache = nil
 	globalRewriteCacheOnce = sync.Once{}
