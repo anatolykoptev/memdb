@@ -212,7 +212,7 @@ func TestEnhanceRetrievalAnswer_NilEmbedderIsBaseOnly(t *testing.T) {
 	if hinted {
 		t.Errorf("expected hinted=false with nil embedder, got true")
 	}
-	if prompt != answerEnhanceSystemPrompt {
+	if prompt != loadSkillPrompt() {
 		t.Errorf("expected base prompt verbatim with nil embedder, got divergence")
 	}
 }
@@ -232,7 +232,7 @@ func TestEnhanceRetrievalAnswer_DisabledClassifier(t *testing.T) {
 	if hinted {
 		t.Errorf("expected hinted=false when classifier disabled, got true")
 	}
-	if prompt != answerEnhanceSystemPrompt {
+	if prompt != loadSkillPrompt() {
 		t.Errorf("expected base prompt verbatim when classifier disabled")
 	}
 }

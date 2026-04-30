@@ -18,6 +18,7 @@ import (
 	"syscall"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/server"
 
 	"go.opentelemetry.io/otel"
@@ -79,6 +80,10 @@ func main() {
 	// Create HTTP server
 	srv, cleanup := server.New(ctx, cfg, logger)
 	defer cleanup()
+
+	// Log which D10 skill source is live so operators can confirm a
+	// prompt edit took effect (env override / bundled / fallback const).
+	logger.Info("d10 skill source", slog.String("source", search.SkillLoadDiagnostic()))
 
 	// Start server in goroutine
 	go func() {
