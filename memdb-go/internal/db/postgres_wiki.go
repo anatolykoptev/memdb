@@ -143,6 +143,74 @@ LIMIT $2`, cubeID, limit)
 	return out, rows.Err()
 }
 
+// WikiSearchHit pairs a wiki page with its cosine similarity to the search
+// query. Score is in [0, 1] where 1 is identical and 0 is orthogonal —
+// matches the relativity scale on retrieved memories so the chat retrieval
+// slot can mix them into the same ranked list without rescaling.
+type WikiSearchHit struct {
+	Page  WikiPage
+	Score float64
+}
+
+// SearchWikiByCosine returns the top-K wiki pages most similar to the supplied
+// query embedding for a cube, ordered by pgvector halfvec_cosine distance
+// ascending (closest first). Pages without an embedding are skipped. Body is
+// returned alongside metadata so callers (chat prompt injector / retrieval
+// slot) can either paste the markdown into the system prompt or merge into
+// the memory list.
+//
+// Empty embedding or limit ≤ 0 → returns nil, nil. Limit clamped to 50 to
+// bound prompt growth.
+//
+// Score = 1 - distance: pgvector's halfvec_cosine returns distance in [0, 2]
+// for normalised embeddings, but in practice on our 1024-dim e5 vectors the
+// range is [0, 1] (orthogonal pages cluster around 0.95+). We expose
+// similarity in [0, 1] so callers can compare against the same threshold
+// used for memory relativity.
+func (p *Postgres) SearchWikiByCosine(ctx context.Context, cubeID string, query []float32, limit int) ([]WikiSearchHit, error) {
+	if cubeID == "" {
+		return nil, errors.New("SearchWikiByCosine: empty cube_id")
+	}
+	if len(query) == 0 || limit <= 0 {
+		return nil, nil
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	rows, err := p.pool.Query(ctx, `
+SELECT `+wikiPageColumns+`,
+    1 - (embedding::halfvec(1024) <=> $2::halfvec(1024)) AS score
+FROM memos_graph.wiki_pages
+WHERE cube_id = $1
+  AND embedding IS NOT NULL
+ORDER BY embedding::halfvec(1024) <=> $2::halfvec(1024)
+LIMIT $3`, cubeID, FormatVector(query), limit)
+	if err != nil {
+		return nil, fmt.Errorf("SearchWikiByCosine: %w", err)
+	}
+	defer rows.Close()
+	var out []WikiSearchHit
+	for rows.Next() {
+		var hit WikiSearchHit
+		if err := rows.Scan(
+			&hit.Page.ID,
+			&hit.Page.CubeID,
+			&hit.Page.Slug,
+			&hit.Page.Title,
+			&hit.Page.Body,
+			&hit.Page.ParentSources,
+			&hit.Page.Version,
+			&hit.Page.CreatedAt,
+			&hit.Page.UpdatedAt,
+			&hit.Score,
+		); err != nil {
+			return nil, fmt.Errorf("scan wiki search hit: %w", err)
+		}
+		out = append(out, hit)
+	}
+	return out, rows.Err()
+}
+
 // DeleteWikiPage removes one page by (cube_id, slug). Returns
 // ErrWikiPageNotFound when no row matched. Used only for cube
 // tear-down or explicit operator action — wiki maintenance should
