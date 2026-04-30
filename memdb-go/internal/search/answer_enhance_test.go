@@ -48,7 +48,7 @@ func TestEnhance_Disabled(t *testing.T) {
 	items := []map[string]any{itemWithRel("u1", "mem A", 0.9)}
 	cfg := AnswerEnhanceConfig{APIURL: ts.URL, Model: "m"}
 
-	out := applyAnswerEnhancement(context.Background(), nil, "q", items, cfg)
+	out := applyAnswerEnhancement(context.Background(), nil, "q", items, cfg, nil)
 	if len(out) != 1 || out[0]["id"] != "u1" {
 		t.Fatalf("expected items unchanged when env off, got %v", out)
 	}
@@ -58,11 +58,12 @@ func TestEnhance_Disabled(t *testing.T) {
 }
 
 func TestEnhance_EmptyItems(t *testing.T) {
-	ans, src, conf, err := EnhanceRetrievalAnswer(
+	ans, src, conf, hinted, err := EnhanceRetrievalAnswer(
 		context.Background(),
 		"anything",
 		nil,
 		AnswerEnhanceConfig{APIURL: "http://x", Model: "m"},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("expected no error for empty items, got %v", err)
@@ -72,6 +73,9 @@ func TestEnhance_EmptyItems(t *testing.T) {
 	}
 	if src != nil || conf != 0 {
 		t.Errorf("expected zero sources/confidence, got %v / %v", src, conf)
+	}
+	if hinted {
+		t.Errorf("expected hinted=false for empty items, got true")
 	}
 }
 
@@ -85,9 +89,10 @@ func TestEnhance_BelowThreshold(t *testing.T) {
 		itemWithRel("a", "mem A", 0.2),
 		itemWithRel("b", "mem B", 0.35),
 	}
-	ans, _, _, err := EnhanceRetrievalAnswer(
+	ans, _, _, _, err := EnhanceRetrievalAnswer(
 		context.Background(), "q", items,
 		AnswerEnhanceConfig{APIURL: ts.URL, Model: "m"},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -117,9 +122,10 @@ func TestEnhance_ParsesLLMResponse(t *testing.T) {
 			0.82),
 	}
 
-	ans, srcs, conf, err := EnhanceRetrievalAnswer(
+	ans, srcs, conf, _, err := EnhanceRetrievalAnswer(
 		context.Background(), "what is Caroline's job?", items,
 		AnswerEnhanceConfig{APIURL: ts.URL, Model: "m"},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -144,9 +150,10 @@ func TestEnhance_HandlesMarkdownFencedResponse(t *testing.T) {
 	defer ts.Close()
 
 	items := []map[string]any{itemWithRel("uuid1", "a social worker", 0.9)}
-	ans, _, _, err := EnhanceRetrievalAnswer(
+	ans, _, _, _, err := EnhanceRetrievalAnswer(
 		context.Background(), "job?", items,
 		AnswerEnhanceConfig{APIURL: ts.URL, Model: "m"},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error on fenced response: %v", err)
@@ -163,9 +170,10 @@ func TestEnhance_UnknownOnNoMemories(t *testing.T) {
 	defer ts.Close()
 
 	items := []map[string]any{itemWithRel("x", "irrelevant memory", 0.9)}
-	ans, _, _, err := EnhanceRetrievalAnswer(
+	ans, _, _, _, err := EnhanceRetrievalAnswer(
 		context.Background(), "q", items,
 		AnswerEnhanceConfig{APIURL: ts.URL, Model: "m"},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

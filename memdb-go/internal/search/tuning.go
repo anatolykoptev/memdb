@@ -105,13 +105,37 @@ func parseEnvInt(name string, lo, hi, def int) int {
 
 // ---- D10 — answer_enhance --------------------------------------------------
 
-const defaultAnswerEnhanceMinRelativity = 0.4
+const (
+	defaultAnswerEnhanceMinRelativity   = 0.4
+	defaultD10ClassifierThreshold       = 0.5
+	defaultD10ClassifierEnabled         = true
+)
 
 // answerEnhanceMinRelativity returns the minimum relativity threshold below
 // which candidate memories are excluded from D10 answer enhancement.
 // Env: MEMDB_D10_MIN_RELATIVITY in [0, 1].
 func answerEnhanceMinRelativity() float64 {
 	return parseEnvFloat("MEMDB_D10_MIN_RELATIVITY", 0, 1, defaultAnswerEnhanceMinRelativity)
+}
+
+// d10ClassifierThreshold returns the minimum top-1 confidence the embedding
+// classifier must report before its category hint is appended to the D10
+// system prompt. Below threshold the prompt collapses to the base extractor
+// (i.e. byte-identical to current main behaviour) — the soft-routing safety
+// net.  Env: MEMDB_D10_CLASSIFIER_THRESHOLD in [0, 1].
+func d10ClassifierThreshold() float64 {
+	return parseEnvFloat("MEMDB_D10_CLASSIFIER_THRESHOLD", 0, 1, defaultD10ClassifierThreshold)
+}
+
+// d10ClassifierEnabled reports whether the embedding-based query classifier
+// should run at all. Default ON in code; compose / .env keeps it OFF for
+// safe rollout — flip via MEMDB_D10_CLASSIFIER_ENABLED=true once the
+// LLM-Judge lift is confirmed.
+//
+// Env: MEMDB_D10_CLASSIFIER_ENABLED — accepts 1/true/yes (on) or
+// 0/false/no (off). Anything else falls back to the default.
+func d10ClassifierEnabled() bool {
+	return parseEnvBool("MEMDB_D10_CLASSIFIER_ENABLED", defaultD10ClassifierEnabled)
 }
 
 // ---- D5 — staged_retrieval -------------------------------------------------
