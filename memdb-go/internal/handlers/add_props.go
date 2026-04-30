@@ -75,6 +75,43 @@ type memoryNodeProps struct {
 	// JSONB compact for facts with no temporal anchor).
 	EventDates []string
 
+	// AttributedTo is the speaker for this row (typically a role label like
+	// "user"/"assistant", or a speaker name when the upstream extractor
+	// resolved one). Lifted to TOP LEVEL so migration 0022's partial index
+	// idx_memory_attributed_to (on properties->>'attributed_to') matches —
+	// the search-side Memobase post-filter pushes "speaker:<who>" predicates
+	// through this column. Empty omits the property entirely so the partial
+	// index excludes rows with no speaker signal (preserves index size).
+	AttributedTo string
+
+	// LinkedMemoryIDs is the soft-graph neighbour set for this row (F12 multi-hop
+	// expand). Lifted to TOP LEVEL so the GIN index idx_memory_linked_ids on
+	// (properties -> 'linked_memory_ids') matches. Fast mode populates this
+	// from TIMELINE_NEXT structural edges (forward neighbour by chronological
+	// order) — atomic / fine paths get it from LLM extraction. Empty/nil omits
+	// the property so the search-side `?|` predicate skips rows with no
+	// soft-graph signal.
+	LinkedMemoryIDs []string
+
+	// Kind is the row discriminator stamped at TOP LEVEL of properties.
+	// Migration 0022 indexes (properties->>'kind') via the partial index
+	// idx_memory_kind (predicated on `properties ? 'kind'`). Without an
+	// explicit value, fast rows would fall through to the migration's
+	// COALESCE default 'paragraph_legacy' and any search filter targeting
+	// kind='atomic_fact' or kind='fast_msg' would silently exclude them.
+	//
+	// Two callers use this slot today:
+	//   * fast/per-message path → fastMsgKind ("fast_msg"), so per-msg fast
+	//     rows can be filtered/aggregated independently of legacy paragraphs.
+	//   * atomic path → still goes through liftAtomicDiscriminators for
+	//     back-compat (the factInfo bag also needs the value visible to
+	//     existing JSONB-property tests). buildNodeProps does not duplicate
+	//     that lift; setting Kind here is purely the fast-path entry point.
+	//
+	// Empty omits the property so the partial index excludes the row and
+	// the migration default applies.
+	Kind string
+
 	// ExtractionState (migration 0028): one of the extractionState* constants.
 	// Always written by buildNodeProps. Callers must pass one of the
 	// extractionState* constants — passing an empty string lands an empty value
@@ -155,6 +192,31 @@ func buildNodeProps(p memoryNodeProps) map[string]any {
 			dates[i] = s
 		}
 		props["event_dates"] = dates
+	}
+	// attributed_to — top-level for the partial index idx_memory_attributed_to
+	// (migration 0022). Empty omits the property so the partial index skips
+	// the row. Mirror of liftAtomicDiscriminators behaviour, but driven by an
+	// explicit struct field so the no-LLM paths (fast/raw) can populate it
+	// without going through the per-fact info-bag dance.
+	if p.AttributedTo != "" {
+		props["attributed_to"] = p.AttributedTo
+	}
+	// linked_memory_ids — top-level for the GIN index idx_memory_linked_ids
+	// (migration 0022). Empty/nil omits so the GIN `?|` predicate skips the
+	// row. Cast through []any so json.Marshal emits a JSON array.
+	if len(p.LinkedMemoryIDs) > 0 {
+		ids := make([]any, len(p.LinkedMemoryIDs))
+		for i, s := range p.LinkedMemoryIDs {
+			ids[i] = s
+		}
+		props["linked_memory_ids"] = ids
+	}
+	// kind — top-level for the partial index idx_memory_kind (migration 0022).
+	// Empty omits so the partial-index predicate skips the row and the
+	// generated-column COALESCE default ('paragraph_legacy') applies — i.e.
+	// callers that don't set Kind get back-compat behaviour byte-for-byte.
+	if p.Kind != "" {
+		props["kind"] = p.Kind
 	}
 	// Migration 0028: extraction_state is ALWAYS written so any future filler
 	// SELECT on state='pending' hits the partial index rather than table-scanning.
