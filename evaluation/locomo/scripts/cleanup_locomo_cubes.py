@@ -55,7 +55,7 @@ def build_headers() -> dict:
 
 class CubeInfo(NamedTuple):
     cube_id: str
-    owner_id: str
+    user_id: str
 
 
 def list_locomo_cubes_for_user(memdb_url: str, user_id: str) -> list[CubeInfo]:
@@ -80,7 +80,26 @@ def list_locomo_cubes_for_user(memdb_url: str, user_id: str) -> list[CubeInfo]:
         cid = c.get("cube_id") or c.get("id", "")
         oid = c.get("owner_id", "")
         if cid:
-            result.append(CubeInfo(cube_id=cid, owner_id=oid or user_id))
+            result.append(CubeInfo(cube_id=cid, user_id=oid or user_id))
+    return result
+
+
+def cubes_from_conversations(conversations: list[dict]) -> list[CubeInfo]:
+    """Build cube IDs directly from the conversation source file.
+
+    Mirrors the IDs that ingest.py writes: f"{sample_id}__speaker_a" /
+    f"{sample_id}__speaker_b". cube_id == user_id in the LoCoMo context.
+
+    Required because the server's mem_cubes registry is not maintained for
+    LoCoMo runs — /product/list_cubes returns empty, which made the legacy
+    enumeration silently no-op (scanned=0, deleted=0).
+    """
+    result: list[CubeInfo] = []
+    for conv in conversations:
+        sample_id = conv.get("sample_id", "locomo_unknown")
+        ua, ub = user_ids_for(sample_id)
+        result.append(CubeInfo(cube_id=ua, user_id=ua))
+        result.append(CubeInfo(cube_id=ub, user_id=ub))
     return result
 
 
@@ -158,25 +177,23 @@ def main() -> int:
         data = json.load(f)
     conversations = list(data.values()) if isinstance(data, dict) else data
 
-    user_ids = collect_user_ids(conversations)
+    cubes = cubes_from_conversations(conversations)
     print(f"[cleanup] memdb_url={args.memdb_url!r} dry_run={args.dry_run}", flush=True)
-    print(f"[cleanup] scanning {len(user_ids)} user IDs across {len(conversations)} conv(s)", flush=True)
+    print(f"[cleanup] {len(cubes)} cubes to delete across {len(conversations)} conv(s)", flush=True)
 
     scanned = 0
     deleted = 0
     errors: list[str] = []
 
-    for uid in user_ids:
-        cubes = list_locomo_cubes_for_user(args.memdb_url, uid)
-        scanned += len(cubes)
-        for cube in cubes:
-            outcome = delete_cube(args.memdb_url, cube.cube_id, cube.owner_id, args.dry_run)
-            tag = "[DRY-RUN]" if args.dry_run else ""
-            print(f"  {tag} cube_id={cube.cube_id!r} owner={cube.owner_id!r} → {outcome}", flush=True)
-            if outcome == "deleted":
-                deleted += 1
-            elif outcome.startswith("error:"):
-                errors.append(f"{cube.cube_id}/{cube.owner_id}: {outcome}")
+    for cube in cubes:
+        scanned += 1
+        outcome = delete_cube(args.memdb_url, cube.cube_id, cube.user_id, args.dry_run)
+        tag = "[DRY-RUN]" if args.dry_run else ""
+        print(f"  {tag} cube_id={cube.cube_id!r} user_id={cube.user_id!r} → {outcome}", flush=True)
+        if outcome == "deleted":
+            deleted += 1
+        elif outcome.startswith("error:"):
+            errors.append(f"{cube.cube_id}/{cube.user_id}: {outcome}")
 
     summary = {"scanned": scanned, "deleted": deleted, "errors": errors}
     print(json.dumps(summary, indent=2))
