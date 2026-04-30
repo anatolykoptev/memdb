@@ -12,184 +12,185 @@ MemDB is a hard fork of [MemOS](https://github.com/MemTensor/MemOS) (Apache 2.0)
 
 **The core problem**: LLMs are stateless. They forget everything between sessions, cannot learn from ongoing interactions, provide inconsistent responses as knowledge accumulates without organization, and cannot share memory across agents or platforms. RAG is a workaround, not a solution — it has no lifecycle management, no deduplication, no versioning, no governance.
 
-**MemDB's answer**: A unified memory system with 5 memory types, graph-based storage, multi-strategy search, self-organizing intelligence, and a high-performance Go gateway.
+**MemDB's answer**: A unified pure-Go memory system with typed memory tiers, Apache AGE graph storage, multi-strategy search with adaptive rerank, background reorganization workers, atomic-fact extraction, bi-temporal edges, and per-cube tenant isolation.
 
 ---
 
 ## Architecture Overview
 
 ```
-Clients (Claude Code, OpenClaw, API consumers)
+Clients (Claude Code plugin, vaelor, oxpulse, API consumers)
           |
-          | HTTP/REST (:8080)
+          | HTTP/REST (:8080) + MCP (:8001)
           v
-+--------------------------------------------------+
-|  memdb-go (Go Gateway)                           |
-|  - 15 native handlers (45% of routes)           |
-|  - Reverse proxy for LLM-dependent routes        |
-|  - Redis cache (30s TTL)                         |
-|  - VoyageAI embedder, parallel DB queries        |
-|  - Auth, rate limiting, OpenTelemetry            |
-+--------------------------------------------------+
-          |                        |
-          | native                 | proxy (:8000)
-          v                        v
-+------------------+    +-------------------------+
-| PolarDB          |    | Python Backend (FastAPI)|
-| (PostgreSQL +    |    | - Memory lifecycle      |
-|  Apache AGE +    |    | - LLM summarization     |
-|  pgvector)       |    | - Skill extraction      |
-|                  |    | - Preference extraction  |
-| Qdrant (prefs)   |    | - Chat with memory      |
-| Redis (cache)    |    | - Scheduler (Redis      |
-+------------------+    |   Streams)              |
-                        +-------------------------+
++----------------------------------------------------------+
+|  memdb-go (Pure Go, ~44k LoC, all routes native)         |
+|  - HTTP+MCP handlers, OpenTelemetry, rate limiting       |
+|  - 4 add modes: raw / fast / fine / fine-atomic          |
+|  - ~30 search stages (rerank, multihop, fast-path,       |
+|    LLM judge, CoT, query rewrite, event inject, …)       |
+|  - ~30 background reorganizer phases                     |
+|  - Server-side dual-speaker fan-out (M9)                 |
++----------------------------------------------------------+
+   |          |                |                  |
+   | pgxpool  | redis           | http (sidecar)   | http
+   v          v                 v                  v
++----------+ +-------+ +-----------------+ +----------------+
+| Postgres | | Redis | | embed-server    | | LLM gateway    |
+| 17 +     | | 7     | | (Rust, BoringSSL)| | (CLIProxyAPI   |
+| pgvector | | (cache,| | multilingual-e5  | |  :8317, OpenAI |
+| + AGE +  | |  XADD,| | + jina-code-v2,  | |  Anthropic     |
+| tsvector | |  WM    | | tokio batcher)   | |  Gemini, …)    |
++----------+ +-------+ +-----------------+ +----------------+
 ```
 
-**Two languages, one system**:
-- **Python** (82K+ LOC): Core intelligence — memory lifecycle, LLM-driven extraction, skill learning, reorganization, preference detection
-- **Go** (18K+ LOC): Performance layer — native search (400ms vs 30s Python), connection pooling, caching, rate limiting, 70x faster for read operations
+**Pure-Go stack** (since M9, 2026-04-26): the legacy Python backend was removed — every route is native Go. The 70× retrieval speedup that motivated the original Python→Go migration is now table-stakes; the rest of the engineering effort moved into ingestion quality (atomic facts, bi-temporal edges, structural edges) and retrieval intelligence (adaptive rerank gating, multi-hop graph expansion, M9 dual-speaker).
+
+| Layer | What | Where |
+|---|---|---|
+| HTTP gateway | All ingest/search/chat/admin routes; OpenAPI spec; auth (Bearer + X-Service-Secret); MCP | `memdb-go/internal/handlers` |
+| Embed sidecar | Rust HTTP service, multi-model (`multilingual-e5-large` 1024-dim + `jina-code-v2`); tokio batcher; Prometheus | `embed-server/` (separate repo) |
+| LLM | All callers go through CLIProxyAPI on `:8317` (Gemini Flash/Pro, Claude Sonnet, OpenAI) — single env (`LLM_API_BASE`) | external |
+| DB | PostgreSQL 17 + Apache AGE (Cypher) + pgvector (cosine) + tsvector full-text + GIN indexes | `memos_graph` schema |
+| Cache | Redis: ingest stream (XADD), Working Memory hot cache (VSET), query rewrite cache, scheduler queue | external |
 
 ---
 
-## The Five Memory Types
+## Memory tiers and entity types
 
-MemDB implements all five memory types from the MemOS paper. No other system covers all five.
+MemDB inherits the five-type taxonomy from the MemOS paper but extends it with first-class entity tables for events, profiles, and feedback. The shape on disk:
 
-### 1. Long-Term Memory (text_mem)
+### Memory rows (`memos_graph.Memory`)
 
-General facts, conversation summaries, extracted knowledge. Stored as graph nodes in PolarDB (PostgreSQL + Apache AGE) with vector embeddings (VoyageAI, 1024-dim). Organized hierarchically: **task -> concept -> fact**.
+Apache AGE vertex with rich `properties` JSONB. The `memory_type` discriminator splits four classes:
 
-- Limit: 1,500 entries per user (FIFO eviction at 80% threshold)
-- Auto-dedup: cosine similarity (0.95 threshold) + content hash (SHA256)
-- Self-reorganizing: LLM detects conflicts/redundancies, merges or archives
+| memory_type | Purpose | Lifecycle |
+|---|---|---|
+| `WorkingMemory` | hot, session-scoped buffer (paired 1:1 with `LongTermMemory` in fast/fine modes) | trimmed by `cleanupWorkingMemory` per-cube budget |
+| `LongTermMemory` | persistent facts, summaries, extracted knowledge | tree-promoted (raw → episodic → semantic), bi-temporal edges, PageRank-scored |
+| `UserMemory` | user-only personal facts (auto-classified when content is exclusively about the user) | same lifecycle as LTM, but search filtered by speaker_label / attributed_to |
+| `SkillMemory` | procedural knowledge (extractor: `internal/llm/skill_extractor.go`) | structured fields: name, description, procedure, experience, examples |
 
-### 2. Skill Memory (skill_mem)
+Common `properties` fields (excerpt — see `add_props.go::buildNodeProps`):
+`id, memory, memory_type, hierarchy_level (raw|episodic|semantic), user_name, user_id, agent_id, session_id, created_at, updated_at, observation_date, sources[], tags[], info{...}, kind (atomic_fact?), attributed_to, event_dates[], linked_memory_ids[], parent_memory_id, merged_into_id, pagerank, ce_score_topk[]`.
 
-Procedural knowledge — **how to do things**. Automatically extracted from conversations by an LLM that identifies task sequences and generates structured skill records.
+### Atomic facts (M11 F8, mem0-arxiv pattern)
 
-Fields:
-- `name`: Skill title
-- `description`: What it does
-- `procedure`: Step-by-step instructions
-- `experience[]`: Past successful uses
-- `preference[]`: User preferences when using this skill
-- `examples[]`: Concrete examples
-- `scripts`: Code snippets
-- `url`: Reference links
+When `MEMDB_ATOMIC_FACTS=true` (default ON), the fine-mode extractor emits 5–15 self-contained 15–80-word facts per chunk instead of one paragraph. Each fact carries `kind=atomic_fact`, `attributed_to=<speaker>`, `linked_memory_ids[]` (LLM-picked at extract time), `event_dates[]`. Lives in the same `Memory` table.
 
-When extracting new skills, the system recalls existing related skills (top_k=5) to update/extend rather than duplicate.
+### User profiles (`memos_graph.user_profiles`, M10)
 
-### 3. User & Preference Memory (user_mem + pref_mem)
+Typed (topic, sub_topic) taxonomy with confidence + valid_at + soft-delete (`expired_at IS NULL`). Cube-scoped (security audit C1, migration 0017). Per-slot LLM merge: `add_fine_profile.go` extracts slot updates, `reorganizer_prefs.go` periodically reorganises and promotes. Closed-set 22-key MemOS-style preference taxonomy enforced at parse time.
 
-**User Memory**: Profile facts about the user (limit: 480 entries). Interests, background, behavioral patterns.
+### User events (`memos_graph.user_events`, F3)
 
-**Preference Memory**: Dual-layer system in Qdrant vector DB:
-- **Explicit preferences**: Direct statements ("I prefer Python over Java")
-- **Implicit preferences**: Inferred from behavioral patterns ("user always chooses concise explanations")
+LLM-extracted dated events from messages. Used by the F7 search-time temporal augment stage (`SearchMemoriesByDateRange`) and the F3 `event_inject` stage (cosine + date + tag matched).
 
-Both collections are queried during search and merged into results.
+### Feedback events (`memos_graph.feedback_events`)
 
-### 4. Parametric Memory (para_mem)
+Persistent record of user feedback signals (`feedback_ops.go`). Consumed by `reorganizer_feedback.go` to bias future retrieval.
 
-Knowledge encoded directly in model weights through **LoRA adapter modules**. Domain-specific patches that can be composed, activated, or deactivated without full retraining. Example: a legal domain LoRA that gives a general-purpose model legal reasoning capabilities.
+### Memory edges (Apache AGE)
 
-Supports cross-type promotion: stable plaintext knowledge can be distilled into parametric form.
+`memory_edges` and `entity_edges` carry F11 bi-temporal columns: `valid_at` (when the fact became true), `invalid_at` (when it stopped), `expired_at` (when we learned it was wrong). Structural edges are emitted at ingest by `add_structural_edges.go` with three relations: `SAME_SESSION`, `TIMELINE_NEXT`, `SIMILAR_COSINE_HIGH`.
 
-*Note: Requires local model infrastructure. Not used with API-based LLMs (OpenAI, Gemini).*
+### Activation Memory + Parametric Memory
 
-### 5. Activation Memory (act_mem)
-
-KV-cache structures from LLM inference — the transient cognitive state that normally vanishes after each request. MemOS persists frequently-accessed KV states across requests, achieving up to **91.4% reduction in Time To First Token** for long contexts.
-
-*Note: Requires local HuggingFace/vLLM model access to KV tensors. Not available with API-based LLMs.*
+The two MemOS types that need access to model internals are **out of scope for the API-based LLM stack** MemDB targets (Gemini, Claude, GPT). Tracked as a future deliverable for self-hosted vLLM deployments.
 
 ---
 
-## Multi-Strategy Search
+## Add modes (4 ingest pipelines)
 
-MemDB runs **five parallel retrieval strategies** — more than any competitor:
+| Mode | Pipeline | Sources stamping | LLM extract? | When to use |
+|---|---|---|---|---|
+| `raw` | `add_raw.go` (1 row per message, no windowing, no LLM) | per-msg metadata in `info{chat_time,uuid,agent_id,role}` | no | structured payloads (JSON experience records, API logs, tool trajectories) where windowing would corrupt the blob |
+| `fast` | `add_windowing.go::extractFastMemories` (sliding-window with overlap, batch embed, WM+LTM pair) | per-window `sources[]` array carries chat_time, uuid, agent_id, role, content per source | no | conversational ingest where session-aware structural edges + WM hot cache help |
+| `fine` | `add_fine.go::nativeFineAddForCube` (LLM extract + dedup + entity link + atomic facts) | per-msg `sources[]` after extraction | yes | LoCoMo / unstructured human dialogue / multi-turn agent transcripts |
+| `fine-atomic` (F8) | branch of fine when `MEMDB_ATOMIC_FACTS=true` (default) | adds `kind`, `attributed_to`, `linked_memory_ids`, `event_dates` | yes (atomic prompt from mem0 arXiv) | every fine call, opt-out via env |
 
-| Strategy | How It Works | Latency |
-|----------|-------------|---------|
-| **Vector Search** | VoyageAI embedding -> pgvector cosine similarity across all memory scopes | ~100ms |
-| **BM25** | Probabilistic keyword relevance ranking via `rank-bm25` | ~50ms |
-| **Fulltext (Fast Graph)** | PostgreSQL `tsvector`/`tsquery` with GIN index. Multi-language tokenizer (EN/RU/CJK) | ~50ms |
-| **VEC_COT** | LLM decomposes complex queries into sub-queries -> multiple embedding lookups for broader recall | ~3-9s (LLM calls) |
-| **Internet Search** | SearXNG self-hosted metasearch (Google, DuckDuckGo, Brave, Wikipedia, GitHub) | ~2s |
-
-All strategies run concurrently. Results are merged by node ID (keep highest score), with dual-found items receiving a +10% score boost. Three deduplication modes:
-
-- **`no`**: Trim to top_k, no dedup
-- **`sim`**: Greedy cosine threshold (0.92) — removes near-duplicates
-- **`mmr`**: Maximal Marginal Relevance (lambda=0.8) — maximizes result diversity via 3-phase algorithm: prefill top-2, MMR selection with exponential penalty, re-sort by relevance
+All modes share `chat_time` propagation (M12.1 temporal anchor), `observation_date` resolver (`add_obs_date.go`), per-msg uuid passthrough (PR #218 raw, PR #216 fast, PR #215 fine), and content_hash + cosine dedup (with the M9 session-aware dedup fix from PR #224 — cross-session high-cosine pairs are no longer treated as duplicates).
 
 ---
 
-## Self-Organizing Intelligence
+## Search pipeline (~30 stages)
 
-MemDB doesn't just store memories — it actively maintains their quality through four mechanisms:
+The native search path runs a long pipeline rather than a fixed RRF on three retrievers. `internal/search/pipeline.go` orchestrates; `internal/search/service.go::defaultStages` lists the canonical order. Headline stages, in order:
 
-### 1. Reorganizer LLM
+1. **Tokenize + temporal cutoff** — extract per-language tokens, detect "yesterday / last week / 2023" intent, compute time window
+2. **D4 query rewrite** (LLM, cached) — rephrase ambiguous queries for embedding match
+3. **D7 / D11 CoT decompose** — break complex queries into sub-queries
+4. **Vector search** — pgvector cosine on `Memory.embedding` (pgvector HNSW or halfvec_cosine_ops)
+5. **Full-text search** — Postgres `tsvector` GIN index, EN/RU/CJK tokenizer
+6. **Multi-hop graph expansion (D2)** — Apache AGE Cypher traversal from top-K seeds
+7. **Linked-expand (F12)** — 1-hop GIN lookup on `linked_memory_ids` (atomic-facts only)
+8. **F3 event inject** — cosine + date + tag match against `user_events`
+9. **F7 temporal augment** — boost rows whose `event_dates[]` intersect the query window
+10. **PPR scorer** — Personalized PageRank over the result graph (F14)
+11. **Counting classifier** — detects "how many" queries and inflates top_k
+12. **Internet augmentation** — optional, via go-search MCP (off by default)
+13. **Fusion (RRF / DBSF / LinearMinMax)** — env-selectable strategy
+14. **Cross-Encoder rerank** — M14 CE precompute + adapter
+15. **MMR / staged / cosine rerank** — three local rerankers run unconditionally
+16. **Adaptive rerank gate** — decides "skip / clustered / wide-spread / too-few" before LLM rerank fires
+17. **LLM Judge** — fires when adaptive gate selects clustered/wide-spread; can swap, reject, or agree with the cosine top-1
+18. **D10 answer enhancement** — LLM-driven candidate boost
+19. **Threshold filter + chatMinPersonalMem floor** — relativity cutoff with min-rows guard
+20. **Token-budget truncation** (M12 RAM-style) — caps the memories block at `max_context_tokens` before prompt assembly
+21. **Format response** — `FormatMemoryItem` strips `sources[]` for response size, exposes metadata
 
-Background thread that periodically optimizes the memory graph:
-- Detects pairs with cosine similarity > 0.8
-- LLM classifies: **conflict** (merge/archive), **duplicate** (consolidate), or **unrelated** (keep both)
-- Builds hierarchical summaries: child nodes clustered by embedding similarity, LLM generates parent summary nodes
-- 600-second timeout per optimization cycle
-
-### 2. FIFO Eviction
-
-When memory exceeds limits (1500 LTM, 480 User, 20 Working), oldest entries are evicted. Archived entries preserved for audit trail.
-
-### 3. Cosine Deduplication (Pre-Insertion)
-
-Before inserting any new memory, checks existing activated entries via `search_by_embedding(threshold=0.95)`. Prevents near-duplicates from accumulating. Different thresholds for fast-mode (0.92, already LLM-processed) vs fine-mode (0.95).
-
-### 4. Content Hash Deduplication (Cross-Client)
-
-Clients generate `SHA256[:16]` hashes stored in `info.content_hash`. Exact match detection across different clients (Claude Code, OpenClaw, API).
-
----
-
-## The MemCube Abstraction
-
-The **MemCube** is the fundamental unit of memory — a standardized container wrapping any memory type with rich metadata:
-
-**Content**: The actual data (text for plaintext, tensors for activation, LoRA weights for parametric)
-
-**Metadata**:
-- **Descriptive**: Timestamps, origin signatures (user input / inference output / knowledge base), semantic tags
-- **Governance**: Access permissions (read/write/share scope), TTL/lifespan policies, priority levels
-- **Behavioral**: Access frequency, relevance scores, version lineage
-
-**Lifecycle states**: Generated -> Activated -> Merged -> Archived -> Deleted (with version rollback at each step)
-
-**Cross-type evolution**: MemCubes support promotion/demotion between memory types — frequently accessed plaintext can become activation memory, stable knowledge can become parametric memory. This "memory as OS resource" treatment is unique to MemOS/MemDB.
+The list above is canonical for the read path; ingest also runs F11 bi-temporal edge extraction and F3 event extraction in parallel fan-out workers.
 
 ---
 
-## Go Gateway: Performance Layer
+## Background reorganizer (`internal/scheduler`)
 
-The Go gateway (`memdb-go`) is a reverse proxy + native handler layer that provides dramatic performance improvements:
+~30 phases run on Redis-stream workers and timer loops:
 
-| Metric | Python Backend | Go Native | Speedup |
-|--------|---------------|-----------|---------|
-| Health check | 1.80ms | 0.56ms | **3.2x** |
-| Get all memories | 25,600ms | 363ms | **70x** |
-| Search (cached) | N/A | 1.7ms | - |
-| Search (uncached) | ~30,000ms | 350-500ms | **60-85x** |
+- **Tree promotion** (`tree_manager.go`, `tree_cluster_promote.go`, `tree_summariser.go`) — clusters of `raw` memories promote to `episodic`, `episodic` clusters promote to `semantic` with LLM-generated summaries. Children carry `parent_memory_id`.
+- **LLM consolidation** (`reorganizer_consolidate.go`, `reorganizer_llm_consolidate.go`) — pairs above cosine 0.8 → LLM classifies conflict / duplicate / unrelated → merge or archive
+- **Auto-merge / fuzzy** (`reorganizer_automerge.go`, `reorganizer_fuzzy.go`) — non-LLM bulk merge for high-confidence near-dupes
+- **Entity reorganization** (`reorganizer_entities.go`) — entity_edges maintenance, F11 invalid_at bookkeeping
+- **Episodic / WM consolidation** (`reorganizer_episodic.go`, `reorganizer_wm.go`, `reorganizer_wm_compact.go`) — WM trimming, episodic clustering
+- **Profile reorganization** (`reorganizer_prefs.go`) — slot-by-slot user_profiles consolidation
+- **Bi-temporal validator** (`bitemporal_validator.go`) — cross-record valid_at synchronisation
+- **PageRank** (`pagerank.go`, `pagerank_personalized.go`) — F14 importance scoring, personalised per-cube
+- **CE precompute** (`tree_ce_precompute.go`) — M14 cross-encoder score caching for top neighbours
+- **Profiler** (`profiler.go`) — LLM-driven user_profile updater on conversation completion
+- **Worker pool** (`worker.go`, `worker_*.go`) — Redis stream consumers with retry, priority queues, periodic flush
 
-**How native search works** (Go Phase 3):
-1. VoyageAI Embed: query -> 1024-dim vector (~200ms)
-2. Parallel errgroup: PolarDB vector search + PolarDB fulltext search + Qdrant preference search (2 collections)
-3. Merge & format results
-4. Apply dedup (sim/mmr/no)
-5. Cache in Redis (30s TTL)
+---
 
-**Proxy fallback**: Any native handler gracefully falls back to Python if dependencies are missing (no embedder, no DB connection, fine mode requiring LLM, internet search requiring SearXNG).
+## Performance
 
-**Coverage**: 15 of 33 routes native (45%), 18 proxied to Python. Proxied routes are those requiring LLM inference: add (summarization), chat (streaming), feedback, suggestions, scheduler.
+Pure-Go gateway, single docker-compose deployment. Numbers from M9 / M10 prod traces:
+
+| Metric | Value | Note |
+|---|---|---|
+| Search p50 | 80–150 ms | full ~30-stage pipeline, single cube |
+| Search p95 | 350–500 ms | with multi-hop expansion + LLM judge |
+| Search (cached, Redis 30s) | 1–2 ms | query-rewrite cache + result cache |
+| Add fast (single window, batch embed) | 50–80 ms | dominated by ONNX embed RTT |
+| Add fine (LLM extract + dedup) | 1.2–3 s | gemini-2.5-flash, 30-msg batch |
+| Add fine-atomic | 2–4 s | adds atomic-extractor LLM call |
+| Health check | < 1 ms | |
+
+Numbers depend heavily on cube size, query complexity, and whether the adaptive rerank gate fires LLM Judge.
+
+---
+
+## Stack
+
+| Layer | Tech | Why |
+|---|---|---|
+| Server | Go 1.26, single binary, multi-stage Docker (debian:trixie-slim runtime) | static linking, low startup, no Python runtime dependencies |
+| API | HTTP REST + MCP (Model Context Protocol) on `:8001` | first-class MCP server for AI-tool integration |
+| DB | Postgres 17 + Apache AGE (Cypher) + pgvector + tsvector | one DB does graph + vector + fulltext — no Neo4j / Qdrant split |
+| Embedder | ONNX `multilingual-e5-large` (1024-dim) + `jina-code-v2`, served by Rust `embed-server` sidecar with BoringSSL | multilingual + code-specific embeddings, tokio batcher |
+| LLM | CLIProxyAPI on `:8317` (Gemini 2.5 Flash/Pro, Claude Sonnet 4.6, OpenAI fallback) | single env (`LLM_API_BASE`) for every caller |
+| Cache | Redis 7 (XADD streams for ingest queue, VSET for WM hot cache, key-value for query rewrite cache, sorted-set for scheduler) | one server, four use-cases |
+| Auth | Bearer `Authorization` header + `X-Service-Secret` (internal callers) | dual-auth — public clients use Bearer, sidecars use service secret |
+| Observability | OpenTelemetry + Prometheus `/metrics` on `PROM_PORT = MCP_PORT + 1000` (e.g. 9001 for memdb-go) | grafana-ready out of the box |
 
 ---
 
