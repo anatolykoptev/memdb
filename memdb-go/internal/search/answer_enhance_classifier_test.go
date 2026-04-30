@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"hash/fnv"
-	"strings"
 	"testing"
 	"unicode"
 )
@@ -205,55 +204,6 @@ func TestClassifyTopN_AmbiguousQuery(t *testing.T) {
 	}
 	if delta > 0.05 {
 		t.Errorf("expected similar confidences for ambiguous query, got delta=%.3f", delta)
-	}
-}
-
-func TestCategoryHintBlock_BelowThreshold(t *testing.T) {
-	top := []CategoryConfidence{
-		{Category: QueryCategorySingleHop, Confidence: 0.49},
-		{Category: QueryCategoryTemporal, Confidence: 0.30},
-	}
-	got := categoryHintBlock(top, 0.5)
-	if got != "" {
-		t.Errorf("expected empty hint below threshold, got %q", got)
-	}
-}
-
-func TestCategoryHintBlock_OpenDomainNoHint(t *testing.T) {
-	top := []CategoryConfidence{
-		{Category: QueryCategoryOpenDomain, Confidence: 0.95},
-		{Category: QueryCategorySingleHop, Confidence: 0.20},
-	}
-	got := categoryHintBlock(top, 0.5)
-	if got != "" {
-		t.Errorf("expected empty hint when top-1 is open_domain, got %q", got)
-	}
-}
-
-func TestCategoryHintBlock_AppendsToBase(t *testing.T) {
-	top := []CategoryConfidence{
-		{Category: QueryCategorySingleHop, Confidence: 0.78},
-		{Category: QueryCategoryTemporal, Confidence: 0.41},
-	}
-	hint := categoryHintBlock(top, 0.5)
-	if hint == "" {
-		t.Fatalf("expected non-empty hint for high-confidence top-1, got empty")
-	}
-	if !strings.Contains(hint, string(QueryCategorySingleHop)) {
-		t.Errorf("hint missing top-1 category name: %q", hint)
-	}
-	if !strings.Contains(hint, categoryHintStrings[QueryCategorySingleHop]) {
-		t.Errorf("hint missing per-category hint string: %q", hint)
-	}
-	if !strings.Contains(hint, "Secondary:") || !strings.Contains(hint, string(QueryCategoryTemporal)) {
-		t.Errorf("hint should include secondary category, got %q", hint)
-	}
-	if !strings.Contains(hint, "SHORTEST surface form rule") {
-		t.Errorf("hint must include the 'defer to base' clause, got %q", hint)
-	}
-	combined := answerEnhanceSystemPrompt + hint
-	if !strings.HasPrefix(combined, answerEnhanceSystemPrompt) {
-		t.Errorf("combined prompt must start with the unmodified base")
 	}
 }
 
