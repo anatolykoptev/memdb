@@ -176,74 +176,171 @@ func (h *Handler) batchEmbedFastTexts(ctx context.Context, texts []string) ([][]
 // WM/LTM node pairs for memories that survive. Returns parallel slices: nodes (WM+LTM
 // pairs in [WM0,LTM0,WM1,LTM1,...] order), addResponseItems, and the WM embeddings
 // to push into the VSET hot cache.
+//
+// Two-pass shape (since 2026-04-29 — fast no-LLM fields):
+//   - Pass 1 selects survivors (cosine-dedup) and pre-allocates the LTM UUIDs.
+//     We need the IDs up front so each row's linked_memory_ids can point at the
+//     next survivor's LTM ID — TIMELINE_NEXT chain materialised in JSONB so the
+//     search-side F12 GIN index (idx_memory_linked_ids) actually catches forward
+//     hops without waiting on the post-insert structural-edge writer.
+//   - Pass 2 marshals props with each row's forward neighbour wired in. Last
+//     row in the batch has no neighbour → empty linked slice → property omitted.
 func (h *Handler) buildFastBatch(
 	ctx context.Context,
 	pending []pendingFastMemory,
 	vecs [][]float32,
 	fac fastAddContext,
 ) ([]db.MemoryInsertNode, []addResponseItem, [][]float32, error) {
-	allNodes := make([]db.MemoryInsertNode, 0, len(pending)*2)
-	items := make([]addResponseItem, 0, len(pending))
-	wmEmbeddings := make([][]float32, 0, len(pending))
+	survivors, wmEmbeddings := h.selectFastSurvivors(ctx, pending, vecs, fac)
+	if len(survivors) == 0 {
+		return nil, nil, nil, nil
+	}
 
-	for j, p := range pending {
-		embedding := vecs[j]
-		if h.isDuplicate(ctx, embedding, fac.cubeID, fac.agentID, fac.sessionID) {
-			continue
+	allNodes := make([]db.MemoryInsertNode, 0, len(survivors)*2)
+	items := make([]addResponseItem, 0, len(survivors))
+	for i, s := range survivors {
+		var nextLTMID string
+		if i+1 < len(survivors) {
+			nextLTMID = survivors[i+1].ltmID
 		}
-		memInfo := mergeInfo(fac.info, p.hash)
-		nodes, item, err := h.buildFastNodes(p.mem, embedding, fac, memInfo)
+		nodes, item, err := h.buildFastNodes(s, fac, nextLTMID)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		allNodes = append(allNodes, nodes...)
 		items = append(items, item)
-		wmEmbeddings = append(wmEmbeddings, embedding)
 	}
 	return allNodes, items, wmEmbeddings, nil
 }
 
-// buildFastNodes constructs the WM and LTM MemoryInsertNode pair for a memory.
-func (h *Handler) buildFastNodes(
-	mem extractedMemory,
-	embedding []float32,
+// fastSurvivor carries everything buildFastNodes needs for a single survivor:
+// the source memory, its embedding, the per-row info bag, and the pre-allocated
+// WM/LTM UUIDs. Pre-allocating the UUIDs in pass 1 lets pass 2 wire each row's
+// linked_memory_ids to the next survivor's LTM ID before the JSONB props are
+// marshalled — the only way to get TIMELINE_NEXT into the GIN index without a
+// second round-trip through Postgres.
+type fastSurvivor struct {
+	mem       extractedMemory
+	embedding []float32
+	info      map[string]any
+	wmID      string
+	ltmID     string
+}
+
+// selectFastSurvivors runs cosine-dedup over the pending batch and returns the
+// rows that pass, with WM/LTM UUIDs pre-allocated for the chain step. The
+// parallel wmEmbeddings slice is what writeWMCache + emitStructuralEdges
+// expect downstream — kept as a separate return so the existing code paths
+// don't have to grow new fields on the survivor struct.
+func (h *Handler) selectFastSurvivors(
+	ctx context.Context,
+	pending []pendingFastMemory,
+	vecs [][]float32,
 	fac fastAddContext,
-	memInfo map[string]any,
+) ([]fastSurvivor, [][]float32) {
+	survivors := make([]fastSurvivor, 0, len(pending))
+	wmEmbeddings := make([][]float32, 0, len(pending))
+	for j, p := range pending {
+		embedding := vecs[j]
+		if h.isDuplicate(ctx, embedding, fac.cubeID, fac.agentID, fac.sessionID) {
+			continue
+		}
+		survivors = append(survivors, fastSurvivor{
+			mem:       p.mem,
+			embedding: embedding,
+			info:      mergeInfo(fac.info, p.hash),
+			wmID:      uuid.New().String(),
+			ltmID:     uuid.New().String(),
+		})
+		wmEmbeddings = append(wmEmbeddings, embedding)
+	}
+	return survivors, wmEmbeddings
+}
+
+// buildFastNodes constructs the WM and LTM MemoryInsertNode pair for a memory.
+//
+// Three no-LLM fields lifted to top-level properties (since 2026-04-29) — only
+// for per-message rows; window-mode rows preserve their pre-existing shape
+// because the fields are not meaningfully derivable from a multi-message
+// window (mixed speakers / multiple chat_times / LLM-grade reasoning needed
+// for soft-graph links):
+//   - attributed_to     ← mem.Sources[0]["role"] (search idx_memory_attributed_to)
+//   - event_dates       ← regex YYYY-MM-DD over content + chat_time anchor (F7)
+//   - linked_memory_ids ← [nextLTMID] when set, else nil (F12 multi-hop, forward
+//     TIMELINE_NEXT chain pre-materialised in JSONB)
+//
+// Per-message rows also stamp kind=fast_msg (distinct from atomic_fact and
+// the migration default paragraph_legacy) and lift per-msg metadata
+// (chat_time/uuid/agent_id/role) into properties.info — both for filter
+// pushdown parity with the raw path. Empty values omit the corresponding
+// property so the GIN/partial indexes (migration 0022 / 0024) skip the row.
+func (h *Handler) buildFastNodes(
+	s fastSurvivor,
+	fac fastAddContext,
+	nextLTMID string,
 ) ([]db.MemoryInsertNode, addResponseItem, error) {
-	embeddingStr := db.FormatVector(embedding)
-	wmID := uuid.New().String()
+	embeddingStr := db.FormatVector(s.embedding)
+
+	// Per-message gating: window-mode rows aggregate multiple speakers /
+	// chat_times / messages into one extractedMemory. The no-LLM fields
+	// don't have a single canonical value in that shape, so we skip them
+	// to preserve the pre-2026-04-30 byte-for-byte property layout.
+	perMsg := isPerMessageFastMemory(s.mem)
+	var (
+		attributedTo string
+		eventDates   []string
+		linked       []string
+		kind         string
+	)
+	if perMsg {
+		applyPerMessageFastInfo(s.info, s.mem)
+		attributedTo = attributedToForFastMemory(s.mem)
+		eventDates = extractEventDatesForFastMemory(s.mem)
+		if nextLTMID != "" {
+			linked = []string{nextLTMID}
+		}
+		kind = fastMsgKind
+	}
+
 	wmJSON, err := marshalProps(buildNodeProps(memoryNodeProps{
-		ID: wmID, Memory: mem.Text, MemoryType: "WorkingMemory",
+		ID: s.wmID, Memory: s.mem.Text, MemoryType: "WorkingMemory",
 		UserName: fac.cubeID, UserID: fac.userID, AgentID: fac.agentID, SessionID: fac.sessionID,
 		Mode: modeFast, Now: fac.now, CreatedAt: fac.now,
-		Info: memInfo, CustomTags: fac.customTags, Sources: mem.Sources, Background: "",
+		Info: s.info, CustomTags: fac.customTags, Sources: s.mem.Sources, Background: "",
 		Key:             fac.key,
 		ObservationDate: fac.observationDate,
 		ExtractionState: extractionStateExtracted,
+		AttributedTo:    attributedTo,
+		EventDates:      eventDates,
+		LinkedMemoryIDs: linked,
+		Kind:            kind,
 	}))
 	if err != nil {
 		return nil, addResponseItem{}, fmt.Errorf("marshal wm properties: %w", err)
 	}
 
-	ltID := uuid.New().String()
 	ltJSON, err := marshalProps(buildNodeProps(memoryNodeProps{
-		ID: ltID, Memory: mem.Text, MemoryType: mem.MemoryType,
+		ID: s.ltmID, Memory: s.mem.Text, MemoryType: s.mem.MemoryType,
 		UserName: fac.cubeID, UserID: fac.userID, AgentID: fac.agentID, SessionID: fac.sessionID,
 		Mode: modeFast, Now: fac.now, CreatedAt: fac.now,
-		Info: memInfo, CustomTags: fac.customTags, Sources: mem.Sources, Background: workingBinding(wmID),
+		Info: s.info, CustomTags: fac.customTags, Sources: s.mem.Sources, Background: workingBinding(s.wmID),
 		Key:             fac.key,
 		ObservationDate: fac.observationDate,
 		ExtractionState: extractionStateExtracted,
+		AttributedTo:    attributedTo,
+		EventDates:      eventDates,
+		LinkedMemoryIDs: linked,
+		Kind:            kind,
 	}))
 	if err != nil {
 		return nil, addResponseItem{}, fmt.Errorf("marshal lt properties: %w", err)
 	}
 
 	nodes := []db.MemoryInsertNode{
-		{ID: wmID, PropertiesJSON: wmJSON, EmbeddingVec: embeddingStr},
-		{ID: ltID, PropertiesJSON: ltJSON, EmbeddingVec: embeddingStr},
+		{ID: s.wmID, PropertiesJSON: wmJSON, EmbeddingVec: embeddingStr},
+		{ID: s.ltmID, PropertiesJSON: ltJSON, EmbeddingVec: embeddingStr},
 	}
-	item := addResponseItem{Memory: mem.Text, MemoryID: ltID, MemoryType: mem.MemoryType, CubeID: fac.cubeID}
+	item := addResponseItem{Memory: s.mem.Text, MemoryID: s.ltmID, MemoryType: s.mem.MemoryType, CubeID: fac.cubeID}
 	return nodes, item, nil
 }
 
