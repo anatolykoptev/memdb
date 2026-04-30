@@ -60,6 +60,12 @@ type reorgPostgres interface {
 	// D3 — promote a memory into a higher tier (sets hierarchy_level + parent_memory_id
 	// on parent_memory_id for children; sets hierarchy_level on the parent itself).
 	SetHierarchyLevel(ctx context.Context, memoryID, level, parentMemoryID, updatedAt string) error
+
+	// W2 — LLM Wiki auto-update from tree promotions. The reorganizer
+	// upserts a wiki page per cluster summary so the wiki keeps pace
+	// with the graph without a separate maintenance loop. Env-gated
+	// by MEMDB_WIKI_AUTO_UPDATE — see internal/scheduler/reorganizer_wiki.go.
+	UpsertWikiPage(ctx context.Context, params db.UpsertWikiPageParams) (db.WikiPage, error)
 }
 
 const (
