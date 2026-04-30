@@ -166,22 +166,6 @@ func atomicInfoFromFact(f llm.AtomicFact) map[string]any {
 	return out
 }
 
-// observationDateFromRequest returns "YYYY-MM-DD" for the conversation. We
-// pick the latest message's chat_time when present, else fall back to UTC
-// today. The value feeds mem0's prompt and is never persisted on its own.
-func observationDateFromRequest(req *fullAddRequest) string {
-	if req == nil {
-		return ""
-	}
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		ct := req.Messages[i].ChatTime
-		if len(ct) >= 10 {
-			return ct[:10]
-		}
-	}
-	return ""
-}
-
 // liftAtomicDiscriminators copies the F8-specific discriminator keys from a
 // per-fact info bag onto the TOP LEVEL of the JSONB props map produced by
 // buildNodeProps. This is required because:
