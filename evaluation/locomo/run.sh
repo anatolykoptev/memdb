@@ -19,6 +19,9 @@
 #   EMBED_API_KEY         Bearer token for embed endpoint (default: "" — embed-server needs none)
 #   LLM_URL, LLM_API_KEY  LLM endpoint (judge, chat). Not used for embeddings.
 #   LOCOMO_LLM_JUDGE=1    run LLM judge scoring (accepts "1" or "true")
+#   LOCOMO_CLEAN_BEFORE=1 hard-delete LoCoMo cubes before ingest (required for
+#                         ingest-mode A/B — content_hash dedup otherwise skips
+#                         every chunk that already lives in the cube)
 #   OUT_SUFFIX            override default <commit-sha> output filename
 
 set -euo pipefail
@@ -62,6 +65,20 @@ SHA=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 SUFFIX="${OUT_SUFFIX:-$SHA}"
 PREDS_OUT="$RESULTS_DIR/predictions-$SUFFIX.json"
 SCORE_OUT="$RESULTS_DIR/$SUFFIX.json"
+
+# 0. Optional cube cleanup. Without this, content_hash dedup on re-ingest
+# silently skips every chunk that already lives in the cube — making
+# ingest-mode A/B comparisons impossible (mode=fine vs mode=raw on the
+# same cube produces near-identical Memory rows after the first run).
+# Default off — opt in via LOCOMO_CLEAN_BEFORE=1.
+if [[ "${LOCOMO_CLEAN_BEFORE:-0}" == "1" ]]; then
+    echo "==> [0/3] cleanup cubes (LOCOMO_CLEAN_BEFORE=1)"
+    if [[ "${LOCOMO_FULL:-0}" == "1" ]]; then
+        python3 "$EVAL_DIR/scripts/cleanup_locomo_cubes.py" --full --memdb-url "$MEMDB_URL"
+    else
+        python3 "$EVAL_DIR/scripts/cleanup_locomo_cubes.py" --sample --memdb-url "$MEMDB_URL"
+    fi
+fi
 
 # 1. Ingest
 echo "==> [1/3] ingest"

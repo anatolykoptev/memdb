@@ -23,15 +23,21 @@ import (
 )
 
 const (
-	atomicOutcomeSuccess  = "success"
-	atomicOutcomeEmpty    = "empty"
-	atomicOutcomeLLMError = "llm_error"
+	atomicOutcomeSuccess       = "success"
+	atomicOutcomeEmpty         = "empty"
+	atomicOutcomeLLMError      = "llm_error"
+	atomicOutcomeNearDupSkip   = "near_dup_skip"
+	atomicOutcomeClassifySkip  = "classify_skip"
+	atomicOutcomeHashDedupSkip = "hash_dedup_skip"
 )
 
 var atomicOutcomes = []string{
 	atomicOutcomeSuccess,
 	atomicOutcomeEmpty,
 	atomicOutcomeLLMError,
+	atomicOutcomeNearDupSkip,
+	atomicOutcomeClassifySkip,
+	atomicOutcomeHashDedupSkip,
 }
 
 var (
@@ -49,7 +55,7 @@ func atomicMx() *atomicMetricsStruct {
 	atomicMetricsOnce.Do(func() {
 		meter := otel.Meter("memdb-go/add")
 		ext, _ := meter.Int64Counter("memdb.add.atomic_facts_extracted_total",
-			metric.WithDescription("Atomic-fact extraction outcomes (success|empty|llm_error)"),
+			metric.WithDescription("Atomic-fact extraction outcomes (success|empty|llm_error|near_dup_skip|classify_skip|hash_dedup_skip)"),
 		)
 		fpc, _ := meter.Float64Histogram("memdb.add.facts_per_chunk",
 			metric.WithDescription("Facts produced per atomic-extraction call"),
