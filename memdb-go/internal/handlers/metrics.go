@@ -195,6 +195,13 @@ type chatRefusalInstruments struct {
 	// "context_signal_strength" dashboard panel and the calibration check
 	// against MEMDB_FACTUAL_CONFIDENCE_THRESHOLD.
 	TopRetrievalScore metric.Float64Histogram
+
+	// ConfidenceComponents observes the per-term contributions of the
+	// multi-feature confidence formula (top1, spread, density, median,
+	// combined). One label `component` keeps cardinality flat (5 series)
+	// regardless of formula choice, supporting A/B between top1-only and
+	// multifeature gates. Range [0, 1] for every component.
+	ConfidenceComponents metric.Float64Histogram
 }
 
 // chatRefusalMx returns the singleton M12.2 chat-refusal instruments,
@@ -212,15 +219,24 @@ func chatRefusalMx() *chatRefusalInstruments {
 		score, _ := meter.Float64Histogram("memdb.chat.top_retrieval_score",
 			metric.WithDescription("Top-1 metadata.relativity (max cosine score) of the memory pool seen by the factual chat prompt builder."),
 		)
+		components, _ := meter.Float64Histogram("memdb.chat.factual_confidence_components",
+			metric.WithDescription("Per-term contributions of the multi-feature retrieval-confidence formula. Label component ∈ {top1,spread,density,median,combined}; value range [0, 1]."),
+		)
 		// Pre-register reason labels at 0 so Prometheus emits the series
 		// before the first refusal happens.
 		ctx := context.Background()
 		for _, reason := range []string{"none", "no_memories", "low_confidence", "other"} {
 			total.Add(ctx, 0, metric.WithAttributes(attribute.String("reason", reason)))
 		}
+		// Pre-register every component label at 0 — operators see the full
+		// series space even before the first factual chat request.
+		for _, comp := range []string{"top1", "spread", "density", "median", "combined"} {
+			components.Record(ctx, 0, metric.WithAttributes(attribute.String("component", comp)))
+		}
 		chatRefusalMetrics = &chatRefusalInstruments{
-			RefusalTotal:      total,
-			TopRetrievalScore: score,
+			RefusalTotal:         total,
+			TopRetrievalScore:    score,
+			ConfidenceComponents: components,
 		}
 	})
 	return chatRefusalMetrics
