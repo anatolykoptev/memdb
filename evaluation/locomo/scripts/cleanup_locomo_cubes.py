@@ -66,8 +66,17 @@ class CubeInfo(NamedTuple):
 
 
 def user_ids_for(sample_id: str) -> tuple[str, str]:
-    """Stable per-conv user IDs for both speakers (mirrors ingest.py)."""
-    return f"{sample_id}__speaker_a", f"{sample_id}__speaker_b"
+    """Stable per-conv user IDs for both speakers (mirrors ingest.py).
+
+    LOCOMO_CUBE_NAMESPACE env scopes cleanup to a per-session namespace.
+    Cleanup MUST run with the same env value the ingest used, otherwise
+    it either deletes nothing or — far worse — wipes another session's
+    cubes. This is the wedge that prevents the conv-26 cross-session
+    delete that bit us on 2026-04-29.
+    """
+    ns = os.getenv("LOCOMO_CUBE_NAMESPACE", "").strip()
+    prefix = f"{ns}__" if ns else ""
+    return f"{prefix}{sample_id}__speaker_a", f"{prefix}{sample_id}__speaker_b"
 
 
 def cubes_from_conversations(conversations: list[dict]) -> list[CubeInfo]:

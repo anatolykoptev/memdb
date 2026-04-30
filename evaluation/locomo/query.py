@@ -689,8 +689,15 @@ def query_chat(
 # --- M9 Stream 1: dual-speaker retrieval helpers -------------------------------
 
 def _speaker_user_ids(conv_id: str) -> tuple[str, str]:
-    """Return `(speaker_a_uid, speaker_b_uid)` for a LoCoMo conv id."""
-    return f"{conv_id}__speaker_a", f"{conv_id}__speaker_b"
+    """Return `(speaker_a_uid, speaker_b_uid)` for a LoCoMo conv id.
+
+    LOCOMO_CUBE_NAMESPACE env optionally prepends a per-session prefix —
+    must match the value used by ingest.py / cleanup_locomo_cubes.py for
+    the run, otherwise query targets the wrong cubes.
+    """
+    ns = os.getenv("LOCOMO_CUBE_NAMESPACE", "").strip()
+    prefix = f"{ns}__" if ns else ""
+    return f"{prefix}{conv_id}__speaker_a", f"{prefix}{conv_id}__speaker_b"
 
 
 def _merge_dual_results(
