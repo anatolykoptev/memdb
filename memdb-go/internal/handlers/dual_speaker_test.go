@@ -147,7 +147,7 @@ func TestBuildDualSpeakerPromptBlock_RendersBothBlocks(t *testing.T) {
 			{"memory": "bob loves red"},
 		}},
 	}
-	out := buildDualSpeakerPromptBlock(legs)
+	out, _ := buildDualSpeakerPromptBlock(legs)
 	if !strings.Contains(out, "## Speaker alice memories:") {
 		t.Errorf("missing alice header in block:\n%s", out)
 	}
@@ -167,7 +167,7 @@ func TestBuildDualSpeakerPromptBlock_EmptyLegRendersPlaceholder(t *testing.T) {
 		{speaker: "alice", memories: []map[string]any{{"memory": "x"}}},
 		{speaker: "bob", memories: nil},
 	}
-	out := buildDualSpeakerPromptBlock(legs)
+	out, _ := buildDualSpeakerPromptBlock(legs)
 	if !strings.Contains(out, "(no memories retrieved)") {
 		t.Errorf("expected placeholder for empty leg, got:\n%s", out)
 	}
