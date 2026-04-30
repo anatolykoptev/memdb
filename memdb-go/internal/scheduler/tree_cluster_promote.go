@@ -78,6 +78,13 @@ func (r *Reorganizer) promoteCluster(ctx context.Context, cubeID string, cluster
 		))
 	}
 
+	// W2 (LLM Wiki): mirror the cluster summary into wiki_pages. No-op when
+	// MEMDB_WIKI_AUTO_UPDATE is off. Best-effort — failures are counted into
+	// schedMx().TreeReorg{outcome=wiki_write_error} without aborting the
+	// promotion. The audit trail above is the source of truth; the wiki page
+	// is a secondary view for the chat retrieval slot (W3.5).
+	r.recordWikiPage(ctx, cubeID, eventID, res.Summary, res.Embedding, childIDs, targetLevel)
+
 	return parentInfo{
 		ID:        res.ParentID,
 		Text:      res.Summary,
