@@ -20,7 +20,14 @@ const (
 	modeRaw         = "raw"
 )
 
-// extractedMemory is a single memory window produced by the sliding-window algorithm.
+// extractedMemory is a single memory unit produced by the fast-add extractor.
+// Two extractor flavours feed this struct:
+//   - extractFastMemoriesPerMessage  → 1 row per message, Sources len = 1
+//   - extractFastMemories (windowed) → 1 row per ~windowChars-budget window
+//
+// The downstream pipeline (buildFastNodes / WM+LTM pair) treats both
+// uniformly; the only difference is granularity. Window mode is preserved
+// for legacy A/B and the WindowChars override path.
 type extractedMemory struct {
 	Text       string
 	Sources    []map[string]any
@@ -81,6 +88,58 @@ func extractFastMemories(messages []chatMessage, windowSize int) []extractedMemo
 	}
 
 	return results
+}
+
+// extractFastMemoriesPerMessage emits one extractedMemory per non-empty
+// message — same granularity as raw mode but riding the fast pipeline
+// (batched embed + WM/LTM pair + VSET hot cache).
+//
+// Why this exists: the windowed extractor (extractFastMemories) bundles
+// 18+ messages into ~3 windows, dissolving per-message facts ("Melanie has
+// 3 kids") into average-pooled embeddings. cat-1 simple-fact retrieval
+// hit@k drops to zero on the windowed path. Per-message rows preserve the
+// fact in its own embedding, fixable by the same retrieve→rerank stack
+// that already works for raw.
+//
+// MemoryType: same heuristic as the windowed path — assistant role lifts
+// the row to LongTermMemory, otherwise UserMemory. Single-msg windows
+// can't be "mixed", so the userOnly check collapses to role inspection.
+func extractFastMemoriesPerMessage(messages []chatMessage) []extractedMemory {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]extractedMemory, 0, len(messages))
+	for _, msg := range messages {
+		trimmed := strings.TrimSpace(msg.Content)
+		if trimmed == "" {
+			continue
+		}
+		chatTime := msg.ChatTime
+		if chatTime == "" {
+			chatTime = time.Now().UTC().Format("2006-01-02T15:04:05")
+		}
+		src := map[string]any{
+			"role":      msg.Role,
+			"content":   msg.Content,
+			"chat_time": chatTime,
+		}
+		if msg.UUID != "" {
+			src["uuid"] = msg.UUID
+		}
+		if msg.AgentID != "" {
+			src["agent_id"] = msg.AgentID
+		}
+		memType := memTypeLongTerm
+		if msg.Role == roleUser {
+			memType = memTypeUser
+		}
+		out = append(out, extractedMemory{
+			Text:       fmt.Sprintf("%s: [%s]: %s", msg.Role, chatTime, msg.Content),
+			Sources:    []map[string]any{src},
+			MemoryType: memType,
+		})
+	}
+	return out
 }
 
 // formattedMsg is an intermediate representation of a single message.
