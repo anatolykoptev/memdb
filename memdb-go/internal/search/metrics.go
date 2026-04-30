@@ -189,8 +189,20 @@ func searchMx() *searchMetricsInstruments {
 		// the series before the first real event fires — avoids a
 		// "metric not found" gap in dashboards / alert rules.
 		ctx := context.Background()
-		for _, c := range []metric.Int64Counter{d4, d7, d10, mh, d11} {
+		for _, c := range []metric.Int64Counter{d4, d7, mh, d11} {
 			c.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", "")))
+		}
+		// D10 hybrid extractor: pre-register every (category × outcome)
+		// pair so all 5 × 4 series appear at zero on cold start.
+		// Cardinality stays bounded (20 series) because both label sets
+		// are closed enums (AllQueryCategories + d10EnhanceOutcomes).
+		for _, cat := range AllQueryCategories {
+			for _, oc := range []string{"answered", "unknown", "skipped", "error"} {
+				d10.Add(ctx, 0, metric.WithAttributes(
+					attribute.String("outcome", oc),
+					attribute.String("category", string(cat)),
+				))
+			}
 		}
 		d5.Add(ctx, 0, metric.WithAttributes(
 			attribute.String("stage", ""),
