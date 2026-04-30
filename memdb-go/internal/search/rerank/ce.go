@@ -22,10 +22,34 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"math"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/anatolykoptev/go-kit/rerank"
 )
+
+// ceQualityFloorEnv gates the low-quality CE → MathReranker fallback. CE
+// returning StatusOk with top-1 score below this floor is treated as a
+// hallucination (gte-multi-rerank's known failure mode on narrow OOD queries)
+// and routes through cosine instead. Default 0.1 matches go-search.
+// Set to 0 to disable the quality gate entirely (preserve pre-#14 behavior).
+const ceQualityFloorEnv = "MEMDB_CE_QUALITY_FLOOR"
+const ceQualityFloorDefault = 0.1
+
+func ceQualityFloor() float64 {
+	raw := strings.TrimSpace(os.Getenv(ceQualityFloorEnv))
+	if raw == "" {
+		return ceQualityFloorDefault
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v < 0 {
+		return ceQualityFloorDefault
+	}
+	return v
+}
 
 // CrossEncoder reranks via a precompute lookup with live HTTP fallback.
 // Disabled (skip lookup, always live) when MEMDB_CE_PRECOMPUTE=false.
@@ -39,6 +63,11 @@ type CrossEncoder struct {
 	OnLiveCall func(ctx context.Context)
 	// OnPrecompute fires for every lookup outcome (hit | partial | miss | stale).
 	OnPrecompute func(ctx context.Context, outcome string)
+	// OnMathFallback fires when the live CE call routes through MathReranker
+	// (cosine on QueryVec) — either because go-kit returned StatusDegraded
+	// (timeout, 5xx, ErrCircuitOpen) OR because top-1 score fell below the
+	// quality floor. Reason is "degraded" or "low_quality"; nil = skip metric.
+	OnMathFallback func(ctx context.Context, reason string)
 	// QueryUserID, QuerySessionID, QueryTags carry the query-time identity
 	// context used by the metadata boost post-step (Q3 stream). Empty
 	// strings / nil slice = no boost for that factor.
@@ -49,6 +78,18 @@ type CrossEncoder struct {
 	// (all fields = 0) disables all boosting silently. Use
 	// DefaultBoostWeights() for MemOS-parity defaults.
 	BoostWeights BoostWeights
+	// QueryVec and EmbeddingsByID enable the math fallback path: when the
+	// live CE call returns degraded or near-zero scores, MathReranker
+	// reorders items by cosine on these vectors. Nil/empty = math fallback
+	// disabled (CE-only behavior, parity with pre-fallback ports).
+	//
+	// Pattern lifted from go-search ce_rerank.go (PRs #10 + #14): CE
+	// hallucinates near-zero scores on narrow OOD queries even when cosine
+	// says the docs are highly relevant. On those queries the
+	// require_positive_ce / threshold gate downstream drops every result —
+	// math fallback keeps the pipeline producing scores.
+	QueryVec       []float32
+	EmbeddingsByID map[string][]float32
 }
 
 // Name implements Reranker.
@@ -202,7 +243,15 @@ func (ce CrossEncoder) runLive(ctx context.Context, query string, items []Item) 
 			continue
 		}
 		id := fmt.Sprintf("%d", i)
-		docs = append(docs, rerank.Doc{ID: id, Text: text})
+		// Carry the embed vector when we have one — required by the math
+		// fallback path. EmbeddingsByID may be nil (legacy callers) or
+		// missing this item; in that case Doc.EmbedVector is nil and the
+		// fallback path will skip cosine scoring for it.
+		var vec []float32
+		if ce.EmbeddingsByID != nil {
+			vec = ce.EmbeddingsByID[it.ID()]
+		}
+		docs = append(docs, rerank.Doc{ID: id, Text: text, EmbedVector: vec})
 		idxByID[id] = i
 	}
 	if len(docs) == 0 {
@@ -212,7 +261,7 @@ func (ce CrossEncoder) runLive(ctx context.Context, query string, items []Item) 
 	if ce.OnLiveCall != nil {
 		ce.OnLiveCall(ctx)
 	}
-	scored := ce.Client.Rerank(ctx, query, docs)
+	scored := ce.rerankWithMathFallback(ctx, query, docs)
 
 	seen := make(map[int]bool, len(scored))
 	out := make([]Item, 0, len(items))
@@ -234,6 +283,108 @@ func (ce CrossEncoder) runLive(ctx context.Context, query string, items []Item) 
 	return out
 }
 
+// rerankWithMathFallback is the CE-or-cosine wrapper. Two fallback triggers:
+//
+//  1. Availability: ceClient returns StatusDegraded (timeout, 5xx,
+//     ErrCircuitOpen). Pattern from go-search PR #10.
+//  2. Quality: ceClient returns StatusOk but the top-1 score is below
+//     MEMDB_CE_QUALITY_FLOOR. Pattern from go-search PR #14 — gte-multi-rerank
+//     hallucinates near-zero scores on narrow OOD queries even when cosine
+//     similarity is 0.9+. Without this fallback the require_positive_ce
+//     gate / threshold filter downstream drops every result.
+//
+// When either trigger fires AND a non-empty QueryVec is set, MathReranker
+// reorders by cosine on Doc.EmbedVector. Otherwise the CE result is returned
+// as-is so existing tests / nil-vec callers keep their behavior.
+func (ce CrossEncoder) rerankWithMathFallback(ctx context.Context, query string, docs []rerank.Doc) []rerank.Scored {
+	res, err := ce.Client.RerankWithResult(ctx, query, docs)
+
+	ceDegraded := res == nil || res.Status == rerank.StatusDegraded
+	ceLowQuality := false
+	floor := ceQualityFloor()
+	if !ceDegraded && floor > 0 && len(res.Scored) > 0 {
+		topScore := float64(res.Scored[0].Score)
+		for _, s := range res.Scored {
+			if float64(s.Score) > topScore {
+				topScore = float64(s.Score)
+			}
+		}
+		ceLowQuality = topScore < floor
+	}
+
+	// Healthy path — return CE scores directly.
+	if !ceDegraded && !ceLowQuality {
+		return res.Scored
+	}
+
+	// No query vector → can't run math fallback. Return what CE gave (if
+	// anything) so the caller still has a stable shape to work with.
+	if len(ce.QueryVec) == 0 {
+		if res != nil {
+			return res.Scored
+		}
+		return nil
+	}
+
+	reason := "degraded"
+	if ceLowQuality {
+		reason = "low_quality"
+	}
+	slog.Warn("ce_rerank: falling back to MathReranker",
+		slog.String("reason", reason),
+		slog.Any("error", err),
+	)
+	if ce.OnMathFallback != nil {
+		ce.OnMathFallback(ctx, reason)
+	}
+	return mathRerankCosine(ce.QueryVec, docs)
+}
+
+// mathRerankCosine reorders docs by cosine similarity to queryVec. Docs
+// without an EmbedVector get score 0 and sink to the bottom in original
+// order. Drop-in replacement for ce.Client.Rerank when the live path
+// hallucinates or fails.
+func mathRerankCosine(queryVec []float32, docs []rerank.Doc) []rerank.Scored {
+	if len(queryVec) == 0 || len(docs) == 0 {
+		return nil
+	}
+	scored := make([]rerank.Scored, 0, len(docs))
+	for i, d := range docs {
+		score := float32(0)
+		if len(d.EmbedVector) == len(queryVec) && len(queryVec) > 0 {
+			score = cosineFloat32(queryVec, d.EmbedVector)
+		}
+		scored = append(scored, rerank.Scored{Doc: d, Score: score, OrigRank: i})
+	}
+	// Insertion sort DESC by score — small N (chat top-K is ≤30 typically).
+	for i := 1; i < len(scored); i++ {
+		j := i
+		for j > 0 && scored[j-1].Score < scored[j].Score {
+			scored[j-1], scored[j] = scored[j], scored[j-1]
+			j--
+		}
+	}
+	return scored
+}
+
+// cosineFloat32 is a minimal pure-Go cosine. Returns 0 on zero-norm input.
+// Kept local to avoid a go-kit/rerank import cycle for this single helper.
+func cosineFloat32(a, b []float32) float32 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+	var dot, na, nb float32
+	for i := range a {
+		dot += a[i] * b[i]
+		na += a[i] * a[i]
+		nb += b[i] * b[i]
+	}
+	if na == 0 || nb == 0 {
+		return 0
+	}
+	return float32(float64(dot) / math.Sqrt(float64(na)*float64(nb)))
+}
+
 // runLiveSubset calls the live HTTP rerank backend for a subset of items
 // (the uncached portion in a partial-hit). Returns items in the order the
 // CE backend scored them, with SetScore applied. Items without text are
@@ -251,7 +402,11 @@ func (ce CrossEncoder) runLiveSubset(ctx context.Context, query string, items []
 			continue
 		}
 		id := fmt.Sprintf("%d", i)
-		docs = append(docs, rerank.Doc{ID: id, Text: text})
+		var vec []float32
+		if ce.EmbeddingsByID != nil {
+			vec = ce.EmbeddingsByID[it.ID()]
+		}
+		docs = append(docs, rerank.Doc{ID: id, Text: text, EmbedVector: vec})
 		idxByID[id] = i
 	}
 
@@ -265,7 +420,7 @@ func (ce CrossEncoder) runLiveSubset(ctx context.Context, query string, items []
 	if ce.OnLiveCall != nil {
 		ce.OnLiveCall(ctx)
 	}
-	scored := ce.Client.Rerank(ctx, query, docs)
+	scored := ce.rerankWithMathFallback(ctx, query, docs)
 
 	for _, s := range scored {
 		origIdx, ok := idxByID[s.ID]
