@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -217,19 +218,56 @@ func (h *Handler) chatSearchMemoriesDual(
 	return filtered, pref, legs, nil
 }
 
+// extractMemoryTs returns the in-conversation date for a single memory,
+// trying observation_date → chat_time → created_at → created_time → time
+// → date. Mirrors evaluation/locomo/query.py::_extract_ts (the harness
+// equivalent) so server-built dual-speaker prompts share the M12.1
+// temporal anchor with the legacy harness-built path.
+//
+// Returns "" when no usable date is found — caller renders the memory
+// without a ts: prefix in that case.
+func extractMemoryTs(m map[string]any) string {
+	md, _ := m["metadata"].(map[string]any)
+	if md == nil {
+		md = m
+	}
+	keys := [...]string{"observation_date", "chat_time", "created_at", "created_time", "time", "date"}
+	for _, k := range keys {
+		v, ok := md[k]
+		if !ok {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok || s == "" {
+			continue
+		}
+		if len(s) >= 10 {
+			return s[:10]
+		}
+		return s
+	}
+	return ""
+}
+
 // buildDualSpeakerPromptBlock renders a "## Speaker <id> memories: ..."
 // block per speaker. Mirrors the harness shape from
-// evaluation/locomo/query.py:_build_dual_speaker_system_prompt but uses
-// "## Speaker X" headers (the prod-friendly name) instead of "[speaker:X]".
+// evaluation/locomo/query.py:_build_dual_speaker_system_prompt — each
+// memory line is prefixed with its in-conversation ts (M12.1 temporal
+// anchor) so the LLM resolves "yesterday"/"last week" against the
+// conversation's own timeline, not server wall-clock.
+//
+// The maximum ts seen across all legs is returned alongside the block
+// so the caller can render a "Current time:" header without re-walking
+// the memories.
 //
 // Empty legs (search failed or returned 0) render as "(no memories
-// retrieved)" so the model sees the explicit absence — matches the
-// harness's behaviour.
-func buildDualSpeakerPromptBlock(legs []chatDualSpeakerLeg) string {
+// retrieved)" so the model sees the explicit absence.
+func buildDualSpeakerPromptBlock(legs []chatDualSpeakerLeg) (string, string) {
 	if len(legs) == 0 {
-		return ""
+		return "", ""
 	}
 	var sb strings.Builder
+	maxTs := ""
 	for _, l := range legs {
 		sb.WriteString(fmt.Sprintf("## Speaker %s memories:\n", l.speaker))
 		if l.err != nil || len(l.memories) == 0 {
@@ -241,11 +279,19 @@ func buildDualSpeakerPromptBlock(legs []chatDualSpeakerLeg) string {
 			if text == "" {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, text))
+			ts := extractMemoryTs(m)
+			if ts != "" {
+				sb.WriteString(fmt.Sprintf("%d. %s: %s\n", i+1, ts, text))
+				if ts > maxTs {
+					maxTs = ts
+				}
+			} else {
+				sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, text))
+			}
 		}
 		sb.WriteString("\n")
 	}
-	return strings.TrimRight(sb.String(), "\n")
+	return strings.TrimRight(sb.String(), "\n"), maxTs
 }
 
 // dualSpeakerChatPromptHeader is prepended to the dual-speaker system
@@ -255,20 +301,49 @@ func buildDualSpeakerPromptBlock(legs []chatDualSpeakerLeg) string {
 // be appended after the speaker blocks.
 const dualSpeakerChatPromptHeader = "You are a factual QA assistant answering a question about a recorded multi-speaker conversation. Below are memories retrieved separately from each speaker's personal memory store; treat every speaker's evidence as equally authoritative and combine across speakers when the question requires it."
 
+// dualSpeakerNowOverrideEnv is the operator-pin env that forces a fixed
+// "Current time:" anchor regardless of retrieved memories. Mirrors the
+// LOCOMO_CONV_NOW harness override so replay/eval scenarios can bolt the
+// reference time without writing it into every payload.
+const dualSpeakerNowOverrideEnv = "MEMDB_DUAL_NOW_OVERRIDE"
+
 // composeDualSpeakerSystemPrompt assembles the full system prompt for a
 // dual-speaker chat call when the caller did NOT supply a custom
-// system_prompt. Order: header → per-speaker blocks → factual rules
-// (delegated to buildSystemPromptWithDecision via basePrompt route).
+// system_prompt. Order: header → "Current time: <ts>" anchor →
+// per-speaker blocks → factual rules (delegated to
+// buildSystemPromptWithDecision via basePrompt route).
 //
-// The returned string is fed into buildSystemPromptWithDecision as
-// basePrompt. We pre-compose the header + speaker blocks here so the
-// decision-routing logic in chat_prompt.go can append the M12.4 anti-
-// refusal rules block uniformly (same code path as the harness's
-// `system_prompt + answer_style=factual` shape that already works in prod).
+// The "Current time:" line resolves in priority:
+//
+//   1. MEMDB_DUAL_NOW_OVERRIDE env (operator pin),
+//   2. max ts across retrieved memories (the conversation's own timeline),
+//   3. omit the line entirely — never falls back to time.Now() (M11
+//      regression vector documented in M12 RCA).
+//
+// The trailer instruction nudges the LLM to resolve relative phrases
+// against per-memory ts: prefixes (M12.1 anti-poisoning).
 func composeDualSpeakerSystemPrompt(legs []chatDualSpeakerLeg) string {
-	block := buildDualSpeakerPromptBlock(legs)
-	if block == "" {
-		return dualSpeakerChatPromptHeader
+	block, maxTs := buildDualSpeakerPromptBlock(legs)
+	convNow := strings.TrimSpace(os.Getenv(dualSpeakerNowOverrideEnv))
+	if convNow == "" {
+		convNow = maxTs
 	}
-	return dualSpeakerChatPromptHeader + "\n\n" + block
+
+	var sb strings.Builder
+	sb.WriteString(dualSpeakerChatPromptHeader)
+	if convNow != "" {
+		sb.WriteString("\n\nCurrent time: ")
+		sb.WriteString(convNow)
+	}
+	if block != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(block)
+	}
+	if convNow != "" || block != "" {
+		sb.WriteString("\n\nEach memory line is prefixed with its in-conversation date (YYYY-MM-DD). " +
+			"Resolve relative phrases like 'last week', 'yesterday', 'next month' against the dated memory, " +
+			"NOT against the 'Current time' header. When asked WHEN an event happened, answer with the most " +
+			"specific date or relative phrase present in the memories themselves.")
+	}
+	return sb.String()
 }
