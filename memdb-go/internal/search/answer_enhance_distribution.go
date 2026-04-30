@@ -42,12 +42,12 @@ import (
 // open_domain entry with confidence 0 (matches ClassifyTopN's noSignal
 // shape — callers can branch on `len(dist) == 1 && dist[0].Confidence == 0`).
 //
-// Softmax is applied with a fixed temperature of 1 / 0.10 (= 10) so that
-// cosine differences in the natural [-0.2, 0.8] range produce a sharp but
-// not collapsed distribution. Temperature was chosen empirically against
-// the LoCoMo anchor set: at T=10 the modal-category mass is 0.6-0.95 for
-// confident questions and 0.25-0.45 for ambiguous ones, which keeps the
-// hard-routing gate meaningful without saturating to one-hot.
+// Softmax is applied with an inverse-temperature read from
+// MEMDB_D10_SOFTMAX_TEMPERATURE (default 10) so that cosine differences in
+// the natural [0, 0.8] range produce a sharp but not collapsed distribution.
+// At T=10 the modal-category mass is 0.6-0.95 for confident questions and
+// 0.25-0.45 for ambiguous ones — meaningful hard-routing gate without
+// saturating to one-hot. Operators can sweep the knob during calibration.
 func (c *lazyEmbedClassifier) classifyAndDistribute(ctx context.Context, query string) ([]CategoryConfidence, error) {
 	// Pull the full top-N (== all categories), then softmax across them.
 	all, err := c.ClassifyTopN(ctx, query, len(classifierCategoryOrder))
@@ -59,7 +59,7 @@ func (c *lazyEmbedClassifier) classifyAndDistribute(ctx context.Context, query s
 		// the base prompt path.
 		return all, nil
 	}
-	const temperature = 10.0
+	temperature := d10SoftmaxTemperature()
 	maxScore := all[0].Confidence
 	var sum float64
 	exps := make([]float64, len(all))

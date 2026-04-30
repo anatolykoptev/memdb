@@ -119,6 +119,12 @@ const (
 	// cost of hiding the long tail (which a calibrated classifier puts at
 	// ~1-3% each anyway).
 	defaultD10SoftTopN                  = 5
+	// defaultD10SoftmaxTemperature — inverse-temperature applied to cosine
+	// similarities before softmax. T=10 keeps top-1 in [0.6, 0.95] for
+	// confident anchor matches and [0.25, 0.45] for ambiguous queries on
+	// the multilingual-e5-large embedder. Lower → flatter distribution
+	// (less hard-routing); higher → sharper (more hard-routing).
+	defaultD10SoftmaxTemperature        = 10.0
 )
 
 // answerEnhanceMinRelativity returns the minimum relativity threshold below
@@ -167,6 +173,16 @@ func d10HardRoutingThreshold() float64 {
 // Env: MEMDB_D10_SOFT_TOP_N in [1, 5]. Default 5 (all categories).
 func d10SoftTopN() int {
 	return parseEnvInt("MEMDB_D10_SOFT_TOP_N", 1, 5, defaultD10SoftTopN)
+}
+
+// d10SoftmaxTemperature returns the inverse-temperature applied to cosine
+// similarities before softmax in classifyAndDistribute. Higher = sharper
+// distribution (more hard-routing); lower = flatter (less hard-routing).
+//
+// Env: MEMDB_D10_SOFTMAX_TEMPERATURE in [1, 50]. Default 10.0 (calibrated
+// against multilingual-e5-large + the LoCoMo anchor set).
+func d10SoftmaxTemperature() float64 {
+	return parseEnvFloat("MEMDB_D10_SOFTMAX_TEMPERATURE", 1, 50, defaultD10SoftmaxTemperature)
 }
 
 // ---- D5 — staged_retrieval -------------------------------------------------

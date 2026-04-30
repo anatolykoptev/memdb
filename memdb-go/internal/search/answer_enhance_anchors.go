@@ -121,15 +121,3 @@ var anchorQuestions = map[QueryCategory][]string{
 	},
 }
 
-// categoryHintStrings maps each category to a short (one-line) shape hint
-// appended after the base extractor prompt. open_domain is intentionally
-// empty — it has no shape constraint to add and the base prompt's general
-// rules are sufficient. Empty hint suppresses the entire hint block so the
-// prompt is byte-identical to the base in that case.
-var categoryHintStrings = map[QueryCategory]string{
-	QueryCategorySingleHop:   "Prefer single number/name/count over noun phrase. Strip articles (a/the).",
-	QueryCategoryMultiHop:    "Combine evidence from multiple memories. Cite source IDs in linking order.",
-	QueryCategoryTemporal:    "Format dates as YYYY-MM-DD. Format durations as 'N days/months/years'.",
-	QueryCategoryOpenDomain:  "",
-	QueryCategoryAdversarial: "If question's premise contradicts the memories, return the contradicting fact. If unsupported, return UNKNOWN with confidence ≤ 0.3.",
-}
