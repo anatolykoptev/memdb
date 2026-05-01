@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anatolykoptev/skillkit"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"
@@ -90,18 +91,34 @@ func validateISODates(ctx context.Context, in []string) []string {
 	return out
 }
 
-// ADDITIVE_EXTRACTION_PROMPT is a verbatim copy of
-// mem0/mem0/configs/prompts.py::ADDITIVE_EXTRACTION_PROMPT (lines 468-944).
+//go:embed skills/atomic-extractor.md
+var embeddedAtomicSkillRaw string
+
+// atomicSkill is the singleton skillkit.Embedded for the mem0
+// ADDITIVE_EXTRACTION_PROMPT used by ExtractAtomicFacts. The .md file
+// is the single source of truth, embedded into the binary; operators
+// can override at runtime via MEMDB_ATOMIC_SKILL_PATH for hot-reload
+// during prompt iteration.
 //
-// It lives in additive_extraction_prompt.txt (33 KB, embedded at build time)
-// so the Go source stays readable and so future prompt-version diffs are
-// visible in `git log -- additive_extraction_prompt.txt`. Do NOT edit the
-// .txt file in-place — re-extract from the upstream source if you bump.
+// Resolution per Body() call (delegated to skillkit):
+//  1. If MEMDB_ATOMIC_SKILL_PATH is set + path readable + file ≤1 MiB +
+//     body non-empty after frontmatter strip → mtime-cached body.
+//  2. If env path becomes transiently unreadable but a prior read
+//     populated the cache → cached last-known-good body
+//     (operator-friendly during atomic-rename windows).
+//  3. Otherwise → embedded default (skills/atomic-extractor.md).
 //
-// Source: https://github.com/mem0ai/mem0/blob/main/mem0/configs/prompts.py
-//
-//go:embed additive_extraction_prompt.txt
-var ADDITIVE_EXTRACTION_PROMPT string
+// Always returns non-empty. Package init panics if embedded body is
+// empty after frontmatter strip (build-time invariant).
+var atomicSkill = skillkit.NewEmbedded("atomic-extractor", "MEMDB_ATOMIC_SKILL_PATH", embeddedAtomicSkillRaw)
+
+// AtomicSkillDiagnostic returns a one-line description of the live
+// atomic-extractor prompt source. Used by cmd/server at startup so
+// operators see in stdout whether the env override is active. Not
+// a hot-path call.
+func AtomicSkillDiagnostic() string {
+	return atomicSkill.Diagnostic()
+}
 
 // AtomicFact is one mem0-style atomic memory: a 15-80-word self-contained
 // factual statement with optional speaker attribution and soft graph edges.
@@ -193,7 +210,7 @@ func (e *AtomicExtractor) ExtractAtomicFacts(
 	user := buildAtomicUserMessage(conversation, candidates, observationDate)
 
 	msgs := []Message{
-		{Role: "system", Content: ADDITIVE_EXTRACTION_PROMPT},
+		{Role: "system", Content: atomicSkill.Body()},
 		{Role: "user", Content: user},
 	}
 
