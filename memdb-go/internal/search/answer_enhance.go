@@ -45,34 +45,6 @@ const (
 // tuning.go as an env-readable accessor (MEMDB_D10_MIN_RELATIVITY).
 // Default: 0.4. See defaultAnswerEnhanceMinRelativity.
 
-// answerEnhanceSystemPrompt — D10 answer extractor (concise).
-//
-// Design (post cefix7→cefix9 diagnosis, 2026-04-30):
-//   - Cefix9 metrics showed 60-100% UNKNOWN per category — base prompt's
-//     gate ("UNKNOWN only when NO related info exists") was too strict
-//     AND the prompt was too long (~440 tokens) which makes Gemini 2.5
-//     flash bias toward the safe UNKNOWN escape hatch.
-//   - This rewrite drops to ~120 tokens: 1 commitment line, 3 short
-//     rules, 2 contrasting examples, JSON contract. Same extractive
-//     discipline, half the cognitive load.
-//
-// Lower the bar: "best guess from memories" replaces "shortest surface
-// form" as the primary instruction. Shape rules stay but as guidance,
-// not as gate. UNKNOWN remains the hallucination escape, but the prompt
-// now actively pushes the model to answer instead of refuse.
-const answerEnhanceSystemPrompt = `Extract the answer from the memories. If ANY memory mentions the entity in the question, return your best grounded guess from that memory (a short noun, name, number, or phrase). UNKNOWN only when NO memory mentions the entity at all.
-
-Rules:
-- Strip articles/framing ("a"/"the"/"works as"/"is a") unless the question asks for the full phrase.
-- Match the gold style, not the memory's verbatim phrasing (e.g. "three kids" → "3" if asked "how many").
-- Tokens in the answer should come from the memories. Synthesising the gold surface form (e.g. "3" from "three") is allowed; inventing facts not in the memories is not.
-
-Examples:
-- Q: "What is Caroline's job?"  M: "Caroline works as a social worker" → "social worker"
-- Q: "How many children does Melanie have?"  M: "Melanie has three kids" → "3"
-
-Return JSON: {"answer": string, "source_ids": [string...], "confidence": float 0.0-1.0}`
-
 // AnswerEnhanceConfig configures the post-retrieval answer-extraction LLM call.
 // Mirrors LLMRerankConfig shape so the service can reuse the same proxy credentials.
 type AnswerEnhanceConfig struct {

@@ -1,0 +1,83 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    # Complexity & size
+    - funlen        # function length (lines + statements)
+    - gocognit      # cognitive complexity (Sonar-style)
+    - cyclop        # cyclomatic complexity
+    - nestif        # deeply nested ifs
+
+    # DRY
+    - dupl          # copy-paste detector
+    - goconst       # repeated string literals → constants
+
+    # Hardcode prevention
+    - mnd           # magic number detector
+    - usestdlibvars # use stdlib constants (http.StatusOK, http.MethodGet, etc.)
+
+    # Security
+    - gosec         # security issues (hardcoded creds, weak crypto, etc.)
+
+    # Code quality
+    - gocritic      # opinionated checks for bugs, performance, style
+    - noctx         # HTTP requests must use context
+    - bodyclose     # HTTP response body must be closed
+    - errorlint     # proper error wrapping (Go 1.13+)
+    - perfsprint    # faster alternatives to fmt.Sprintf
+
+  settings:
+    funlen:
+      lines: 100
+      statements: 60
+    gocognit:
+      min-complexity: 20
+    cyclop:
+      max-complexity: 15
+    nestif:
+      min-complexity: 5
+    dupl:
+      threshold: 150
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    mnd:
+      checks:
+        - argument
+        - case
+        - condition
+        - return
+      ignored-numbers:
+        - "0"
+        - "1"
+        - "2"
+        - "10"
+        - "100"
+        - "1000"
+      ignored-functions:
+        - "^math\\."
+        - "^time\\."
+        - "^strings\\.Repeat$"
+    gosec:
+      excludes:
+        - G104  # unhandled errors — errcheck covers this
+        - G304  # file path from variable — common in CLI tools
+
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      # Tests can be long and use magic numbers
+      - path: _test\.go
+        linters:
+          - funlen
+          - mnd
+          - dupl
+          - gosec
+          - goconst
+          - gocognit
+          - cyclop

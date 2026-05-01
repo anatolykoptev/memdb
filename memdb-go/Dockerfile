@@ -20,11 +20,11 @@ RUN apt-get update && \
 COPY --from=builder /memdb-go /usr/local/bin/memdb-go
 COPY --from=builder /memdb-reembed /usr/local/bin/memdb-reembed
 
-# D10 skill files — system prompt for the answer-extractor LLM call.
-# loadSkillPrompt() resolves /etc/memdb/skills/d10-extractor.md as the
-# bundled default; operators can override via MEMDB_D10_SKILL_PATH or
-# by volume-mounting on top of /etc/memdb/skills/.
-COPY --from=builder /app/internal/search/skills /etc/memdb/skills
+# D10 skill files (skills/d10-extractor.md) are bundled INTO the binary
+# via //go:embed in internal/search/skill_loader.go. Operators can still
+# override the prompt at runtime by setting MEMDB_D10_SKILL_PATH to a
+# host-mounted file (volume-mount in compose). No image-layer COPY is
+# needed for the default to work.
 
 EXPOSE 8080
 
