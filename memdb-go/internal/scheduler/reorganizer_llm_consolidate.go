@@ -33,7 +33,7 @@ func (r *Reorganizer) llmConsolidate(ctx context.Context, cluster []memNode) (co
 	memoriesJSON, _ := json.Marshal(items)
 
 	msgs := []map[string]string{
-		{"role": "system", "content": consolidationSystemPrompt},
+		{"role": "system", "content": schedulerPrompt("memory-consolidator")},
 		{"role": "user", "content": fmt.Sprintf("Memory cluster to consolidate:\n%s", memoriesJSON)},
 	}
 

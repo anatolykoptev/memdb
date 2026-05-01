@@ -242,17 +242,18 @@ func TestEpisodicMemory_NotInWMType(t *testing.T) {
 // ---- wmCompactionSystemPrompt sanity ----------------------------------------
 
 func TestWMCompactionSystemPrompt(t *testing.T) {
-	if wmCompactionSystemPrompt == "" {
-		t.Error("wmCompactionSystemPrompt must not be empty")
+	p := schedulerPrompt("session-compactor")
+	if p == "" {
+		t.Error("session-compactor skill must not be empty")
 	}
-	if !strings.Contains(wmCompactionSystemPrompt, "summary") {
-		t.Error("wmCompactionSystemPrompt must reference 'summary' field")
+	if !strings.Contains(p, "summary") {
+		t.Error("session-compactor skill must reference 'summary' field")
 	}
-	if !strings.Contains(wmCompactionSystemPrompt, "third person") {
-		t.Error("wmCompactionSystemPrompt must instruct third-person writing")
+	if !strings.Contains(p, "third person") {
+		t.Error("session-compactor skill must instruct third-person writing")
 	}
-	if !strings.Contains(wmCompactionSystemPrompt, "JSON") {
-		t.Error("wmCompactionSystemPrompt must require JSON output")
+	if !strings.Contains(p, "JSON") {
+		t.Error("session-compactor skill must require JSON output")
 	}
 }
 
