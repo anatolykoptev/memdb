@@ -14,14 +14,24 @@ package queries
 const DeleteMemoryByPropID = `
 DELETE FROM %[1]s."Memory" WHERE properties->>(('id'::text)) = $1`
 
-// InsertMemoryNode inserts a new memory node with properties and embedding.
+// InsertMemoryNode inserts a new memory node with properties, dense embedding,
+// and (optionally) sparse SPLADE embedding for hybrid retrieval.
 // The id column is AGE-managed (graphid) and auto-generated — we never bind it.
 // properties->>(('id'::text)) carries the stable UUID identity used by all other queries.
 // Used as the second half of an upsert (DELETE then INSERT).
-// Args: $1 = properties (jsonb), $2 = embedding (text, cast to vector(1024))
+//
+// Args:
+//   $1 = properties (jsonb cast through agtype)
+//   $2 = embedding dense (text, cast to vector(1024))
+//   $3 = sparse_embedding (text, cast to sparsevec(30522)). Pass empty string
+//        for NULL — NULLIF($3, '')::sparsevec short-circuits cleanly.
 const InsertMemoryNode = `
-INSERT INTO %[1]s."Memory"(properties, embedding)
-VALUES ($1::text::agtype, $2::vector(1024))`
+INSERT INTO %[1]s."Memory"(properties, embedding, sparse_embedding)
+VALUES (
+    $1::text::agtype,
+    $2::vector(1024),
+    NULLIF($3, '')::sparsevec(30522)
+)`
 
 // UpdateMemoryNodeFull updates the memory text, embedding, and updated_at for an existing activated node.
 // Used by the fine-mode dedup-merge pipeline when JudgeDedupMerge returns action="update".

@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
@@ -72,6 +73,30 @@ func (h *Handler) applyAtomicAndPersist(
 	var allNodes []db.MemoryInsertNode
 	var items []addResponseItem
 	var vsetInserts []wmVSetInsert
+
+	// Hybrid retrieval prep: batch-generate SPLADE sparse vectors for every
+	// surviving fact so each Memory row carries both dense (semantic) AND
+	// sparse (exact-token) embeddings. SPLADE call is one HTTP round-trip
+	// per batch (~50-100ms on the loaded SPLADE-v3-distilbert ONNX session).
+	// On failure we fall back to NULL sparse_embedding — retrieval just
+	// skips the sparse leg for those rows, so degraded ingest still produces
+	// usable rows for dense-only search.
+	sparseVecs := make([]string, len(embedded))
+	if h.sparseEmbedder != nil {
+		texts := make([]string, len(embedded))
+		for i, ef := range embedded {
+			texts[i] = ef.fact.Memory
+		}
+		sparseRaw, err := h.sparseEmbedder.EmbedSparse(ctx, texts)
+		if err != nil {
+			h.logger.Warn("atomic persist: SPLADE batch failed, sparse_embedding will be NULL",
+				slog.Any("error", err), slog.Int("batch", len(texts)))
+		} else if len(sparseRaw) == len(embedded) {
+			for i, sv := range sparseRaw {
+				sparseVecs[i] = embedder.FormatSparseVector(sv, 30522)
+			}
+		}
+	}
 
 	for i := range embedded {
 		ef := embedded[i]
@@ -138,9 +163,13 @@ func (h *Handler) applyAtomicAndPersist(
 				slog.Any("err1", err1), slog.Any("err2", err2))
 			continue
 		}
+		// sparseVecs[i] is "" when SPLADE was unavailable / batch failed —
+		// the SQL NULLIF($3, '') guard in InsertMemoryNode turns that into a
+		// NULL column for graceful dense-only fallback.
+		sparseVec := sparseVecs[i]
 		allNodes = append(allNodes,
-			db.MemoryInsertNode{ID: wmID, PropertiesJSON: wmJSON, EmbeddingVec: ef.embVec},
-			db.MemoryInsertNode{ID: ltID, PropertiesJSON: ltJSON, EmbeddingVec: ef.embVec},
+			db.MemoryInsertNode{ID: wmID, PropertiesJSON: wmJSON, EmbeddingVec: ef.embVec, SparseEmbeddingVec: sparseVec},
+			db.MemoryInsertNode{ID: ltID, PropertiesJSON: ltJSON, EmbeddingVec: ef.embVec, SparseEmbeddingVec: sparseVec},
 		)
 		items = append(items, addResponseItem{
 			Memory: f.Memory, MemoryID: ltID, MemoryType: f.Type, CubeID: fc.CubeID,
@@ -308,6 +337,28 @@ func (h *Handler) runAtomicFineExtractionFull(
 		recordAtomicExtractOutcome(ctx, atomicOutcomeLLMError)
 		return nil, nil, true, fmt.Errorf("atomic fine add: extract: %w", err)
 	}
+
+	// NER completeness validator. Compares proper nouns in source against
+	// entities the LLM emitted; if any are missing, fires ONE targeted
+	// re-extract for the gap. Recovers the dominant cat1 single-hop failure
+	// mode where Flash family drops items from enumerations (Bailey lost
+	// from "Oliver, Luna, Bailey", "Becoming Nicole" missed entirely, etc.).
+	// Skipped when the source has no uppercase content (no proper nouns
+	// possible) or when MEMDB_ATOMIC_NER_VALIDATOR=0.
+	if nerValidatorEnabled() && hasUpper(conversation) && len(atomicFacts) > 0 {
+		missing := computeMissingEntities(conversation, atomicFacts)
+		if len(missing) == 0 {
+			recordNERValidatorOutcome(ctx, "complete")
+		} else {
+			rescued := h.runNERRescue(ctx, conversation, obs, missing, ext)
+			if len(rescued) > 0 {
+				atomicFacts = append(atomicFacts, rescued...)
+			}
+		}
+	} else {
+		recordNERValidatorOutcome(ctx, "skipped")
+	}
+
 	// Populate cache on success — even when atomicFacts is empty (so the
 	// LLM's "no facts here" verdict on the same chunk doesn't burn a second
 	// 4.5s call). atomicExtractCache.Set is no-op on len==0 so we skip

@@ -54,6 +54,7 @@ type Handler struct {
 	cubeStore       cubeStoreClient              // nil = cube endpoints return 503
 	memUpdaterField memoryUpdater                // non-nil only in tests (overrides h.postgres)
 	atomicCache     *atomicExtractCache          // nil = atomic-extract LLM call always hits the LLM
+	sparseEmbedder  *embedder.SparseEmbedder     // nil = SPLADE generation disabled, sparse_embedding column stays NULL
 }
 
 // NewHandler creates a new Handler with the given dependencies.
@@ -117,6 +118,17 @@ func (h *Handler) SetReorganizer(r reorgRunner) { h.reorg = r }
 func (h *Handler) SetTaskTracker(t *scheduler.TaskStatusTracker) {
 	h.tracker = t
 }
+
+// SetSparseEmbedder wires the SPLADE-v3-distilbert sparse embedder for
+// hybrid retrieval. Pass nil to disable (rows persist with NULL
+// sparse_embedding; retrieval transparently falls back to dense-only).
+func (h *Handler) SetSparseEmbedder(s *embedder.SparseEmbedder) {
+	h.sparseEmbedder = s
+}
+
+// SparseEmbedder returns the wired SPLADE client (nil if disabled). Used by
+// the search path to embed queries on the sparse leg of hybrid retrieval.
+func (h *Handler) SparseEmbedder() *embedder.SparseEmbedder { return h.sparseEmbedder }
 
 // SetAtomicExtractCache wires the Redis-backed cache that short-circuits
 // llm.ExtractAtomicFacts. Pass nil to disable. Wired from server_init_search

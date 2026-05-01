@@ -26,6 +26,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -40,7 +41,13 @@ import (
 const (
 	// atomicExtractCachePrefix namespaces Redis keys so they don't collide
 	// with the embed cache (embed:v1:) or response cache.
-	atomicExtractCachePrefix = "atomic-extract:v1:"
+	//
+	// 2026-05-01 bump v1 → v2: cached values now include NER-rescue facts
+	// (post-extract validator that re-calls LLM for missed proper nouns).
+	// v1 keys held PRE-NER fact sets; serving them on hit would silently
+	// suppress the rescue path. Bumping the prefix invalidates the v1
+	// keyspace at deploy time without requiring an explicit Redis FLUSHDB.
+	atomicExtractCachePrefix = "atomic-extract:v2:"
 	// defaultAtomicExtractCacheTTL — 24h. Atomic extraction is deterministic
 	// for a given (input, prompt) pair, so long TTL is safe. Tuned down via
 	// env override if a prompt iteration cadence demands faster invalidation.
@@ -76,6 +83,10 @@ func (a *atomicExtractCache) Get(ctx context.Context, key string) ([]llm.AtomicF
 	}
 	raw, err := a.client.Get(ctx, atomicExtractCachePrefix+key)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			recordAtomicCacheOutcome(ctx, "ctx_canceled")
+			return nil, false
+		}
 		recordAtomicCacheOutcome(ctx, "get_error")
 		a.logger.Warn("atomic-extract cache get failed", slog.String("key", key), slog.Any("error", err))
 		return nil, false

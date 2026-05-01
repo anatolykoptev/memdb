@@ -8,6 +8,7 @@ import (
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/cache"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/handlers"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
@@ -53,6 +54,16 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	// cache (so no additional Redis connection); when nil (cache disabled),
 	// SetAtomicExtractCache becomes a no-op and extract always hits the LLM.
 	h.SetAtomicExtractCache(cacheClient, 0)
+
+	// Wire SPLADE sparse embedder (hybrid retrieval: dense + sparse).
+	// Requires the embed-server SPLADE model loaded (already true in prod
+	// via EMBED_MODELS env). When EmbedURL is empty (proxy-only mode) we
+	// skip — sparse_embedding column stays NULL and retrieval degrades
+	// gracefully to dense-only.
+	if cfg.EmbedURL != "" {
+		h.SetSparseEmbedder(embedder.NewSparseEmbedder(cfg.EmbedURL, "", logger))
+		logger.Info("sparse embedder wired (SPLADE-v3-distilbert via embed-server)")
+	}
 
 	// Initialize search service with optional LLM features and profiler
 	searchSvc, profiler := initSearchService(cfg, pg, qd, emb, rd, h, cacheClient, logger)

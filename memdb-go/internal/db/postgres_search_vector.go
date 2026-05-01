@@ -103,6 +103,23 @@ func scanVectorSearchRows(ctx context.Context, conn *pgxpool.Conn, queryName, q 
 	return results, rows.Err()
 }
 
+// SparseVectorSearch performs SPLADE sparse-vector similarity search using
+// pgvector's `<#>` (negative inner product). Mirrors VectorSearch's signature
+// and result shape so the search-service hybrid wrapper can fuse dense+sparse
+// rankings via RRF without bespoke plumbing. sparseVecLiteral is a pgvector
+// sparsevec literal of the form "{i1:v1,i2:v2,...}/30522" (build via
+// embedder.FormatSparseVector).
+func (p *Postgres) SparseVectorSearch(ctx context.Context, sparseVecLiteral string, cubeID, personID string, memoryTypes []string, agentID string, limit int) ([]VectorSearchResult, error) {
+	q := fmt.Sprintf(queries.SparseVectorSearch, graphName)
+	results, err := observability.MeasureQuery(ctx, "SparseVectorSearch", p.pool, func(conn *pgxpool.Conn) ([]VectorSearchResult, error) {
+		return scanVectorSearchRows(ctx, conn, "SparseVectorSearch", q, sparseVecLiteral, cubeID, personID, memoryTypes, limit, agentID)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sparse vector search: %w", err)
+	}
+	return results, nil
+}
+
 // VectorSearchMultiCube performs cosine similarity search across multiple cubes.
 // Used for cross-domain experience memory: a successful flow on
 // site A can be found when handling site B if both are in cubeIDs.

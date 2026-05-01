@@ -17,6 +17,9 @@ type postgresClient interface {
 	VectorSearch(ctx context.Context, vector []float32, cubeID, personID string, memoryTypes []string, agentID string, limit int) ([]db.VectorSearchResult, error)
 	VectorSearchMultiCube(ctx context.Context, vector []float32, cubeIDs []string, personID string, memoryTypes []string, agentID string, limit int) ([]db.VectorSearchResult, error)
 	VectorSearchWithCutoff(ctx context.Context, vector []float32, cubeID, personID string, memoryTypes []string, limit int, cutoff string, agentID string) ([]db.VectorSearchResult, error)
+	// SparseVectorSearch — SPLADE leg of hybrid retrieval. Filters rows where
+	// sparse_embedding IS NOT NULL (graceful degradation for un-backfilled rows).
+	SparseVectorSearch(ctx context.Context, sparseVecLiteral string, cubeID, personID string, memoryTypes []string, agentID string, limit int) ([]db.VectorSearchResult, error)
 	FulltextSearch(ctx context.Context, tsquery string, cubeID, personID string, memoryTypes []string, agentID string, limit int) ([]db.VectorSearchResult, error)
 	FulltextSearchWithCutoff(ctx context.Context, tsquery string, cubeID, personID string, memoryTypes []string, limit int, cutoff string, agentID string) ([]db.VectorSearchResult, error)
 	GetWorkingMemory(ctx context.Context, cubeID, personID string, limit int, agentID string) ([]db.VectorSearchResult, error)
@@ -137,6 +140,10 @@ type parallelSearchResults struct {
 	entityGraphResults []db.GraphRecallResult
 	workingMemItems    []db.VectorSearchResult
 	internetResults    []InternetResult
+	// textSparse — SPLADE leg of hybrid retrieval. Populated only when
+	// SearchService.SparseEmbedder != nil and MEMDB_HYBRID_SPARSE!=0.
+	// Fused into textVec via RRF inside runParallelSearches before merge.
+	textSparse []db.VectorSearchResult
 }
 
 // searchBudget holds the inflated top-k values for dedup modes.

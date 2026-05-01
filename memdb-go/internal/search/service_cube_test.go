@@ -90,6 +90,10 @@ func (m *mockPostgres) VectorSearchWithCutoff(_ context.Context, _ []float32, cu
 	return nil, nil
 }
 
+func (m *mockPostgres) SparseVectorSearch(_ context.Context, _ string, _, _ string, _ []string, _ string, _ int) ([]db.VectorSearchResult, error) {
+	return nil, nil
+}
+
 func (m *mockPostgres) FulltextSearch(_ context.Context, _ string, cubeID, personID string, _ []string, _ string, _ int) ([]db.VectorSearchResult, error) {
 	m.fulltextSearchCubeID = cubeID
 	m.fulltextSearchPersonID = personID
