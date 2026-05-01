@@ -17,6 +17,7 @@ package rerank
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"log/slog"
 	"math"
 	"sync"
@@ -67,6 +68,14 @@ func (r *RedisRerankCache) Get(ctx context.Context, key string) (float32, bool) 
 	}
 	raw, err := r.client.Get(ctx, rerankCachePrefix+key)
 	if err != nil {
+		// Caller-cancelled ctx is the dominant "error" under parallel
+		// query workers — one slow rerank trips the per-query deadline
+		// and cancels the rest mid-Redis-Get. Not a cache fault; classify
+		// separately so the get_error rate reflects real Redis problems.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			recordRerankCacheOutcome(ctx, "ctx_canceled")
+			return 0, false
+		}
 		recordRerankCacheOutcome(ctx, "get_error")
 		r.logger.Warn("rerank cache get failed", slog.String("key", key), slog.Any("error", err))
 		return 0, false

@@ -26,6 +26,7 @@ func (s *SearchService) runParallelSearches(
 	psr := &parallelSearchResults{}
 
 	s.spawnTextSearches(g, gctx, psr, queryVec, tsquery, cutoffISO, hasCutoff, p, budget)
+	s.spawnSparseTextSearch(g, gctx, psr, p.Query, p, budget)
 	s.spawnSkillToolSearches(g, gctx, psr, queryVec, tsquery, p, budget)
 	s.spawnPrefSearch(g, gctx, psr, queryVec, p, budget)
 	s.spawnWorkingMemAndGraph(g, gctx, psr, tokens, p)
@@ -34,6 +35,9 @@ func (s *SearchService) runParallelSearches(
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+	// Fuse SPLADE sparse leg into textVec via RRF before merge sees it.
+	// No-op when sparse is empty / disabled.
+	fuseSparseIntoTextVec(psr)
 	return psr, nil
 }
 

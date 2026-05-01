@@ -85,3 +85,37 @@ WHERE properties->>(('status'::text)) = 'activated'
   AND (properties->>(('created_at'::text))) >= $6
 ORDER BY embedding::halfvec(1024) <=> $1::halfvec(1024) ASC
 LIMIT $5`
+
+// SparseVectorSearch — SPLADE sparse-vector cosine via inner product.
+// Mirror of VectorSearch shape but on sparse_embedding column. Returns
+// `embedding::text` (DENSE column) for downstream parity with dense
+// scanVectorSearchRows — caller doesn't need the sparse vector again.
+//
+// pgvector's sparsevec uses inner product (`<#>`) as native distance —
+// SPLADE is non-negative term weighting where higher dot = more relevant.
+// Score = - <#> because pgvector returns negative inner product (smaller
+// = more similar by distance convention); we flip sign so larger=better,
+// matching the dense `1 - <=>` shape.
+//
+// Args mirror VectorSearch:
+//   $1 = sparse vector literal "{idx:val,...}/30522" cast to sparsevec
+//   $2 = user_name, $3 = user_id, $4 = memory_types[],
+//   $5 = limit, $6 = agent_id ('' for any)
+//
+// WHERE includes `sparse_embedding IS NOT NULL` so legacy rows pre-backfill
+// transparently fall out of the sparse leg without hurting recall — they
+// remain available via the dense leg.
+const SparseVectorSearch = `
+SELECT properties->>(('id'::text)) AS memory_id,
+       (properties::text::jsonb - 'sources')::text,
+       -(sparse_embedding <#> $1::sparsevec(30522)) AS score,
+       embedding::text
+FROM %[1]s."Memory"
+WHERE properties->>(('status'::text)) = 'activated'
+  AND properties->>(('user_name'::text)) = $2
+  AND properties->>(('user_id'::text))   = $3
+  AND properties->>(('memory_type'::text)) = ANY($4)
+  AND ($6::text = '' OR properties->>(('agent_id'::text)) = $6)
+  AND sparse_embedding IS NOT NULL
+ORDER BY sparse_embedding <#> $1::sparsevec(30522) ASC
+LIMIT $5`

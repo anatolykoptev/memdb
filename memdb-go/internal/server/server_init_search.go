@@ -104,6 +104,18 @@ func initSearchService(
 ) (*search.SearchService, *scheduler.Profiler) {
 	svc := search.NewSearchService(pg, qd, emb, logger)
 
+	// Hybrid retrieval (Step D): wire the same SPLADE client used on ingest
+	// path (handlers.Handler.SparseEmbedder) into the search service. The
+	// embedder field on Handler is set in server.go BEFORE this function runs
+	// (initEmbedder → SetSparseEmbedder), so by the time we reach here the
+	// embedder is either nil (sparse disabled) or ready. Nil-safe both sides:
+	// SearchService.SparseEmbedder=nil disables the sparse leg in
+	// spawnSparseTextSearch.
+	if sp := h.SparseEmbedder(); sp != nil {
+		svc.SetSparseEmbedder(sp)
+		logger.Info("hybrid retrieval enabled (SPLADE sparse leg + RRF fusion)")
+	}
+
 	// Cross-encoder rerank client (step 6.05). Zero URL disables the step.
 	// APIKey supports hosted providers (Cohere/Jina/Voyage/Mixedbread);
 	// leave empty for self-hosted TEI/embed-server. MaxCharsPerDoc caps
