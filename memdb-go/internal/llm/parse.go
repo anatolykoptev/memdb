@@ -46,7 +46,15 @@ import (
 // Default tunables for ChatStructured. Picked to match the median of the
 // 10 migrated callsites — individual callsites override via opts.
 const (
-	defaultStructuredTimeout      = 15 * time.Second
+	// 2026-05-01: 15s → 30s. Search-side prompts (d4_rewrite, d7_decompose,
+	// d10_enhance) were timing out under parallel query load (workers=5 +
+	// LOCOMO_INGEST_PARALLELISM=4): observed 80 d4_rewrite + 67 d10_enhance
+	// + 45 d7_decompose timeouts in a single chat-50 run, each producing a
+	// degraded retrieval and downstream wrong answer. Bump amortises Flash
+	// 3.1 preview latency variance (free-tier throttling under burst) and
+	// keeps the retry budget intact (chatRoundTrip applies WithTimeout per
+	// attempt, not per total).
+	defaultStructuredTimeout      = 30 * time.Second
 	defaultStructuredMaxTokens    = 1024
 	defaultStructuredMaxRetries   = 1
 	defaultStructuredTemperature  = 0.0
@@ -252,6 +260,89 @@ func ChatStructured[T any](
 		lastErr = errors.New("llm.ChatStructured: exhausted retries")
 	}
 	return lastErr
+}
+
+// ChatStructuredWithRaw is the same as ChatStructured but on terminal parse
+// failure returns the LAST raw upstream content alongside the error, so the
+// caller can attempt heuristic salvage (e.g. regex-extract a JSON object from
+// prose-wrapped output). On success returns ("", nil). On HTTP error returns
+// ("", err) — there is no body to salvage.
+//
+// Use ChatStructured if you don't need the raw on failure; this variant exists
+// purely to support graceful-degradation paths in extractors where losing a
+// whole chunk is more costly than re-parsing imperfect output.
+func ChatStructuredWithRaw[T any](
+	ctx context.Context,
+	c *Client,
+	promptID string,
+	msgs []Message,
+	target *T,
+	opts ...ChatOpt,
+) (string, error) {
+	if c == nil {
+		return "", errors.New("llm.ChatStructuredWithRaw: nil client")
+	}
+	if target == nil {
+		return "", errors.New("llm.ChatStructuredWithRaw: nil target")
+	}
+	o := resolveStructuredOpts(opts)
+	mx := llmStructuredMetrics()
+	start := time.Now()
+	defer func() {
+		mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
+			metric.WithAttributes(attribute.String("prompt_id", promptID)))
+	}()
+
+	current := append([]Message(nil), msgs...)
+	var lastRaw string
+	var lastErr error
+	for attempt := 0; attempt <= o.maxRetries; attempt++ {
+		content, retried429, httpErr := fetchChatContent(ctx, c, current, o)
+		if retried429 {
+			mx.Calls.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("prompt_id", promptID),
+				attribute.String("outcome", outcomeRetried),
+			))
+		}
+		if httpErr != nil {
+			outcome := outcomeHTTPError
+			if errors.Is(httpErr, context.DeadlineExceeded) {
+				outcome = outcomeTimeout
+			}
+			mx.Calls.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("prompt_id", promptID),
+				attribute.String("outcome", outcome),
+			))
+			return "", httpErr
+		}
+		lastRaw = content
+		stripped := StripJSONFence([]byte(content))
+		if err := json.Unmarshal(stripped, target); err != nil {
+			lastErr = fmt.Errorf("llm.ChatStructuredWithRaw[%s]: parse: %w", promptID, err)
+			if attempt < o.maxRetries {
+				mx.Calls.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("prompt_id", promptID),
+					attribute.String("outcome", outcomeRetried),
+				))
+				current = appendReminder(current, o.parseRetryReminder)
+				continue
+			}
+			mx.Calls.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("prompt_id", promptID),
+				attribute.String("outcome", outcomeParseError),
+			))
+			return lastRaw, lastErr
+		}
+		mx.Calls.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("prompt_id", promptID),
+			attribute.String("outcome", outcomeSuccess),
+		))
+		return "", nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("llm.ChatStructuredWithRaw: exhausted retries")
+	}
+	return lastRaw, lastErr
 }
 
 // ChatText is the plain-text sibling of ChatStructured: same metrics +

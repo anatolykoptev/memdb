@@ -33,6 +33,7 @@ import (
 	"github.com/anatolykoptev/skillkit"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -116,6 +117,14 @@ var atomicSkill = skillkit.NewEmbedded("atomic-extractor", "MEMDB_ATOMIC_SKILL_P
 	skillkit.WithTracer(observability.SkillkitTracer()),
 )
 
+// AtomicSkillBody returns the live atomic-extractor prompt body. Used by
+// the handlers' atomic-extract cache to hash the prompt into the cache key
+// so that an operator hot-reload of atomic-extractor.md (skillkit env override
+// with mtime pickup) implicitly invalidates stale cached extractions.
+func AtomicSkillBody(ctx context.Context) string {
+	return atomicSkill.BodyCtx(ctx)
+}
+
 // AtomicSkillDiagnostic returns a one-line description of the live
 // atomic-extractor prompt source. Used by cmd/server at startup so
 // operators see in stdout whether the env override is active. Not
@@ -147,6 +156,14 @@ type AtomicFact struct {
 	// EventDates are ISO-8601 dates the fact references (resolved against
 	// observation_date). Empty if the fact has no temporal anchor.
 	EventDates []string `json:"event_dates,omitempty"`
+	// NamedEntitiesInText forces the LLM to enumerate every proper noun present
+	// in Text. Acts as a soft schema constraint: filling this field requires the
+	// LLM to scan the source for named entities, which materially reduces the
+	// "missed third member of an enumeration" failure mode (e.g. extracting
+	// "Oliver and Luna" while silently dropping "Bailey"). Persisted but unused
+	// downstream; lives purely to bias generation. Empty array is fine for
+	// proper-noun-free facts.
+	NamedEntitiesInText []string `json:"named_entities_in_text,omitempty"`
 }
 
 // atomicFactsResponse mirrors the {"memory": [...]} envelope mem0 emits.
@@ -219,13 +236,28 @@ func (e *AtomicExtractor) ExtractAtomicFacts(
 	}
 
 	var resp atomicFactsResponse
-	err := ChatStructured(ctx, e.client, "atomic_facts", msgs, &resp,
+	rawOnFail, err := ChatStructuredWithRaw(ctx, e.client, "atomic_facts", msgs, &resp,
 		WithMaxTokens(atomicMaxTokens),
 		WithTimeout(atomicCallTimeout),
 		WithMaxRetries(1),
+		WithJSONResponseMode(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("atomic extract: %w", err)
+		// Graceful degradation: structured parse failed terminally. Try heuristic
+		// salvage on the last raw response — better to return a few partial facts
+		// than to lose the entire chunk on a single trailing comma. Counted via
+		// memdb.atomic.salvage_total{outcome=...}.
+		if rawOnFail == "" {
+			salvageOutcomeCounter().Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "no_raw")))
+			return nil, fmt.Errorf("atomic extract: %w", err)
+		}
+		salvaged := salvageAtomicFacts(rawOnFail)
+		if len(salvaged) == 0 {
+			salvageOutcomeCounter().Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "empty")))
+			return nil, fmt.Errorf("atomic extract: %w", err)
+		}
+		salvageOutcomeCounter().Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "recovered")))
+		resp.Memory = salvaged
 	}
 
 	out := make([]AtomicFact, 0, len(resp.Memory))
@@ -339,3 +371,6 @@ func HasProperNoun(s string) bool {
 	}
 	return false
 }
+
+// Graceful-degradation salvage helpers (salvageAtomicFacts, filterValidFacts,
+// salvageOutcomeCounter, factObjectPattern) live in atomic_extractor_salvage.go.

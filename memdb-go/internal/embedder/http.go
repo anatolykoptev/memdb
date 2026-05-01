@@ -2,6 +2,7 @@ package embedder
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -20,24 +21,80 @@ import (
 // Foundation migration (task #82): HTTP transport is now delegated to
 // github.com/anatolykoptev/go-kit/embed.HTTPEmbedder. The public struct type
 // is preserved so callers (factory.go, server_init_search.go, tests) compile
-// unchanged. Resiliency (E1: circuit/fallback) and cache (E3) are wired in
-// subsequent tasks (#83, #84).
+// unchanged.
+//
+// 2026-05-01 — switched the underlying client from the v1 NewHTTPEmbedder
+// helper (no opts) to the v2 NewClient(...) entry point so we can wire
+// E3 (cache) and optionally E1 (circuit). The cache wraps the deterministic
+// (model, dim, prefix, text) → vector lookup in Redis (see redis_cache.go),
+// short-circuiting embed-server traffic on idempotent re-embed (reverse-role
+// pass, query rewrites, scheduler reorganiser sweeps). Saves the HTTP round
+// trip + ONNX inference whenever a vector is already cached.
 type HTTPEmbedder struct {
 	baseURL string
 	model   string
-	inner   *gokitembed.HTTPEmbedder
+	inner   *gokitembed.Client
 	dim     int
 	logger  *slog.Logger
 }
 
-// NewHTTPEmbedder creates an HTTPEmbedder pointing at baseURL.
-// baseURL should not include /v1/embeddings — it will be appended automatically.
+// HTTPEmbedderOpts collects the optional dependencies wired through
+// NewHTTPEmbedderWithOpts. Kept as a struct (not variadic functional opts on
+// our wrapper) because the cardinality is small and the call site (factory)
+// is the single producer — adding a field is one line at both ends.
+type HTTPEmbedderOpts struct {
+	// Cache enables Redis-backed embedding cache via go-kit/embed.WithCache.
+	// nil disables caching (legacy v1 behaviour). Recommended for the LoCoMo
+	// ingest path where reverse-role + reorganiser sweeps re-embed the same
+	// (model, text) tuple repeatedly.
+	Cache gokitembed.Cache
+
+	// CircuitConfig (zero-value disabled). When set, wraps the client in a
+	// circuit breaker that opens after N consecutive backend failures and
+	// short-circuits subsequent calls until the recovery window elapses.
+	// Useful in prod where an embed-server crash should fail fast instead of
+	// stacking 5s timeouts behind every request.
+	Circuit *gokitembed.CircuitConfig
+}
+
+// NewHTTPEmbedder creates an HTTPEmbedder pointing at baseURL with no
+// resiliency opts (legacy entry point — preserved so existing call sites
+// and tests compile unchanged). For production-grade wiring with cache +
+// circuit breaker use NewHTTPEmbedderWithOpts.
 func NewHTTPEmbedder(baseURL, model string, dim int, logger *slog.Logger) *HTTPEmbedder {
+	return NewHTTPEmbedderWithOpts(baseURL, model, dim, logger, HTTPEmbedderOpts{})
+}
+
+// NewHTTPEmbedderWithOpts is the v2-aware constructor. Wires go-kit/embed's
+// optional features (cache, circuit) when the corresponding opt is non-nil.
+// baseURL should not include /v1/embeddings — it will be appended
+// automatically by the underlying http transport.
+func NewHTTPEmbedderWithOpts(baseURL, model string, dim int, logger *slog.Logger, opts HTTPEmbedderOpts) *HTTPEmbedder {
 	trimmed := strings.TrimRight(baseURL, "/")
+	clientOpts := []gokitembed.Opt{
+		gokitembed.WithBackend("http"),
+		gokitembed.WithModel(model),
+		gokitembed.WithDim(dim),
+		gokitembed.WithLogger(logger),
+	}
+	if opts.Cache != nil {
+		clientOpts = append(clientOpts, gokitembed.WithCache(opts.Cache))
+	}
+	if opts.Circuit != nil {
+		clientOpts = append(clientOpts, gokitembed.WithCircuit(*opts.Circuit))
+	}
+	client, err := gokitembed.NewClient(trimmed, clientOpts...)
+	if err != nil {
+		// NewClient only fails on programmer error (no backend opt set, etc.).
+		// We always pass WithBackend("http") so a failure here is a build-time
+		// regression — surface loudly via panic at startup rather than silently
+		// fall back to a broken embedder.
+		panic(fmt.Sprintf("embedder.NewHTTPEmbedderWithOpts: gokitembed.NewClient failed: %v", err))
+	}
 	return &HTTPEmbedder{
 		baseURL: trimmed,
 		model:   model,
-		inner:   gokitembed.NewHTTPEmbedder(trimmed, model, dim, logger),
+		inner:   client,
 		dim:     dim,
 		logger:  logger,
 	}
@@ -66,35 +123,42 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		))
 	}()
 
-	vecs, err := h.inner.Embed(ctx, texts)
+	// 2026-05-01: route through EmbedWithResult, NOT Client.Embed. The plain
+	// Client.Embed entry point in go-kit/embed bypasses the cache layer
+	// entirely (it calls callBackendResilient directly — see go-kit
+	// client.go:45). Only EmbedWithResult performs the WithCache(...) lookup
+	// before hitting the backend (client_v2.go:142). Our wrapper MUST use
+	// EmbedWithResult or our cache hit-rate stays at 0% no matter how the
+	// cache is wired.
+	res, err := h.inner.EmbedWithResult(ctx, texts)
 	if err != nil {
 		outcome = "error"
-		return nil, err
-	}
-
-	// Safety net (G7-style validation): the wrapped go-kit HTTPEmbedder does
-	// NOT validate per-vector dimension on the v1 NewHTTPEmbedder path —
-	// validation only fires through the v2 Client built via NewClient +
-	// WithDim. memdb-go uses NewHTTPEmbedder directly, so a model swap on
-	// the embed-server side (accidental e5-large→jina-code-v2, fork drift)
-	// would silently write wrong-dim vectors into pgvector and corrupt the
-	// halfvec column without any error surface.
-	//
-	// dim == 0 disables the check, mirroring go-kit's "WithDim(0) =
-	// auto-detect" convention used by ONNX/Voyage paths.
-	if h.dim > 0 {
-		for i, v := range vecs {
-			if len(v) != h.dim {
-				outcome = "error"
-				recordHTTPDimMismatch(ctx, h.model)
-				return nil, &DimMismatchError{
-					Got:   len(v),
-					Want:  h.dim,
-					Model: h.model,
-					Index: i,
-				}
+		var gokitErr *gokitembed.ErrDimMismatch
+		if errors.As(err, &gokitErr) {
+			recordHTTPDimMismatch(ctx, h.model)
+			return nil, &DimMismatchError{
+				Got:   gokitErr.Got,
+				Want:  gokitErr.Want,
+				Model: h.model,
+				Index: 0,
 			}
 		}
+		return nil, err
+	}
+	if res == nil || res.Status != gokitembed.StatusOk {
+		outcome = "error"
+		if res != nil && res.Err != nil {
+			return nil, res.Err
+		}
+		return nil, fmt.Errorf("embedder.HTTPEmbedder: status=%v with no error", res)
+	}
+	vecs := make([][]float32, len(res.Vectors))
+	for i, v := range res.Vectors {
+		if v == nil {
+			vecs[i] = nil
+			continue
+		}
+		vecs[i] = v.Embedding
 	}
 
 	h.logger.Debug("http embed complete",

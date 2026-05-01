@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anatolykoptev/memdb/memdb-go/internal/cache"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
@@ -52,6 +53,7 @@ type Handler struct {
 	addWaiters      atomic.Int64                 // current goroutines waiting for semaphore
 	cubeStore       cubeStoreClient              // nil = cube endpoints return 503
 	memUpdaterField memoryUpdater                // non-nil only in tests (overrides h.postgres)
+	atomicCache     *atomicExtractCache          // nil = atomic-extract LLM call always hits the LLM
 }
 
 // NewHandler creates a new Handler with the given dependencies.
@@ -114,6 +116,14 @@ func (h *Handler) SetReorganizer(r reorgRunner) { h.reorg = r }
 // (same schema as Python) instead of stream-based XLen/XPending heuristics.
 func (h *Handler) SetTaskTracker(t *scheduler.TaskStatusTracker) {
 	h.tracker = t
+}
+
+// SetAtomicExtractCache wires the Redis-backed cache that short-circuits
+// llm.ExtractAtomicFacts. Pass nil to disable. Wired from server_init_search
+// once cache.Client is constructed; the same client backs the embed cache so
+// no additional Redis connection is opened.
+func (h *Handler) SetAtomicExtractCache(c *cache.Client, ttl time.Duration) {
+	h.atomicCache = newAtomicExtractCache(c, ttl, h.logger)
 }
 
 // SetBufferConfig sets the buffer zone configuration for batching add requests.

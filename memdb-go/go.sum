@@ -9,6 +9,8 @@ github.com/anatolykoptev/go-engine v1.3.1 h1:B/deUA0pRpX9+hYOOTE7XPPuh69idlX4PVu
 github.com/anatolykoptev/go-engine v1.3.1/go.mod h1:ZcJMqmoy+GP9HJRrj5G0y7reyIM8NbMX6IMyHYmwoEQ=
 github.com/anatolykoptev/go-kit v0.35.0 h1:iqmKhNiYk/l8AuUi92PUr3vlluv9JnvQ8Q3/UEI/CTk=
 github.com/anatolykoptev/go-kit v0.35.0/go.mod h1:D0qQqFqNkeBeKuajrdvpIhgNxBZ/nr/lTcjessF09Bg=
+github.com/anatolykoptev/go-kit v0.36.0 h1:3Uuq4i/KW8ECh/M40Lgwjt4LZCnlnS8kaG2TYJyo9vw=
+github.com/anatolykoptev/go-kit v0.36.0/go.mod h1:D0qQqFqNkeBeKuajrdvpIhgNxBZ/nr/lTcjessF09Bg=
 github.com/anatolykoptev/go-stealth v1.3.1 h1:6Q1MSi8JA66xggtVL8iAKdCy/ULKQ76KU7KSbfgo67A=
 github.com/anatolykoptev/go-stealth v1.3.1/go.mod h1:/3rYAaunzRjBKtFtHLeEh/Jw/jVyGRtdBPJeF8voYog=
 github.com/anatolykoptev/skillkit v0.2.2 h1:VWh9rhG/2zZi/L2LRhGxZXVA3zhqxVy73YnoF5H8BoE=

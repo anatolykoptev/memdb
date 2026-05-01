@@ -23,9 +23,10 @@ github.com/anatolykoptev/go-engine/metrics
 github.com/anatolykoptev/go-engine/search
 github.com/anatolykoptev/go-engine/sources
 github.com/anatolykoptev/go-engine/text
-# github.com/anatolykoptev/go-kit v0.35.0
+# github.com/anatolykoptev/go-kit v0.36.0
 ## explicit; go 1.26
 github.com/anatolykoptev/go-kit/embed
+github.com/anatolykoptev/go-kit/llm
 github.com/anatolykoptev/go-kit/metrics
 github.com/anatolykoptev/go-kit/rerank
 github.com/anatolykoptev/go-kit/retry
