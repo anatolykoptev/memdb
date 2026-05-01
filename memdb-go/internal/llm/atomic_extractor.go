@@ -29,6 +29,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 	"github.com/anatolykoptev/skillkit"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
@@ -110,7 +111,9 @@ var embeddedAtomicSkillRaw string
 //
 // Always returns non-empty. Package init panics if embedded body is
 // empty after frontmatter strip (build-time invariant).
-var atomicSkill = skillkit.NewEmbedded("atomic-extractor", "MEMDB_ATOMIC_SKILL_PATH", embeddedAtomicSkillRaw)
+var atomicSkill = skillkit.NewEmbedded("atomic-extractor", "MEMDB_ATOMIC_SKILL_PATH", embeddedAtomicSkillRaw,
+	skillkit.WithObserver(observability.SkillkitObserver()),
+)
 
 // AtomicSkillDiagnostic returns a one-line description of the live
 // atomic-extractor prompt source. Used by cmd/server at startup so

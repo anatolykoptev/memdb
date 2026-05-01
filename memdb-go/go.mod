@@ -8,7 +8,7 @@ require (
 	github.com/anatolykoptev/go-engine v1.3.1
 	github.com/anatolykoptev/go-kit v0.32.0
 	github.com/anatolykoptev/go-stealth v1.3.1
-	github.com/anatolykoptev/skillkit v0.1.0
+	github.com/anatolykoptev/skillkit v0.2.0
 	github.com/daulet/tokenizers v1.25.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.9.2

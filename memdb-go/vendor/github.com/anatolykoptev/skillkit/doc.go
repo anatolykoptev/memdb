@@ -15,6 +15,11 @@
 // Both APIs share the StripFrontmatter / ParseFrontmatter / Metadata
 // primitives. Frontmatter formats: YAML (Markdown standard) and JSON.
 //
+// Observability: both Embedded and Catalog accept an optional
+// Observer to hook runtime events into a caller-supplied metrics
+// backend (prometheus, OpenTelemetry, slog, ...). All hooks are
+// nil-safe; skillkit core stays stdlib-only. See WithObserver.
+//
 // Spec conformance: skillkit implements the agentskills.io standard
 // adopted by Claude Code, Cursor, GitHub Copilot, JetBrains Junie,
 // Gemini CLI, OpenAI Codex, and 35+ other agentic tools. A skill
