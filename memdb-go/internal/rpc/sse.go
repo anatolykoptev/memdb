@@ -168,7 +168,7 @@ func (c *PythonClient) streamSSEProxy(ctx context.Context, w http.ResponseWriter
 
 		if !scanner.Scan() {
 			if err := scanner.Err(); err != nil {
-				c.logger.Debug("sse proxy: scanner error", slog.Any("error", err))
+				c.logger.DebugContext(ctx, "sse proxy: scanner error", slog.Any("error", err))
 			}
 			return
 		}
