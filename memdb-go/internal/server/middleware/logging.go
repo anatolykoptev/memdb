@@ -46,7 +46,7 @@ func Logging(logger *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(rw, r)
 
 			duration := time.Since(start)
-			logger.Info("http request",
+			logger.InfoContext(r.Context(), "http request",
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
 				slog.Int("status", rw.statusCode),
