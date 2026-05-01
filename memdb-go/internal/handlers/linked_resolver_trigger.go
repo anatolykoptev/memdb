@@ -86,7 +86,11 @@ func (h *Handler) getLinkedResolver() *LinkedIDsResolver {
 // triggerLinkedIDsResolver fans out per-fact F12 resolution. Fire-and-forget:
 // each fact runs in its own goroutine, gated by the package semaphore.
 // Returns immediately to keep the /add request path off the LLM hop.
+// reqCtx is the request context; each goroutine wraps it with
+// context.WithoutCancel to preserve the OTel trace without inheriting
+// the request cancellation signal.
 func (h *Handler) triggerLinkedIDsResolver(
+	reqCtx context.Context,
 	atomicFacts []llm.AtomicFact,
 	embedded []embeddedFact,
 	cubeID, personID, agentID string,
@@ -95,9 +99,8 @@ func (h *Handler) triggerLinkedIDsResolver(
 		return
 	}
 	if !linkedResolverEnabled() {
-		ctx := context.Background()
 		for range atomicFacts {
-			recordLinkedFactProcessed(ctx, linkedOutcomeDisabled)
+			recordLinkedFactProcessed(reqCtx, linkedOutcomeDisabled)
 		}
 		return
 	}
@@ -111,6 +114,7 @@ func (h *Handler) triggerLinkedIDsResolver(
 		return
 	}
 
+	bgCtx := context.WithoutCancel(reqCtx)
 	sem := acquireLinkedResolverSlot()
 	for i := range atomicFacts {
 		fact := atomicFacts[i]
@@ -118,7 +122,7 @@ func (h *Handler) triggerLinkedIDsResolver(
 		if ef.ltmID == "" || ef.fact.Memory == "" {
 			continue
 		}
-		go h.runLinkedResolverForFact(resolver, sem, fact, ef, cubeID, personID, agentID)
+		go h.runLinkedResolverForFact(bgCtx, resolver, sem, fact, ef, cubeID, personID, agentID)
 	}
 }
 
@@ -126,14 +130,17 @@ func (h *Handler) triggerLinkedIDsResolver(
 // fetches candidates, calls the LLM, merges with extract-time IDs, and
 // persists. Each path increments exactly one outcome label so dashboards
 // can attribute regressions cleanly.
+// bgCtx must be a context.WithoutCancel-wrapped request context so the OTel
+// trace propagates into pgxotel spans and slogh log lines.
 func (h *Handler) runLinkedResolverForFact(
+	bgCtx context.Context,
 	resolver *LinkedIDsResolver,
 	sem chan struct{},
 	fact llm.AtomicFact,
 	ef embeddedFact,
 	cubeID, personID, agentID string,
 ) {
-	ctx, cancel := context.WithTimeout(context.Background(), linkedResolverPerFactBudget)
+	ctx, cancel := context.WithTimeout(bgCtx, linkedResolverPerFactBudget)
 	defer cancel()
 
 	select {

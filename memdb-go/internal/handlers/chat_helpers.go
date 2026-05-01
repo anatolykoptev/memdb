@@ -291,7 +291,11 @@ func chatBuildMessages(systemPrompt, query string, history []map[string]string) 
 // turn, and writing it under Speakers[0] would silently bias multi-tenant
 // memory partitioning. Callers that want post-add in dual mode must
 // supply UserID + WritableCubeIDs explicitly.
-func (h *Handler) chatPostAdd(req *nativeChatRequest, query, response string) {
+// reqCtx is the request context; the goroutine uses context.WithoutCancel so
+// the OTel trace propagates without inheriting the request cancellation signal.
+// This matters especially on the SSE path where the client may disconnect
+// before the post-add completes.
+func (h *Handler) chatPostAdd(reqCtx context.Context, req *nativeChatRequest, query, response string) {
 	userID := stringOrEmpty(req.UserID)
 	if userID == "" {
 		h.logger.Debug("chat post-add skipped: no user_id (dual-speaker request)")
@@ -308,6 +312,7 @@ func (h *Handler) chatPostAdd(req *nativeChatRequest, query, response string) {
 		sessionID = "default_session"
 	}
 
+	bgCtx := context.WithoutCancel(reqCtx)
 	go func() {
 		now := time.Now().Format("2006-01-02 15:04:05")
 		asyncMode := modeAsync
@@ -322,7 +327,7 @@ func (h *Handler) chatPostAdd(req *nativeChatRequest, query, response string) {
 			SessionID:       &sessionID,
 		}
 		for _, cid := range cubeIDs {
-			if _, err := h.nativeAddForCube(context.Background(), addReq, cid); err != nil {
+			if _, err := h.nativeAddForCube(bgCtx, addReq, cid); err != nil {
 				h.logger.Warn("chat post-add failed",
 					slog.String("cube_id", cid), slog.Any("error", err))
 			}

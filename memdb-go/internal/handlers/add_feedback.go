@@ -94,7 +94,7 @@ func (h *Handler) processFeedback(ctx context.Context, req feedbackRequest) (*fe
 	// Persist a feedback_events row for the M11 reward loop.
 	// This is intentionally fire-and-forget: errors are logged and metered,
 	// but never propagated to the caller.
-	h.persistFeedbackEvent(req)
+	h.persistFeedbackEvent(ctx, req)
 
 	return &feedbackResponse{}, nil
 }
@@ -102,7 +102,9 @@ func (h *Handler) processFeedback(ctx context.Context, req feedbackRequest) (*fe
 // persistFeedbackEvent writes a row to memos_graph.feedback_events in a detached
 // goroutine. Errors are logged and counted; the calling request is never blocked.
 // Label is always "neutral" at the scaffold stage — M11 will derive it from LLM judge.
-func (h *Handler) persistFeedbackEvent(req feedbackRequest) {
+// reqCtx is the request context; the goroutine uses context.WithoutCancel so
+// the OTel trace propagates without inheriting the request cancellation signal.
+func (h *Handler) persistFeedbackEvent(reqCtx context.Context, req feedbackRequest) {
 	// Capture fields needed inside the goroutine (avoid req escape).
 	userID := *req.UserID
 	query := *req.FeedbackContent
@@ -111,8 +113,9 @@ func (h *Handler) persistFeedbackEvent(req feedbackRequest) {
 	prediction := ""
 	label := "neutral"
 
+	bgCtx := context.WithoutCancel(reqCtx)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(bgCtx, 5*time.Second)
 		defer cancel()
 
 		_, err := h.postgres.InsertFeedbackEvent(ctx, db.InsertFeedbackEventParams{

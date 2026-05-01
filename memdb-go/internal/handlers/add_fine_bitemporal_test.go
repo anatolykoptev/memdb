@@ -20,7 +20,7 @@ func biTemporalRefForTest(from, predicate, to string) db.BiTemporalEdgeRef {
 // has no postgres / llmChat wired.
 func TestTriggerEdgeInvalidationJudge_ShortCircuits_NoDeps(t *testing.T) {
 	h := &Handler{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
-	if h.triggerEdgeInvalidationJudge("cube-x", "2026-04-27T00:00:00Z") {
+	if h.triggerEdgeInvalidationJudge(context.Background(), "cube-x", "2026-04-27T00:00:00Z") {
 		t.Fatalf("expected false (postgres + llmChat are nil)")
 	}
 }
@@ -31,7 +31,7 @@ func TestTriggerEdgeInvalidationJudge_DisabledByEnv(t *testing.T) {
 	h := &Handler{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
 	// Even with deps "set" (we skip the actual wiring; the env gate is
 	// checked AFTER the dep check), behavior is consistent: no goroutine.
-	if h.triggerEdgeInvalidationJudge("cube-x", "2026-04-27T00:00:00Z") {
+	if h.triggerEdgeInvalidationJudge(context.Background(), "cube-x", "2026-04-27T00:00:00Z") {
 		t.Fatalf("expected false when MEMDB_F11_EDGE_JUDGE=false")
 	}
 }
@@ -112,7 +112,7 @@ func TestDBErrorOutcome_ConstantAndRegistration(t *testing.T) {
 	h := &Handler{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
 	stub := errPG{err: errors.New("simulated postgres failure")}
 	// runEdgeInvalidationJudge is the goroutine body; call synchronously.
-	h.runEdgeInvalidationJudge(stub, "cube-test", "2026-04-27T00:00:00Z")
+	h.runEdgeInvalidationJudge(context.Background(), stub, "cube-test", "2026-04-27T00:00:00Z")
 	// If the wrong branch was hit (llm_error path via panic or wrong constant),
 	// the test would panic. Reaching here means the db_error branch was taken.
 }

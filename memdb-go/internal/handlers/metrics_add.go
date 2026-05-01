@@ -83,6 +83,7 @@ func addMx() *addMetricsStruct {
 		}
 		// Pre-register zero observations so the time series exists before the
 		// first real request lands. Keeps Grafana panels alive on a cold start.
+		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		ctx := context.Background()
 		for _, s := range fineStages {
 			stageDur.Record(ctx, 0,

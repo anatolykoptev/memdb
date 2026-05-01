@@ -22,7 +22,7 @@ const (
 )
 
 // generateSkillMemory asynchronously extracts skill memories from the conversation.
-func (h *Handler) generateSkillMemory(cubeID, userID, conversation string, messageCount int) {
+func (h *Handler) generateSkillMemory(reqCtx context.Context, cubeID, userID, conversation string, messageCount int) {
 	if h.llmChat == nil || h.postgres == nil || h.embedder == nil {
 		return
 	}
@@ -33,8 +33,9 @@ func (h *Handler) generateSkillMemory(cubeID, userID, conversation string, messa
 		return
 	}
 
+	bgCtx := context.WithoutCancel(reqCtx)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), skillExtractionTimeout)
+		ctx, cancel := context.WithTimeout(bgCtx, skillExtractionTimeout)
 		defer cancel()
 
 		// Step 1: chunk tasks

@@ -242,7 +242,7 @@ func (h *Handler) runFinePipeline(ctx context.Context, conversation, cubeID stri
 				}
 			}
 		}
-		h.linkEntitiesAsync(embedded, cubeID, now)
+		h.linkEntitiesAsync(ctx, embedded, cubeID, now)
 	}
 
 	// Cleanup
@@ -250,7 +250,7 @@ func (h *Handler) runFinePipeline(ctx context.Context, conversation, cubeID stri
 
 	// Episodic summary for the entire batch
 	// Buffer flush has no original request — use cubeID as userID fallback.
-	h.generateEpisodicSummary(cubeID, cubeID, "", conversation, now, len(facts))
+	h.generateEpisodicSummary(ctx, cubeID, cubeID, "", conversation, now, len(facts))
 
 	// Profile refresh
 	if h.profiler != nil {

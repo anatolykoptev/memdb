@@ -205,7 +205,7 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	observability.RecordChatRefusedWithEvidence(ctx, response, len(memories), "", emitStyle)
 
 	if derefBoolOr(req.AddMessageOnAnswer, false) {
-		h.chatPostAdd(&req, *req.Query, response)
+		h.chatPostAdd(ctx, &req, *req.Query, response)
 	}
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
@@ -286,7 +286,7 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chunks, errc := h.llmChat.ChatStream(ctx, messages, llm.StreamOpts{})
-	h.streamChatResponse(sse, chunks, errc, &req, streamStyle, len(memories))
+	h.streamChatResponse(ctx, sse, chunks, errc, &req, streamStyle, len(memories))
 }
 
 // streamChatResponse reads chunks, classifies think tags, emits SSE events.
@@ -295,7 +295,10 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 // post-stream pred-length / refusal counters tag identically to the non-stream
 // path. memCount is the post-threshold memory count (used as the "had
 // evidence?" signal for memdb.chat.refused_with_evidence_total).
-func (h *Handler) streamChatResponse(sse *rpc.SSEWriter, chunks <-chan llm.StreamChunk, errc <-chan error, req *nativeChatRequest, answerStyle string, memCount int) {
+// reqCtx is the request context. Post-stream work (metrics, post-add) uses
+// context.WithoutCancel(reqCtx) so trace_id propagates even when the SSE
+// client has already disconnected and the request context is cancelled.
+func (h *Handler) streamChatResponse(reqCtx context.Context, sse *rpc.SSEWriter, chunks <-chan llm.StreamChunk, errc <-chan error, req *nativeChatRequest, answerStyle string, memCount int) {
 	parser := &thinkParser{}
 	var fullResp strings.Builder
 
@@ -319,15 +322,17 @@ func (h *Handler) streamChatResponse(sse *rpc.SSEWriter, chunks <-chan llm.Strea
 	}
 	_ = sse.WriteDone()
 
-	// M12.5: post-stream observability. context.Background() because the
-	// request context may have been cancelled by the time streaming finishes
-	// (SSE consumers disconnect mid-stream); we still want the metric.
+	// M12.5: post-stream observability. Use WithoutCancel so the SSE client
+	// disconnecting mid-stream (which cancels reqCtx) doesn't suppress the
+	// metric record — we still want the observation regardless of client state.
+	// The trace_id from reqCtx is preserved for slogh correlation.
+	obsCtx := context.WithoutCancel(reqCtx)
 	finalAnswer := fullResp.String()
-	observability.RecordChatPredLength(context.Background(), finalAnswer, answerStyle)
-	observability.RecordChatRefusedWithEvidence(context.Background(), finalAnswer, memCount, "", answerStyle)
+	observability.RecordChatPredLength(obsCtx, finalAnswer, answerStyle)
+	observability.RecordChatRefusedWithEvidence(obsCtx, finalAnswer, memCount, "", answerStyle)
 
 	if derefBoolOr(req.AddMessageOnAnswer, false) {
-		h.chatPostAdd(req, *req.Query, finalAnswer)
+		h.chatPostAdd(reqCtx, req, *req.Query, finalAnswer)
 	}
 }
 

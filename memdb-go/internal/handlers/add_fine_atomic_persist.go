@@ -137,7 +137,7 @@ func (h *Handler) applyAtomicAndPersist(
 				}
 			}
 		}
-		h.linkEntitiesAsync(embedded, fc.CubeID, fc.Now)
+		h.linkEntitiesAsync(ctx, embedded, fc.CubeID, fc.Now)
 	}
 	h.cleanupWorkingMemory(ctx, fc.CubeID)
 	return items, nil
@@ -221,6 +221,7 @@ func (h *Handler) runAtomicFineForCube(ctx context.Context, req *fullAddRequest,
 	// shared with the legacy path so behavioural parity is preserved.
 	t = time.Now()
 	h.triggerBackgroundExtractors(extractorTriggerInput{
+		ReqCtx: ctx,
 		CubeID: cubeID, UserID: *req.UserID, SessionID: sessionID,
 		Conversation: conversation, Now: now,
 		FactCount: len(extracted), MessageCount: len(req.Messages),
@@ -229,7 +230,7 @@ func (h *Handler) runAtomicFineForCube(ctx context.Context, req *fullAddRequest,
 	// for atomic facts (the legacy paragraph path doesn't carry the
 	// linked_memory_ids slot). Lives after triggerBackgroundExtractors so
 	// existing fanout latency stays unchanged when MEMDB_F12_LINKED is off.
-	h.triggerLinkedIDsResolver(atomicFacts, embedded, cubeID, *req.UserID, stringOrEmpty(req.AgentID))
+	h.triggerLinkedIDsResolver(ctx, atomicFacts, embedded, cubeID, *req.UserID, stringOrEmpty(req.AgentID))
 	recordStageDuration(ctx, "fanout", t)
 	return items, nil
 }
