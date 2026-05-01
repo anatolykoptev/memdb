@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/anatolykoptev/go-kit/rerank"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/cache"
+	localrerank "github.com/anatolykoptev/memdb/memdb-go/internal/search/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
@@ -21,17 +23,24 @@ import (
 
 // initEmbedder initializes the embedder via factory (non-fatal if unavailable).
 // When ONNXModelDirCode is set, also loads a second ONNX model and creates a Registry.
-func initEmbedder(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) embedder.Embedder {
+//
+// 2026-05-01: cacheClient param wires a Redis-backed embedding cache via
+// go-kit/embed.WithCache (only for cfg.EmbedderType=="http"). Saves the
+// embed-server round trip + ONNX inference on idempotent re-embed (reverse-
+// role pass, query rewrites, scheduler reorganiser sweeps). Pass nil to
+// disable — embedder degrades gracefully to the no-cache path.
+func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Client, logger *slog.Logger) embedder.Embedder {
 	embCfg := embedder.Config{
-		Type:         cfg.EmbedderType,
-		ONNXModelDir: cfg.ONNXModelDir,
-		VoyageAPIKey: cfg.VoyageAPIKey,
-		Model:        cfg.EmbedderModel,
-		OllamaURL:    cfg.OllamaURL,
-		OllamaDim:    cfg.OllamaDim,
-		OllamaPrefix: cfg.OllamaPrefix,
-		OllamaQuery:  cfg.OllamaQuery,
-		HTTPBaseURL:  cfg.EmbedURL,
+		Type:            cfg.EmbedderType,
+		ONNXModelDir:    cfg.ONNXModelDir,
+		VoyageAPIKey:    cfg.VoyageAPIKey,
+		Model:           cfg.EmbedderModel,
+		OllamaURL:       cfg.OllamaURL,
+		OllamaDim:       cfg.OllamaDim,
+		OllamaPrefix:    cfg.OllamaPrefix,
+		OllamaQuery:     cfg.OllamaQuery,
+		HTTPBaseURL:     cfg.EmbedURL,
+		HTTPCacheClient: cacheClient,
 	}
 	e, err := embedder.New(embCfg, logger)
 	if err != nil {
@@ -90,6 +99,7 @@ func initSearchService(
 	emb embedder.Embedder,
 	rd *db.Redis,
 	h *handlers.Handler,
+	cacheClient *cache.Client,
 	logger *slog.Logger,
 ) (*search.SearchService, *scheduler.Profiler) {
 	svc := search.NewSearchService(pg, qd, emb, logger)
@@ -112,6 +122,15 @@ func initSearchService(
 		rerank.WithTimeout(cfg.CrossEncoderTimeout),
 		rerank.WithMaxDocs(cfg.CrossEncoderMaxDocs),
 		rerank.WithMaxCharsPerDoc(cfg.CrossEncoderMaxCharsPerDoc),
+	}
+	// Redis-backed score cache for the cross-encoder. Same cache.Client as
+	// the embed cache (separate Redis namespace prefix). Saves the cross-
+	// encoder HTTP round trip + ~200-500ms compute on (model, query, doc)
+	// triples that recur across query workers (D4/D7/D10 rewrite variants of
+	// the same user query, plus the original).
+	if cacheClient != nil {
+		rerankOpts = append(rerankOpts, rerank.WithCache(localrerank.NewRedisRerankCache(cacheClient, 0, logger)))
+		logger.Info("rerank cache enabled (redis-backed)")
 	}
 	if circuitEnabled() {
 		cbCfg := rerank.CircuitConfig{

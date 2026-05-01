@@ -47,10 +47,15 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	pg, qd, rd, wmCache := initDBClients(ctx, cfg, h, logger)
 
 	// Initialize embedder via factory (non-fatal: server starts without embedder)
-	emb := initEmbedder(cfg, h, logger)
+	emb := initEmbedder(cfg, h, cacheClient, logger)
+
+	// Wire the atomic-extract LLM-call cache. Same cacheClient backs the embed
+	// cache (so no additional Redis connection); when nil (cache disabled),
+	// SetAtomicExtractCache becomes a no-op and extract always hits the LLM.
+	h.SetAtomicExtractCache(cacheClient, 0)
 
 	// Initialize search service with optional LLM features and profiler
-	searchSvc, profiler := initSearchService(cfg, pg, qd, emb, rd, h, logger)
+	searchSvc, profiler := initSearchService(cfg, pg, qd, emb, rd, h, cacheClient, logger)
 	h.SetSearchService(searchSvc)
 
 	// Initialize LLM extractor (chat client with LLM API config is wired below).
