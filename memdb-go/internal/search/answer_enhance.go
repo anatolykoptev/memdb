@@ -25,6 +25,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/anatolykoptev/memdb/memdb-go/internal/lang"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
@@ -51,6 +52,7 @@ type AnswerEnhanceConfig struct {
 	APIURL string
 	APIKey string
 	Model  string
+	Locale string // "en"/"ru"/"zh"; empty triggers auto-detect from query text
 }
 
 // answerEnhanceEnabled reports whether MEMDB_SEARCH_ENHANCE is set to "true".
@@ -136,7 +138,7 @@ func EnhanceRetrievalAnswer(
 	// refusing to commit. Putting the most relevant memory verbatim into
 	// the system role nudges it to anchor on real text instead of fall
 	// back to UNKNOWN.
-	systemPrompt, hinted, trace := buildAnswerEnhanceSystemPrompt(ctx, query, emb)
+	systemPrompt, hinted, trace := buildAnswerEnhanceSystemPrompt(ctx, query, emb, cfg.Locale)
 	if topMem := topAnchorMemory(candidates); topMem != "" {
 		// Fence the injected memory text so the LLM treats it as data,
 		// not as instructions. A stored memory containing
@@ -178,11 +180,15 @@ func EnhanceRetrievalAnswer(
 // Returns also a d10RoutingTrace capturing the numeric signals that fed
 // the routing decision; the trace is recorded as observability metrics
 // downstream (see recordD10Routing in d10_metrics.go).
-func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb classifierEmbedder) (string, bool, d10RoutingTrace) {
+func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb classifierEmbedder, locale string) (string, bool, d10RoutingTrace) {
+	// Resolve the request locale: explicit from cfg → auto-detect from query text.
+	if locale == "" {
+		locale = lang.Detect(query)
+	}
 	// Resolve the base prompt ONCE per call: env override → bundled
 	// default → repo default → const fallback. mtime-cached so an
 	// operator edit hot-reloads next request, no rebuild needed.
-	base := loadSkillPrompt()
+	base := loadSkillPromptForLocale(locale)
 	if emb == nil || !d10ClassifierEnabled() {
 		return base, false, d10RoutingTrace{Mode: D10RouteBase}
 	}

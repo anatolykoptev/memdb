@@ -36,13 +36,20 @@ type skillkitInstruments struct {
 	envFallback metric.Int64Counter
 	bodyBytes   metric.Int64Histogram
 	catalogLoad metric.Int64Counter
-	catalogSize metric.Int64Gauge
 }
 
+// catalogSizesMu guards catalogSizes, written by CatalogSize hook on the
+// operator goroutine and read by the OTel observable callback on the
+// Prometheus scrape goroutine.
 var (
-	skillkitOnce  sync.Once
-	skillkitInst  *skillkitInstruments
-	skillkitObsv  *skillkit.Observer
+	catalogSizesMu sync.RWMutex
+	catalogSizes   = map[string]int64{} // tier name → skill count
+)
+
+var (
+	skillkitOnce sync.Once
+	skillkitInst *skillkitInstruments
+	skillkitObsv *skillkit.Observer
 )
 
 // initSkillkitInstruments builds the OTel instruments and the Observer
@@ -80,11 +87,26 @@ func initSkillkitInstruments() {
 				"A 'miss' means a caller asked for a skill the catalog doesn't know — "+
 				"usually a programmer error (see scheduler.schedulerPrompt panic guard)."),
 	)
-	inst.catalogSize, _ = meter.Int64Gauge(
+
+	// skillkit_catalog_skills uses an Int64ObservableGauge with a
+	// register-time callback. The OTel Prometheus exporter serializes gauge
+	// values only via observable (async) instruments; a synchronous
+	// Int64Gauge.Record() call is never reflected in /metrics output.
+	// The in-memory catalogSizes map is updated by the CatalogSize hook
+	// (operator goroutine) and read by the callback on every Prometheus scrape.
+	_, _ = meter.Int64ObservableGauge(
 		"memdb.skillkit.catalog_skills",
 		metric.WithDescription(
-			"Skills loaded per catalog tier at observer-attach time. "+
+			"Skills loaded per catalog tier (snapshot at observer attach). "+
 				"A value < expected count means //go:embed missed some SKILL.md files."),
+		metric.WithInt64Callback(func(_ context.Context, obs metric.Int64Observer) error {
+			catalogSizesMu.RLock()
+			defer catalogSizesMu.RUnlock()
+			for tier, n := range catalogSizes {
+				obs.Observe(n, metric.WithAttributes(attribute.String("tier", tier)))
+			}
+			return nil
+		}),
 	)
 
 	skillkitInst = inst
@@ -114,9 +136,9 @@ func initSkillkitInstruments() {
 			))
 		},
 		CatalogSize: func(tier string, count int) {
-			skillkitInst.catalogSize.Record(context.Background(), int64(count), metric.WithAttributes(
-				attribute.String("tier", tier),
-			))
+			catalogSizesMu.Lock()
+			catalogSizes[tier] = int64(count)
+			catalogSizesMu.Unlock()
 		},
 	}
 }
