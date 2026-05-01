@@ -1,9 +1,11 @@
 // Package observability — skillkit_metrics.go.
 //
-// Singleton skillkit.Observer wired to MemDB's existing OTel MeterProvider.
-// Five instruments under scope "memdb-go/skillkit" surface at /metrics via
-// the same Prometheus exporter used by D10 routing, scheduler loops, and
-// cache metrics.
+// Singleton skillkit.Observer and skillkit.Tracer wired to MemDB's existing
+// OTel MeterProvider and TracerProvider. Five metric instruments under scope
+// "memdb-go/skillkit" surface at /metrics via the same Prometheus exporter
+// used by D10 routing, scheduler loops, and cache metrics. Two span types
+// ("skill.body", "skillkit.catalog.load") surface in Jaeger under the same
+// "memdb-go/skillkit" tracer scope.
 //
 // Bounded label cardinality:
 //   - "name"    — small known enum (~10 values: d10-extractor, atomic-extractor,
@@ -13,9 +15,10 @@
 //   - "outcome" — {"hit","miss"}                                    — skillkit enum
 //   - "tier"    — {"scheduler-builtin", …}                         — operator-named
 //
-// Singleton design: a single *Observer is shared by D10, atomic-extractor,
-// and scheduler. Per-skill differentiation flows through the "name" label,
-// not separate Observer instances. Use SkillkitObserver() to retrieve it.
+// Singleton design: a single *Observer and a single *Tracer are shared by D10,
+// atomic-extractor, and scheduler. Per-skill differentiation flows through the
+// "name" / "skill.name" label/attribute, not separate instances.
+// Use SkillkitObserver() / SkillkitTracer() to retrieve them.
 package observability
 
 import (
@@ -25,6 +28,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/anatolykoptev/skillkit"
 )
@@ -50,6 +54,7 @@ var (
 	skillkitOnce sync.Once
 	skillkitInst *skillkitInstruments
 	skillkitObsv *skillkit.Observer
+	skillkitTrcr *skillkit.Tracer
 )
 
 // initSkillkitInstruments builds the OTel instruments and the Observer
@@ -141,6 +146,25 @@ func initSkillkitInstruments() {
 			catalogSizesMu.Unlock()
 		},
 	}
+
+	skillkitTrcr = &skillkit.Tracer{
+		StartBody: func(ctx context.Context, name string) (context.Context, func(string)) {
+			ctx, span := otel.Tracer(skillkitMeterScope).Start(ctx, "skill.body",
+				trace.WithAttributes(attribute.String("skill.name", name)))
+			return ctx, func(source string) {
+				span.SetAttributes(attribute.String("skill.source", source))
+				span.End()
+			}
+		},
+		StartCatalogLoad: func(ctx context.Context, name string) (context.Context, func(string)) {
+			ctx, span := otel.Tracer(skillkitMeterScope).Start(ctx, "skillkit.catalog.load",
+				trace.WithAttributes(attribute.String("skill.name", name)))
+			return ctx, func(outcome string) {
+				span.SetAttributes(attribute.String("catalog.outcome", outcome))
+				span.End()
+			}
+		},
+	}
 }
 
 // SkillkitObserver returns the process-wide singleton *skillkit.Observer
@@ -148,9 +172,29 @@ func initSkillkitInstruments() {
 //   - skillkit.NewEmbedded via skillkit.WithObserver(observability.SkillkitObserver())
 //   - skillkit.NewCatalog via Catalog.WithObserver(observability.SkillkitObserver())
 //
+// See also SkillkitTracer() for the companion OTel span adapter.
+//
 // Thread-safe: the Observer itself is a struct of function pointers
 // set once at init; the OTel SDK instruments are concurrency-safe.
 func SkillkitObserver() *skillkit.Observer {
 	skillkitOnce.Do(initSkillkitInstruments)
 	return skillkitObsv
+}
+
+// SkillkitTracer returns the process-wide singleton *skillkit.Tracer
+// for span-level tracing of skill body and catalog-load hot paths. Wire into:
+//   - skillkit.NewEmbedded via skillkit.WithTracer(observability.SkillkitTracer())
+//   - skillkit.NewCatalog via Catalog.WithTracer(observability.SkillkitTracer())
+//
+// Two span types are emitted under the "memdb-go/skillkit" tracer scope:
+//   - "skill.body"           — per Embedded.BodyCtx call; attribute "skill.source"
+//   - "skillkit.catalog.load" — per Catalog.LoadCtx call; attribute "catalog.outcome"
+//
+// Spans nest under the request trace tree (HTTP handler → LLM call → skill load).
+//
+// Thread-safe: initialised exactly once by the same sync.Once that guards
+// SkillkitObserver (shared initSkillkitInstruments call).
+func SkillkitTracer() *skillkit.Tracer {
+	skillkitOnce.Do(initSkillkitInstruments)
+	return skillkitTrcr
 }

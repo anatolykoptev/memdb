@@ -36,7 +36,7 @@ github.com/anatolykoptev/go-kit/uploads
 github.com/anatolykoptev/go-stealth
 github.com/anatolykoptev/go-stealth/proxypool
 github.com/anatolykoptev/go-stealth/ratelimit
-# github.com/anatolykoptev/skillkit v0.2.0
+# github.com/anatolykoptev/skillkit v0.2.2
 ## explicit; go 1.26
 github.com/anatolykoptev/skillkit
 # github.com/andybalholm/brotli v1.2.0

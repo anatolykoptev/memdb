@@ -31,9 +31,10 @@ type pluginRecord struct {
 }
 
 type pluginTier struct {
-	name string
-	bare map[string]pluginRecord // bare name → first-seen entry
-	full map[string]pluginRecord // "plugin:skill" → entry
+	name   string
+	bare   map[string]pluginRecord // bare name → first-seen entry
+	full   map[string]pluginRecord // "plugin:skill" → entry
+	byInfo map[string]pluginRecord // "tierName:pluginName:skillName" → entry (for ResolveByInfo)
 }
 
 // NewPluginTier creates a tier from a slice of pre-resolved entries.
@@ -43,9 +44,10 @@ type pluginTier struct {
 // wins and a slog.Warn is emitted listing duplicates.
 func NewPluginTier(name string, entries []PluginEntry) Tier {
 	p := &pluginTier{
-		name: name,
-		bare: make(map[string]pluginRecord, len(entries)),
-		full: make(map[string]pluginRecord, len(entries)),
+		name:   name,
+		bare:   make(map[string]pluginRecord, len(entries)),
+		full:   make(map[string]pluginRecord, len(entries)),
+		byInfo: make(map[string]pluginRecord, len(entries)),
 	}
 
 	type dupKey struct{ plugin, skill string }
@@ -68,6 +70,10 @@ func NewPluginTier(name string, entries []PluginEntry) Tier {
 		}
 
 		p.full[fullKey] = rec
+		// byInfo key: "<tierName>:<pluginName>:<skillName>" mirrors the Source
+		// field ("tierName:pluginName") plus the skill name — uniquely identifies
+		// each record for ResolveByInfo without re-parsing Source.
+		p.byInfo[rec.info.Source+":"+rec.info.Name] = rec
 
 		// First entry for a bare name wins.
 		if _, conflict := p.bare[e.SkillName]; !conflict {
@@ -155,6 +161,19 @@ func (p *pluginTier) resolveRecord(name string) (pluginRecord, bool) {
 	// Bare: look up in the bare index.
 	rec, ok := p.bare[name]
 	return rec, ok
+}
+
+// ResolveByInfo implements bodyByInfoResolver. It uses the pre-built byInfo
+// index (keyed by "tierName:pluginName:skillName") to return the body for the
+// exact SkillInfo Walk selected, enabling correct locale routing when multiple
+// plugin entries share the same bare SkillName but differ in locale.
+func (p *pluginTier) ResolveByInfo(info SkillInfo) (string, bool) {
+	key := info.Source + ":" + info.Name
+	rec, ok := p.byInfo[key]
+	if !ok {
+		return "", false
+	}
+	return rec.body, true
 }
 
 func (p *pluginTier) Walk(yield func(SkillInfo)) {

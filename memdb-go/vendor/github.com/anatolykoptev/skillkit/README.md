@@ -32,6 +32,8 @@ Both APIs share the same frontmatter primitives (`StripFrontmatter`,
   observability without skillkit-side dep. Wire to whichever backend the
   consuming service already uses.
 
+- **Optional locale routing** for multi-language skill catalogs: `cat.WithLocale("ru")` prefers `locale: ru` variants, falls back to neutral, then any match (v0.2.1+).
+
 ## Why
 
 Until now, every Go service that loaded skills hand-rolled its own loader:

@@ -144,7 +144,7 @@ func (r *Reorganizer) dedupPreferences(ctx context.Context, cubeID string, prefs
 // llmExtractPreferences calls the LLM to extract user preferences from a conversation.
 func (r *Reorganizer) llmExtractPreferences(ctx context.Context, conversation string) ([]string, error) {
 	msgs := []map[string]string{
-		{"role": "system", "content": schedulerPrompt("preference-extractor")},
+		{"role": "system", "content": schedulerPrompt(ctx, "preference-extractor")},
 		{"role": "user", "content": "Conversation:\n" + conversation},
 	}
 

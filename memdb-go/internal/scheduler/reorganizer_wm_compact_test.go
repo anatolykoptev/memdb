@@ -242,7 +242,7 @@ func TestEpisodicMemory_NotInWMType(t *testing.T) {
 // ---- wmCompactionSystemPrompt sanity ----------------------------------------
 
 func TestWMCompactionSystemPrompt(t *testing.T) {
-	p := schedulerPrompt("session-compactor")
+	p := schedulerPrompt(context.Background(), "session-compactor")
 	if p == "" {
 		t.Error("session-compactor skill must not be empty")
 	}

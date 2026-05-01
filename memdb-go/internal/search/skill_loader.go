@@ -30,6 +30,7 @@ package search
 // shims for existing callers — they delegate to the "en" instance.
 
 import (
+	"context"
 	_ "embed"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
@@ -60,18 +61,21 @@ var d10SkillsByLocale = map[string]*skillkit.Embedded{
 		"MEMDB_D10_SKILL_PATH",
 		embeddedD10SkillEN,
 		skillkit.WithObserver(observability.SkillkitObserver()),
+		skillkit.WithTracer(observability.SkillkitTracer()),
 	),
 	"ru": skillkit.NewEmbedded(
 		"d10-extractor-ru",
 		"MEMDB_D10_SKILL_PATH_RU",
 		embeddedD10SkillRU,
 		skillkit.WithObserver(observability.SkillkitObserver()),
+		skillkit.WithTracer(observability.SkillkitTracer()),
 	),
 	"zh": skillkit.NewEmbedded(
 		"d10-extractor-zh",
 		"MEMDB_D10_SKILL_PATH_ZH",
 		embeddedD10SkillZH,
 		skillkit.WithObserver(observability.SkillkitObserver()),
+		skillkit.WithTracer(observability.SkillkitTracer()),
 	),
 }
 
@@ -82,7 +86,7 @@ var d10SkillsByLocale = map[string]*skillkit.Embedded{
 // Backward-compat shim. New code paths should prefer
 // loadSkillPromptForLocale to enable .ru / .zh selection.
 func loadSkillPrompt() string {
-	return loadSkillPromptForLocale("en")
+	return loadSkillPromptForLocale(context.Background(), "en")
 }
 
 // loadSkillPromptForLocale returns the D10 system-prompt body for the
@@ -92,12 +96,15 @@ func loadSkillPrompt() string {
 //	MEMDB_D10_SKILL_PATH     — operator override for "en" (existing)
 //	MEMDB_D10_SKILL_PATH_RU  — operator override for "ru" (new)
 //	MEMDB_D10_SKILL_PATH_ZH  — operator override for "zh" (new)
-func loadSkillPromptForLocale(locale string) string {
+//
+// When a Tracer is configured (via WithTracer), opens a span around
+// the BodyCtx call so operators can see skill load latency in Jaeger.
+func loadSkillPromptForLocale(ctx context.Context, locale string) string {
 	skill, ok := d10SkillsByLocale[locale]
 	if !ok {
 		skill = d10SkillsByLocale["en"]
 	}
-	return skill.Body()
+	return skill.BodyCtx(ctx)
 }
 
 // SkillLoadDiagnostic returns a one-line description of the live D10

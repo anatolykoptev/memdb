@@ -170,6 +170,17 @@ func (d *dirTier) cachePut(skillFile string, mtime int64, body string, info Skil
 	d.cache[skillFile] = dirCacheEntry{mtime: mtime, body: body, info: info}
 }
 
+// ResolveByInfo implements bodyByInfoResolver. It re-reads (or serves from
+// cache) the skill file at info.Path so that locale-aware lookup can retrieve
+// the correct body after Walk has selected the best SkillInfo candidate.
+func (d *dirTier) ResolveByInfo(info SkillInfo) (string, bool) {
+	if info.Path == "" {
+		return "", false
+	}
+	_, body, ok := d.loadFile(info.Path)
+	return body, ok
+}
+
 func (d *dirTier) Walk(yield func(SkillInfo)) {
 	entries, err := os.ReadDir(d.dir)
 	if err != nil {
