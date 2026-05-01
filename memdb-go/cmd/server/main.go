@@ -23,12 +23,11 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/server"
 
+	gokit_tracing "github.com/anatolykoptev/go-kit/tracing"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	promexporter "go.opentelemetry.io/otel/exporters/prometheus"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
@@ -133,36 +132,23 @@ func initOTel(cfg *config.Config) (func(context.Context) error, error) {
 		return nil, err
 	}
 
-	// Trace exporter — only when OTEL_EXPORTER_OTLP_ENDPOINT is set.
-	// Skipping the batcher avoids periodic "connection refused" warnings when
-	// no collector is deployed (Prometheus metrics remain unaffected).
-	var tp *sdktrace.TracerProvider
-	if cfg.OTelEndpoint != "" {
-		// WithEndpointURL takes the canonical OTel env format — full URL
-		// with scheme ("http://host:port" insecure, "https://host:port" TLS).
-		// The legacy WithEndpoint(host:port) takes bare host and double-
-		// prefixes if you pass it a URL — produced parse errors like
-		// `traces export: parse "http://http://jaeger:4318/v1/traces"`.
-		traceExporter, err := otlptracehttp.New(ctx,
-			otlptracehttp.WithEndpointURL(cfg.OTelEndpoint),
-		)
-		if err != nil {
-			return nil, err
-		}
-		tp = sdktrace.NewTracerProvider(
-			sdktrace.WithBatcher(traceExporter),
-			sdktrace.WithResource(res),
-		)
-		otel.SetTracerProvider(tp)
+	// Trace provider via go-kit/tracing — installs propagators always, exports
+	// to OTLP/HTTP only when endpoint is set. WithEndpoint accepts the full URL
+	// ("http://jaeger:4318") — internally uses otlptracehttp.WithEndpointURL,
+	// avoiding the legacy double-prefix bug that produced
+	// `parse "http://http://jaeger:4318/v1/traces"`.
+	shutdownTrace, err := gokit_tracing.Setup(ctx, cfg.OTelServiceName,
+		gokit_tracing.WithEndpoint(cfg.OTelEndpoint),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("tracing setup: %w", err)
 	}
 
 	// Metric exporter — Prometheus pull-based. Instruments registered via the
 	// OTel Meter are scraped from GET /metrics (see server_routes.go).
 	promExporter, err := promexporter.New()
 	if err != nil {
-		if tp != nil {
-			_ = tp.Shutdown(ctx)
-		}
+		_ = shutdownTrace(ctx)
 		return nil, fmt.Errorf("prometheus exporter: %w", err)
 	}
 
@@ -173,10 +159,8 @@ func initOTel(cfg *config.Config) (func(context.Context) error, error) {
 	otel.SetMeterProvider(mp)
 
 	shutdown := func(ctx context.Context) error {
-		if tp != nil {
-			if err := tp.Shutdown(ctx); err != nil {
-				return err
-			}
+		if err := shutdownTrace(ctx); err != nil {
+			return err
 		}
 		return mp.Shutdown(ctx)
 	}

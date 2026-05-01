@@ -29,6 +29,7 @@ github.com/anatolykoptev/go-kit/embed
 github.com/anatolykoptev/go-kit/metrics
 github.com/anatolykoptev/go-kit/rerank
 github.com/anatolykoptev/go-kit/retry
+github.com/anatolykoptev/go-kit/tracing
 github.com/anatolykoptev/go-kit/uploads
 # github.com/anatolykoptev/go-stealth v1.3.1
 ## explicit; go 1.26
