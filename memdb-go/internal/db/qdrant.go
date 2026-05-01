@@ -45,7 +45,7 @@ func NewQdrant(ctx context.Context, addr string, logger *slog.Logger) (*Qdrant, 
 		return nil, fmt.Errorf("qdrant health check failed: %w", err)
 	}
 
-	logger.Info("qdrant connected",
+	logger.InfoContext(ctx, "qdrant connected",
 		slog.String("version", health.GetVersion()),
 	)
 	return &Qdrant{client: client, logger: logger}, nil

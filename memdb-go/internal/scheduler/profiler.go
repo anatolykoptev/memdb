@@ -83,7 +83,7 @@ func (p *Profiler) TriggerRefresh(cubeID string) {
 		ctx, cancel := context.WithTimeout(context.Background(), profileRefreshTimeout)
 		defer cancel()
 		if err := p.refresh(ctx, cubeID); err != nil {
-			p.logger.Debug("profile refresh failed",
+			p.logger.DebugContext(ctx, "profile refresh failed",
 				slog.String("cube_id", cubeID),
 				slog.Any("error", err),
 			)

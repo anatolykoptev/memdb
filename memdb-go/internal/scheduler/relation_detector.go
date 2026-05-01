@@ -95,7 +95,7 @@ func (r *Reorganizer) DetectRelationPair(ctx context.Context, fromID, fromText, 
 	if err := r.postgres.CreateMemoryEdgeWithConfidence(ctx, fromID, toID, rel, now, "", parsed.Confidence, rationale); err != nil {
 		return "", parsed.Confidence, fmt.Errorf("write relation edge: %w", err)
 	}
-	r.logger.Debug("tree reorg: relation edge written",
+	r.logger.DebugContext(ctx, "tree reorg: relation edge written",
 		slog.String("from", fromID),
 		slog.String("to", toID),
 		slog.String("relation", rel),

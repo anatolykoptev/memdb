@@ -46,12 +46,12 @@ func (r *Reorganizer) ProcessRawMemory(ctx context.Context, userID, cubeID strin
 		return
 	}
 	if r.embedder == nil {
-		r.logger.Debug("mem_read: embedder not configured, skipping")
+		r.logger.DebugContext(ctx, "mem_read: embedder not configured, skipping")
 		return
 	}
 
 	log := r.logger.With(slog.String("cube_id", cubeID), slog.Int("wm_ids", len(wmIDs)))
-	log.Info("mem_read: processing raw WM nodes")
+	log.InfoContext(ctx, "mem_read: processing raw WM nodes")
 
 	// Guard: use fine-level pipeline only if llmExtractor is available.
 	if r.llmExtractor != nil {
@@ -69,14 +69,14 @@ func (r *Reorganizer) processRawMemoryFine(ctx context.Context, userID, cubeID s
 
 	fullNodes, err := r.postgres.GetMemoriesByPropertyIDs(ctx, wmIDs)
 	if err != nil || len(fullNodes) == 0 {
-		log.Warn("mem_read: GetMemoriesByPropertyIDs failed or returned empty",
+		log.WarnContext(ctx, "mem_read: GetMemoriesByPropertyIDs failed or returned empty",
 			slog.Any("error", err), slog.Int("results", len(fullNodes)))
 		return
 	}
 
 	info := extractWMInfo(fullNodes)
 	if len(info.texts) == 0 {
-		log.Debug("mem_read: no valid WM texts found")
+		log.DebugContext(ctx, "mem_read: no valid WM texts found")
 		return
 	}
 	conversation := strings.Join(info.texts, "\n")
@@ -84,15 +84,15 @@ func (r *Reorganizer) processRawMemoryFine(ctx context.Context, userID, cubeID s
 	candidates := r.fetchMemReadCandidates(ctx, conversation, cubeID, info.agentID, log)
 	facts, err := r.llmExtractor.ExtractAndDedup(ctx, conversation, candidates)
 	if err != nil {
-		log.Warn("mem_read: ExtractAndDedup failed", slog.Any("error", err))
+		log.WarnContext(ctx, "mem_read: ExtractAndDedup failed", slog.Any("error", err))
 		return
 	}
 	if len(facts) == 0 {
-		log.Debug("mem_read: no facts extracted")
+		log.DebugContext(ctx, "mem_read: no facts extracted")
 		r.deleteWMNodes(ctx, cubeID, info.processedWMIDs, log)
 		return
 	}
-	log.Info("mem_read: extracted facts", slog.Int("count", len(facts)), slog.String("model", r.llmExtractor.Model()))
+	log.InfoContext(ctx, "mem_read: extracted facts", slog.Int("count", len(facts)), slog.String("model", r.llmExtractor.Model()))
 
 	facts = r.filterAddsByContentHash(ctx, facts, cubeID, log)
 	embedded := r.embedFacts(ctx, facts, log)
@@ -109,7 +109,7 @@ func (r *Reorganizer) processRawMemoryFine(ctx context.Context, userID, cubeID s
 		r.profiler.TriggerRefresh(cubeID)
 	}
 
-	log.Info("mem_read: complete",
+	log.InfoContext(ctx, "mem_read: complete",
 		slog.Int("wm_nodes_processed", len(info.processedWMIDs)),
 		slog.Int("ltm_inserted", counts.inserted),
 		slog.Int("updated", counts.updated),

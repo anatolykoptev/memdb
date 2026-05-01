@@ -61,7 +61,7 @@ func (p *Postgres) RunMigrations(ctx context.Context) error {
 	}
 	defer func() {
 		if _, err := conn.Exec(ctx, `SELECT pg_advisory_unlock($1)`, migrationLockKey); err != nil {
-			p.logger.Warn("release migration advisory lock failed", slog.Any("error", err))
+			p.logger.WarnContext(ctx, "release migration advisory lock failed", slog.Any("error", err))
 		}
 	}()
 
@@ -112,7 +112,7 @@ func (p *Postgres) RunMigrations(ctx context.Context) error {
 
 		if prev, ok := applied[name]; ok {
 			if prev != sum {
-				p.logger.Warn("migration checksum drift",
+				p.logger.WarnContext(ctx, "migration checksum drift",
 					slog.String("name", name),
 					slog.String("applied_sha", prev[:12]),
 					slog.String("current_sha", sum[:12]),
@@ -123,11 +123,11 @@ func (p *Postgres) RunMigrations(ctx context.Context) error {
 			continue
 		}
 
-		p.logger.Info("applying migration", slog.String("name", name), slog.String("sha", sum[:12]))
+		p.logger.InfoContext(ctx, "applying migration", slog.String("name", name), slog.String("sha", sum[:12]))
 		if err := p.applyMigration(ctx, conn, name, string(content), sum); err != nil {
 			return fmt.Errorf("apply migration %s: %w", name, err)
 		}
-		p.logger.Info("migration applied", slog.String("name", name))
+		p.logger.InfoContext(ctx, "migration applied", slog.String("name", name))
 	}
 	return nil
 }
@@ -169,7 +169,7 @@ func (p *Postgres) baselineIfNeeded(ctx context.Context, conn *pgxpool.Conn) err
 		firstMigrationName, sha256sum(content)); err != nil {
 		return fmt.Errorf("baseline insert: %w", err)
 	}
-	p.logger.Info("baselined existing schema",
+	p.logger.InfoContext(ctx, "baselined existing schema",
 		slog.String("name", firstMigrationName),
 		slog.String("reason", "memos_graph.cubes exists, schema_migrations was empty"))
 	return nil
@@ -270,9 +270,9 @@ func (p *Postgres) bootstrapGraphIfNeeded(ctx context.Context, conn *pgxpool.Con
 		}
 		// Restore default search_path so subsequent queries are not affected.
 		if _, err := conn.Exec(ctx, `RESET search_path`); err != nil {
-			p.logger.Warn("reset search_path after graph bootstrap failed", slog.Any("error", err))
+			p.logger.WarnContext(ctx, "reset search_path after graph bootstrap failed", slog.Any("error", err))
 		}
-		p.logger.Info("AGE graph bootstrapped", slog.String("graph", "memos_graph"))
+		p.logger.InfoContext(ctx, "AGE graph bootstrapped", slog.String("graph", "memos_graph"))
 	}
 	return nil
 }

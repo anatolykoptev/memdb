@@ -35,7 +35,7 @@ func (r *Reorganizer) ExtractAndStorePreferences(ctx context.Context, userID, cu
 		return
 	}
 	if r.embedder == nil {
-		r.logger.Debug("pref_add: embedder not configured, skipping")
+		r.logger.DebugContext(ctx, "pref_add: embedder not configured, skipping")
 		return
 	}
 
@@ -44,26 +44,26 @@ func (r *Reorganizer) ExtractAndStorePreferences(ctx context.Context, userID, cu
 	// Step 1: LLM extraction.
 	prefs, err := r.llmExtractPreferences(ctx, conversation)
 	if err != nil {
-		log.Warn("pref_add: llm extraction failed", slog.Any("error", err))
+		log.WarnContext(ctx, "pref_add: llm extraction failed", slog.Any("error", err))
 		return
 	}
 	if len(prefs) == 0 {
-		log.Debug("pref_add: no preferences extracted")
+		log.DebugContext(ctx, "pref_add: no preferences extracted")
 		return
 	}
-	log.Info("pref_add: preferences extracted", slog.Int("count", len(prefs)))
+	log.InfoContext(ctx, "pref_add: preferences extracted", slog.Int("count", len(prefs)))
 
 	// Step 2: embed all preference texts in one batch.
 	embs, err := r.embedder.Embed(ctx, prefs)
 	if err != nil {
-		log.Warn("pref_add: embed failed", slog.Any("error", err))
+		log.WarnContext(ctx, "pref_add: embed failed", slog.Any("error", err))
 		return
 	}
 
 	// Step 2b: dedup — skip preferences that are near-duplicates of existing ones.
 	prefs, embs = r.dedupPreferences(ctx, cubeID, prefs, embs, log)
 	if len(prefs) == 0 {
-		log.Debug("pref_add: all preferences already exist (dedup)")
+		log.DebugContext(ctx, "pref_add: all preferences already exist (dedup)")
 		return
 	}
 
@@ -99,10 +99,10 @@ func (r *Reorganizer) ExtractAndStorePreferences(ctx context.Context, userID, cu
 		return
 	}
 	if err := r.postgres.InsertMemoryNodes(ctx, nodes); err != nil {
-		log.Warn("pref_add: insert failed", slog.Any("error", err))
+		log.WarnContext(ctx, "pref_add: insert failed", slog.Any("error", err))
 		return
 	}
-	log.Info("pref_add: preferences stored", slog.Int("inserted", len(nodes)))
+	log.InfoContext(ctx, "pref_add: preferences stored", slog.Int("inserted", len(nodes)))
 }
 
 // dedupPreferences filters out preference texts whose embedding is within
@@ -125,7 +125,7 @@ func (r *Reorganizer) dedupPreferences(ctx context.Context, cubeID string, prefs
 		isDup := false
 		for _, res := range results {
 			if res.Score >= prefDedupThreshold {
-				log.Debug("pref_add: skipping duplicate preference",
+				log.DebugContext(ctx, "pref_add: skipping duplicate preference",
 					slog.String("text", prefs[i]),
 					slog.Float64("score", res.Score),
 				)

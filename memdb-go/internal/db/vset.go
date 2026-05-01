@@ -114,7 +114,7 @@ func (c *WorkingMemoryCache) VAdd(ctx context.Context, cubeID, nodeID, memoryTex
 	if err != nil {
 		// Fallback: key exists without REDUCE — projection matrix mismatch.
 		// Retry without REDUCE so the cube continues working until it is re-created.
-		c.logger.Debug("vset vadd: reduce failed, retrying without reduce (existing key)",
+		c.logger.DebugContext(ctx, "vset vadd: reduce failed, retrying without reduce (existing key)",
 			slog.String("cube_id", cubeID),
 			slog.String("node_id", nodeID),
 			slog.Any("error", err),
@@ -133,7 +133,7 @@ func (c *WorkingMemoryCache) VAdd(ctx context.Context, cubeID, nodeID, memoryTex
 	// Inactive cubes (no new WorkingMemory for vsetTTL) are auto-evicted by Redis.
 	// Non-fatal: if Expire fails the VSET still works, just won't auto-expire.
 	if err := c.client.Expire(ctx, key, vsetTTL).Err(); err != nil {
-		c.logger.Debug("vset expire failed (non-fatal)",
+		c.logger.DebugContext(ctx, "vset expire failed (non-fatal)",
 			slog.String("cube_id", cubeID), slog.Any("error", err))
 	}
 	return nil
@@ -203,7 +203,7 @@ func (c *WorkingMemoryCache) VSimFiltered(ctx context.Context, cubeID string, qu
 	for i, r := range results {
 		attrJSON, err := attrCmds[i].Result()
 		if err != nil {
-			c.logger.Debug("vset vgetattr failed", slog.String("id", r.Name), slog.Any("error", err))
+			c.logger.DebugContext(ctx, "vset vgetattr failed", slog.String("id", r.Name), slog.Any("error", err))
 			continue
 		}
 		memText := extractMemFromAttr(attrJSON)

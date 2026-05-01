@@ -87,7 +87,7 @@ func (r *Reorganizer) recordWikiPage(
 		Embedding:     embedding,
 	})
 	if err != nil {
-		r.logger.Warn("tree reorg: wiki upsert failed",
+		r.logger.WarnContext(ctx, "tree reorg: wiki upsert failed",
 			slog.String("cube_id", cubeID),
 			slog.String("slug", slug),
 			slog.String("tier", tier),
@@ -105,7 +105,7 @@ func (r *Reorganizer) recordWikiPage(
 		Version:   page.Version,
 		UpdatedAt: page.UpdatedAt,
 	}); fsErr != nil {
-		r.logger.Warn("tree reorg: wiki fs export",
+		r.logger.WarnContext(ctx, "tree reorg: wiki fs export",
 			slog.String("cube_id", cubeID),
 			slog.String("slug", slug),
 			slog.Any("error", fsErr))
@@ -113,7 +113,7 @@ func (r *Reorganizer) recordWikiPage(
 	}
 	if err := wiki.AppendLog(cubeID,
 		fmt.Sprintf("auto: %s promote %s v%d", tier, slug, page.Version)); err != nil {
-		r.logger.Warn("tree reorg: wiki log append",
+		r.logger.WarnContext(ctx, "tree reorg: wiki log append",
 			slog.String("cube_id", cubeID),
 			slog.Any("error", err))
 	}

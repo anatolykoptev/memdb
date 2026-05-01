@@ -43,7 +43,7 @@ func NewRedis(ctx context.Context, redisURL string, logger *slog.Logger) (*Redis
 		return nil, fmt.Errorf("redis ping failed: %w", err)
 	}
 
-	logger.Info("redis connected", slog.String("url", redisURL))
+	logger.InfoContext(ctx, "redis connected", slog.String("url", redisURL))
 	return &Redis{client: client, logger: logger}, nil
 }
 

@@ -54,7 +54,7 @@ func (c *Client) Passthrough(ctx context.Context, body []byte, isStream bool, w 
 	target := c.baseURL + "/v1/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {
-		logger.Error("llm passthrough: create request failed", slog.Any("error", err))
+		logger.ErrorContext(ctx, "llm passthrough: create request failed", slog.Any("error", err))
 		writeJSONError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -70,7 +70,7 @@ func (c *Client) Passthrough(ctx context.Context, body []byte, isStream bool, w 
 
 	resp, err := client.Do(req)
 	if err != nil {
-		logger.Error("llm passthrough: request failed",
+		logger.ErrorContext(ctx, "llm passthrough: request failed",
 			slog.String("target", target), slog.Any("error", err))
 		writeJSONError(w, http.StatusBadGateway, "llm service unavailable")
 		return
@@ -113,7 +113,7 @@ func streamSSELines(ctx context.Context, w http.ResponseWriter, body io.Reader, 
 		}
 		if !scanner.Scan() {
 			if err := scanner.Err(); err != nil {
-				logger.Debug("llm passthrough sse: scanner error", slog.Any("error", err))
+				logger.DebugContext(ctx, "llm passthrough sse: scanner error", slog.Any("error", err))
 			}
 			return
 		}
@@ -243,7 +243,7 @@ func (c *Client) chatModelLoop(ctx context.Context, model string, models []strin
 			continue
 		case retryNextModel:
 			if hasNext {
-				c.logger.Info("llm model fallback",
+				c.logger.InfoContext(ctx, "llm model fallback",
 					slog.String("from", model), slog.String("to", models[modelIdx+1]))
 				return "", nil, lastErr
 			}
@@ -261,13 +261,13 @@ func (c *Client) classifyAttemptError(ctx context.Context, apiErr *APIError, mod
 		return retryStop
 	}
 	if apiErr.isQuotaError() && hasNext {
-		c.logger.Warn("llm quota error, switching model",
+		c.logger.WarnContext(ctx, "llm quota error, switching model",
 			slog.String("model", model), slog.Int("status", apiErr.StatusCode))
 		return retryNextModel
 	}
 	if apiErr.IsTransient() && attempt < maxRetries-1 {
 		delay := backoff(attempt)
-		c.logger.Warn("llm transient error, retrying",
+		c.logger.WarnContext(ctx, "llm transient error, retrying",
 			slog.String("model", model), slog.Int("status", apiErr.StatusCode),
 			slog.Int("attempt", attempt+1), slog.Duration("delay", delay))
 		llmMetrics().Requests.Add(ctx, 1, metric.WithAttributes(

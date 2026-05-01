@@ -21,7 +21,7 @@ const dlqStreamKey = "scheduler:dlq:v1"
 // Inspired by hibiken/asynq archived queue pattern.
 // The DLQ is a regular Redis Stream — inspect with XRANGE scheduler:dlq:v1 - +
 func (w *Worker) moveToDLQ(ctx context.Context, msg ScheduleMessage, reason string) {
-	w.logger.Warn("scheduler: moving message to DLQ",
+	w.logger.WarnContext(ctx, "scheduler: moving message to DLQ",
 		slog.String("stream", msg.StreamKey),
 		slog.String("msg_id", msg.MsgID),
 		slog.String("cube_id", msg.CubeID),
@@ -41,7 +41,7 @@ func (w *Worker) moveToDLQ(ctx context.Context, msg ScheduleMessage, reason stri
 			"failed_at":     time.Now().UTC().Format(time.RFC3339),
 		},
 	}).Err(); err != nil {
-		w.logger.Debug("scheduler: dlq write failed", slog.Any("error", err))
+		w.logger.DebugContext(ctx, "scheduler: dlq write failed", slog.Any("error", err))
 	}
 }
 
@@ -70,10 +70,10 @@ func (w *Worker) startPeriodicReorgLoop(ctx context.Context) {
 func (w *Worker) runPeriodicReorg(ctx context.Context) {
 	cubes := w.getActiveCubes(ctx)
 	if len(cubes) == 0 {
-		w.logger.Debug("scheduler: periodic reorg — no active cubes found")
+		w.logger.DebugContext(ctx, "scheduler: periodic reorg — no active cubes found")
 		return
 	}
-	w.logger.Info("scheduler: periodic reorg starting",
+	w.logger.InfoContext(ctx, "scheduler: periodic reorg starting",
 		slog.Int("cubes", len(cubes)))
 
 	archived := int64(0)
@@ -86,10 +86,10 @@ func (w *Worker) runPeriodicReorg(ctx context.Context) {
 		// WM compaction: summarize old WM nodes → EpisodicMemory LTM before reorg.
 		// Run before Run() so the compacted EpisodicMemory can be deduplicated too.
 		if compacted, err := w.reorg.CompactWorkingMemory(ctx, cubeID); err != nil {
-			w.logger.Debug("scheduler: wm compaction failed",
+			w.logger.DebugContext(ctx, "scheduler: wm compaction failed",
 				slog.String("cube_id", cubeID), slog.Any("error", err))
 		} else if compacted {
-			w.logger.Info("scheduler: wm compacted",
+			w.logger.InfoContext(ctx, "scheduler: wm compacted",
 				slog.String("cube_id", cubeID))
 		}
 
@@ -106,13 +106,13 @@ func (w *Worker) runPeriodicReorg(ctx context.Context) {
 		// Auto-archive memories that have faded below the threshold.
 		n, err := w.reorg.DecayAndArchive(ctx, cubeID)
 		if err != nil {
-			w.logger.Debug("scheduler: importance decay failed",
+			w.logger.DebugContext(ctx, "scheduler: importance decay failed",
 				slog.String("cube_id", cubeID), slog.Any("error", err))
 		} else {
 			archived += n
 		}
 	}
-	w.logger.Info("scheduler: periodic reorg complete",
+	w.logger.InfoContext(ctx, "scheduler: periodic reorg complete",
 		slog.Int("cubes", len(cubes)),
 		slog.Int64("archived_by_decay", archived))
 }
@@ -137,7 +137,7 @@ func (w *Worker) scanVSetCubeIDs(ctx context.Context, seen map[string]bool) []st
 		batch, next, err := w.redis.Scan(ctx, cursor, vsetKeyScanPattern, scanBatchSize).Result()
 		if err != nil {
 			if ctx.Err() == nil {
-				w.logger.Debug("scheduler: scan vset keys error", slog.Any("error", err))
+				w.logger.DebugContext(ctx, "scheduler: scan vset keys error", slog.Any("error", err))
 			}
 			break
 		}

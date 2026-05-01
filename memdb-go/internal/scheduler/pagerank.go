@@ -116,7 +116,7 @@ func (w *Worker) runPageRankOnce(ctx context.Context, pg *db.Postgres) error {
 
 	cubes := w.getActiveCubes(ctx)
 	if len(cubes) == 0 {
-		w.logger.Debug("pagerank: no active cubes found")
+		w.logger.DebugContext(ctx, "pagerank: no active cubes found")
 		mx.PageRankRuns.Add(ctx, 1, labelPageRankOutcome("empty"))
 		mx.PageRankLastRun.Record(ctx, time.Since(start).Seconds())
 		return nil
@@ -130,7 +130,7 @@ func (w *Worker) runPageRankOnce(ctx context.Context, pg *db.Postgres) error {
 		}
 		n, err := w.runPageRankForCube(ctx, pg, cubeID)
 		if err != nil {
-			w.logger.Warn("pagerank: cube failed",
+			w.logger.WarnContext(ctx, "pagerank: cube failed",
 				slog.String("cube_id", cubeID),
 				slog.Any("error", err),
 			)
@@ -148,7 +148,7 @@ func (w *Worker) runPageRankOnce(ctx context.Context, pg *db.Postgres) error {
 	mx.PageRankLastRun.Record(ctx, time.Since(start).Seconds())
 	mx.PageRankDistinctScores.Record(ctx, totalDistinct)
 
-	w.logger.Info("pagerank: cycle complete",
+	w.logger.InfoContext(ctx, "pagerank: cycle complete",
 		slog.Int("cubes_total", len(cubes)),
 		slog.Int("cubes_ok", success),
 		slog.Duration("elapsed", time.Since(start)),
