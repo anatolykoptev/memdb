@@ -198,7 +198,7 @@ func (w *Worker) runBitemporalValidatorOnce(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if err := w.judgeStaleEdgesForCube(ctx, cubeID, cutoff, now); err != nil {
-			w.logger.Warn("bitemporal_validator: cube failed",
+			w.logger.WarnContext(ctx, "bitemporal_validator: cube failed",
 				slog.String("cube_id", cubeID), slog.Any("error", err))
 			// Continue — one cube's failure shouldn't abort the cycle.
 		}
@@ -292,7 +292,7 @@ func (w *Worker) judgeOneStaleEdge(ctx context.Context, cubeID, now string, edge
 	n, err := w.pg.InvalidateEntityEdgesByTriples(ctx, cubeID, doomed, now)
 	if err != nil {
 		recordValidatorEdgeOutcome(ctx, validatorOutcomeDBError, 1)
-		w.logger.Warn("bitemporal_validator: invalidate failed",
+		w.logger.WarnContext(ctx, "bitemporal_validator: invalidate failed",
 			slog.String("cube_id", cubeID), slog.Any("error", err))
 		return
 	}

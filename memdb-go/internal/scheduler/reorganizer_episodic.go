@@ -57,7 +57,7 @@ func (r *Reorganizer) generateEpisodicSummary(userID, cubeID, sessionID, convers
 
 		summary, err := r.callLLM(ctx, msgs, episodicSummaryMaxTokens)
 		if err != nil {
-			r.logger.Debug("mem_read episodic summary: llm call failed", slog.Any("error", err))
+			r.logger.DebugContext(ctx, "mem_read episodic summary: llm call failed", slog.Any("error", err))
 			return
 		}
 		summary = strings.TrimSpace(summary)
@@ -68,7 +68,7 @@ func (r *Reorganizer) generateEpisodicSummary(userID, cubeID, sessionID, convers
 		// Embed the summary.
 		vecs, err := r.embedder.Embed(ctx, []string{summary})
 		if err != nil || len(vecs) == 0 {
-			r.logger.Debug("mem_read episodic summary: embed failed", slog.Any("error", err))
+			r.logger.DebugContext(ctx, "mem_read episodic summary: embed failed", slog.Any("error", err))
 			return
 		}
 
@@ -98,10 +98,10 @@ func (r *Reorganizer) generateEpisodicSummary(userID, cubeID, sessionID, convers
 			EmbeddingVec:   db.FormatVector(vecs[0]),
 		}
 		if err := r.postgres.InsertMemoryNodes(ctx, []db.MemoryInsertNode{node}); err != nil {
-			r.logger.Debug("mem_read episodic summary: insert failed", slog.Any("error", err))
+			r.logger.DebugContext(ctx, "mem_read episodic summary: insert failed", slog.Any("error", err))
 			return
 		}
-		r.logger.Debug("mem_read episodic summary: stored",
+		r.logger.DebugContext(ctx, "mem_read episodic summary: stored",
 			slog.String("cube_id", cubeID),
 			slog.String("session_id", sessionID),
 			slog.Int("summary_len", len(summary)),

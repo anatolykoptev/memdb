@@ -121,7 +121,7 @@ func (p *periodicLoop) runIteration(ctx context.Context, lmx *loopMetricsStruct)
 		defer func() {
 			if r := recover(); r != nil {
 				outcome = "panic"
-				slog.Error("scheduler.periodicLoop: runOnce panicked",
+				slog.ErrorContext(ctx, "scheduler.periodicLoop: runOnce panicked",
 					slog.String("name", p.name),
 					slog.Any("panic", r),
 					slog.String("stack", string(debug.Stack())),

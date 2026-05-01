@@ -51,7 +51,7 @@ func (r *Reorganizer) linkEntities(embedded []embeddedMemReadFact, cubeID, now s
 		for _, p := range pairs {
 			r.linkOnePair(ctx, p, cubeID, now, embByName)
 		}
-		r.logger.Debug("mem_read entity link: complete",
+		r.logger.DebugContext(ctx, "mem_read entity link: complete",
 			slog.String("cube_id", cubeID), slog.Int("pairs", len(pairs)))
 	}()
 }
@@ -114,13 +114,13 @@ func (r *Reorganizer) linkOnePair(ctx context.Context, p entityPair, cubeID, now
 		}
 		entityID, err := r.postgres.UpsertEntityNodeWithEmbedding(ctx, ent.Name, ent.Type, cubeID, now, embByName[ent.Name])
 		if err != nil {
-			r.logger.Debug("mem_read entity link: upsert entity node failed",
+			r.logger.DebugContext(ctx, "mem_read entity link: upsert entity node failed",
 				slog.String("name", ent.Name), slog.Any("error", err))
 			continue
 		}
 		entityIDByName[ent.Name] = entityID
 		if err := r.postgres.CreateMemoryEdge(ctx, p.ltmID, entityID, db.EdgeMentionsEntity, now, p.validAt); err != nil {
-			r.logger.Debug("mem_read entity link: create edge failed",
+			r.logger.DebugContext(ctx, "mem_read entity link: create edge failed",
 				slog.String("ltm_id", p.ltmID), slog.String("entity_id", entityID), slog.Any("error", err))
 		}
 	}
@@ -131,7 +131,7 @@ func (r *Reorganizer) linkOnePair(ctx context.Context, p entityPair, cubeID, now
 			continue
 		}
 		if err := r.postgres.UpsertEntityEdge(ctx, fromID, rel.Predicate, toID, p.ltmID, cubeID, p.validAt, now); err != nil {
-			r.logger.Debug("mem_read entity link: upsert entity edge failed",
+			r.logger.DebugContext(ctx, "mem_read entity link: upsert entity edge failed",
 				slog.String("from", fromID), slog.String("pred", rel.Predicate),
 				slog.String("to", toID), slog.Any("error", err))
 		}
@@ -143,11 +143,11 @@ func (r *Reorganizer) linkOnePair(ctx context.Context, p entityPair, cubeID, now
 	// range boundary.
 	if p.invalidAt != "" {
 		if err := r.postgres.InvalidateEdgesByMemoryID(ctx, p.ltmID, p.invalidAt); err != nil {
-			r.logger.Debug("mem_read entity link: stamp memory_edges invalid_at failed",
+			r.logger.DebugContext(ctx, "mem_read entity link: stamp memory_edges invalid_at failed",
 				slog.String("ltm_id", p.ltmID), slog.Any("error", err))
 		}
 		if err := r.postgres.InvalidateEntityEdgesByMemoryID(ctx, p.ltmID, p.invalidAt); err != nil {
-			r.logger.Debug("mem_read entity link: stamp entity_edges invalid_at failed",
+			r.logger.DebugContext(ctx, "mem_read entity link: stamp entity_edges invalid_at failed",
 				slog.String("ltm_id", p.ltmID), slog.Any("error", err))
 		}
 	}

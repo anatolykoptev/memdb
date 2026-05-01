@@ -184,7 +184,7 @@ func (r *Reorganizer) DecayAndArchive(ctx context.Context, cubeID string) (int64
 		return 0, err
 	}
 	if archived > 0 {
-		r.logger.Info("importance decay: archived low-importance memories",
+		r.logger.InfoContext(ctx, "importance decay: archived low-importance memories",
 			slog.String("cube_id", cubeID),
 			slog.Int64("archived", archived),
 		)

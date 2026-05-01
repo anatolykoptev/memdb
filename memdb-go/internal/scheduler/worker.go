@@ -133,7 +133,7 @@ func (w *Worker) SetLLMJudge(c *llm.Client) {
 
 // Run starts the worker goroutines and blocks until ctx is cancelled.
 func (w *Worker) Run(ctx context.Context) {
-w.logger.Info("scheduler worker: starting",
+w.logger.InfoContext(ctx, "scheduler worker: starting",
 slog.String("consumer_group", ConsumerGroup),
 slog.String("stream_prefix", StreamKeyPrefix),
 )
@@ -147,7 +147,7 @@ go w.startPeriodicReorgLoop(ctx)
 // M10 Stream 7: PageRank background goroutine — requires Postgres + feature gate.
 if w.pg != nil && pageRankEnabled() {
 	go w.startPageRankLoop(ctx, w.pg)
-	w.logger.Info("pagerank: background goroutine started",
+	w.logger.InfoContext(ctx, "pagerank: background goroutine started",
 		slog.Duration("interval", pageRankInterval()),
 	)
 }
@@ -156,7 +156,7 @@ if w.pg != nil && pageRankEnabled() {
 // invalidation rates have stabilised in prod.
 if w.pg != nil && w.llmJudge != nil && validatorEnabled() {
 	go w.startBitemporalValidatorLoop(ctx)
-	w.logger.Info("bitemporal_validator: background goroutine started",
+	w.logger.InfoContext(ctx, "bitemporal_validator: background goroutine started",
 		slog.Duration("interval", validatorInterval()),
 		slog.Duration("staleness", validatorStaleness()),
 	)

@@ -38,13 +38,13 @@ func (c *RedisCacheInvalidator) Invalidate(ctx context.Context, patterns ...stri
 		for {
 			keys, next, err := c.client.Scan(ctx, cursor, pattern, 100).Result()
 			if err != nil {
-				c.logger.Debug("reorg cache scan error",
+				c.logger.DebugContext(ctx, "reorg cache scan error",
 					slog.String("pattern", pattern), slog.Any("error", err))
 				break
 			}
 			if len(keys) > 0 {
 				if err := c.client.Del(ctx, keys...).Err(); err != nil {
-					c.logger.Debug("reorg cache del error", slog.Any("error", err))
+					c.logger.DebugContext(ctx, "reorg cache del error", slog.Any("error", err))
 				}
 			}
 			cursor = next

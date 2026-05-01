@@ -64,21 +64,21 @@ func (r *Reorganizer) findNearDuplicatesByIDs(ctx context.Context, cubeID string
 // It is safe to call concurrently for different cubes.
 func (r *Reorganizer) Run(ctx context.Context, cubeID string) {
 	log := r.logger.With(slog.String("cube_id", cubeID))
-	log.Debug("reorganizer: starting cycle")
+	log.DebugContext(ctx, "reorganizer: starting cycle")
 
 	pairs, err := r.findNearDuplicates(ctx, cubeID)
 	if err != nil {
-		log.Error("reorganizer: FindNearDuplicates failed", slog.Any("error", err))
+		log.ErrorContext(ctx, "reorganizer: FindNearDuplicates failed", slog.Any("error", err))
 		return
 	}
 	if len(pairs) == 0 {
-		log.Debug("reorganizer: no near-duplicates found")
+		log.DebugContext(ctx, "reorganizer: no near-duplicates found")
 		return
 	}
-	log.Info("reorganizer: found near-duplicate pairs", slog.Int("pairs", len(pairs)))
+	log.InfoContext(ctx, "reorganizer: found near-duplicate pairs", slog.Int("pairs", len(pairs)))
 
 	clusters := buildClusters(pairs)
-	log.Debug("reorganizer: formed clusters", slog.Int("clusters", len(clusters)))
+	log.DebugContext(ctx, "reorganizer: formed clusters", slog.Int("clusters", len(clusters)))
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	merged, skipped := 0, 0
@@ -89,7 +89,7 @@ func (r *Reorganizer) Run(ctx context.Context, cubeID string) {
 				continue
 			}
 			if err := r.consolidateCluster(ctx, cubeID, sub, now); err != nil {
-				log.Warn("reorganizer: cluster consolidation failed",
+				log.WarnContext(ctx, "reorganizer: cluster consolidation failed",
 					slog.Any("ids", clusterIDs(sub)),
 					slog.Any("error", err))
 				skipped++
@@ -99,7 +99,7 @@ func (r *Reorganizer) Run(ctx context.Context, cubeID string) {
 		}
 	}
 
-	log.Info("reorganizer: cycle complete",
+	log.InfoContext(ctx, "reorganizer: cycle complete",
 		slog.Int("merged_clusters", merged),
 		slog.Int("skipped_clusters", skipped),
 	)
@@ -120,18 +120,18 @@ func (r *Reorganizer) RunTargeted(ctx context.Context, cubeID string, ids []stri
 		slog.String("cube_id", cubeID),
 		slog.Int("seed_ids", len(ids)),
 	)
-	log.Debug("reorganizer: targeted cycle starting")
+	log.DebugContext(ctx, "reorganizer: targeted cycle starting")
 
 	pairs, err := r.findNearDuplicatesByIDs(ctx, cubeID, ids)
 	if err != nil {
-		log.Error("reorganizer: FindNearDuplicatesByIDs failed", slog.Any("error", err))
+		log.ErrorContext(ctx, "reorganizer: FindNearDuplicatesByIDs failed", slog.Any("error", err))
 		return
 	}
 	if len(pairs) == 0 {
-		log.Debug("reorganizer: no near-duplicates found in targeted set")
+		log.DebugContext(ctx, "reorganizer: no near-duplicates found in targeted set")
 		return
 	}
-	log.Info("reorganizer: targeted pairs found", slog.Int("pairs", len(pairs)))
+	log.InfoContext(ctx, "reorganizer: targeted pairs found", slog.Int("pairs", len(pairs)))
 
 	clusters := buildClusters(pairs)
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -143,7 +143,7 @@ func (r *Reorganizer) RunTargeted(ctx context.Context, cubeID string, ids []stri
 				continue
 			}
 			if err := r.consolidateCluster(ctx, cubeID, sub, now); err != nil {
-				log.Warn("reorganizer: targeted cluster consolidation failed",
+				log.WarnContext(ctx, "reorganizer: targeted cluster consolidation failed",
 					slog.Any("ids", clusterIDs(sub)),
 					slog.Any("error", err))
 				skipped++
@@ -152,7 +152,7 @@ func (r *Reorganizer) RunTargeted(ctx context.Context, cubeID string, ids []stri
 			}
 		}
 	}
-	log.Info("reorganizer: targeted cycle complete",
+	log.InfoContext(ctx, "reorganizer: targeted cycle complete",
 		slog.Int("merged_clusters", merged),
 		slog.Int("skipped_clusters", skipped),
 	)
@@ -183,7 +183,7 @@ func (r *Reorganizer) consolidateCluster(ctx context.Context, cubeID string, clu
 	keepID := result.KeepID
 	if !clusterSet[keepID] {
 		if resolved, ok := resolveFuzzyID(keepID, ids); ok {
-			r.logger.Info("reorganizer: fuzzy-matched LLM id",
+			r.logger.InfoContext(ctx, "reorganizer: fuzzy-matched LLM id",
 				slog.String("field", "keep_id"),
 				slog.String("original", keepID),
 				slog.String("resolved", resolved))
@@ -204,7 +204,7 @@ func (r *Reorganizer) consolidateCluster(ctx context.Context, cubeID string, clu
 	if err := r.postgres.UpdateMemoryNodeFull(ctx, keepID, result.MergedText, embVec, now); err != nil {
 		return fmt.Errorf("update keep node %s: %w", keepID, err)
 	}
-	r.logger.Debug("reorganizer: updated keep node",
+	r.logger.DebugContext(ctx, "reorganizer: updated keep node",
 		slog.String("id", keepID),
 		slog.String("text_preview", truncate(result.MergedText, consolidateLogPreviewLen)))
 

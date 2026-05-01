@@ -61,7 +61,7 @@ func (w *Worker) readStream(ctx context.Context, key string) bool {
 	}).Result()
 	if err != nil {
 		if !errors.Is(err, redis.Nil) && ctx.Err() == nil {
-			w.logger.Debug("scheduler: xreadgroup error",
+			w.logger.DebugContext(ctx, "scheduler: xreadgroup error",
 				slog.String("stream", key), slog.Any("error", err))
 		}
 		return true
@@ -81,7 +81,7 @@ func (w *Worker) readStream(ctx context.Context, key string) bool {
 func (w *Worker) enqueueXMessage(ctx context.Context, stream string, m redis.XMessage) bool {
 	sm, err := fromXMessage(stream, m)
 	if err != nil {
-		w.logger.Warn("scheduler: parse message failed",
+		w.logger.WarnContext(ctx, "scheduler: parse message failed",
 			slog.String("stream", stream),
 			slog.String("msg_id", m.ID),
 			slog.Any("error", err))
@@ -101,7 +101,7 @@ func (w *Worker) scanStreamKeys(ctx context.Context) []string {
 		batch, next, err := w.redis.Scan(ctx, cursor, pattern, scanBatchSize).Result()
 		if err != nil {
 			if ctx.Err() == nil {
-				w.logger.Debug("scheduler: scan error", slog.Any("error", err))
+				w.logger.DebugContext(ctx, "scheduler: scan error", slog.Any("error", err))
 			}
 			break
 		}
@@ -119,7 +119,7 @@ func (w *Worker) scanStreamKeys(ctx context.Context) []string {
 func (w *Worker) ensureGroup(ctx context.Context, streamKey string) {
 	err := w.redis.XGroupCreateMkStream(ctx, streamKey, ConsumerGroup, "0").Err()
 	if err != nil && !isBusyGroup(err) {
-		w.logger.Debug("scheduler: xgroup create error",
+		w.logger.DebugContext(ctx, "scheduler: xgroup create error",
 			slog.String("stream", streamKey), slog.Any("error", err))
 	}
 }
@@ -173,7 +173,7 @@ func (w *Worker) reclaimStream(ctx context.Context, key string) bool {
 		}).Result()
 		if err != nil {
 			if ctx.Err() == nil {
-				w.logger.Debug("scheduler: xautoclaim error",
+				w.logger.DebugContext(ctx, "scheduler: xautoclaim error",
 					slog.String("stream", key), slog.Any("error", err))
 			}
 			break
