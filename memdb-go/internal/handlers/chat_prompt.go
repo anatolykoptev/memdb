@@ -46,7 +46,9 @@ func chatPromptNow() string {
 // answerStyle values are validated upstream by validateChatRequest; this function
 // treats any unknown value as the default branch (defensive — should never hit).
 func buildSystemPrompt(query string, memories []map[string]any, prefString, basePrompt, answerStyle string) string {
-	prompt, _ := buildSystemPromptWithDecision(context.TODO(), query, memories, prefString, basePrompt, answerStyle, "")
+	// context.Background(): this wrapper has no ctx parameter and no request-path callers.
+	// TODO(cleanup): buildSystemPrompt has zero call sites; consider removing.
+	prompt, _ := buildSystemPromptWithDecision(context.Background(), query, memories, prefString, basePrompt, answerStyle, "")
 	return prompt
 }
 

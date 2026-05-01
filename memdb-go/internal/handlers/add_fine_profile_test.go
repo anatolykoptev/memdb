@@ -5,6 +5,7 @@ package handlers
 // add_fine_profile_livepg_test.go behind the `livepg` build tag.
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"sync"
@@ -47,7 +48,7 @@ func TestProfileExtractEnabled_TruthyEnables(t *testing.T) {
 func TestTriggerProfileExtract_MissingDeps(t *testing.T) {
 	// No postgres / extractor → must short-circuit and never panic.
 	h := &Handler{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
-	if h.triggerProfileExtract("hello world", "user1", "cube1") {
+	if h.triggerProfileExtract(context.Background(), "hello world", "user1", "cube1") {
 		t.Errorf("expected false when handler has no postgres/llmExtractor")
 	}
 }
@@ -55,7 +56,7 @@ func TestTriggerProfileExtract_MissingDeps(t *testing.T) {
 func TestTriggerProfileExtract_DisabledByEnv(t *testing.T) {
 	t.Setenv(profileExtractEnvVar, "false")
 	h := &Handler{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
-	if h.triggerProfileExtract("hello world", "user1", "cube1") {
+	if h.triggerProfileExtract(context.Background(), "hello world", "user1", "cube1") {
 		t.Errorf("expected false when MEMDB_PROFILE_EXTRACT=false")
 	}
 }
@@ -63,7 +64,7 @@ func TestTriggerProfileExtract_DisabledByEnv(t *testing.T) {
 func TestTriggerProfileExtract_EmptyUserID(t *testing.T) {
 	t.Setenv(profileExtractEnvVar, "true")
 	h := &Handler{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
-	if h.triggerProfileExtract("hello world", "", "cube1") {
+	if h.triggerProfileExtract(context.Background(), "hello world", "", "cube1") {
 		t.Errorf("expected false when user_id is empty")
 	}
 }
@@ -74,7 +75,7 @@ func TestTriggerProfileExtract_EmptyUserID(t *testing.T) {
 func TestTriggerProfileExtract_EmptyCubeID(t *testing.T) {
 	t.Setenv(profileExtractEnvVar, "true")
 	h := &Handler{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
-	if h.triggerProfileExtract("hello world", "user1", "") {
+	if h.triggerProfileExtract(context.Background(), "hello world", "user1", "") {
 		t.Errorf("expected false when cube_id is empty (security audit C1)")
 	}
 }

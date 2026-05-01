@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -203,13 +204,13 @@ func TestStrFromMap(t *testing.T) {
 func TestGenerateSkillMemory_NilDependencies(t *testing.T) {
 	h := &Handler{}
 	// Should not panic with nil dependencies
-	h.generateSkillMemory("cube", "user-1", "user: hello\nassistant: hi", 15)
+	h.generateSkillMemory(context.Background(), "cube", "user-1", "user: hello\nassistant: hi", 15)
 }
 
 func TestGenerateSkillMemory_TooFewMessages(t *testing.T) {
 	// messageCount < 10 should return early
 	h := &Handler{}
-	h.generateSkillMemory("cube", "user-1", "user: hello", 5)
+	h.generateSkillMemory(context.Background(), "cube", "user-1", "user: hello", 5)
 	// No panic = success (no LLM/DB configured to call)
 }
 
@@ -217,5 +218,5 @@ func TestGenerateSkillMemory_HighCodeRatio(t *testing.T) {
 	h := &Handler{}
 	code := "```go\npackage main\nfunc main() {}\n```"
 	// 100% code → should skip
-	h.generateSkillMemory("cube", "user-1", code, 15)
+	h.generateSkillMemory(context.Background(), "cube", "user-1", code, 15)
 }

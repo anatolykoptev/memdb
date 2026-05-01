@@ -92,6 +92,7 @@ func eventExtractMetrics() {
 			metric.WithUnit("s"),
 		)
 		// Pre-register every outcome at zero so dashboards see all series from start.
+		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		ctx := context.Background()
 		for _, oc := range []string{
 			eventOutcomeSuccess, eventOutcomeEmpty, eventOutcomeLLMError,
@@ -127,28 +128,32 @@ func recordEventOutcome(ctx context.Context, outcome string, dur time.Duration) 
 //
 // Returns true when a goroutine was scheduled (used by tests / callers that
 // want to know whether the work was admitted).
-func (h *Handler) triggerEventExtract(conversation, userID, cubeID, now string) bool {
+// reqCtx is the request context; it is stripped of its cancellation signal
+// (context.WithoutCancel) inside the goroutine so the background work survives
+// request completion while still carrying the OTel trace for pgxotel/slogh.
+func (h *Handler) triggerEventExtract(reqCtx context.Context, conversation, userID, cubeID, now string) bool {
 	if h == nil || h.postgres == nil || h.llmExtractor == nil {
 		return false
 	}
 	if !eventExtractEnabled() {
-		recordEventOutcome(context.Background(), eventOutcomeDisabled, 0)
+		recordEventOutcome(reqCtx, eventOutcomeDisabled, 0)
 		return false
 	}
 	if userID == "" || cubeID == "" {
-		recordEventOutcome(context.Background(), eventOutcomeDisabled, 0)
+		recordEventOutcome(reqCtx, eventOutcomeDisabled, 0)
 		return false
 	}
 	sem := eventExtractSemaphore()
 	if !sem.TryAcquire(1) {
-		recordEventOutcome(context.Background(), eventOutcomeBusy, 0)
+		recordEventOutcome(reqCtx, eventOutcomeBusy, 0)
 		h.logger.Debug("event extract: semaphore saturated, dropping",
 			slog.String("user_id", userID), slog.String("cube_id", cubeID))
 		return false
 	}
+	bgCtx := context.WithoutCancel(reqCtx)
 	go func() {
 		defer sem.Release(1)
-		h.runEventExtractWithSem(conversation, userID, cubeID, now)
+		h.runEventExtractWithSem(bgCtx, conversation, userID, cubeID, now)
 	}()
 	return true
 }
@@ -174,9 +179,11 @@ func parseNowAnchor(now string) time.Time {
 // runEventExtractWithSem is the goroutine body. The caller has already
 // acquired the semaphore; this function runs Extract under a 60s deadline,
 // embeds each event text, and inserts the rows into user_events.
-func (h *Handler) runEventExtractWithSem(conversation, userID, cubeID, now string) {
+// bgCtx must be a context.WithoutCancel-wrapped request context so the OTel
+// trace propagates into pgxotel spans and slogh log lines.
+func (h *Handler) runEventExtractWithSem(bgCtx context.Context, conversation, userID, cubeID, now string) {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), eventExtractTimeout)
+	ctx, cancel := context.WithTimeout(bgCtx, eventExtractTimeout)
 	defer cancel()
 
 	ee := llm.NewEventExtractor(h.llmExtractor.Client())

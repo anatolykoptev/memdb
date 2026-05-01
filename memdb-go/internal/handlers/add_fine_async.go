@@ -1,5 +1,7 @@
 package handlers
 
+import "context"
+
 // add_fine_async.go — fire-and-forget background extractors invoked from the
 // fine-add orchestrator. Split out of add_fine.go (M11 R1) so the F3 event
 // extractor can plug into a single fan-out point and the F4 buffer flush can
@@ -20,7 +22,12 @@ package handlers
 // Kept private to the package; callers populate it from fullAddRequest or
 // from the buffer flush context. factCount is sourced from the just-completed
 // extract step so episodic summary can short-circuit on empty extractions.
+// ReqCtx is the request context from which each extractor derives its own
+// context.WithoutCancel background context. This preserves the OTel trace
+// (pgxotel spans + slogh trace_id) across all fire-and-forget goroutines
+// without inheriting the request cancellation signal.
 type extractorTriggerInput struct {
+	ReqCtx       context.Context
 	CubeID       string
 	UserID       string
 	SessionID    string
@@ -51,13 +58,13 @@ func (h *Handler) triggerBackgroundExtractors(in extractorTriggerInput) {
 		return
 	}
 	// 1. Episodic summary — session-level overview node.
-	h.generateEpisodicSummary(in.CubeID, in.UserID, in.SessionID, in.Conversation, in.Now, in.FactCount)
+	h.generateEpisodicSummary(in.ReqCtx, in.CubeID, in.UserID, in.SessionID, in.Conversation, in.Now, in.FactCount)
 
 	// 2. Skill memory — extract reusable skill chunks from sufficiently long convs.
-	h.generateSkillMemory(in.CubeID, in.UserID, in.Conversation, in.MessageCount)
+	h.generateSkillMemory(in.ReqCtx, in.CubeID, in.UserID, in.Conversation, in.MessageCount)
 
 	// 3. Tool trajectory — capture tool-call traces if any are present.
-	h.generateToolTrajectory(in.CubeID, in.UserID, in.Conversation)
+	h.generateToolTrajectory(in.ReqCtx, in.CubeID, in.UserID, in.Conversation)
 
 	// 4. Legacy profile summary refresh — runs only if the profiler is wired in.
 	if h.profiler != nil {
@@ -67,13 +74,13 @@ func (h *Handler) triggerBackgroundExtractors(in extractorTriggerInput) {
 	// 5. Structured user-profile extraction — gated by MEMDB_PROFILE_EXTRACT and
 	// bounded by profileExtractSemaphore (M10 audit C3 fix). Do NOT remove the
 	// admission control: it caps goroutine count under burst load.
-	h.triggerProfileExtract(in.Conversation, in.UserID, in.CubeID)
+	h.triggerProfileExtract(in.ReqCtx, in.Conversation, in.UserID, in.CubeID)
 
 	// 6. M11 F11 — bi-temporal edge invalidation judge. Re-judges entity
 	// edges this /add just wrote against their currently-valid peers; on
 	// confidence >= 0.7 flips invalid_at on superseded peers. Bounded by
 	// edgeJudgeSemaphore; gated by MEMDB_F11_EDGE_JUDGE.
-	h.triggerEdgeInvalidationJudge(in.CubeID, in.Now)
+	h.triggerEdgeInvalidationJudge(in.ReqCtx, in.CubeID, in.Now)
 
 	// 7. M11 F3 — Memobase event extraction. Produces per-blob event_summary
 	// rows with [mention YYYY/MM/DD] anchors + tag list, persisted to
@@ -82,5 +89,5 @@ func (h *Handler) triggerBackgroundExtractors(in extractorTriggerInput) {
 	// The `in.Now` anchor is threaded through so EventExtractor.Extract
 	// uses the request-time clock the rest of the /add pipeline saw,
 	// instead of an unrelated time.Now() call.
-	h.triggerEventExtract(in.Conversation, in.UserID, in.CubeID, in.Now)
+	h.triggerEventExtract(in.ReqCtx, in.Conversation, in.UserID, in.CubeID, in.Now)
 }

@@ -22,7 +22,7 @@ const (
 
 // generateToolTrajectory asynchronously extracts tool call trajectories from the conversation.
 // Fire-and-forget: errors are logged but never returned to the caller.
-func (h *Handler) generateToolTrajectory(cubeID, userID, conversation string) {
+func (h *Handler) generateToolTrajectory(reqCtx context.Context, cubeID, userID, conversation string) {
 	if h.llmChat == nil || h.postgres == nil || h.embedder == nil {
 		return
 	}
@@ -30,8 +30,9 @@ func (h *Handler) generateToolTrajectory(cubeID, userID, conversation string) {
 		return
 	}
 
+	bgCtx := context.WithoutCancel(reqCtx)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), toolExtractionTimeout)
+		ctx, cancel := context.WithTimeout(bgCtx, toolExtractionTimeout)
 		defer cancel()
 
 		items, err := llm.ExtractToolTrajectory(ctx, h.llmChat, conversation)

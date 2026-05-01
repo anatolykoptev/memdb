@@ -75,6 +75,7 @@ func wikiInjectMx() *wikiInjectMetricsStruct {
 		wikiInjectInstruments = &wikiInjectMetricsStruct{
 			Total: total, Pages: pages, BodyChars: body,
 		}
+		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		ctx := context.Background()
 		for _, oc := range wikiInjectOutcomes {
 			total.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))

@@ -102,6 +102,7 @@ func profileExtractMetrics() {
 			metric.WithExplicitBucketBoundaries(0, 1, 3, 5, 10, 20),
 		)
 		// Pre-register at zero so Prometheus sees the series from startup.
+		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		profileMetrics.FactsPerMsg.Record(context.Background(), 0)
 	})
 }
@@ -136,20 +137,20 @@ func recordProfileExtractOutcome(ctx context.Context, outcome string, dur time.D
 // "busy" counter fires at the point of saturation (not 60 s later).
 //
 // Returns true when a goroutine was scheduled (useful for tests / metrics).
-func (h *Handler) triggerProfileExtract(conversation, userID, cubeID string) bool {
+func (h *Handler) triggerProfileExtract(reqCtx context.Context, conversation, userID, cubeID string) bool {
 	if h == nil || h.postgres == nil || h.llmExtractor == nil {
 		// Required dependencies missing — silently skip. The fine-add path
 		// itself would have been a proxy fallback in this state.
 		return false
 	}
 	if !profileExtractEnabled() {
-		recordProfileExtractOutcome(context.Background(), profileOutcomeDisabled, 0)
+		recordProfileExtractOutcome(reqCtx, profileOutcomeDisabled, 0)
 		return false
 	}
 	if userID == "" || cubeID == "" {
 		// No user_id / cube_id → cannot persist with tenant isolation; treat
 		// as disabled rather than error so the add path stays silent.
-		recordProfileExtractOutcome(context.Background(), profileOutcomeDisabled, 0)
+		recordProfileExtractOutcome(reqCtx, profileOutcomeDisabled, 0)
 		return false
 	}
 
@@ -158,15 +159,16 @@ func (h *Handler) triggerProfileExtract(conversation, userID, cubeID string) boo
 	// Never queue — if all slots are occupied, drop the work immediately.
 	sem := profileExtractSemaphore()
 	if !sem.TryAcquire(1) {
-		recordProfileExtractOutcome(context.Background(), profileOutcomeBusy, 0)
+		recordProfileExtractOutcome(reqCtx, profileOutcomeBusy, 0)
 		h.logger.Debug("profile extract: semaphore saturated, dropping",
 			slog.String("user_id", userID), slog.String("cube_id", cubeID))
 		return false
 	}
 	// Semaphore slot is held; the goroutine is responsible for releasing it.
+	bgCtx := context.WithoutCancel(reqCtx)
 	go func() {
 		defer sem.Release(1)
-		h.runProfileExtractWithSem(conversation, userID, cubeID)
+		h.runProfileExtractWithSem(bgCtx, conversation, userID, cubeID)
 	}()
 	return true
 }
@@ -174,9 +176,11 @@ func (h *Handler) triggerProfileExtract(conversation, userID, cubeID string) boo
 // runProfileExtractWithSem is the goroutine body. The caller has already
 // acquired the semaphore; this function runs ExtractProfile (cube-scoped)
 // and BulkUpserts the result under the per-call 60 s deadline.
-func (h *Handler) runProfileExtractWithSem(conversation, userID, cubeID string) {
+// bgCtx must be a context.WithoutCancel-wrapped request context so the OTel
+// trace propagates into pgxotel spans and slogh log lines.
+func (h *Handler) runProfileExtractWithSem(bgCtx context.Context, conversation, userID, cubeID string) {
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), profileExtractTimeout)
+	ctx, cancel := context.WithTimeout(bgCtx, profileExtractTimeout)
 	defer cancel()
 
 	// Reuse the existing LLM client behind the fact extractor — same retry,

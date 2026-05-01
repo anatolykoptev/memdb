@@ -68,6 +68,7 @@ func atomicMx() *atomicMetricsStruct {
 		atomicInstruments = &atomicMetricsStruct{
 			Extracted: ext, FactsPerChunk: fpc, FactWordCount: fwc,
 		}
+		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		ctx := context.Background()
 		for _, oc := range atomicOutcomes {
 			ext.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))

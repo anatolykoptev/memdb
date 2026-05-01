@@ -105,6 +105,7 @@ func chatPromptMx() *chatPromptMetricsInstruments {
 		// Pre-register all template label values at zero so Prometheus emits
 		// the series before the first real chat request. Matches the enum in
 		// promptTemplateLabel (chat_record.go).
+		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		ctx := context.Background()
 		for _, tpl := range chatPromptTemplateLabels {
 			used.Add(ctx, 0, metric.WithAttributes(attribute.String("template", tpl)))
@@ -137,6 +138,7 @@ func feedbackEventsMx() *feedbackEventsInstruments {
 			metric.WithDescription("Count of feedback_events rows persisted to Postgres, labelled by label (positive/negative/neutral/correction). Powers M11 reward loop."),
 		)
 		// Pre-register all label values at 0 so dashboards see the series immediately.
+		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		ctx := context.Background()
 		for _, label := range []string{"positive", "negative", "neutral", "correction"} {
 			total.Add(ctx, 0, metric.WithAttributes(attribute.String("label", label)))
@@ -224,6 +226,7 @@ func chatRefusalMx() *chatRefusalInstruments {
 		)
 		// Pre-register reason labels at 0 so Prometheus emits the series
 		// before the first refusal happens.
+		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		ctx := context.Background()
 		for _, reason := range []string{"none", "no_memories", "low_confidence", "other"} {
 			total.Add(ctx, 0, metric.WithAttributes(attribute.String("reason", reason)))

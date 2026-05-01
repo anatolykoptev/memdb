@@ -149,6 +149,7 @@ func edgeJudgeMetrics() {
 		)
 
 		// Pre-register at zero for both label sets.
+		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		ctx := context.Background()
 		for _, oc := range preregisteredJudgeOutcomes {
 			edgeJudgeMx.JudgeTotal.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
@@ -208,12 +209,12 @@ type edgeJudgePG interface {
 //
 // `now` is the per-/add timestamp passed through extractorTriggerInput. We
 // use it to filter entity_edges to the just-inserted batch (created_at = now).
-func (h *Handler) triggerEdgeInvalidationJudge(cubeID, now string) bool {
+func (h *Handler) triggerEdgeInvalidationJudge(reqCtx context.Context, cubeID, now string) bool {
 	if h == nil || h.postgres == nil || h.llmChat == nil {
 		return false
 	}
 	if !edgeJudgeEnabled() {
-		recordJudgeOutcome(context.Background(), edgeJudgeOutcomeDisabled)
+		recordJudgeOutcome(reqCtx, edgeJudgeOutcomeDisabled)
 		return false
 	}
 	if cubeID == "" || now == "" {
@@ -221,14 +222,15 @@ func (h *Handler) triggerEdgeInvalidationJudge(cubeID, now string) bool {
 	}
 	sem := edgeJudgeSemaphore()
 	if !sem.TryAcquire(1) {
-		recordJudgeOutcome(context.Background(), edgeJudgeOutcomeBusy)
+		recordJudgeOutcome(reqCtx, edgeJudgeOutcomeBusy)
 		h.logger.Debug("edge judge: semaphore saturated, dropping",
 			slog.String("cube_id", cubeID))
 		return false
 	}
+	bgCtx := context.WithoutCancel(reqCtx)
 	go func() {
 		defer sem.Release(1)
-		h.runEdgeInvalidationJudge(h.postgres, cubeID, now)
+		h.runEdgeInvalidationJudge(bgCtx, h.postgres, cubeID, now)
 	}()
 	return true
 }
@@ -236,8 +238,10 @@ func (h *Handler) triggerEdgeInvalidationJudge(cubeID, now string) bool {
 // runEdgeInvalidationJudge is the goroutine body. Loads fresh entity edges
 // for the cube, groups by (subject,predicate), and dispatches one LLM judge
 // per group with active peers.
-func (h *Handler) runEdgeInvalidationJudge(pg edgeJudgePG, cubeID, now string) {
-	ctx, cancel := context.WithTimeout(context.Background(), edgeJudgeOverallTimeout)
+// bgCtx must be a context.WithoutCancel-wrapped request context so the OTel
+// trace propagates into pgxotel spans and slogh log lines.
+func (h *Handler) runEdgeInvalidationJudge(bgCtx context.Context, pg edgeJudgePG, cubeID, now string) {
+	ctx, cancel := context.WithTimeout(bgCtx, edgeJudgeOverallTimeout)
 	defer cancel()
 
 	fresh, err := pg.FetchFreshEntityEdgesForCube(ctx, cubeID, now, edgeJudgeBatchCap)
