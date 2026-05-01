@@ -47,7 +47,7 @@ func Auth(logger *slog.Logger, cfg AuthConfig) func(http.Handler) http.Handler {
 					next.ServeHTTP(w, r)
 					return
 				}
-				logger.Warn("invalid service secret",
+				logger.WarnContext(r.Context(), "invalid service secret",
 					slog.String("path", r.URL.Path),
 					slog.String("remote", r.RemoteAddr),
 				)
@@ -115,7 +115,7 @@ func checkBearerToken(w http.ResponseWriter, r *http.Request, logger *slog.Logge
 	}
 
 	if !validateToken(token, masterKeyHash) {
-		logger.Warn("auth failed: invalid token",
+		logger.WarnContext(r.Context(), "auth failed: invalid token",
 			slog.String("path", r.URL.Path),
 			slog.String("remote", r.RemoteAddr),
 		)
