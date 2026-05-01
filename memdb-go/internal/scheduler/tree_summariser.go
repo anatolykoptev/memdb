@@ -150,9 +150,9 @@ func (r *Reorganizer) persistTierParent(ctx context.Context, cubeID string, clus
 func tierPromptFor(level string) (string, string) {
 	switch level {
 	case hierarchyLevelSemantic:
-		return semanticTierSystemPrompt, memoryTypeSemantic
+		return schedulerPrompt("semantic-tier-abstractor"), memoryTypeSemantic
 	default:
-		return episodicTierSystemPrompt, memoryTypeEpisodic
+		return schedulerPrompt("episodic-tier-archivist"), memoryTypeEpisodic
 	}
 }
 

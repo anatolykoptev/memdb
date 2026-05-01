@@ -106,7 +106,7 @@ func (r *Reorganizer) llmAnalyzeFeedback(ctx context.Context, feedbackContent st
 
 	memoriesJSON, _ := json.Marshal(items)
 	msgs := []map[string]string{
-		{"role": "system", "content": memFeedbackSystemPrompt},
+		{"role": "system", "content": schedulerPrompt("feedback-memory-curator")},
 		{"role": "user", "content": fmt.Sprintf("User feedback:\n%s\n\nMemories shown to the user:\n%s",
 			feedbackContent, memoriesJSON)},
 	}
