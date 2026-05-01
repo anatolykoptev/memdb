@@ -7,8 +7,8 @@ github.com/alicebob/miniredis/v2 v2.37.0 h1:RheObYW32G1aiJIj81XVt78ZHJpHonHLHW7O
 github.com/alicebob/miniredis/v2 v2.37.0/go.mod h1:TcL7YfarKPGDAthEtl5NBeHZfeUQj6OXMm/+iu5cLMM=
 github.com/anatolykoptev/go-engine v1.3.1 h1:B/deUA0pRpX9+hYOOTE7XPPuh69idlX4PVuxHcRVCJ8=
 github.com/anatolykoptev/go-engine v1.3.1/go.mod h1:ZcJMqmoy+GP9HJRrj5G0y7reyIM8NbMX6IMyHYmwoEQ=
-github.com/anatolykoptev/go-kit v0.32.0 h1:5/m9JwgwcopJHzo4tEcmWZygEaQcbvWWsqPw1DZ3fI8=
-github.com/anatolykoptev/go-kit v0.32.0/go.mod h1:UqViC2HoCeIoIj6Qi3dJREVQX43dgUeHV3SynpcL8Zs=
+github.com/anatolykoptev/go-kit v0.34.0 h1:nvMOdH2uU4FQ89841ssM3ITQ3VEPUL671xkX4svhu0w=
+github.com/anatolykoptev/go-kit v0.34.0/go.mod h1:5FBHe2Psqplomk/GqydCWdG84VCHOVA9GqO7F/TsKx4=
 github.com/anatolykoptev/go-stealth v1.3.1 h1:6Q1MSi8JA66xggtVL8iAKdCy/ULKQ76KU7KSbfgo67A=
 github.com/anatolykoptev/go-stealth v1.3.1/go.mod h1:/3rYAaunzRjBKtFtHLeEh/Jw/jVyGRtdBPJeF8voYog=
 github.com/anatolykoptev/skillkit v0.2.0 h1:QFSDs59cKMLXUOUkCbezq6Uh+WnvDQQdH3uDHGXqrn8=
