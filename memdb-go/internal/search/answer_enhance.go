@@ -188,7 +188,7 @@ func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb class
 	// Resolve the base prompt ONCE per call: env override → bundled
 	// default → repo default → const fallback. mtime-cached so an
 	// operator edit hot-reloads next request, no rebuild needed.
-	base := loadSkillPromptForLocale(locale)
+	base := loadSkillPromptForLocale(ctx, locale)
 	if emb == nil || !d10ClassifierEnabled() {
 		return base, false, d10RoutingTrace{Mode: D10RouteBase}
 	}

@@ -163,7 +163,7 @@ func (r *Reorganizer) llmSummarizeWM(ctx context.Context, cubeID string, nodes [
 	defer cancel()
 
 	raw, err := r.callLLM(llmCtx, []map[string]string{
-		{"role": "system", "content": schedulerPrompt("session-compactor")},
+		{"role": "system", "content": schedulerPrompt(llmCtx, "session-compactor")},
 		{"role": "user", "content": sb.String()},
 	}, llmCompactMaxTokens)
 	if err != nil {

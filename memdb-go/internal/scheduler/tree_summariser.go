@@ -43,7 +43,7 @@ type tierParentResult struct {
 // as a no-op (not a failure). Matches the Python manager.py convention of
 // dropping clusters whose summariser returns "".
 func (r *Reorganizer) createTierParent(ctx context.Context, cubeID string, cluster []hierarchyNode, targetLevel, now string) (tierParentResult, error) {
-	systemPrompt, memoryType := tierPromptFor(targetLevel)
+	systemPrompt, memoryType := tierPromptFor(ctx, targetLevel)
 
 	// Build the user payload — {id, text} so the LLM sees each child as a source.
 	type inputItem struct {
@@ -147,12 +147,12 @@ func (r *Reorganizer) persistTierParent(ctx context.Context, cubeID string, clus
 }
 
 // tierPromptFor returns (system prompt, memory_type) for a given target tier.
-func tierPromptFor(level string) (string, string) {
+func tierPromptFor(ctx context.Context, level string) (string, string) {
 	switch level {
 	case hierarchyLevelSemantic:
-		return schedulerPrompt("semantic-tier-abstractor"), memoryTypeSemantic
+		return schedulerPrompt(ctx, "semantic-tier-abstractor"), memoryTypeSemantic
 	default:
-		return schedulerPrompt("episodic-tier-archivist"), memoryTypeEpisodic
+		return schedulerPrompt(ctx, "episodic-tier-archivist"), memoryTypeEpisodic
 	}
 }
 

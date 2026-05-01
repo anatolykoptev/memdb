@@ -11,7 +11,8 @@ import (
 
 type embedFSTier struct {
 	name   string
-	skills map[string]embedEntry // keyed by skill name
+	skills map[string]embedEntry // keyed by skill name (subdir name)
+	byPath map[string]embedEntry // keyed by SkillInfo.Path for ResolveByInfo
 }
 
 type embedEntry struct {
@@ -48,6 +49,7 @@ func NewEmbedFSTier(name string, fsys embed.FS, root string, opts ...EmbedFSOpti
 	e := &embedFSTier{
 		name:   name,
 		skills: make(map[string]embedEntry),
+		byPath: make(map[string]embedEntry),
 	}
 	buildEmbedFS(e, fsys, root, cfg.skillFilename)
 	return Tier{Name: name, Resolver: e}
@@ -88,7 +90,9 @@ func buildEmbedFS(e *embedFSTier, fsys embed.FS, root, skillFilename string) {
 			Dir:      path.Join(root, skillName),
 			Metadata: meta,
 		}
-		e.skills[skillName] = embedEntry{info: si, body: body}
+		entry := embedEntry{info: si, body: body}
+		e.skills[skillName] = entry
+		e.byPath[fpath] = entry
 		return nil
 	})
 }
@@ -99,6 +103,17 @@ func (e *embedFSTier) Find(name string) (SkillInfo, string, bool) {
 		return SkillInfo{}, "", false
 	}
 	return entry.info, entry.body, true
+}
+
+// ResolveByInfo implements bodyByInfoResolver. It looks up the pre-parsed
+// entry by SkillInfo.Path (the embed.FS file path) so that locale-aware lookup
+// can retrieve the exact body for the SkillInfo Walk selected.
+func (e *embedFSTier) ResolveByInfo(info SkillInfo) (string, bool) {
+	entry, ok := e.byPath[info.Path]
+	if !ok {
+		return "", false
+	}
+	return entry.body, true
 }
 
 func (e *embedFSTier) Walk(yield func(SkillInfo)) {

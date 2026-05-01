@@ -65,7 +65,7 @@ func (r *Reorganizer) DetectRelationPair(ctx context.Context, fromID, fromText, 
 	defer cancel()
 
 	raw, err := r.callLLM(callCtx, []map[string]string{
-		{"role": "system", "content": schedulerPrompt("relation-detector")},
+		{"role": "system", "content": schedulerPrompt(ctx, "relation-detector")},
 		{"role": "user", "content": user},
 	}, relationDetectorMaxTokens)
 	if err != nil {
