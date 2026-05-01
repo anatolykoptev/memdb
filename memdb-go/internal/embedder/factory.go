@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/cache"
 )
 
 // Config holds all embedder configuration in one typed struct.
@@ -19,6 +21,13 @@ type Config struct {
 	OllamaQuery  string // client-side query prefix (e.g. "query: ")
 	HTTPBaseURL  string // for type="http" — URL of embed-server sidecar
 	HTTPDim      int    // dimension override (default 1024)
+
+	// HTTPCacheClient enables Redis-backed embedding cache for type="http".
+	// When non-nil, every (model, dim, prefix, text) lookup short-circuits the
+	// embed-server call on cache hit. Saves the HTTP round trip + ONNX
+	// inference. nil = caching disabled (legacy behaviour, default for
+	// non-http backends). Wired from cmd/server/main.go after redis.NewClient.
+	HTTPCacheClient *cache.Client
 }
 
 // New constructs the appropriate Embedder from cfg.
@@ -92,8 +101,16 @@ func New(cfg Config, logger *slog.Logger) (Embedder, error) {
 		if model == "" {
 			model = "multilingual-e5-large"
 		}
-		e := NewHTTPEmbedder(cfg.HTTPBaseURL, model, dim, logger)
-		logger.Info("embedder: http", slog.String("url", cfg.HTTPBaseURL), slog.String("model", model))
+		opts := HTTPEmbedderOpts{}
+		if cfg.HTTPCacheClient != nil {
+			opts.Cache = NewRedisEmbedCache(cfg.HTTPCacheClient, 0, logger)
+		}
+		e := NewHTTPEmbedderWithOpts(cfg.HTTPBaseURL, model, dim, logger, opts)
+		logger.Info("embedder: http",
+			slog.String("url", cfg.HTTPBaseURL),
+			slog.String("model", model),
+			slog.Bool("cache_enabled", opts.Cache != nil),
+		)
 		return e, nil
 
 	default:

@@ -36,30 +36,61 @@ type Client struct {
 	queryPrefix string
 }
 
-// Embed satisfies the Embedder interface. Delegates to inner (via callBackendResilient
-// if circuit is wired). For the full Result API with observer hooks, use EmbedWithResult.
+// Embed satisfies the Embedder interface. Routes through EmbedWithResult so
+// that ALL configured layers — cache (E3), circuit breaker (E1), fallback,
+// and observer hooks — fire on this path identically to EmbedWithResult.
+//
+// 2026-05-01 fix: prior implementation called callBackendResilient directly,
+// which silently bypassed the cache layer (WithCache was effectively a no-op
+// for callers using the simpler Embed API). Verified empirically — memdb-go
+// wired WithCache via NewHTTPEmbedderWithOpts but its embed_cache_total
+// counter stayed at 0 across a full LoCoMo ingest because every Embed() call
+// took the no-cache path. Routing through EmbedWithResult fixes this without
+// changing the public Embed signature.
 func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if c == nil || c.inner == nil {
 		return nil, nil
 	}
-	return c.callBackendResilient(ctx, texts)
+	res, err := c.EmbedWithResult(ctx, texts)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return nil, nil
+	}
+	if res.Status == StatusDegraded && res.Err != nil {
+		return nil, res.Err
+	}
+	out := make([][]float32, len(res.Vectors))
+	for i, v := range res.Vectors {
+		if v == nil {
+			continue
+		}
+		out[i] = v.Embedding
+	}
+	return out, nil
 }
 
-// EmbedQuery satisfies Embedder; delegates to inner. When WithDim was set,
-// the returned vector length is validated against c.expectedDim — a mismatch
-// surfaces as *ErrDimMismatch and bumps embed_dim_mismatch_total{model}.
+// EmbedQuery satisfies Embedder; routes through Embed so single-text query
+// embeddings benefit from the same cache + resilience layers as batch calls.
+// When WithDim was set, the returned vector length is validated against
+// c.expectedDim — a mismatch surfaces as *ErrDimMismatch and bumps
+// embed_dim_mismatch_total{model}.
+//
+// 2026-05-01 fix: was c.inner.EmbedQuery directly, also bypassing cache.
+// Now identical resilience semantics whether you call Embed or EmbedQuery.
 func (c *Client) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
 	if c == nil || c.inner == nil {
 		return nil, nil
 	}
-	vec, err := c.inner.EmbedQuery(ctx, text)
+	vecs, err := c.Embed(ctx, []string{text})
 	if err != nil {
 		return nil, err
 	}
-	if dimErr := c.validateDim([][]float32{vec}); dimErr != nil {
-		return nil, dimErr
+	if len(vecs) == 0 {
+		return nil, nil
 	}
-	return vec, nil
+	return vecs[0], nil
 }
 
 // Dimension satisfies Embedder.
