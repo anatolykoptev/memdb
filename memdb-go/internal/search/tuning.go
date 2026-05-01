@@ -106,25 +106,27 @@ func parseEnvInt(name string, lo, hi, def int) int {
 // ---- D10 — answer_enhance --------------------------------------------------
 
 const (
-	defaultAnswerEnhanceMinRelativity   = 0.4
-	defaultD10ClassifierThreshold       = 0.5
-	defaultD10ClassifierEnabled         = true
+	defaultAnswerEnhanceMinRelativity = 0.4
+	// defaultD10ClassifierEnabled — default OFF (cefix7 baseline). Operators
+	// opt-in via MEMDB_D10_CLASSIFIER_ENABLED=true once LLM-Judge lift is
+	// confirmed. Code, comment, and production .env now agree.
+	defaultD10ClassifierEnabled = false
 	// defaultD10HardRoutingThreshold — top-1 softmax probability above which
 	// the soft-routing distribution block is replaced by a category-specific
 	// full system prompt. 0.97 is "near-verbatim anchor match" territory;
 	// false-positive risk is empirically near zero.
-	defaultD10HardRoutingThreshold      = 0.97
+	defaultD10HardRoutingThreshold = 0.97
 	// defaultD10SoftTopN — how many categories to surface in the
 	// distribution block. 5 == all of them; lowering trims tokens at the
 	// cost of hiding the long tail (which a calibrated classifier puts at
 	// ~1-3% each anyway).
-	defaultD10SoftTopN                  = 5
+	defaultD10SoftTopN = 5
 	// defaultD10SoftmaxTemperature — inverse-temperature applied to cosine
 	// similarities before softmax. T=10 keeps top-1 in [0.6, 0.95] for
 	// confident anchor matches and [0.25, 0.45] for ambiguous queries on
 	// the multilingual-e5-large embedder. Lower → flatter distribution
 	// (less hard-routing); higher → sharper (more hard-routing).
-	defaultD10SoftmaxTemperature        = 10.0
+	defaultD10SoftmaxTemperature = 10.0
 )
 
 // answerEnhanceMinRelativity returns the minimum relativity threshold below
@@ -134,19 +136,9 @@ func answerEnhanceMinRelativity() float64 {
 	return parseEnvFloat("MEMDB_D10_MIN_RELATIVITY", 0, 1, defaultAnswerEnhanceMinRelativity)
 }
 
-// d10ClassifierThreshold returns the minimum top-1 confidence the embedding
-// classifier must report before its category hint is appended to the D10
-// system prompt. Below threshold the prompt collapses to the base extractor
-// (i.e. byte-identical to current main behaviour) — the soft-routing safety
-// net.  Env: MEMDB_D10_CLASSIFIER_THRESHOLD in [0, 1].
-func d10ClassifierThreshold() float64 {
-	return parseEnvFloat("MEMDB_D10_CLASSIFIER_THRESHOLD", 0, 1, defaultD10ClassifierThreshold)
-}
-
 // d10ClassifierEnabled reports whether the embedding-based query classifier
-// should run at all. Default ON in code; compose / .env keeps it OFF for
-// safe rollout — flip via MEMDB_D10_CLASSIFIER_ENABLED=true once the
-// LLM-Judge lift is confirmed.
+// should run at all. Default OFF (cefix7 baseline); operators opt-in via
+// MEMDB_D10_CLASSIFIER_ENABLED=true once the LLM-Judge lift is confirmed.
 //
 // Env: MEMDB_D10_CLASSIFIER_ENABLED — accepts 1/true/yes (on) or
 // 0/false/no (off). Anything else falls back to the default.
