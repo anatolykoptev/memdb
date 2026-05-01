@@ -23,6 +23,7 @@ package search
 import (
 	_ "embed"
 
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 	"github.com/anatolykoptev/skillkit"
 )
 
@@ -31,7 +32,9 @@ var embeddedD10SkillRaw string
 
 // d10Skill is the singleton skillkit.Embedded for the D10 answer-extractor
 // system prompt. Constructed once at package init.
-var d10Skill = skillkit.NewEmbedded("d10-extractor", "MEMDB_D10_SKILL_PATH", embeddedD10SkillRaw)
+var d10Skill = skillkit.NewEmbedded("d10-extractor", "MEMDB_D10_SKILL_PATH", embeddedD10SkillRaw,
+	skillkit.WithObserver(observability.SkillkitObserver()),
+)
 
 // loadSkillPrompt returns the D10 system-prompt body. See package doc
 // for the resolution chain. Always non-empty.

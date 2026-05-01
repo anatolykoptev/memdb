@@ -17,6 +17,7 @@ import (
 	"embed"
 	"fmt"
 
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 	"github.com/anatolykoptev/skillkit"
 )
 
@@ -27,7 +28,7 @@ var schedulerSkillsFS embed.FS
 // prompts, parsed once at package init from the embedded FS.
 var schedulerCatalog = skillkit.NewCatalog(
 	skillkit.NewEmbedFSTier("scheduler-builtin", schedulerSkillsFS, "skills"),
-)
+).WithObserver(observability.SkillkitObserver())
 
 // SchedulerSkillNames is the canonical list of scheduler skill names,
 // in the order they were declared in the legacy prompts.go const block.

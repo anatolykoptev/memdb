@@ -11,12 +11,51 @@ import (
 // Tiers are searched in order; the first match wins. Duplicate skill
 // names across tiers are deduplicated so the higher-priority tier wins.
 type Catalog struct {
-	tiers []Tier
+	tiers    []Tier
+	observer *Observer
 }
 
 // NewCatalog creates a Catalog from the given tiers, searched in order.
 func NewCatalog(tiers ...Tier) *Catalog {
 	return &Catalog{tiers: tiers}
+}
+
+// WithObserver returns a new Catalog wrapping the receiver with the
+// given observer. Method receiver pattern (not constructor option)
+// because tiers are passed at construction; observer attaches after.
+//
+// On first attach, CatalogSize is fired once per tier with the count
+// of skills that tier exposes via Walk. Tiers that expose zero skills
+// (e.g. empty DirTier) still fire with count=0.
+//
+// Nil observer is a no-op; method returns the receiver unchanged.
+//
+// Thread-safety: configure once at startup before any concurrent
+// Load/LoadCtx callers — this method is not safe to call after the
+// catalog is in use. The observer field is read on every Load without
+// synchronization (intentional — zero hot-path cost). Future v0.3.0
+// may wrap observer in atomic.Pointer if a runtime swap use case
+// emerges.
+func (c *Catalog) WithObserver(obs *Observer) *Catalog {
+	if obs == nil {
+		return c
+	}
+	c.observer = obs
+	if obs.CatalogSize != nil {
+		for _, t := range c.tiers {
+			count := 0
+			t.Resolver.Walk(func(_ SkillInfo) { count++ })
+			obs.CatalogSize(t.Name, count)
+		}
+	}
+	return c
+}
+
+// fireCatalogLoad invokes CatalogLoad if the observer is set.
+func (c *Catalog) fireCatalogLoad(name, outcome string) {
+	if c.observer != nil && c.observer.CatalogLoad != nil {
+		c.observer.CatalogLoad(name, outcome)
+	}
 }
 
 // List returns all unique skills across all tiers, sorted by Name.
@@ -48,8 +87,10 @@ func (c *Catalog) Load(name string) (body string, info SkillInfo, ok bool) {
 			continue
 		}
 		si = c.tagSource(t, si)
+		c.fireCatalogLoad(name, "hit")
 		return b, si, true
 	}
+	c.fireCatalogLoad(name, "miss")
 	return "", SkillInfo{}, false
 }
 
@@ -66,6 +107,7 @@ func (c *Catalog) LoadCtx(ctx context.Context, name string) (body string, info S
 				continue
 			}
 			si = c.tagSource(t, si)
+			c.fireCatalogLoad(name, "hit")
 			return b, si, true, nil
 		}
 		si, b, found := t.Resolver.Find(name)
@@ -73,8 +115,10 @@ func (c *Catalog) LoadCtx(ctx context.Context, name string) (body string, info S
 			continue
 		}
 		si = c.tagSource(t, si)
+		c.fireCatalogLoad(name, "hit")
 		return b, si, true, nil
 	}
+	c.fireCatalogLoad(name, "miss")
 	return "", SkillInfo{}, false, nil
 }
 

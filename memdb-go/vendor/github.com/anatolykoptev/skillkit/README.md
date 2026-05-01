@@ -28,6 +28,10 @@ Two independent APIs in one zero-dependency package:
 Both APIs share the same frontmatter primitives (`StripFrontmatter`,
 `ParseFrontmatter`, `ParseMetadata`).
 
+- **Optional `Observer` hooks** for prometheus / OpenTelemetry / slog
+  observability without skillkit-side dep. Wire to whichever backend the
+  consuming service already uses.
+
 ## Why
 
 Until now, every Go service that loaded skills hand-rolled its own loader:
