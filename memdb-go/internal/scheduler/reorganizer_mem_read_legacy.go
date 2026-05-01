@@ -173,7 +173,7 @@ func isCleanText(s string) bool {
 // llmEnhance calls the LLM to extract structured facts from a raw WM note (legacy path).
 func (r *Reorganizer) llmEnhance(ctx context.Context, rawText string) ([]enhancementFact, error) {
 	msgs := []map[string]string{
-		{"role": "system", "content": memEnhancementSystemPrompt},
+		{"role": "system", "content": schedulerPrompt("wm-enhancement-extractor")},
 		{"role": "user", "content": "Raw working memory note:\n" + rawText},
 	}
 

@@ -337,7 +337,7 @@ func TestCompactWM_LLMRequest_SystemPrompt(t *testing.T) {
 	if req.Messages[0].Role != "system" {
 		t.Errorf("first message role = %q, want system", req.Messages[0].Role)
 	}
-	if req.Messages[0].Content != wmCompactionSystemPrompt {
+	if req.Messages[0].Content != schedulerPrompt("session-compactor") {
 		t.Errorf("system prompt mismatch")
 	}
 	if req.Messages[1].Role != "user" {
