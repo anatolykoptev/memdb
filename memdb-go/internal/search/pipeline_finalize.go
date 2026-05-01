@@ -99,7 +99,12 @@ func (s *SearchService) stageProfileInject(ctx context.Context, st *pipelineStat
 // retrieval_count column on every returned text/skill row. Cap-bound by
 // the rows' explicit ID list — no fan-out beyond the response size. Soft-
 // fail: errors land in s.logger.Debug, never blocking the pipeline.
-func (s *SearchService) stageRetrievalCountAsync(_ context.Context, st *pipelineState) error {
+//
+// context.WithoutCancel(ctx) is used so the goroutine carries the OTel
+// trace context (enabling pgxotel to emit a nested span in Jaeger) without
+// inheriting request cancellation — the goroutine must complete even after
+// the HTTP handler returns and the request context is cancelled.
+func (s *SearchService) stageRetrievalCountAsync(ctx context.Context, st *pipelineState) error {
 	if s.postgres == nil {
 		st.skip("retrieval_count_async")
 		return nil
@@ -110,8 +115,9 @@ func (s *SearchService) stageRetrievalCountAsync(_ context.Context, st *pipeline
 		return nil
 	}
 	nowStr := time.Now().UTC().Format("2006-01-02T15:04:05.000000")
+	bgCtx := context.WithoutCancel(ctx)
 	go func() {
-		if err := s.postgres.IncrRetrievalCount(context.Background(), ids, nowStr); err != nil {
+		if err := s.postgres.IncrRetrievalCount(bgCtx, ids, nowStr); err != nil {
 			s.logger.Debug("incr retrieval count failed", slog.Any("error", err))
 		}
 	}()
