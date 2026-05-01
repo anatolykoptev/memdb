@@ -163,6 +163,17 @@ func atomicInfoFromFact(f llm.AtomicFact) map[string]any {
 		}
 		out["event_dates"] = dates
 	}
+	if len(f.NamedEntitiesInText) > 0 {
+		// v2 schema-bind: persisted so downstream observability can verify
+		// the LLM actually populated the field (memdb_atomic_named_entity_count
+		// histogram derives from this — empty arrays are excluded by the
+		// len() > 0 gate, mirroring EventDates).
+		ents := make([]any, len(f.NamedEntitiesInText))
+		for i, s := range f.NamedEntitiesInText {
+			ents[i] = s
+		}
+		out["named_entities_in_text"] = ents
+	}
 	return out
 }
 
