@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/anatolykoptev/go-kit/tracing/httpmw"
 )
 
 const (
@@ -20,8 +22,10 @@ const (
 	streamChunkBufSize       = 8 // buffered channel capacity for stream chunks
 )
 
-// streamHTTPClient has no timeout — SSE streams are long-lived.
-var streamHTTPClient = &http.Client{} //nolint:gochecknoglobals // shared across all streaming calls
+// streamHTTPClient has no timeout — SSE streams are long-lived. Wrapped via
+// httpmw so each streaming call surfaces as a client span and traceparent
+// propagates to the LLM proxy.
+var streamHTTPClient = httpmw.Client() //nolint:gochecknoglobals // shared across all streaming calls
 
 // StreamOpts configures a streaming chat completion.
 type StreamOpts struct {
