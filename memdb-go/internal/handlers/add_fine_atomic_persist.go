@@ -40,6 +40,35 @@ func (h *Handler) applyAtomicAndPersist(
 	if len(embedded) != len(perFactInfo) {
 		return nil, fmt.Errorf("atomic persist: length mismatch (embedded=%d info=%d)", len(embedded), len(perFactInfo))
 	}
+
+	// Pre-persist semantic dedup. kNN-probes each new fact against existing
+	// atomic facts in the cube; drops near-duplicates (cosine ≥ 0.92, Zep
+	// pattern). embedded[] and perFactInfo[] are tightly coupled — when we
+	// drop an embedded entry we MUST drop the matching perFactInfo entry at
+	// the same index, or downstream lift/discriminator logic reads the wrong
+	// AttributedTo / NamedEntities for the surviving fact. Walk both in lock
+	// step using kept-index → original-index mapping.
+	if filtered, dropped := h.dedupAtomicFactsAgainstCube(ctx, fc.CubeID, embedded); dropped > 0 {
+		filteredInfo := make([]map[string]any, 0, len(filtered))
+		// dedupAtomicFactsAgainstCube preserves order, so a left-to-right
+		// merge identifies kept entries by pointer equality of the inner
+		// AtomicFact (Memory + ContentHash uniquely identify it within a
+		// batch).
+		fi := 0
+		for i := range embedded {
+			if fi < len(filtered) && embedded[i].fact.Memory == filtered[fi].fact.Memory &&
+				embedded[i].fact.ContentHash == filtered[fi].fact.ContentHash {
+				filteredInfo = append(filteredInfo, perFactInfo[i])
+				fi++
+			}
+		}
+		embedded = filtered
+		perFactInfo = filteredInfo
+		h.logger.Debug("atomic persist: semantic dedup removed near-duplicates",
+			slog.String("cube_id", fc.CubeID), slog.Int("dropped", dropped),
+			slog.Int("kept", len(embedded)))
+	}
+
 	var allNodes []db.MemoryInsertNode
 	var items []addResponseItem
 	var vsetInserts []wmVSetInsert
@@ -257,11 +286,35 @@ func (h *Handler) runAtomicFineExtractionFull(
 	}
 
 	obs := h.resolveObservationDate(ctx, req.Messages)
+
+	// E3-style cache: same (cubeID, conversation, observation_date,
+	// candidate fingerprint, prompt body) → reuse facts without firing the
+	// LLM. Saves ~4.5s per cache hit (Flash 3.1 extract avg). Cold runs and
+	// reverse-role passes (perspective swap → different conversation text)
+	// still miss; warm re-ingest of the same chunk is the primary win.
+	cacheKey := computeAtomicCacheKey(cubeID, obs, conversation, candidates, llm.AtomicSkillBody(ctx))
+	if cached, ok := h.atomicCache.Get(ctx, cacheKey); ok {
+		recordAtomicExtractOutcome(ctx, atomicOutcomeSuccess)
+		recordAtomicFactsPerChunk(ctx, len(cached))
+		// Re-emit success outcome on the cache path so chart drift between
+		// cached vs uncached extractions is observable via the cache counter
+		// (memdb.atomic.extract_cache_total{outcome=hit}) rather than hidden.
+		extracted := atomicFactsToExtracted(h.logger, cached, cubeID)
+		return cached, extracted, true, nil
+	}
+
 	atomicFacts, err := ext.ExtractAtomicFacts(ctx, conversation, candidates, obs)
 	if err != nil {
 		recordAtomicExtractOutcome(ctx, atomicOutcomeLLMError)
 		return nil, nil, true, fmt.Errorf("atomic fine add: extract: %w", err)
 	}
+	// Populate cache on success — even when atomicFacts is empty (so the
+	// LLM's "no facts here" verdict on the same chunk doesn't burn a second
+	// 4.5s call). atomicExtractCache.Set is no-op on len==0 so we skip
+	// writing an empty entry; that means an empty extraction does NOT cache,
+	// trading one extra LLM call against the risk of pinning a wrong
+	// "nothing here" verdict that a model upgrade might revise.
+	h.atomicCache.Set(ctx, cacheKey, atomicFacts)
 	if len(atomicFacts) == 0 {
 		recordAtomicExtractOutcome(ctx, atomicOutcomeEmpty)
 		h.logger.Debug("atomic fine add: no facts extracted",
@@ -272,17 +325,28 @@ func (h *Handler) runAtomicFineExtractionFull(
 	recordAtomicExtractOutcome(ctx, atomicOutcomeSuccess)
 	recordAtomicFactsPerChunk(ctx, len(atomicFacts))
 
-	extracted := make([]llm.ExtractedFact, 0, len(atomicFacts))
+	extracted := atomicFactsToExtracted(h.logger, atomicFacts, cubeID)
 	for _, f := range atomicFacts {
-		if !llm.HasProperNoun(f.Text) {
-			h.logger.Debug("atomic fine add: fact has no proper noun",
-				slog.String("text", f.Text), slog.String("cube_id", cubeID))
-		}
 		recordAtomicFactWordCount(ctx, llm.CountWords(f.Text))
-		extracted = append(extracted, atomicToExtracted(f))
 	}
 	_ = sig
 	h.logger.Debug("atomic fine add: extracted facts",
 		slog.Int("count", len(extracted)), slog.String("cube_id", cubeID))
 	return atomicFacts, extracted, true, nil
+}
+
+// atomicFactsToExtracted converts a slice of llm.AtomicFact to ExtractedFact,
+// logging proper-noun absence for observability. Shared by the LLM path and
+// the cache-hit path so both surfaces apply the same conversion (and so the
+// proper-noun warning still fires when serving cached facts).
+func atomicFactsToExtracted(logger *slog.Logger, facts []llm.AtomicFact, cubeID string) []llm.ExtractedFact {
+	out := make([]llm.ExtractedFact, 0, len(facts))
+	for _, f := range facts {
+		if !llm.HasProperNoun(f.Text) {
+			logger.Debug("atomic fine add: fact has no proper noun",
+				slog.String("text", f.Text), slog.String("cube_id", cubeID))
+		}
+		out = append(out, atomicToExtracted(f))
+	}
+	return out
 }

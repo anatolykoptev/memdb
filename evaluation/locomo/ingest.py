@@ -36,10 +36,18 @@ import re
 import sys
 import time
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+
+# LOCOMO_INGEST_PARALLELISM caps client-side parallel /add HTTP calls.
+# Default 1 = sequential (legacy behavior). Set to N>1 to fan out N session
+# ingests concurrently. Effective ceiling is min(N, MEMDB_ADD_WORKERS server
+# env). Server queue (MEMDB_ADD_QUEUE_SIZE=50) absorbs bursts; LLM proxy free
+# tier sustains ~3 calls/s across all 17 keys via round-robin.
+INGEST_PARALLELISM = int(os.getenv("LOCOMO_INGEST_PARALLELISM", "1"))
 
 # LoCoMo ingest mode. Three modes are supported (per CLAUDE.md add-mode contract):
 #   - "raw":  per-message granularity, no LLM. Best per-message cosine, but no
@@ -225,8 +233,15 @@ def ingest(
     Set ``reverse_role=False`` to reproduce pre-F9 baselines.
     """
     stats = {"conversations": 0, "sessions": 0, "messages": 0, "errors": [],
-             "reverse_role": reverse_role, "reverse_role_sessions": 0}
+             "reverse_role": reverse_role, "reverse_role_sessions": 0,
+             "parallelism": INGEST_PARALLELISM}
     conversations = sorted(conversations, key=lambda c: c.get("sample_id", ""))
+
+    # Collect every (sample_id, session_key, perspective, kwargs, is_reverse)
+    # job up-front so the parallel pool can fan them out without re-walking
+    # the conversation tree per worker. Sequential mode runs the same list
+    # through max_workers=1, so behavior is identical at parallelism=1.
+    jobs = []
     for conv in conversations:
         sample_id = conv.get("sample_id", "locomo_unknown")
         conversation = conv.get("conversation", {})
@@ -234,7 +249,7 @@ def ingest(
         user_a, user_b = user_ids_for(sample_id)
         print(
             f"[ingest] conv={sample_id} speakers=({speaker_a}, {speaker_b}) "
-            f"reverse_role={reverse_role}",
+            f"reverse_role={reverse_role} parallelism={INGEST_PARALLELISM}",
             flush=True,
         )
         for session_key, iso_date, messages in iter_sessions(conversation):
@@ -245,49 +260,80 @@ def ingest(
             if dry_run:
                 continue
 
-            # Normal pass: each speaker from their own POV.
+            # Normal pass jobs (per-speaker POV).
             for perspective, uid in (("a", user_a), ("b", user_b)):
-                try:
-                    ingest_one_session(
-                        memdb_url=memdb_url,
-                        user_id=uid,
-                        session_id=session_id,
-                        speaker_a=speaker_a,
-                        speaker_b=speaker_b,
-                        messages=messages,
-                        iso_date=iso_date,
-                        perspective=perspective,
-                    )
-                except requests.RequestException as exc:
-                    stats["errors"].append(f"{sample_id}/{session_key}/{perspective}: {exc}")
-                    print(f"    ERROR: {exc}", file=sys.stderr, flush=True)
+                jobs.append({
+                    "sample_id": sample_id, "session_key": session_key,
+                    "perspective": perspective, "is_reverse": False,
+                    "kwargs": dict(memdb_url=memdb_url, user_id=uid,
+                                   session_id=session_id,
+                                   speaker_a=speaker_a, speaker_b=speaker_b,
+                                   messages=messages, iso_date=iso_date,
+                                   perspective=perspective),
+                })
 
-            # Reverse-role pass: swap speaker_a ↔ speaker_b so each speaker
-            # also stores the conversation from the other's POV.  Session ID
-            # gets a __rev suffix to remain deterministic and avoid stomping
-            # the normal pass (server deduplicates by session_id).
+            # Reverse-role pass jobs (swap a↔b, __rev session suffix).
             if reverse_role:
                 rev_session_id = f"{session_id}__rev"
                 for perspective, uid in (("a", user_a), ("b", user_b)):
-                    try:
-                        ingest_one_session(
-                            memdb_url=memdb_url,
-                            user_id=uid,
-                            session_id=rev_session_id,
-                            speaker_a=speaker_b,  # swapped
-                            speaker_b=speaker_a,  # swapped
-                            messages=messages,
-                            iso_date=iso_date,
-                            perspective=perspective,
-                        )
-                        stats["reverse_role_sessions"] += 1
-                    except requests.RequestException as exc:
-                        stats["errors"].append(
-                            f"{sample_id}/{session_key}/{perspective}/rev: {exc}"
-                        )
-                        print(f"    ERROR (rev): {exc}", file=sys.stderr, flush=True)
-
+                    jobs.append({
+                        "sample_id": sample_id, "session_key": session_key,
+                        "perspective": perspective, "is_reverse": True,
+                        "kwargs": dict(memdb_url=memdb_url, user_id=uid,
+                                       session_id=rev_session_id,
+                                       speaker_a=speaker_b, speaker_b=speaker_a,
+                                       messages=messages, iso_date=iso_date,
+                                       perspective=perspective),
+                    })
         stats["conversations"] += 1
+
+    if dry_run or not jobs:
+        return stats
+
+    # Group jobs by cube (user_id). content_hash dedup is per-cube, so two
+    # concurrent adds against the SAME cube race: both LLM-extract the same
+    # chunk, both try to insert, the UNIQUE constraint drops one silently and
+    # the loser's facts are lost. Confirmed empirically on 2026-05-01: naive
+    # parallel=10 dropped TOTAL rows from 431 (serial Flash 3.1) to 121 and
+    # entire pet conversation (Oliver/Luna/Bailey) vanished.
+    #
+    # Solution: serial per cube, parallel between cubes. ThreadPool worker
+    # count = number of distinct cubes (capped by INGEST_PARALLELISM). A LoCoMo
+    # conversation has 2 cubes (speaker_a + speaker_b), so 1 conv → 2 workers
+    # max; full corpus (10 conv) → 20 workers max.
+    cubes: dict[str, list] = {}
+    for job in jobs:
+        cube = job["kwargs"]["user_id"]
+        cubes.setdefault(cube, []).append(job)
+
+    def _run_cube(cube_jobs):
+        """Process all jobs for one cube serially. Returns (cube_id, [(job, err)])."""
+        results = []
+        for job in cube_jobs:
+            try:
+                ingest_one_session(**job["kwargs"])
+                results.append((job, None))
+            except requests.RequestException as exc:
+                results.append((job, exc))
+        return results
+
+    workers = min(len(cubes), max(1, INGEST_PARALLELISM))
+    print(f"[ingest] dispatching {len(jobs)} jobs across {len(cubes)} cubes "
+          f"with {workers} parallel cube workers (serial within each cube to "
+          f"avoid hash_dedup race)", flush=True)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for results in (f.result() for f in as_completed(ex.submit(_run_cube, cj) for cj in cubes.values())):
+            for job, exc in results:
+                if exc is not None:
+                    tag = f"{job['sample_id']}/{job['session_key']}/{job['perspective']}"
+                    if job["is_reverse"]:
+                        tag += "/rev"
+                    stats["errors"].append(f"{tag}: {exc}")
+                    print(f"    ERROR{' (rev)' if job['is_reverse'] else ''}: {exc}",
+                          file=sys.stderr, flush=True)
+                elif job["is_reverse"]:
+                    stats["reverse_role_sessions"] += 1
+
     return stats
 
 
