@@ -315,6 +315,9 @@ func applySearchOverrides(params *search.SearchParams, req searchRequest) {
 	if req.AttributedTo != nil {
 		params.AttributedTo = strings.TrimSpace(*req.AttributedTo)
 	}
+	if req.Locale != nil {
+		params.Locale = *req.Locale
+	}
 }
 
 // hashQuery returns first 8 chars of SHA256 hex digest.

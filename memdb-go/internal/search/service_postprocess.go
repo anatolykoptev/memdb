@@ -99,6 +99,7 @@ func (s *SearchService) postProcessResults(
 		APIURL: s.LLMReranker.APIURL,
 		APIKey: s.LLMReranker.APIKey,
 		Model:  s.LLMReranker.Model,
+		Locale: p.Locale,
 	}, s.embedder)
 
 	// Step 11: Trim each type to its budget

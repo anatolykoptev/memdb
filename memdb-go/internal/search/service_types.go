@@ -111,6 +111,11 @@ type SearchParams struct {
 	// coexist (mem0 pattern; complementary to the Speakers fan-out which
 	// scopes across user_ids).
 	AttributedTo string
+	// Locale is the BCP-47-style language tag for the request, used for
+	// D10 system-prompt selection. Empty string triggers auto-detect from
+	// the query text via internal/lang.Detect. Currently supported set:
+	// "en", "ru", "zh".
+	Locale string
 }
 
 // SearchOutput holds the formatted result plus optional embedding sidecar.

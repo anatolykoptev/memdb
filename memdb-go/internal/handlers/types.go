@@ -76,6 +76,12 @@ type searchRequest struct {
 	// without reverse_role) and the caller wants a single perspective.
 	// Empty/nil = no filter (legacy behaviour).
 	AttributedTo *string `json:"attributed_to,omitempty"`
+
+	// Locale — explicit BCP-47 language tag for D10 prompt selection.
+	// When nil or empty, the server auto-detects from query text via
+	// internal/lang.Detect. Supported values: "en", "ru", "zh".
+	// Omit for legacy behaviour (auto-detect, backward compat).
+	Locale *string `json:"locale,omitempty"`
 }
 
 // addRequest validates POST /product/add (basic fields only, used by ValidatedAdd).
