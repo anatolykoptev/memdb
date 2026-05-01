@@ -1,6 +1,7 @@
 package skillkit
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -27,6 +28,18 @@ func WithObserver(obs *Observer) EmbeddedOption {
 	return func(e *Embedded) {
 		e.observer = obs
 	}
+}
+
+// WithTracer attaches a Tracer to the Embedded. Subsequent BodyCtx()
+// calls open a span via Tracer.StartBody for the duration of the call.
+// Nil tracer is a no-op (same as not calling WithTracer).
+//
+// Thread-safety: configure once at NewEmbedded construction; this option
+// is not safe to apply after concurrent BodyCtx() callers have started.
+// The tracer field is read on every BodyCtx() without synchronization
+// (intentional — zero hot-path cost).
+func WithTracer(tr *Tracer) EmbeddedOption {
+	return func(e *Embedded) { e.tracer = tr }
 }
 
 // Embedded resolves a single skill body. Use when a binary ships with
@@ -56,6 +69,7 @@ type Embedded struct {
 	body     string   // embedded default body, parsed once at construction
 	metadata Metadata // embedded metadata, parsed once at construction
 	observer *Observer
+	tracer   *Tracer
 
 	mu          sync.Mutex
 	cachedBody  string
@@ -117,6 +131,77 @@ func (e *Embedded) fireEnvFallback(reason string) {
 	}
 }
 
+// resolveBody returns the resolved skill body and the source label
+// describing how it was resolved. It fires observer env-fallback hooks
+// on gate failures but does NOT fire fireBodyCall — callers (Body and
+// BodyCtx) are responsible for that so the tracer can capture the source.
+//
+// When envVar is unset, returns (embedded default, "embedded") without
+// acquiring the mutex. When envVar is set, acquires e.mu for the
+// stat→cache-check→read sequence.
+func (e *Embedded) resolveBody() (body string, source string) {
+	path := os.Getenv(e.envVar)
+	if path == "" {
+		return e.body, "embedded"
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return e.resolveEnvBody(path)
+}
+
+// resolveEnvBody performs stat→cache-check→read under the instance mutex.
+// Called only when path is non-empty. Returns body and source label.
+// Fires fireEnvFallback on gate failures; does NOT fire fireBodyCall.
+func (e *Embedded) resolveEnvBody(path string) (string, string) {
+	info, err := os.Stat(path) //nolint:gosec // G703: path from operator env; intentional
+	if err != nil {
+		slog.Debug("skillkit.Embedded: stat failed", "name", e.name, "path", path, "err", err) //nolint:gosec // G706: path is operator-controlled; not user input
+		// Return last-known-good cache if available, else embedded default.
+		e.fireEnvFallback("unreadable")
+		if e.cachedBody != "" {
+			return e.cachedBody, "last_known_good"
+		}
+		return e.body, "embedded"
+	}
+
+	if info.Size() > maxEnvOverrideSize {
+		slog.Debug("skillkit.Embedded: file too large", "name", e.name, "path", path, "size", info.Size()) //nolint:gosec // G706: path is operator-controlled; not user input
+		e.fireEnvFallback("too_large")
+		return e.body, "embedded"
+	}
+
+	mtime := info.ModTime()
+	if !e.cachedMtime.IsZero() && mtime.Equal(e.cachedMtime) && e.cachedBody != "" {
+		return e.cachedBody, "cache_hit"
+	}
+
+	raw, err := os.ReadFile(path) //nolint:gosec // G304,G703: path from operator env; intentional
+	if err != nil {
+		slog.Debug("skillkit.Embedded: read failed", "name", e.name, "path", path, "err", err) //nolint:gosec // G706: path is operator-controlled; not user input
+		// os.ReadFile failure treated as "unreadable" (same label as stat failure)
+		// to keep reason cardinality low in v0.2.0. Both indicate the env path
+		// is currently inaccessible regardless of root cause.
+		e.fireEnvFallback("unreadable")
+		if e.cachedBody != "" {
+			return e.cachedBody, "last_known_good"
+		}
+		return e.body, "embedded"
+	}
+
+	stripped := StripFrontmatter(string(raw))
+	if stripped == "" {
+		slog.Debug("skillkit.Embedded: env file has empty body after strip", "name", e.name, "path", path) //nolint:gosec // G706: path is operator-controlled; not user input
+		e.fireEnvFallback("empty_body")
+		return e.body, "embedded"
+	}
+
+	e.cachedBody = stripped
+	e.cachedMtime = mtime
+	return e.cachedBody, "env"
+}
+
 // Body returns the resolved skill body. Resolution order:
 //  1. If envVar is set, the file at that path is ≤1 MiB, readable, and
 //     non-empty after frontmatter strip — returns mtime-cached body.
@@ -130,74 +215,33 @@ func (e *Embedded) fireEnvFallback(reason string) {
 // I/O errors are logged via slog.Debug and never returned. Body() is
 // best-effort — a service must never break on a hot-reload typo.
 func (e *Embedded) Body() string {
-	path := os.Getenv(e.envVar)
-	if path == "" {
-		e.fireBodyCall("embedded", e.body)
-		return e.body
-	}
-
-	e.mu.Lock()
-	defer e.mu.Unlock()
-
-	return e.resolveEnvBody(path)
+	body, source := e.resolveBody()
+	e.fireBodyCall(source, body)
+	return body
 }
 
-// resolveEnvBody performs stat→cache-check→read under the instance mutex.
-// Called only when path is non-empty.
-func (e *Embedded) resolveEnvBody(path string) string {
-	info, err := os.Stat(path) //nolint:gosec // G703: path from operator env; intentional
-	if err != nil {
-		slog.Debug("skillkit.Embedded: stat failed", "name", e.name, "path", path, "err", err) //nolint:gosec // G706: path is operator-controlled; not user input
-		// Return last-known-good cache if available, else embedded default.
-		e.fireEnvFallback("unreadable")
-		if e.cachedBody != "" {
-			e.fireBodyCall("last_known_good", e.cachedBody)
-			return e.cachedBody
-		}
-		e.fireBodyCall("embedded", e.body)
-		return e.body
+// BodyCtx is the context-aware variant of Body. When a Tracer is
+// configured via WithTracer, opens a span via Tracer.StartBody for
+// the duration of the call, with the resolved source label attached
+// at end. When tracer is nil, behaves identically to Body().
+//
+// Pass the request context so the span nests under the caller's
+// existing trace tree. Without a parent span the new span becomes
+// a trace root.
+func (e *Embedded) BodyCtx(ctx context.Context) string {
+	if e.tracer == nil || e.tracer.StartBody == nil {
+		return e.Body()
 	}
-
-	if info.Size() > maxEnvOverrideSize {
-		slog.Debug("skillkit.Embedded: file too large", "name", e.name, "path", path, "size", info.Size()) //nolint:gosec // G706: path is operator-controlled; not user input
-		e.fireEnvFallback("too_large")
-		e.fireBodyCall("embedded", e.body)
-		return e.body
-	}
-
-	mtime := info.ModTime()
-	if !e.cachedMtime.IsZero() && mtime.Equal(e.cachedMtime) && e.cachedBody != "" {
-		e.fireBodyCall("cache_hit", e.cachedBody)
-		return e.cachedBody
-	}
-
-	raw, err := os.ReadFile(path) //nolint:gosec // G304,G703: path from operator env; intentional
-	if err != nil {
-		slog.Debug("skillkit.Embedded: read failed", "name", e.name, "path", path, "err", err) //nolint:gosec // G706: path is operator-controlled; not user input
-		// os.ReadFile failure treated as "unreadable" (same label as stat failure)
-		// to keep reason cardinality low in v0.2.0. Both indicate the env path
-		// is currently inaccessible regardless of root cause.
-		e.fireEnvFallback("unreadable")
-		if e.cachedBody != "" {
-			e.fireBodyCall("last_known_good", e.cachedBody)
-			return e.cachedBody
-		}
-		e.fireBodyCall("embedded", e.body)
-		return e.body
-	}
-
-	stripped := StripFrontmatter(string(raw))
-	if stripped == "" {
-		slog.Debug("skillkit.Embedded: env file has empty body after strip", "name", e.name, "path", path) //nolint:gosec // G706: path is operator-controlled; not user input
-		e.fireEnvFallback("empty_body")
-		e.fireBodyCall("embedded", e.body)
-		return e.body
-	}
-
-	e.cachedBody = stripped
-	e.cachedMtime = mtime
-	e.fireBodyCall("env", e.cachedBody)
-	return e.cachedBody
+	// Deferred end-fn so a panicking observer hook in fireBodyCall still
+	// closes the span. Mirrors Catalog.LoadCtx (catalog.go) — keep the
+	// two tracer call sites symmetric.
+	_, end := e.tracer.StartBody(ctx, e.name)
+	var source string
+	defer func() { end(source) }()
+	body, src := e.resolveBody()
+	source = src
+	e.fireBodyCall(source, body)
+	return body
 }
 
 // Metadata returns the parsed metadata from the embedded raw (not from

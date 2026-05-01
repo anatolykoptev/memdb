@@ -20,6 +20,17 @@
 // backend (prometheus, OpenTelemetry, slog, ...). All hooks are
 // nil-safe; skillkit core stays stdlib-only. See WithObserver.
 //
+// Distributed tracing: an optional Tracer hooks span creation into
+// the loader hot paths. Embedded.BodyCtx opens a span per body
+// resolution; Catalog.WithTracer().LoadCtx opens a span per catalog
+// lookup. Both are nil-safe and vendor-neutral; caller adapts to
+// OpenTelemetry or any other tracer with a 5-line wrapper. See
+// WithTracer (v0.2.2+).
+//
+// Locale routing: Catalog supports opt-in locale preference via
+// WithLocale, enabling multi-language skill catalogs without changing
+// existing skill names. See Catalog.WithLocale (v0.2.1+).
+//
 // Spec conformance: skillkit implements the agentskills.io standard
 // adopted by Claude Code, Cursor, GitHub Copilot, JetBrains Junie,
 // Gemini CLI, OpenAI Codex, and 35+ other agentic tools. A skill

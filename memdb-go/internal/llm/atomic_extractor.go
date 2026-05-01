@@ -113,6 +113,7 @@ var embeddedAtomicSkillRaw string
 // empty after frontmatter strip (build-time invariant).
 var atomicSkill = skillkit.NewEmbedded("atomic-extractor", "MEMDB_ATOMIC_SKILL_PATH", embeddedAtomicSkillRaw,
 	skillkit.WithObserver(observability.SkillkitObserver()),
+	skillkit.WithTracer(observability.SkillkitTracer()),
 )
 
 // AtomicSkillDiagnostic returns a one-line description of the live
@@ -213,7 +214,7 @@ func (e *AtomicExtractor) ExtractAtomicFacts(
 	user := buildAtomicUserMessage(conversation, candidates, observationDate)
 
 	msgs := []Message{
-		{Role: "system", Content: atomicSkill.Body()},
+		{Role: "system", Content: atomicSkill.BodyCtx(ctx)},
 		{Role: "user", Content: user},
 	}
 

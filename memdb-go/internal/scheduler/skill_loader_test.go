@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,7 @@ import (
 
 func TestSchedulerCatalog_AllSkillsLoad(t *testing.T) {
 	for _, name := range SchedulerSkillNames {
-		body := schedulerPrompt(name)
+		body := schedulerPrompt(context.Background(), name)
 		if body == "" {
 			t.Errorf("skill %q has empty body", name)
 		}
@@ -27,7 +28,7 @@ func TestSchedulerCatalog_UnknownSkill_Panics(t *testing.T) {
 			t.Error("expected panic on unknown skill name, got nil")
 		}
 	}()
-	_ = schedulerPrompt("nonexistent-skill")
+	_ = schedulerPrompt(context.Background(), "nonexistent-skill")
 }
 
 func TestSchedulerSkillDiagnostic_Lists8Skills(t *testing.T) {

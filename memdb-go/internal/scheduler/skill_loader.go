@@ -19,6 +19,7 @@ package scheduler
 // it manages 8 skills; the workspace tier extends that to conditional dual-tier.
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"os"
@@ -68,7 +69,9 @@ func buildSchedulerCatalog() *skillkit.Catalog {
 		schedulerSkillsFS,
 		"skills",
 	))
-	return skillkit.NewCatalog(tiers...).WithObserver(observability.SkillkitObserver())
+	return skillkit.NewCatalog(tiers...).
+		WithObserver(observability.SkillkitObserver()).
+		WithTracer(observability.SkillkitTracer())
 }
 
 // SchedulerSkillNames is the canonical list of scheduler skill names,
@@ -92,9 +95,13 @@ var SchedulerSkillNames = []string{
 // did not include the skill or the skill name was misspelled by a
 // caller; both are programmer errors that must surface immediately
 // rather than silently degrade prompt content.
-func schedulerPrompt(name string) string {
-	body, _, ok := schedulerCatalog.Load(name)
-	if !ok {
+//
+// ctx is threaded to LoadCtx so the Tracer (if configured) can open a
+// span around the catalog lookup. For embedded-only catalogs the lookup
+// is synchronous and the span adds negligible overhead.
+func schedulerPrompt(ctx context.Context, name string) string {
+	body, _, ok, err := schedulerCatalog.LoadCtx(ctx, name)
+	if err != nil || !ok {
 		panic(fmt.Sprintf("scheduler.schedulerPrompt: unknown skill %q (known: %v)", name, SchedulerSkillNames))
 	}
 	return body
