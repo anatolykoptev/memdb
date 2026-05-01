@@ -56,7 +56,7 @@ func (c *PythonClient) ProxyRequest(ctx context.Context, w http.ResponseWriter, 
 		targetURL += "?" + r.URL.RawQuery
 	}
 
-	c.logger.Debug("proxying request",
+	c.logger.DebugContext(ctx, "proxying request",
 		slog.String("method", r.Method),
 		slog.String("target", targetURL),
 	)
@@ -88,7 +88,7 @@ func (c *PythonClient) ProxyRequest(ctx context.Context, w http.ResponseWriter, 
 	start := time.Now()
 	resp, err := httpCli.Do(proxyReq)
 	if err != nil {
-		c.logger.Error("proxy request failed",
+		c.logger.ErrorContext(ctx, "proxy request failed",
 			slog.String("target", targetURL),
 			slog.Any("error", err),
 			slog.Duration("duration", time.Since(start)),
@@ -98,7 +98,7 @@ func (c *PythonClient) ProxyRequest(ctx context.Context, w http.ResponseWriter, 
 	}
 	defer resp.Body.Close()
 
-	c.logger.Debug("proxy response received",
+	c.logger.DebugContext(ctx, "proxy response received",
 		slog.String("target", targetURL),
 		slog.Int("status", resp.StatusCode),
 		slog.Duration("duration", time.Since(start)),
