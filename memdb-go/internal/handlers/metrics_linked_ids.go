@@ -109,6 +109,7 @@ func linkedMx() *linkedMetricsStruct {
 			CapHit:            ch,
 			Inflight:          ic,
 		}
+		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		ctx := context.Background()
 		for _, oc := range linkedOutcomes {
 			fp.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))

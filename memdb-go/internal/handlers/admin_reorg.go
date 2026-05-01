@@ -137,7 +137,7 @@ func (h *Handler) AdminReorg(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Minute)
 		defer cancel()
 		defer func() {
 			if rec := recover(); rec != nil {

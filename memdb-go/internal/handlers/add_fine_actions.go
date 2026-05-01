@@ -108,7 +108,7 @@ func (h *Handler) applyAndPersistFineFacts(
 				}
 			}
 		}
-		h.linkEntitiesAsync(embedded, fc.CubeID, fc.Now)
+		h.linkEntitiesAsync(ctx, embedded, fc.CubeID, fc.Now)
 	}
 	h.cleanupWorkingMemory(ctx, fc.CubeID)
 	return items, nil

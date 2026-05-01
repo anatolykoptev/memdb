@@ -71,6 +71,7 @@ func wikiSlotMx() *wikiSlotMetricsStruct {
 		wikiSlotInstruments = &wikiSlotMetricsStruct{
 			Total: total, PagesMerged: merged,
 		}
+		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		ctx := context.Background()
 		for _, oc := range wikiSlotOutcomes {
 			total.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))

@@ -103,6 +103,7 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 	// Stage 5: fire-and-forget background extractors (5 today, +F3 soon).
 	t = time.Now()
 	h.triggerBackgroundExtractors(extractorTriggerInput{
+		ReqCtx: ctx,
 		CubeID: cubeID, UserID: *req.UserID, SessionID: sessionID,
 		Conversation: conversation, Now: now,
 		FactCount: len(facts), MessageCount: len(req.Messages),

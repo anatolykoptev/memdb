@@ -37,7 +37,9 @@ const (
 // generateEpisodicSummary asynchronously creates an EpisodicMemory node for the session.
 // Called after fact insertion — non-blocking (fire-and-forget via goroutine).
 // The node captures a 3-5 sentence overview of the conversation window.
-func (h *Handler) generateEpisodicSummary(cubeID, userID, sessionID, conversation, now string, factCount int) {
+// reqCtx is the request context; the goroutine uses context.WithoutCancel so
+// the OTel trace propagates without inheriting the request cancellation signal.
+func (h *Handler) generateEpisodicSummary(reqCtx context.Context, cubeID, userID, sessionID, conversation, now string, factCount int) {
 	if h.llmExtractor == nil || h.llmChat == nil || h.postgres == nil || h.embedder == nil {
 		return
 	}
@@ -53,8 +55,9 @@ func (h *Handler) generateEpisodicSummary(cubeID, userID, sessionID, conversatio
 	// Detect session type for focused summary.
 	sessionType := detectSessionType(conversation)
 
+	bgCtx := context.WithoutCancel(reqCtx)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), episodicSummaryTimeout)
+		ctx, cancel := context.WithTimeout(bgCtx, episodicSummaryTimeout)
 		defer cancel()
 
 		summary, err := callEpisodicSummarizer(ctx, h.llmChat, conversation, sessionType)
@@ -137,7 +140,9 @@ type entityLinkPair struct {
 // linkEntitiesAsync fires a background goroutine that upserts entity_nodes and creates
 // MENTIONS_ENTITY edges for every ADD/UPDATE fact that carries LLM-extracted entities.
 // Non-blocking, non-fatal — entity graph enriches search but is not required for correctness.
-func (h *Handler) linkEntitiesAsync(embedded []embeddedFact, cubeID, now string) {
+// reqCtx is the request context; the goroutine uses context.WithoutCancel so
+// the OTel trace propagates without inheriting the request cancellation signal.
+func (h *Handler) linkEntitiesAsync(reqCtx context.Context, embedded []embeddedFact, cubeID, now string) {
 	if h.postgres == nil {
 		return
 	}
@@ -145,8 +150,9 @@ func (h *Handler) linkEntitiesAsync(embedded []embeddedFact, cubeID, now string)
 	if len(pairs) == 0 {
 		return
 	}
+	bgCtx := context.WithoutCancel(reqCtx)
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), entityLinkTimeout)
+		ctx, cancel := context.WithTimeout(bgCtx, entityLinkTimeout)
 		defer cancel()
 
 		embByName := h.batchEmbedHandlerEntities(ctx, pairs)
