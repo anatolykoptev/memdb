@@ -24,6 +24,7 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/server"
 
 	gokit_tracing "github.com/anatolykoptev/go-kit/tracing"
+	"github.com/anatolykoptev/go-kit/tracing/slogh"
 	"go.opentelemetry.io/otel"
 	promexporter "go.opentelemetry.io/otel/exporters/prometheus"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -45,7 +46,10 @@ func main() {
 	} else {
 		logHandler = slog.NewTextHandler(os.Stdout, opts)
 	}
-	logger := slog.New(logHandler)
+	// slogh wraps the base handler so every slog.*Context call carries
+	// trace_id + span_id. ERROR-level records also annotate the active
+	// span as a Jaeger event. Required for log↔trace correlation.
+	logger := slog.New(slogh.NewHandler(logHandler))
 	slog.SetDefault(logger)
 
 	// Apply GOMEMLIMIT from container cgroup limit if not set explicitly.

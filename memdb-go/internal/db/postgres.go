@@ -17,6 +17,7 @@ import (
 "time"
 
 "github.com/anatolykoptev/go-kit/retry"
+"github.com/anatolykoptev/go-kit/tracing/pgxotel"
 "github.com/jackc/pgx/v5"
 "github.com/jackc/pgx/v5/pgxpool"
 
@@ -49,6 +50,13 @@ cfg.MinConns = 2
 cfg.MaxConnLifetime = 30 * time.Minute
 cfg.MaxConnLifetimeJitter = 5 * time.Minute // spread connection recycling to avoid thundering herd
 cfg.MaxConnIdleTime = 5 * time.Minute
+
+// pgxotel — span per Query/Exec/SendBatch, attaches db.statement /
+// db.system / db.operation. Pool waits surface as events. Combined
+// with otelhttp on the server side, every request shows the full
+// HTTP → handler → DB chain in Jaeger. Query parameters omitted by
+// default to avoid leaking secrets via embedded strings.
+pgxotel.AttachTracer(cfg)
 
 // Run LOAD 'age' and SET search_path on every new connection in the pool.
 cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {

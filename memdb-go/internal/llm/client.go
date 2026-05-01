@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anatolykoptev/go-kit/tracing/httpmw"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -37,8 +38,10 @@ const (
 )
 
 // passthroughSSEClient has no Timeout — SSE streams terminate via ctx cancellation,
-// not wall-clock. Shared across Passthrough calls.
-var passthroughSSEClient = &http.Client{}
+// not wall-clock. Shared across Passthrough calls. Wrapped with otelhttp via
+// httpmw so the SSE call shows as a client span and traceparent reaches the
+// LLM proxy (cliproxyapi).
+var passthroughSSEClient = httpmw.Client()
 
 // Passthrough forwards an already-serialized OpenAI-compatible chat completion body
 // to the configured upstream, copying status and headers back to w. When isStream is
