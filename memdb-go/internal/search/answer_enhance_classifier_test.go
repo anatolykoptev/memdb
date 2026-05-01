@@ -208,7 +208,7 @@ func TestClassifyTopN_AmbiguousQuery(t *testing.T) {
 }
 
 func TestEnhanceRetrievalAnswer_NilEmbedderIsBaseOnly(t *testing.T) {
-	prompt, hinted, _ := buildAnswerEnhanceSystemPrompt(context.Background(), "what is Carol's job?", nil)
+	prompt, hinted, _ := buildAnswerEnhanceSystemPrompt(context.Background(), "what is Carol's job?", nil, "")
 	if hinted {
 		t.Errorf("expected hinted=false with nil embedder, got true")
 	}
@@ -228,7 +228,7 @@ func TestEnhanceRetrievalAnswer_DisabledClassifier(t *testing.T) {
 	}
 	exact["whatever"] = basisVec(dim, 0)
 	emb := &pinnedFakeEmbedder{dim: dim, exact: exact, fallback: make([]float32, dim)}
-	prompt, hinted, _ := buildAnswerEnhanceSystemPrompt(context.Background(), "whatever", emb)
+	prompt, hinted, _ := buildAnswerEnhanceSystemPrompt(context.Background(), "whatever", emb, "")
 	if hinted {
 		t.Errorf("expected hinted=false when classifier disabled, got true")
 	}

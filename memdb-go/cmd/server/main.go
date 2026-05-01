@@ -85,7 +85,7 @@ func main() {
 
 	// Log which D10 skill source is live so operators can confirm a
 	// prompt edit took effect (env override / bundled / fallback const).
-	logger.Info("d10 skill source", slog.String("source", search.SkillLoadDiagnostic()))
+	logger.Info("d10 skill source (per-locale)", slog.String("sources", search.SkillLoadDiagnosticAll()))
 	logger.Info("atomic skill source", slog.String("source", llm.AtomicSkillDiagnostic()))
 	logger.Info("scheduler skill catalog", slog.String("source", scheduler.SchedulerSkillDiagnostic()))
 
@@ -138,9 +138,13 @@ func initOTel(cfg *config.Config) (func(context.Context) error, error) {
 	// no collector is deployed (Prometheus metrics remain unaffected).
 	var tp *sdktrace.TracerProvider
 	if cfg.OTelEndpoint != "" {
+		// WithEndpointURL takes the canonical OTel env format — full URL
+		// with scheme ("http://host:port" insecure, "https://host:port" TLS).
+		// The legacy WithEndpoint(host:port) takes bare host and double-
+		// prefixes if you pass it a URL — produced parse errors like
+		// `traces export: parse "http://http://jaeger:4318/v1/traces"`.
 		traceExporter, err := otlptracehttp.New(ctx,
-			otlptracehttp.WithInsecure(),
-			otlptracehttp.WithEndpoint(cfg.OTelEndpoint),
+			otlptracehttp.WithEndpointURL(cfg.OTelEndpoint),
 		)
 		if err != nil {
 			return nil, err
