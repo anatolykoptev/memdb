@@ -43,7 +43,7 @@ type retryPayload struct {
 func (w *Worker) scheduleRetry(ctx context.Context, msg ScheduleMessage, reason string) {
 	nextRetry := msg.RetryCount + 1
 	if nextRetry > msg.maxRetries() {
-		w.logger.Warn("scheduler: max retries exhausted, moving to DLQ",
+		w.logger.WarnContext(ctx, "scheduler: max retries exhausted, moving to DLQ",
 			slog.String("label", msg.Label),
 			slog.String("cube_id", msg.CubeID),
 			slog.Int("retry_count", msg.RetryCount),
@@ -75,7 +75,7 @@ func (w *Worker) scheduleRetry(ctx context.Context, msg ScheduleMessage, reason 
 
 	data, err := json.Marshal(p)
 	if err != nil {
-		w.logger.Error("scheduler: retry marshal failed, sending to DLQ",
+		w.logger.ErrorContext(ctx, "scheduler: retry marshal failed, sending to DLQ",
 			slog.String("label", msg.Label),
 			slog.Any("error", err),
 		)
@@ -87,7 +87,7 @@ func (w *Worker) scheduleRetry(ctx context.Context, msg ScheduleMessage, reason 
 	member := string(data)
 
 	if err := w.redis.ZAdd(ctx, retryZSetKey, scoreZ(score, member)).Err(); err != nil {
-		w.logger.Error("scheduler: retry zadd failed, sending to DLQ",
+		w.logger.ErrorContext(ctx, "scheduler: retry zadd failed, sending to DLQ",
 			slog.String("label", msg.Label),
 			slog.Any("error", err),
 		)
@@ -95,7 +95,7 @@ func (w *Worker) scheduleRetry(ctx context.Context, msg ScheduleMessage, reason 
 		return
 	}
 
-	w.logger.Info("scheduler: task scheduled for retry",
+	w.logger.InfoContext(ctx, "scheduler: task scheduled for retry",
 		slog.String("label", msg.Label),
 		slog.String("cube_id", msg.CubeID),
 		slog.Int("retry_count", nextRetry),
@@ -140,7 +140,7 @@ func (w *Worker) processDueRetries(ctx context.Context) {
 	// If ZREM fails, the entry will be re-processed on next poll (idempotent).
 	removed, err := w.redis.ZRem(ctx, retryZSetKey, toAnySlice(members)...).Result()
 	if err != nil {
-		w.logger.Debug("scheduler: retry zrem failed", slog.Any("error", err))
+		w.logger.DebugContext(ctx, "scheduler: retry zrem failed", slog.Any("error", err))
 		return
 	}
 	if removed == 0 {
@@ -150,7 +150,7 @@ func (w *Worker) processDueRetries(ctx context.Context) {
 	for _, raw := range members {
 		var p retryPayload
 		if err := json.Unmarshal([]byte(raw), &p); err != nil {
-			w.logger.Warn("scheduler: retry unmarshal failed, skipping",
+			w.logger.WarnContext(ctx, "scheduler: retry unmarshal failed, skipping",
 				slog.Any("error", err))
 			continue
 		}
@@ -171,7 +171,7 @@ func (w *Worker) processDueRetries(ctx context.Context) {
 			HighPriority: isHighPriority(p.Label),
 		}
 
-		w.logger.Info("scheduler: retrying task",
+		w.logger.InfoContext(ctx, "scheduler: retrying task",
 			slog.String("label", msg.Label),
 			slog.String("cube_id", msg.CubeID),
 			slog.Int("retry_count", msg.RetryCount),

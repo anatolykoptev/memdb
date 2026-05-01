@@ -132,7 +132,7 @@ func (r *Reorganizer) persistTierParent(ctx context.Context, cubeID string, clus
 	}}); err != nil {
 		return tierParentResult{PromptSHA: promptSHA}, fmt.Errorf("insert tier parent: %w", err)
 	}
-	r.logger.Debug("tree reorg: tier parent created",
+	r.logger.DebugContext(ctx, "tree reorg: tier parent created",
 		slog.String("cube_id", cubeID),
 		slog.String("tier", targetLevel),
 		slog.String("parent_id", parentID),

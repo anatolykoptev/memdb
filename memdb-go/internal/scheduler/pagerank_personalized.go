@@ -138,7 +138,7 @@ func (w *Worker) ComputePersonalizedPR(ctx context.Context, cubeID string, seedE
 				return cachedScores, nil
 			}
 		} else if redisErr != redis.Nil {
-			w.logger.Debug("ppr: redis get failed, recomputing", "error", redisErr)
+			w.logger.DebugContext(ctx, "ppr: redis get failed, recomputing", "error", redisErr)
 		}
 		mx.PPRCacheTotal.Add(ctx, 1)
 	}

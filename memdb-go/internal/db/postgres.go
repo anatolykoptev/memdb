@@ -62,17 +62,17 @@ pgxotel.AttachTracer(cfg)
 cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 _, err := conn.Exec(ctx, "LOAD 'age'")
 if err != nil {
-logger.Warn("AGE extension load failed on connection", slog.Any("error", err))
+logger.WarnContext(ctx, "AGE extension load failed on connection", slog.Any("error", err))
 }
 _, err = conn.Exec(ctx, "SET search_path = ag_catalog, memos_graph, public")
 if err != nil {
-logger.Warn("failed to set search_path on connection", slog.Any("error", err))
+logger.WarnContext(ctx, "failed to set search_path on connection", slog.Any("error", err))
 }
 // pgvector 0.8.x: iterative HNSW scan keeps scanning past the WHERE filter
 // until ef_search candidates are found — critical for filtered queries.
 _, err = conn.Exec(ctx, "SET hnsw.iterative_scan = relaxed_order; SET hnsw.ef_search = 100")
 if err != nil {
-logger.Warn("failed to set hnsw session params", slog.Any("error", err))
+logger.WarnContext(ctx, "failed to set hnsw session params", slog.Any("error", err))
 }
 return nil // non-fatal — queries use fully-qualified table names
 }
@@ -107,7 +107,7 @@ pg := &Postgres{pool: pool, logger: logger}
 // pool.Stat().AcquiredConns() on every Prometheus collection. Failure to
 // register is non-fatal — log and continue (the pool itself is fine).
 if _, gerr := observability.RegisterPoolGauge(pool); gerr != nil {
-	logger.Warn("pgxpool gauge registration failed", slog.Any("error", gerr))
+	logger.WarnContext(ctx, "pgxpool gauge registration failed", slog.Any("error", gerr))
 }
 
 // Versioned SQL migrations — single source of truth for schema.
@@ -121,7 +121,7 @@ pool.Close()
 return nil, fmt.Errorf("run migrations: %w", err)
 }
 
-logger.Info("postgres connected", slog.Int("max_conns", int(cfg.MaxConns)))
+logger.InfoContext(ctx, "postgres connected", slog.Int("max_conns", int(cfg.MaxConns)))
 return pg, nil
 }
 

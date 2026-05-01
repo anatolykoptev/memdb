@@ -42,7 +42,7 @@ func (r *Reorganizer) promoteCluster(ctx context.Context, cubeID string, cluster
 	childIDs := make([]string, 0, len(cluster))
 	for _, n := range cluster {
 		if err := r.postgres.CreateMemoryEdge(ctx, n.ID, res.ParentID, "CONSOLIDATED_INTO", now, ""); err != nil {
-			r.logger.Warn("tree reorg: edge write failed",
+			r.logger.WarnContext(ctx, "tree reorg: edge write failed",
 				slog.String("from", n.ID), slog.String("to", res.ParentID),
 				slog.String("tier", targetLevel),
 				slog.Any("error", err))
@@ -53,7 +53,7 @@ func (r *Reorganizer) promoteCluster(ctx context.Context, cubeID string, cluster
 			continue
 		}
 		if err := r.postgres.SetHierarchyLevel(ctx, n.ID, childHierarchyLevelFor(targetLevel), res.ParentID, now); err != nil {
-			r.logger.Warn("tree reorg: set child hierarchy failed",
+			r.logger.WarnContext(ctx, "tree reorg: set child hierarchy failed",
 				slog.String("id", n.ID),
 				slog.String("tier", targetLevel),
 				slog.Any("error", err))
@@ -68,7 +68,7 @@ func (r *Reorganizer) promoteCluster(ctx context.Context, cubeID string, cluster
 	// Audit trail (best-effort — schema is nullable and recoverable without it).
 	eventID := newUUID()
 	if err := r.postgres.InsertTreeConsolidationEvent(ctx, eventID, cubeID, res.ParentID, childIDs, targetLevel, r.llmClient.Model(), res.PromptSHA, now); err != nil {
-		r.logger.Warn("tree reorg: audit log write failed",
+		r.logger.WarnContext(ctx, "tree reorg: audit log write failed",
 			slog.String("parent_id", res.ParentID),
 			slog.String("tier", targetLevel),
 			slog.Any("error", err))

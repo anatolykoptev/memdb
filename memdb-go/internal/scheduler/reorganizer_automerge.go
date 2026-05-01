@@ -26,7 +26,7 @@ func (r *Reorganizer) autoMergeCluster(ctx context.Context, cubeID string, clust
 	}
 	keepNode := cluster[keepIdx]
 
-	r.logger.Info("reorganizer: auto-merge cluster (score≥0.97, no LLM)",
+	r.logger.InfoContext(ctx, "reorganizer: auto-merge cluster (score≥0.97, no LLM)",
 		slog.String("cube_id", cubeID),
 		slog.String("keep_id", keepNode.ID),
 		slog.Int("cluster_size", len(cluster)),

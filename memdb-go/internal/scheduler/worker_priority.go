@@ -80,7 +80,7 @@ func (w *Worker) processLoop(ctx context.Context) {
 				default:
 					// Channel full — process low-priority now to avoid deadlock.
 					// This is a rare edge case under extreme load.
-					w.logger.Debug("scheduler: low-priority channel full during priority swap, processing low first")
+					w.logger.DebugContext(ctx, "scheduler: low-priority channel full during priority swap, processing low first")
 					w.handle(ctx, sm.msg)
 				}
 				w.handle(ctx, hi.msg)
