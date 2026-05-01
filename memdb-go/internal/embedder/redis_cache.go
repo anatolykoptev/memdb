@@ -85,6 +85,11 @@ func (r *RedisEmbedCache) Get(ctx context.Context, key string) ([]float32, bool)
 	}
 	raw, err := r.client.Get(ctx, embedCachePrefix+key)
 	if err != nil {
+		// Caller ctx cancellation under parallel load — not a cache fault.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			recordEmbedCacheOutcome(ctx, "ctx_canceled")
+			return nil, false
+		}
 		recordEmbedCacheOutcome(ctx, "get_error")
 		r.logger.Warn("embed cache get failed", slog.String("key", key), slog.Any("error", err))
 		return nil, false

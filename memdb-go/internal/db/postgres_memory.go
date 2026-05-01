@@ -14,6 +14,11 @@ type MemoryInsertNode struct {
 	ID             string // properties->>'id' (UUID string)
 	PropertiesJSON []byte // marshaled JSONB
 	EmbeddingVec   string // "[0.1,0.2,...]" for pgvector cast
+	// SparseEmbeddingVec — SPLADE sparsevec(30522) literal:
+	// "{idx1:val1,idx2:val2,...}/30522". Empty string → NULL column.
+	// Optional; hybrid retrieval skips NULLs on the sparse leg gracefully,
+	// so legacy or sparse-embed-unavailable rows still serve via dense path.
+	SparseEmbeddingVec string
 }
 
 // DuplicatePair represents two semantically similar memory nodes found by vector search.

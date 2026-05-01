@@ -56,6 +56,16 @@ type SearchService struct {
 	// SetReflectionAgent so server_init_search.go can construct it lazily
 	// from the same llm.Client used by the rest of the search service.
 	Reflection *ReflectionAgent
+	// SparseEmbedder is the SPLADE sparse-embedding client used by the hybrid
+	// retrieval leg in spawnTextSearches. nil = sparse leg disabled (dense-only).
+	// Wired in server_init_search.go; controlled by MEMDB_HYBRID_SPARSE env.
+	SparseEmbedder *embedder.SparseEmbedder
+}
+
+// SetSparseEmbedder installs the SPLADE sparse embedder for hybrid retrieval.
+// Pass nil to disable. Safe to call once at startup before Search is invoked.
+func (s *SearchService) SetSparseEmbedder(e *embedder.SparseEmbedder) {
+	s.SparseEmbedder = e
 }
 
 // SetReflectionAgent installs the F2 reflection agent. Pass nil to disable.
