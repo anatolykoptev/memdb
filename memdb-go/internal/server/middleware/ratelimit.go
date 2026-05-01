@@ -59,7 +59,7 @@ func RateLimit(logger *slog.Logger, cfg RateLimitConfig) func(http.Handler) http
 				w.WriteHeader(http.StatusTooManyRequests)
 				fmt.Fprintf(w, `{"code":429,"message":"rate limit exceeded","data":null}`)
 
-				logger.Warn("rate limit exceeded",
+				logger.WarnContext(r.Context(), "rate limit exceeded",
 					slog.String("ip", ip),
 					slog.String("path", r.URL.Path),
 				)

@@ -121,7 +121,7 @@ func readPostBody(w http.ResponseWriter, r *http.Request, rule cacheRule, next h
 func serveCacheHit(w http.ResponseWriter, r *http.Request, client *cache.Client, cacheKey string, logger *slog.Logger, label string) bool {
 	cached, err := client.Get(r.Context(), cacheKey)
 	if err != nil {
-		logger.Debug("cache get error", slog.Any("error", err))
+		logger.DebugContext(r.Context(), "cache get error", slog.Any("error", err))
 	}
 	if cached == nil {
 		return false
@@ -141,7 +141,7 @@ func captureAndCache(w http.ResponseWriter, r *http.Request, next http.Handler, 
 	next.ServeHTTP(rec, r)
 	if rec.statusCode == http.StatusOK {
 		if err := client.Set(r.Context(), cacheKey, rec.body.Bytes(), ttl); err != nil {
-			logger.Debug("cache set error", slog.Any("error", err))
+			logger.DebugContext(r.Context(), "cache set error", slog.Any("error", err))
 		}
 	}
 }
