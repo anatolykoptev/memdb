@@ -17,7 +17,6 @@ package rerank
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"log/slog"
 	"math"
 	"sync"
@@ -104,10 +103,6 @@ func (r *RedisRerankCache) Set(ctx context.Context, key string, score float32) {
 	recordRerankCacheOutcome(ctx, "set")
 }
 
-// errRerankCacheCorrupt is reserved for future per-vector validation if the
-// payload format ever evolves beyond a single 4-byte float32. Today the
-// length check inline in Get is sufficient.
-var _ = errors.New("rerank cache: unused sentinel")
 
 // recordRerankCacheOutcome bumps memdb.rerank.cache_total{outcome=…}.
 // Outcome label values: hit | miss | set | get_error | set_error |
