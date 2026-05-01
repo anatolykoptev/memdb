@@ -4,18 +4,25 @@ package scheduler
 //
 // Eight skill bodies live in skills/<name>/SKILL.md, embedded into the
 // binary via //go:embed. The Catalog provides byte-identical access by
-// skill name. Operators can override individual skills at runtime by
-// dropping a file at /etc/memdb/scheduler-skills/<name>/SKILL.md and
-// configuring a workspace-tier DirTier (deferred — env-override path
-// per-skill is the v0.2 use case once at least one operator asks).
+// skill name.
 //
-// This is the first Pattern B (Catalog + EmbedFSTier) consumer in
-// MemDB; D10 and atomic use Pattern A (Embedded). The Catalog gives
-// us multi-skill lookup without one Embedded instance per prompt.
+// Operators can activate hot-reload by setting MEMDB_SCHEDULER_SKILLS_DIR
+// to an absolute path (e.g. /host-skills/scheduler). A DirTier is then
+// prepended to the catalog with higher priority; the first tier that finds
+// a <dir>/<skill-name>/SKILL.md wins. WithMtimeCache() means edits are
+// picked up on the next request without a container restart. Skills not
+// present in the workspace dir transparently fall through to the embedded
+// builtin tier.
+//
+// This mirrors MEMDB_D10_SKILL_PATH and MEMDB_ATOMIC_SKILL_PATH (Pattern A,
+// single Embedded). Scheduler uses Pattern B (Catalog + EmbedFSTier) because
+// it manages 8 skills; the workspace tier extends that to conditional dual-tier.
 
 import (
 	"embed"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 	"github.com/anatolykoptev/skillkit"
@@ -24,11 +31,45 @@ import (
 //go:embed skills/*/SKILL.md
 var schedulerSkillsFS embed.FS
 
-// schedulerCatalog is the singleton catalog of all 8 scheduler system
-// prompts, parsed once at package init from the embedded FS.
-var schedulerCatalog = skillkit.NewCatalog(
-	skillkit.NewEmbedFSTier("scheduler-builtin", schedulerSkillsFS, "skills"),
-).WithObserver(observability.SkillkitObserver())
+// schedulerSkillsDirEnv names the env var that opts an operator into a
+// workspace-tier override directory for scheduler skills. Unset (default)
+// = embedded-only; the binary ships baked-in scheduler prompts and
+// operators rebuild the image to iterate.
+//
+// Set the env to an absolute path (e.g. /host-skills/scheduler) to
+// activate hot-reload: drop a file at <dir>/<skill-name>/SKILL.md and
+// the next request reads it through the mtime cache. The workspace tier
+// has higher priority than the embedded default — first hit wins per
+// skillkit Catalog semantics. Skill names not present in the workspace
+// dir transparently fall back to the embedded version.
+//
+// Mirrors MEMDB_D10_SKILL_PATH and MEMDB_ATOMIC_SKILL_PATH UX (env-path
+// override) but for the multi-skill Catalog pattern instead of single
+// Embedded.
+const schedulerSkillsDirEnv = "MEMDB_SCHEDULER_SKILLS_DIR"
+
+// schedulerCatalog is the singleton catalog. Tier composition depends
+// on the runtime env: when MEMDB_SCHEDULER_SKILLS_DIR is set, a
+// workspace DirTier is prepended (higher priority); otherwise the
+// catalog is single-tier (embedded only).
+var schedulerCatalog = buildSchedulerCatalog()
+
+func buildSchedulerCatalog() *skillkit.Catalog {
+	tiers := []skillkit.Tier{}
+	if dir := strings.TrimSpace(os.Getenv(schedulerSkillsDirEnv)); dir != "" {
+		tiers = append(tiers, skillkit.NewDirTier(
+			"scheduler-workspace",
+			dir,
+			skillkit.WithMtimeCache(),
+		))
+	}
+	tiers = append(tiers, skillkit.NewEmbedFSTier(
+		"scheduler-builtin",
+		schedulerSkillsFS,
+		"skills",
+	))
+	return skillkit.NewCatalog(tiers...).WithObserver(observability.SkillkitObserver())
+}
 
 // SchedulerSkillNames is the canonical list of scheduler skill names,
 // in the order they were declared in the legacy prompts.go const block.
@@ -62,10 +103,18 @@ func schedulerPrompt(name string) string {
 // SchedulerSkillDiagnostic returns a one-line description of the
 // scheduler skill catalog for the startup log. Lists how many skills
 // loaded; primarily a sanity check that //go:embed picked up all 8
-// SKILL.md files.
+// SKILL.md files. When MEMDB_SCHEDULER_SKILLS_DIR is set the message
+// includes the workspace path to surface which override directory is
+// active.
 func SchedulerSkillDiagnostic() string {
 	loaded := schedulerCatalog.List()
-	return fmt.Sprintf("scheduler-builtin tier: %d skills loaded (%v)", len(loaded), namesOf(loaded))
+	workspaceDir := strings.TrimSpace(os.Getenv(schedulerSkillsDirEnv))
+	if workspaceDir == "" {
+		return fmt.Sprintf("scheduler-builtin tier: %d skills loaded (%v)",
+			len(loaded), namesOf(loaded))
+	}
+	return fmt.Sprintf("scheduler tiers: workspace=%s + builtin: %d effective skills (%v)",
+		workspaceDir, len(loaded), namesOf(loaded))
 }
 
 func namesOf(infos []skillkit.SkillInfo) []string {
