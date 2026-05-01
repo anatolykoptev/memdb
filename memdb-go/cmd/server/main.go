@@ -18,6 +18,7 @@ import (
 	"syscall"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/server"
 
@@ -84,6 +85,7 @@ func main() {
 	// Log which D10 skill source is live so operators can confirm a
 	// prompt edit took effect (env override / bundled / fallback const).
 	logger.Info("d10 skill source", slog.String("source", search.SkillLoadDiagnostic()))
+	logger.Info("atomic skill source", slog.String("source", llm.AtomicSkillDiagnostic()))
 
 	// Start server in goroutine
 	go func() {

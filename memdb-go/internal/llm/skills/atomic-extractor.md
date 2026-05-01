@@ -1,3 +1,9 @@
+---
+name: atomic-extractor
+description: Extract atomic facts from conversations using mem0's ADDITIVE_EXTRACTION_PROMPT (verbatim port from mem0/configs/prompts.py:468-944). Each fact is a self-contained, contextually rich statement; supports temporal resolution against Observation Date and linked_memory_ids for relation tracking.
+version: 1.0.0
+locale: en
+---
 
 
 # ROLE
