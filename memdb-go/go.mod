@@ -6,7 +6,7 @@ require (
 	connectrpc.com/connect v1.19.1
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/anatolykoptev/go-engine v1.3.1
-	github.com/anatolykoptev/go-kit v0.34.0
+	github.com/anatolykoptev/go-kit v0.35.0
 	github.com/anatolykoptev/go-stealth v1.3.1
 	github.com/anatolykoptev/skillkit v0.2.2
 	github.com/daulet/tokenizers v1.25.0
@@ -46,6 +46,7 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/exaring/otelpgx v0.10.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

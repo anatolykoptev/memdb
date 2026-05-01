@@ -23,13 +23,16 @@ github.com/anatolykoptev/go-engine/metrics
 github.com/anatolykoptev/go-engine/search
 github.com/anatolykoptev/go-engine/sources
 github.com/anatolykoptev/go-engine/text
-# github.com/anatolykoptev/go-kit v0.34.0
+# github.com/anatolykoptev/go-kit v0.35.0
 ## explicit; go 1.26
 github.com/anatolykoptev/go-kit/embed
 github.com/anatolykoptev/go-kit/metrics
 github.com/anatolykoptev/go-kit/rerank
 github.com/anatolykoptev/go-kit/retry
 github.com/anatolykoptev/go-kit/tracing
+github.com/anatolykoptev/go-kit/tracing/httpmw
+github.com/anatolykoptev/go-kit/tracing/pgxotel
+github.com/anatolykoptev/go-kit/tracing/slogh
 github.com/anatolykoptev/go-kit/uploads
 # github.com/anatolykoptev/go-stealth v1.3.1
 ## explicit; go 1.26
@@ -122,6 +125,9 @@ github.com/daulet/tokenizers
 # github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f
 ## explicit
 github.com/dgryski/go-rendezvous
+# github.com/exaring/otelpgx v0.10.0
+## explicit; go 1.22.0
+github.com/exaring/otelpgx
 # github.com/felixge/httpsnoop v1.0.4
 ## explicit; go 1.13
 github.com/felixge/httpsnoop
@@ -295,6 +301,7 @@ go.opentelemetry.io/otel/internal/errorhandler
 go.opentelemetry.io/otel/internal/global
 go.opentelemetry.io/otel/propagation
 go.opentelemetry.io/otel/semconv/v1.26.0
+go.opentelemetry.io/otel/semconv/v1.27.0
 go.opentelemetry.io/otel/semconv/v1.37.0
 go.opentelemetry.io/otel/semconv/v1.40.0
 go.opentelemetry.io/otel/semconv/v1.40.0/httpconv
