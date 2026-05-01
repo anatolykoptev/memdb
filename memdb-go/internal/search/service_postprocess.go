@@ -47,7 +47,7 @@ func (s *SearchService) postProcessResults(
 	text = prefixResult.items
 
 	// Gate evaluates POST-cosine/CE scores — see comment above.
-	llmDecision := rerankStrategy(text)
+	llmDecision := rerankStrategy(ctx, text)
 	llmEnabled := p.LLMRerank && s.LLMReranker.APIURL != "" && llmDecision.ShouldRerank
 
 	suffix := buildTextRerankSuffix(s, llmEnabled, llmDecision.TopK, textEmbByID)

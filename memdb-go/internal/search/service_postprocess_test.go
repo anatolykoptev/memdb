@@ -89,7 +89,7 @@ func TestRerankGate_PostCosineOrdering(t *testing.T) {
 	}
 
 	// Sanity: gate on the raw PolarDB band labels this clustered.
-	rawDecision := rerankStrategy(items)
+	rawDecision := rerankStrategy(context.Background(), items)
 	if rawDecision.Reason != "clustered" {
 		t.Fatalf("setup: expected 'clustered' on raw input, got %q (test no longer exercises C2)", rawDecision.Reason)
 	}
@@ -121,7 +121,7 @@ func TestRerankGate_PostCosineOrdering(t *testing.T) {
 
 	// Post-cosine: top score ≈ 1.0, bottom ≈ 0.5 (after (cos+1)/2 normalisation).
 	// Spread ≈ 0.5 → wide-spread → gate should skip LLM.
-	postDecision := rerankStrategy(rescored)
+	postDecision := rerankStrategy(context.Background(), rescored)
 	if postDecision.ShouldRerank {
 		t.Errorf("expected gate to SKIP rerank on post-cosine scores (wide spread), got reason=%q", postDecision.Reason)
 	}
