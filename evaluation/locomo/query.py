@@ -1223,11 +1223,12 @@ def main() -> int:
     p.add_argument(
         "--workers",
         type=int,
-        default=int(os.getenv("LOCOMO_WORKERS", "1")),
+        default=int(os.getenv("LOCOMO_WORKERS", "5")),
         help=(
             "Outer parallelism: process N QAs concurrently via ThreadPoolExecutor. "
-            "Default 1 (sequential). Use 4-8 for benchmark speedup. "
-            "CLIProxyAPI :8317 handles 60+ concurrent. Env: LOCOMO_WORKERS."
+            "Default 5 (was 1; bumped 2026-05-01 — query is the cycle bottleneck "
+            "and CLIProxyAPI :8317 handles 60+ concurrent comfortably). Use 1 to "
+            "reproduce pre-2026-05-01 serial baselines. Env: LOCOMO_WORKERS."
         ),
     )
     p.add_argument(
