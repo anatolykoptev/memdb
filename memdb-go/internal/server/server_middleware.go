@@ -14,10 +14,19 @@ import (
 )
 
 // applyMiddleware wraps the handler with the full middleware stack.
-// Order: outermost wrapper first → innermost last.
+// Order: innermost wrapper first → outermost last (each h = X(h) adds an
+// outer layer, so request flow is the reverse of source order).
+//
+// Logging sits INSIDE OTel so the "http request" log line carries the
+// otelhttp-injected trace_id/span_id (slogh extracts them from ctx).
+// Without this ordering, Logging sees the original r.Context() — otelhttp
+// installs the span context into a NEW request via r.WithContext when it
+// calls inner, so the outer Logging never sees it. Confirmed empirically:
+// trace_id grep returned 0 lines until this swap.
 func applyMiddleware(next http.Handler, cfg *config.Config, cacheClient *cache.Client, logger *slog.Logger) http.Handler {
 	h := next
 	h = mw.Cache(logger, mw.CacheConfig{Client: cacheClient})(h)
+	h = mw.Logging(logger)(h)
 	h = mw.OTel(logger, cfg.OTelEnabled)(h)
 	h = mw.RateLimit(logger, mw.RateLimitConfig{
 		Enabled:       cfg.RateLimitEnabled,
@@ -31,7 +40,6 @@ func applyMiddleware(next http.Handler, cfg *config.Config, cacheClient *cache.C
 		ServiceSecret: cfg.InternalServiceSecret,
 	})(h)
 	h = mw.CORS(h)
-	h = mw.Logging(logger)(h)
 	h = mw.RequestID(h)
 	h = mw.Recovery(logger)(h)
 	return h
