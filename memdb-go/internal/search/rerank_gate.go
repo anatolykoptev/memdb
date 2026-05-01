@@ -70,11 +70,14 @@ type RerankDecision struct {
 // operators can observe gate behaviour without logs. Histogram readings
 // are recorded only when len(items) >= rerankMinResults — too-few branches
 // don't have a meaningful spread to report.
-func rerankStrategy(items []map[string]any) RerankDecision {
+//
+// ctx is threaded into all metric record calls so trace/slog hooks can
+// correlate gate decisions with the originating request span.
+func rerankStrategy(ctx context.Context, items []map[string]any) RerankDecision {
 	t := loadRerankGateThresholds()
 
 	if len(items) < rerankMinResults {
-		recordGateDecision(context.Background(), "too-few")
+		recordGateDecision(ctx, "too-few")
 		return RerankDecision{ShouldRerank: false, Reason: "too-few"}
 	}
 
@@ -84,36 +87,36 @@ func rerankStrategy(items []map[string]any) RerankDecision {
 	// Histograms are emitted for every gate call with >=4 items so the
 	// distribution shows even when the gate skips — this is what makes
 	// the metric useful for tuning the thresholds against real traffic.
-	recordRelativityTop(context.Background(), topRel)
-	recordRelativitySpread(context.Background(), spread)
+	recordRelativityTop(ctx, topRel)
+	recordRelativitySpread(ctx, spread)
 
 	// High-confidence top result — cosine ordering is sufficient.
 	if topRel > t.TopCosine {
-		recordGateDecision(context.Background(), "high-confidence")
+		recordGateDecision(ctx, "high-confidence")
 		return RerankDecision{ShouldRerank: false, Reason: "high-confidence"}
 	}
 
 	// Clustered: all scores are close together — LLM judgment needed for all.
 	if spread < t.ClusteredSpread {
-		recordGateDecision(context.Background(), "clustered")
+		recordGateDecision(ctx, "clustered")
 		return RerankDecision{ShouldRerank: true, Reason: "clustered", TopK: 0}
 	}
 
 	// Wide spread: clear separation — cosine ordering is reliable.
 	if spread > t.WideSpread {
-		recordGateDecision(context.Background(), "wide-spread")
+		recordGateDecision(ctx, "wide-spread")
 		return RerankDecision{ShouldRerank: false, Reason: "wide-spread"}
 	}
 
 	// Medium spread: ambiguous — rerank but cap items for cost control.
-	recordGateDecision(context.Background(), "medium-spread")
+	recordGateDecision(ctx, "medium-spread")
 	return RerankDecision{ShouldRerank: true, Reason: "medium-spread", TopK: t.TopKCap}
 }
 
 // shouldLLMRerank is the backward-compatible wrapper for callers that
 // only need a bool.
-func shouldLLMRerank(items []map[string]any) bool {
-	return rerankStrategy(items).ShouldRerank
+func shouldLLMRerank(ctx context.Context, items []map[string]any) bool {
+	return rerankStrategy(ctx, items).ShouldRerank
 }
 
 // extractRelativityRange returns the top and bottom relativity scores from items.
