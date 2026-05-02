@@ -134,6 +134,15 @@ func initSearchService(
 		rerank.WithTimeout(cfg.CrossEncoderTimeout),
 		rerank.WithMaxDocs(cfg.CrossEncoderMaxDocs),
 		rerank.WithMaxCharsPerDoc(cfg.CrossEncoderMaxCharsPerDoc),
+		// 2026-05-01 — disable gokit retry (prior art from go-search engine/init.go).
+		// gokit default = 3 attempts × exp backoff 200ms→2s, retries on 5xx/timeout.
+		// Problem: every CE call burning 3× timeout budget before MathReranker
+		// fallback kicks in. Eval measured 84% degraded fallback even with 8s
+		// timeout; retries inflated effective per-call latency past timeout
+		// before the deadline fired. With NoRetry, fast-fail to MathReranker
+		// (cosine in microseconds) is strictly better than retrying a CE that
+		// just timed out — the answer is already in the embedding vectors.
+		rerank.WithRetry(rerank.NoRetry),
 	}
 	// Redis-backed score cache for the cross-encoder. Same cache.Client as
 	// the embed cache (separate Redis namespace prefix). Saves the cross-
