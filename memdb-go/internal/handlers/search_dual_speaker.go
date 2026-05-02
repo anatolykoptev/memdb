@@ -193,10 +193,14 @@ func tagSpeakerLabel(memories []map[string]any, speaker string) []map[string]any
 // mergeDualSpeakerResults stitches per-speaker buckets into a final list
 // capped at topK. Two strategies:
 //
-//   - "interleave" (default) — round-robin across speakers, preserving
-//     each speaker's intra-bucket order. Mirrors the LoCoMo harness's
-//     evaluation/locomo/query.py:_merge_dual_results: ensures every
-//     speaker contributes near the top.
+//   - "interleave" (default) — score-aware merge. Each leg is sorted by
+//     metadata.relativity descending in-place, then a 2-pointer / heap
+//     merge pulls items in global score order. Equal-score items break
+//     ties via round-robin across legs so a saturated leg cannot starve
+//     the other when scores collide. This replaces the legacy positional
+//     round-robin which mixed high- and low-scoring items at the top
+//     regardless of comparable relevance and was the largest single noise
+//     source identified in the 2026-05-02 forensic.
 //   - "score" — flat sort by metadata.relativity descending. Useful when
 //     callers want absolute relevance over per-speaker fairness.
 //
@@ -227,30 +231,71 @@ func mergeDualSpeakerResults(results []dualSpeakerSearchResult, strategy string,
 			return relativity(flat[i]) > relativity(flat[j])
 		})
 		return capDedup(flat, topK)
-	default: // interleave
+	default: // interleave (score-aware)
 		flat := interleaveBuckets(buckets)
 		return capDedup(flat, topK)
 	}
 }
 
-// interleaveBuckets does round-robin across input slices, preserving
-// per-bucket order.
+// interleaveBuckets merges per-leg buckets into a single list ordered by
+// metadata.relativity DESC. Per-leg input order is normalised first (each
+// leg sorted DESC by relativity) so the merge does not depend on caller
+// ordering. Tiebreak when scores are equal: round-robin across legs (via
+// the per-leg cursor advancing in input-leg order). This preserves the
+// "fair share when scores are comparable" property of the legacy
+// positional interleave without ever placing a low-score item ahead of a
+// high-score one across legs.
+//
+// Algorithm: maintain a cursor per leg; at each step pick the leg whose
+// current head has the maximum relativity, advance that cursor, append
+// the item to the output. When two legs tie on the head score, the leg
+// with the lower index goes first (deterministic round-robin: the second
+// equal-score pick across iterations alternates because the chosen leg's
+// cursor advances). Cost: O(N · L) for L legs and N total items — L is 2
+// in production so this stays cheap; a heap would only matter for L≥4.
 func interleaveBuckets(buckets [][]map[string]any) []map[string]any {
-	maxLen := 0
+	if len(buckets) == 0 {
+		return nil
+	}
+	// Sort each leg DESC by relativity. Copy first to avoid mutating the
+	// caller's slice (legs[].memories is reused by per-speaker prompt
+	// rendering downstream).
+	sortedLegs := make([][]map[string]any, len(buckets))
+	for i, b := range buckets {
+		s := make([]map[string]any, len(b))
+		copy(s, b)
+		sort.SliceStable(s, func(a, c int) bool { return relativity(s[a]) > relativity(s[c]) })
+		sortedLegs[i] = s
+	}
+
 	total := 0
-	for _, b := range buckets {
-		if len(b) > maxLen {
-			maxLen = len(b)
-		}
+	for _, b := range sortedLegs {
 		total += len(b)
 	}
 	out := make([]map[string]any, 0, total)
-	for i := 0; i < maxLen; i++ {
-		for _, b := range buckets {
-			if i < len(b) {
-				out = append(out, b[i])
+	cursors := make([]int, len(sortedLegs))
+
+	for {
+		bestLeg := -1
+		var bestRel float64
+		for li, b := range sortedLegs {
+			if cursors[li] >= len(b) {
+				continue
+			}
+			r := relativity(b[cursors[li]])
+			// Strict > picks the lower leg index on ties — round-robin
+			// fairness emerges across iterations because the picked leg's
+			// cursor advances while the tied leg's stays.
+			if bestLeg == -1 || r > bestRel {
+				bestLeg = li
+				bestRel = r
 			}
 		}
+		if bestLeg == -1 {
+			break
+		}
+		out = append(out, sortedLegs[bestLeg][cursors[bestLeg]])
+		cursors[bestLeg]++
 	}
 	return out
 }

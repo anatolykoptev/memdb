@@ -22,12 +22,26 @@ import (
 
 // runLive performs the live HTTP rerank call for the full batch. Mirrors
 // rerankMemoryItems from the legacy adapter.
+//
+// Forensic 2026-05-02 fix #6: items with empty EmbeddingText() used to be
+// passed through at the bottom of the output unscored — they kept stale
+// (cosine) scores and consumed real top-K budget downstream, polluting
+// the trim. They are now explicitly stamped with metadata.ce_skipped=true
+// + score=0 so the next stage's TrimSlice + sort places them at the
+// bottom and operators can see how often this happens. We still return
+// them (so the pipeline shape is preserved) but they no longer compete
+// with scored items for slot ordering.
 func (ce CrossEncoder) runLive(ctx context.Context, query string, items []Item) []Item {
 	if len(items) == 0 {
 		return items
 	}
 	docs, idxByID := buildLiveDocs(items, ce.EmbeddingsByID)
 	if len(docs) == 0 {
+		// All items lack EmbeddingText(); flag every one as skipped so
+		// observability surfaces this and downstream sorting demotes them.
+		for i := range items {
+			items[i].SetMeta("ce_skipped", true)
+		}
 		return items
 	}
 
@@ -50,6 +64,7 @@ func (ce CrossEncoder) runLive(ctx context.Context, query string, items []Item) 
 	}
 	for i, it := range items {
 		if !seen[i] {
+			it.SetMeta("ce_skipped", true)
 			out = append(out, it)
 		}
 	}

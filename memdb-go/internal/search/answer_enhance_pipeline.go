@@ -18,15 +18,59 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
+// answerEnhanceMinPrependConfidence is the LLM self-reported confidence
+// floor below which the synthetic answer is NOT prepended. Forensic
+// 2026-05-02 fix #3: low-confidence answers were polluting the top of
+// the result list, displacing real top-K memories that had higher
+// retrieval relevance. Conservative threshold — pre-existing behaviour
+// can be re-enabled by setting MEMDB_ENHANCE_PREPEND_MIN_CONFIDENCE=0.
+const answerEnhanceMinPrependConfidence = 0.5
+
 // prependEnhancedAnswer inserts a synthetic EnhancedAnswer item at position 0
 // of items. Downstream formatting treats this as the top result, but the
 // ordering of all other items is preserved.
 //
 // The synthetic id is "enhanced-" + first 12 hex chars of sha256(query), so
 // identical queries yield stable ids across requests.
+//
+// Forensic 2026-05-02 fix #3 (refactor):
+//   - Synthetic relativity is now top1_score + epsilon (small) instead of
+//     a hardcoded 1.0. This keeps natural ranking continuity downstream
+//     (sorting code can't reorder it below real items, but the score is
+//     still comparable for percentile / threshold calculations) and
+//     avoids artificially boosting the synth ahead of legitimately
+//     stronger memories.
+//   - The global mutation loop that stamped enhanced_answer /
+//     enhanced_confidence onto every other item is GONE — it was a
+//     side-effect that made every map in the pipeline carry duplicate
+//     answer text and broke metric label cardinality assumptions.
+//     Consumers that need the answer should read it from the synthetic
+//     item's metadata only.
+//   - Caller is responsible for confidence + source-id gating. See
+//     computeAnswerEnhancement / applyAnswerEnhancementAfterTrim for the policy.
 func prependEnhancedAnswer(items []map[string]any, answer string, sourceIDs []string, conf float64, query string) []map[string]any {
 	sum := sha256.Sum256([]byte(query))
 	id := "enhanced-" + hex.EncodeToString(sum[:])[:answerEnhanceSynthIDHexLen]
+
+	// Top-1 anchored relativity: epsilon above the strongest existing item
+	// (or 1.0 when items is empty / has no relativity field). epsilon is
+	// 0.001 — large enough to dominate equal-score ties via the
+	// downstream sortByRelativity DESC, small enough not to perturb
+	// percentile-based metrics.
+	var top1 float64
+	for _, it := range items {
+		meta, ok := it["metadata"].(map[string]any)
+		if !ok {
+			continue
+		}
+		if r, ok := meta["relativity"].(float64); ok && r > top1 {
+			top1 = r
+		}
+	}
+	synthRel := top1 + 0.001
+	if synthRel <= 0 {
+		synthRel = 1.0
+	}
 
 	synth := map[string]any{
 		"id":     id,
@@ -37,20 +81,10 @@ func prependEnhancedAnswer(items []map[string]any, answer string, sourceIDs []st
 			"user_name":   "",
 			"confidence":  conf,
 			"source_ids":  sourceIDs,
-			"relativity":  1.0,
+			"relativity":  synthRel,
 			"enhanced":    true,
 		},
 		"ref_id": "[enhanced]",
-	}
-
-	// Also mark downstream items with the enhanced_answer / enhanced_confidence hints.
-	for _, it := range items {
-		meta, ok := it["metadata"].(map[string]any)
-		if !ok {
-			continue
-		}
-		meta["enhanced_answer"] = answer
-		meta["enhanced_confidence"] = conf
 	}
 
 	out := make([]map[string]any, 0, len(items)+1)
@@ -59,21 +93,36 @@ func prependEnhancedAnswer(items []map[string]any, answer string, sourceIDs []st
 	return out
 }
 
-// applyAnswerEnhancement is the pipeline hook. Called from postProcessResults
-// (step 6.8) iff MEMDB_SEARCH_ENHANCE=true and a reranker LLM config is
-// available. On LLM failure it logs at Debug and returns items unchanged
-// (graceful degrade — never fails the whole search).
+// enhancementResult captures a synthesised answer + the inputs needed to
+// build the synthetic item. Returned by computeAnswerEnhancement so the
+// caller can defer the actual prepend until AFTER TrimSlice — synth is
+// supposed to add ABOVE the top-K cap, not displace a real top-K result.
 //
-// emb may be nil; in that case the soft-routing classifier is bypassed and
-// the call is byte-identical to the post-revert single-prompt path.
-func applyAnswerEnhancement(
+// `ok=false` means no synth should be added (LLM error, threshold below,
+// low confidence, missing source_ids, etc.). The caller's items slice
+// must be returned unchanged in that case.
+type enhancementResult struct {
+	answer    string
+	sourceIDs []string
+	conf      float64
+	ok        bool
+}
+
+// computeAnswerEnhancement runs the LLM call and returns the result
+// without mutating items. The actual prepend happens in
+// applyAnswerEnhancementAfterTrim, called by postProcessResults AFTER
+// TrimSlice. Forensic 2026-05-02 fix #3.
+//
+// emb may be nil; in that case the soft-routing classifier is bypassed
+// and the call is byte-identical to the post-revert single-prompt path.
+func computeAnswerEnhancement(
 	ctx context.Context,
 	logger *slog.Logger,
 	query string,
 	items []map[string]any,
 	cfg AnswerEnhanceConfig,
 	emb classifierEmbedder,
-) []map[string]any {
+) enhancementResult {
 	d10Attrs := func(outcome string, hinted bool) metric.MeasurementOption {
 		return metric.WithAttributes(
 			attribute.String("outcome", outcome),
@@ -96,7 +145,7 @@ func applyAnswerEnhancement(
 	if !answerEnhanceEnabled() || len(items) == 0 || cfg.APIURL == "" {
 		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("skipped", false))
 		observability.RecordD10EnhanceOutcome(ctx, "skipped")
-		return items
+		return enhancementResult{}
 	}
 	// Pre-check relativity floor to distinguish "threshold below" (skipped)
 	// from a genuine LLM UNKNOWN response.
@@ -111,7 +160,7 @@ func applyAnswerEnhancement(
 	if !anyRelevant {
 		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("skipped", false))
 		observability.RecordD10EnhanceOutcome(ctx, "skipped")
-		return items
+		return enhancementResult{}
 	}
 	answer, sources, conf, hinted, trace, err := EnhanceRetrievalAnswer(ctx, query, items, cfg, emb)
 
@@ -144,19 +193,66 @@ func applyAnswerEnhancement(
 		if logger != nil {
 			logger.Debug("enhance failed, continuing without", slog.Any("error", err))
 		}
-		return items
+		return enhancementResult{}
 	}
 	if answer == "" || answer == answerEnhanceUnknownAnswer {
 		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("unknown", hinted))
 		observability.RecordD10EnhanceOutcome(ctx, "unknown")
 		recordD10OutcomeByCat(ctx, trace, "unknown")
-		return items
+		return enhancementResult{}
 	}
 	searchMx().D10Enhance.Add(ctx, 1, d10Attrs("answered", hinted))
 	searchMx().D10Conf.Record(ctx, conf)
 	observability.RecordD10EnhanceOutcome(ctx, "answered")
 	recordD10OutcomeByCat(ctx, trace, "answered")
-	return prependEnhancedAnswer(items, answer, sources, conf, query)
+
+	// Forensic 2026-05-02 fix #3: gate the prepend on minimum confidence
+	// + non-empty source_ids. A low-confidence or unsourced answer
+	// poisons the top of the result list — we surface it as "answered"
+	// for the metric (the LLM did succeed) but withhold the prepend so
+	// real top-K memories keep their slots.
+	if conf < answerEnhanceMinPrependConfidence || len(sources) == 0 {
+		if logger != nil {
+			logger.Debug("D10 enhance: synth withheld (low conf / no sources)",
+				slog.Float64("confidence", conf),
+				slog.Int("source_ids", len(sources)),
+			)
+		}
+		return enhancementResult{}
+	}
+
+	return enhancementResult{
+		answer:    answer,
+		sourceIDs: sources,
+		conf:      conf,
+		ok:        true,
+	}
+}
+
+// applyAnswerEnhancementAfterTrim is the post-trim hook called by
+// postProcessResults. Runs computeAnswerEnhancement on the pre-trim items
+// (so the LLM sees the strongest evidence), then prepends the synthetic
+// answer onto the post-trim list (so the synth adds ABOVE the top-K cap
+// rather than displacing a real top-K result).
+//
+// Forensic 2026-05-02 fix #3 — the previous code path called the LLM and
+// the prepend BEFORE TrimSlice, which meant a synthetic always evicted
+// the bottom-ranked real memory at the trim boundary even when the synth
+// confidence was high enough to claim slot 0 anyway.
+func applyAnswerEnhancementAfterTrim(
+	ctx context.Context,
+	logger *slog.Logger,
+	query string,
+	preTrim []map[string]any,
+	postTrim []map[string]any,
+	cfg AnswerEnhanceConfig,
+	emb classifierEmbedder,
+) []map[string]any {
+	res := computeAnswerEnhancement(ctx, logger, query, preTrim, cfg, emb)
+	if !res.ok {
+		return postTrim
+	}
+	return prependEnhancedAnswer(postTrim, res.answer, res.sourceIDs, res.conf, query)
 }
 
 // hintedLabel maps the bool to the metric label value. Two values keep

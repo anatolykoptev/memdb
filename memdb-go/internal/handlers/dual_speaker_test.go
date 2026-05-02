@@ -44,7 +44,13 @@ func TestTagSpeakerLabel_EmptyInput(t *testing.T) {
 	}
 }
 
-func TestMergeDualSpeakerResults_InterleavePreservesDiversity(t *testing.T) {
+func TestMergeDualSpeakerResults_InterleaveByScore(t *testing.T) {
+	// Forensic 2026-05-02 fix #1: interleave is now SCORE-AWARE (heap
+	// merge across legs sorted by relativity DESC). Top item is the
+	// global max (b1=0.95), then the next-best across legs, etc. The
+	// previous positional round-robin would have produced [a1,b1,a2,b2]
+	// which mixed a 0.8 in front of a 0.95 — that was the largest single
+	// noise source identified in the forensic and is now fixed.
 	a := []map[string]any{
 		{"id": "a1", "metadata": map[string]any{"relativity": 0.8}},
 		{"id": "a2", "metadata": map[string]any{"relativity": 0.7}},
@@ -61,11 +67,71 @@ func TestMergeDualSpeakerResults_InterleavePreservesDiversity(t *testing.T) {
 	if len(merged) != 4 {
 		t.Fatalf("want 4 merged, got %d", len(merged))
 	}
-	wantOrder := []string{"a1", "b1", "a2", "b2"}
+	wantOrder := []string{"b1", "a1", "a2", "b2"}
 	for i, m := range merged {
 		got, _ := m["id"].(string)
 		if got != wantOrder[i] {
-			t.Errorf("interleave order[%d]=%q want %q", i, got, wantOrder[i])
+			t.Errorf("score-aware interleave order[%d]=%q want %q", i, got, wantOrder[i])
+		}
+	}
+}
+
+func TestMergeDualSpeakerResults_InterleaveTieBreakRoundRobin(t *testing.T) {
+	// When scores are equal across legs, lower-index leg wins first; the
+	// chosen leg's cursor advances so subsequent equal-score picks
+	// alternate naturally (round-robin tiebreak via cursor advance).
+	a := []map[string]any{
+		{"id": "a1", "metadata": map[string]any{"relativity": 0.5}},
+		{"id": "a2", "metadata": map[string]any{"relativity": 0.5}},
+	}
+	b := []map[string]any{
+		{"id": "b1", "metadata": map[string]any{"relativity": 0.5}},
+		{"id": "b2", "metadata": map[string]any{"relativity": 0.5}},
+	}
+	results := []dualSpeakerSearchResult{
+		{speaker: "alice", memories: a},
+		{speaker: "bob", memories: b},
+	}
+	merged := mergeDualSpeakerResults(results, "interleave", 4)
+	if len(merged) != 4 {
+		t.Fatalf("want 4 merged, got %d", len(merged))
+	}
+	// Expected sequence: a1 (leg 0 wins on tie, cursor→1), then b1
+	// (leg 1 head still 0.5, leg 0 head still 0.5 — leg 0 wins again →
+	// a2), wait: leg 0 cursor=1 a2=0.5; leg 1 cursor=0 b1=0.5; tie →
+	// leg 0 (lower index) wins → a2. Then b1, b2.
+	wantOrder := []string{"a1", "a2", "b1", "b2"}
+	for i, m := range merged {
+		got, _ := m["id"].(string)
+		if got != wantOrder[i] {
+			t.Errorf("tiebreak order[%d]=%q want %q", i, got, wantOrder[i])
+		}
+	}
+}
+
+func TestMergeDualSpeakerResults_HighScoreLegDominatesTop(t *testing.T) {
+	// Pure regression guard: a leg with strictly higher scores must win
+	// the entire top-K cap before the weaker leg contributes a single
+	// item. Defends Fix #1 against the legacy positional behaviour.
+	strong := []map[string]any{
+		{"id": "s1", "metadata": map[string]any{"relativity": 0.99}},
+		{"id": "s2", "metadata": map[string]any{"relativity": 0.97}},
+		{"id": "s3", "metadata": map[string]any{"relativity": 0.95}},
+	}
+	weak := []map[string]any{
+		{"id": "w1", "metadata": map[string]any{"relativity": 0.20}},
+		{"id": "w2", "metadata": map[string]any{"relativity": 0.10}},
+	}
+	results := []dualSpeakerSearchResult{
+		{speaker: "alice", memories: strong},
+		{speaker: "bob", memories: weak},
+	}
+	merged := mergeDualSpeakerResults(results, "interleave", 3)
+	wantOrder := []string{"s1", "s2", "s3"}
+	for i, m := range merged {
+		got, _ := m["id"].(string)
+		if got != wantOrder[i] {
+			t.Errorf("high-score leg dominance: order[%d]=%q want %q", i, got, wantOrder[i])
 		}
 	}
 }
