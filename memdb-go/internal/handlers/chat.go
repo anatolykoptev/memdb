@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -18,6 +19,7 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/rpc"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
 
 const (
@@ -188,7 +190,12 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	observability.RecordChatContextTokens(ctx, prompt, profileCubeIDForRequest(&req), emitStyle)
 	messages := chatBuildMessages(prompt, *req.Query, req.History)
 
+	// Forensic 2026-05-01: chat-LLM duration histogram. Wraps only the
+	// generation call so retrieve / postprocess / format costs are NOT
+	// double-counted into the LLM bucket.
+	llmStart := time.Now()
 	answer, err := h.llmChat.Chat(ctx, messages, chatMaxTokens)
+	search.RecordLLMChatDuration(ctx, h.llmChat.Model(), time.Since(llmStart).Seconds())
 	if err != nil {
 		h.logger.Error("chat LLM error", slog.Any("error", err))
 		h.writeJSON(w, http.StatusInternalServerError, map[string]any{
@@ -285,8 +292,13 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Forensic 2026-05-01: chat-LLM duration histogram for the streaming
+	// path. Wraps the entire stream-drain (chunks closed) so the bucket
+	// reflects total generation time, not first-token latency.
+	llmStart := time.Now()
 	chunks, errc := h.llmChat.ChatStream(ctx, messages, llm.StreamOpts{})
 	h.streamChatResponse(ctx, sse, chunks, errc, &req, streamStyle, len(memories))
+	search.RecordLLMChatDuration(ctx, h.llmChat.Model(), time.Since(llmStart).Seconds())
 }
 
 // streamChatResponse reads chunks, classifies think tags, emits SSE events.

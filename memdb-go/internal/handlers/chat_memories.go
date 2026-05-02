@@ -18,9 +18,12 @@ package handlers
 // caller intact.
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
 
 // formatMemories converts search result memories into numbered text for
@@ -48,15 +51,23 @@ func formatMemories(memories []map[string]any, prefString string, maxTokens int)
 		copy(sorted, memories)
 		sortByRelativity(sorted) // descending; see sortByRelativity helper
 		used := 0
+		truncated := false
 		for i, m := range sorted {
 			text, _ := m["memory"].(string)
 			line := fmt.Sprintf("%d. %s", i+1, text)
 			cost := approxTokens(line)
 			if used+cost > maxTokens && len(lines) >= chatMinPersonalMem() {
+				// Forensic 2026-05-01: budget actually clipped at least one
+				// memory after the floor was satisfied. Counter bumped once
+				// per request, regardless of how many rows remained unread.
+				truncated = true
 				break
 			}
 			lines = append(lines, line)
 			used += cost
+		}
+		if truncated {
+			search.RecordContextTruncated(context.Background())
 		}
 	} else {
 		for i, m := range memories {
@@ -104,12 +115,25 @@ func filterMemoriesByThreshold(memories []map[string]any, threshold float64, min
 		}
 	}
 
+	floorActive := false
 	if len(filtered) < minNum {
 		filtered = safeSlice(personal, minNum)
 		filtered = append(filtered, safeSlice(outer, minNum)...)
+		floorActive = true
 	} else if perCount < minNum {
 		filtered = append(filtered, personal[perCount:min(len(personal), minNum)]...)
+		floorActive = true
 	}
+
+	// Forensic 2026-05-01: per-item kept/dropped counts. Dropped is the
+	// pre-filter total minus final size — captures the net effect including
+	// the floor re-injection.
+	kept := len(filtered)
+	dropped := len(memories) - kept
+	if dropped < 0 {
+		dropped = 0
+	}
+	search.RecordThresholdFilter(context.Background(), kept, dropped, floorActive)
 
 	sortByRelativity(filtered)
 	return filtered

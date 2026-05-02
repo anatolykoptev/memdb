@@ -67,6 +67,17 @@ func (s *SearchService) postProcessResults(
 		llmRerankDur = d
 	}
 
+	// Forensic 2026-05-01: per-strategy rerank histograms. Emit every
+	// strategy that fired in either chain (cosine always; cross_encoder /
+	// llm_judge / mmr / staged conditionally). Skips strategies that
+	// weren't in the chain — operators count series via _count.
+	for strat, d := range prefixResult.durations {
+		recordRerankDuration(ctx, strat, d.Seconds())
+	}
+	for strat, d := range suffixResult.durations {
+		recordRerankDuration(ctx, strat, d.Seconds())
+	}
+
 	// Skill / tool: cosine-only.
 	skill = ReRankByCosine(queryVec, skill, skillEmbByID)
 	tool = ReRankByCosine(queryVec, tool, toolEmbByID)
@@ -79,17 +90,23 @@ func (s *SearchService) postProcessResults(
 	// Step 6.5: Temporal decay
 	text, skill, tool = s.applyTemporalDecay(text, skill, tool, p)
 
-	// Step 7: Relativity threshold
+	// Step 7: Relativity threshold (forensic 2026-05-01: count drops).
+	preThr := len(text) + len(skill) + len(tool) + len(pref)
 	text, skill, tool, pref = s.applyRelativity(text, skill, tool, pref, p)
+	postThr := len(text) + len(skill) + len(tool) + len(pref)
+	recordDedupDrop(ctx, "threshold_filter", preThr-postThr)
 
 	// Step 8: Pref quality filter
 	pref = FilterPrefByQuality(pref)
 
-	// Step 9: Dedup per type
-	text, skill, tool, pref = s.dedupResults(queryVec, textEmbByID, text, skill, tool, pref, p)
+	// Step 9: Dedup per type (forensic 2026-05-01: count drops by mode).
+	text, skill, tool, pref = s.dedupResults(ctx, queryVec, textEmbByID, text, skill, tool, pref, p)
 
-	// Step 10: Cross-source dedup
+	// Step 10: Cross-source dedup (forensic 2026-05-01: count drops).
+	preX := len(skill) + len(tool) + len(pref)
 	skill, tool, pref = CrossSourceDedupByText(text, skill, tool, pref)
+	postX := len(skill) + len(tool) + len(pref)
+	recordDedupDrop(ctx, "cross_source", preX-postX)
 
 	// Step 10.5: D10 post-retrieval answer enhancement (env-gated by
 	// MEMDB_SEARCH_ENHANCE=true; default off). Runs after dedup but
@@ -307,15 +324,23 @@ func (s *SearchService) applyRelativity(text, skill, tool, pref []map[string]any
 }
 
 // dedupResults applies the requested dedup strategy to all result slices.
-func (s *SearchService) dedupResults(queryVec []float32, textEmbByID map[string][]float32, text, skill, tool, pref []map[string]any, p SearchParams) ([]map[string]any, []map[string]any, []map[string]any, []map[string]any) {
+//
+// Forensic 2026-05-01: emits memdb_search_dedup_drop_total counters per
+// reason. sim_threshold counts items dropped by DedupSim (cosine guard);
+// mmr_high_sim counts items dropped by DedupMMR (combined relevance +
+// diversity prune); exact_text counts items dropped by DedupByText. ctx
+// is threaded through so the OTel observation lands in the request span.
+func (s *SearchService) dedupResults(ctx context.Context, queryVec []float32, textEmbByID map[string][]float32, text, skill, tool, pref []map[string]any, p SearchParams) ([]map[string]any, []map[string]any, []map[string]any, []map[string]any) {
 	switch p.Dedup {
 	case DedupModeSim:
 		textItems := ToSearchItems(text, textEmbByID, "text")
+		preCount := len(textItems)
 		textItems = DedupSim(textItems, p.TopK)
+		recordDedupDrop(ctx, "sim_threshold", preCount-len(textItems))
 		text = FromSearchItems(textItems)
-		skill = DedupByText(skill)
-		tool = DedupByText(tool)
-		pref = DedupByText(pref)
+		skill = dedupByTextWithMetric(ctx, skill)
+		tool = dedupByTextWithMetric(ctx, tool)
+		pref = dedupByTextWithMetric(ctx, pref)
 
 	case DedupModeMMR:
 		textItems := ToSearchItems(text, textEmbByID, "text")
@@ -326,18 +351,30 @@ func (s *SearchService) dedupResults(queryVec []float32, textEmbByID map[string]
 			if mmrLambda <= 0 || mmrLambda > 1 {
 				mmrLambda = DefaultMMRLambda
 			}
+			preCount := len(combined)
 			dedupedText, dedupedPref := DedupMMR(combined, p.TopK, p.PrefTopK, queryVec, mmrLambda)
+			recordDedupDrop(ctx, "mmr_high_sim", preCount-(len(dedupedText)+len(dedupedPref)))
 			text = FromSearchItems(dedupedText)
 			pref = FromSearchItems(dedupedPref)
 		}
-		skill = DedupByText(skill)
-		tool = DedupByText(tool)
+		skill = dedupByTextWithMetric(ctx, skill)
+		tool = dedupByTextWithMetric(ctx, tool)
 
 	default:
-		text = DedupByText(text)
-		skill = DedupByText(skill)
-		tool = DedupByText(tool)
-		pref = DedupByText(pref)
+		text = dedupByTextWithMetric(ctx, text)
+		skill = dedupByTextWithMetric(ctx, skill)
+		tool = dedupByTextWithMetric(ctx, tool)
+		pref = dedupByTextWithMetric(ctx, pref)
 	}
 	return text, skill, tool, pref
+}
+
+// dedupByTextWithMetric wraps DedupByText with a drop counter. Helper
+// signatures stay pure — the metric is captured at the only call site
+// inside the search package.
+func dedupByTextWithMetric(ctx context.Context, items []map[string]any) []map[string]any {
+	pre := len(items)
+	out := DedupByText(items)
+	recordDedupDrop(ctx, "exact_text", pre-len(out))
+	return out
 }
