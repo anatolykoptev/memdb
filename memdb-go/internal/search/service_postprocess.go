@@ -109,21 +109,28 @@ func (s *SearchService) postProcessResults(
 	recordDedupDrop(ctx, "cross_source", preX-postX)
 
 	// Step 10.5: D10 post-retrieval answer enhancement (env-gated by
-	// MEMDB_SEARCH_ENHANCE=true; default off). Runs after dedup but
-	// before trim so we synthesise on the actual top candidates.
-	// Reuses LLMReranker proxy credentials.
-	text = applyAnswerEnhancement(ctx, s.logger, p.Query, text, AnswerEnhanceConfig{
-		APIURL: s.LLMReranker.APIURL,
-		APIKey: s.LLMReranker.APIKey,
-		Model:  s.LLMReranker.Model,
-		Locale: p.Locale,
-	}, s.embedder)
+	// MEMDB_SEARCH_ENHANCE=true; default off). Reuses LLMReranker proxy
+	// credentials.
+	//
+	// Forensic 2026-05-02 fix #3: the LLM call sees the pre-trim pool
+	// (strongest evidence available) but the synthetic answer is
+	// prepended ONTO the post-trim list — so the synth adds above the
+	// top-K cap rather than displacing a real top-K result. See
+	// applyAnswerEnhancementAfterTrim.
+	preTrim := text
 
 	// Step 11: Trim each type to its budget
 	text = TrimSlice(text, p.TopK)
 	skill = TrimSlice(skill, p.SkillTopK)
 	tool = TrimSlice(tool, p.ToolTopK)
 	pref = TrimSlice(pref, p.PrefTopK)
+
+	text = applyAnswerEnhancementAfterTrim(ctx, s.logger, p.Query, preTrim, text, AnswerEnhanceConfig{
+		APIURL: s.LLMReranker.APIURL,
+		APIKey: s.LLMReranker.APIKey,
+		Model:  s.LLMReranker.Model,
+		Locale: p.Locale,
+	}, s.embedder)
 
 	StripEmbeddings(text)
 	StripEmbeddings(skill)

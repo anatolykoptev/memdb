@@ -79,6 +79,22 @@ func (h *Handler) chatSearchMemoriesDual(
 	}
 	h.logDualLegFailures(legs)
 
+	// Forensic 2026-05-02 fix #7: parity with the single-cube chat path,
+	// which calls search.EnhanceMemories on the retrieved memory list to
+	// resolve pronouns and relative times using the surrounding memory
+	// context. The dual-speaker path was silently skipping this pass —
+	// "she" inside Caroline's memory must resolve using ONLY Caroline's
+	// memories, so the enhancement runs PER LEG (not on the merged
+	// pool) to avoid cross-speaker pronoun bleed. Empty legs are
+	// passed through unchanged.
+	enhanceCfg := h.searchService.Enhance
+	for i := range legs {
+		if len(legs[i].memories) == 0 {
+			continue
+		}
+		legs[i].memories = search.EnhanceMemories(ctx, *req.Query, legs[i].memories, enhanceCfg)
+	}
+
 	merged := mergeDualLegs(legs, mergeParams)
 	filtered := filterMemoriesByThreshold(merged, mergeParams.threshold, chatMinPersonalMem())
 

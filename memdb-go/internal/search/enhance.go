@@ -100,11 +100,24 @@ func EnhanceMemories(
 		return memories
 	}
 
-	// Build memory context (capped).
+	// Forensic 2026-05-02 fix #4: cap by RELATIVITY, not insertion order.
+	// The previous code took items[:enhanceMaxMemories] which silently
+	// dropped high-scoring rows whenever the caller had merged
+	// alternating-speaker buckets (the dual-speaker path). Sort first;
+	// take the top-N by score; pass the dropped count out as a metric so
+	// operators can spot pools that habitually overflow the cap.
 	items := memories
+	dropped := 0
 	if len(items) > enhanceMaxMemories {
-		items = items[:enhanceMaxMemories]
+		sorted := make([]map[string]any, len(items))
+		copy(sorted, items)
+		sort.SliceStable(sorted, func(i, j int) bool {
+			return enhanceItemRelativity(sorted[i]) > enhanceItemRelativity(sorted[j])
+		})
+		dropped = len(items) - enhanceMaxMemories
+		items = sorted[:enhanceMaxMemories]
 	}
+	recordEnhanceTruncated(ctx, dropped)
 
 	type memInput struct {
 		ID     string `json:"id"`
@@ -129,7 +142,10 @@ func EnhanceMemories(
 		ids[i] = inp.ID
 	}
 	sort.Strings(ids)
-	cacheKey := fmt.Sprintf("%x", sha256.Sum256([]byte(query+"\x00"+strings.Join(ids, ","))))
+	// Forensic 2026-05-02 fix #4: include cfg.Model in the cache key so a
+	// model rollout (e.g. swapping gemini-2.5-flash → gemini-3-flash) does
+	// not return stale enhancements computed by the previous model.
+	cacheKey := fmt.Sprintf("%x", sha256.Sum256([]byte(query+"\x00"+cfg.Model+"\x00"+strings.Join(ids, ","))))
 	if cached, ok := globalEnhanceCache.get(cacheKey); ok {
 		return cached
 	}
@@ -162,6 +178,19 @@ func callEnhanceLLM(ctx context.Context, userMsg string, cfg EnhanceConfig) ([]e
 		return nil, err
 	}
 	return result, nil
+}
+
+// enhanceItemRelativity reads metadata.relativity safely. Items missing
+// the score sort to the bottom (0). Mirrors the search package's
+// `relativity` accessor in handlers/chat_memories.go without crossing
+// the package boundary.
+func enhanceItemRelativity(m map[string]any) float64 {
+	md, ok := m["metadata"].(map[string]any)
+	if !ok {
+		return 0
+	}
+	v, _ := md["relativity"].(float64)
+	return v
 }
 
 // applyEnhancements merges enhanced texts back into the original memory maps.

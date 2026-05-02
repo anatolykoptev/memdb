@@ -96,7 +96,12 @@ func filterMemoriesByThreshold(memories []map[string]any, threshold float64, min
 	sortByRelativity(sorted)
 
 	var personal, outer []map[string]any
-	for _, m := range memories {
+	for _, m := range sorted {
+		// Iterate over `sorted` (relativity DESC) so any subsequent floor
+		// re-injection picks the highest-scoring sub-threshold rows. The
+		// previous implementation iterated the unsorted `memories` slice
+		// here and again at the floor branch, re-injecting noise in
+		// insertion order (forensic 2026-05-02 fix #2).
 		if memType(m) == memTypeOuter {
 			outer = append(outer, m)
 		} else {
@@ -117,11 +122,34 @@ func filterMemoriesByThreshold(memories []map[string]any, threshold float64, min
 
 	floorActive := false
 	if len(filtered) < minNum {
+		// Whole pool was empty after threshold; backfill from the
+		// score-sorted personal+outer slices (already sorted via the
+		// `sorted` iteration above).
 		filtered = safeSlice(personal, minNum)
 		filtered = append(filtered, safeSlice(outer, minNum)...)
 		floorActive = true
 	} else if perCount < minNum {
-		filtered = append(filtered, personal[perCount:min(len(personal), minNum)]...)
+		// Need to top up personal count to minNum. Re-inject from
+		// `personal` (already sorted DESC by relativity), skipping any
+		// row already in `filtered` to avoid duplicates and to make sure
+		// we add the highest-scoring sub-threshold rows rather than
+		// alternating-speaker insertion-order rows.
+		seen := make(map[string]bool, len(filtered))
+		for _, fm := range filtered {
+			seen[memoryDedupKey(fm)] = true
+		}
+		for _, m := range personal {
+			if perCount >= minNum {
+				break
+			}
+			key := memoryDedupKey(m)
+			if seen[key] {
+				continue
+			}
+			filtered = append(filtered, m)
+			seen[key] = true
+			perCount++
+		}
 		floorActive = true
 	}
 
@@ -161,6 +189,25 @@ func memType(m map[string]any) string {
 
 func sortByRelativity(s []map[string]any) {
 	sort.Slice(s, func(i, j int) bool { return relativity(s[i]) > relativity(s[j]) })
+}
+
+// memoryDedupKey returns a stable identity key for a memory map.
+// Prefers `id` when present (canonical search-result identifier) and
+// falls back to a trimmed lower-cased text hash so unmarked rows still
+// dedupe correctly during floor re-injection. Empty fallback returns "".
+func memoryDedupKey(m map[string]any) string {
+	if id, _ := m["id"].(string); id != "" {
+		return id
+	}
+	if md, ok := m["metadata"].(map[string]any); ok {
+		if id, _ := md["id"].(string); id != "" {
+			return id
+		}
+	}
+	if text, ok := m["memory"].(string); ok {
+		return strings.ToLower(strings.TrimSpace(text))
+	}
+	return ""
 }
 
 func safeSlice(s []map[string]any, n int) []map[string]any {

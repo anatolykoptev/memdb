@@ -152,7 +152,27 @@ return formatted
 }
 
 // ToSearchItems converts formatted memory items to SearchItem slice for dedup.
+//
+// BucketIdx defaults to 0 because the SearchService runs once per cube
+// (single-tenant call) and MMR's diversification across multiple cube
+// indices only matters when the caller is fanning items out across
+// semantically distinct sub-pools. The dual-speaker fan-out runs the
+// full search pipeline (including MMR) PER LEG, then merges legs in
+// handlers/search_dual_speaker.go::mergeDualSpeakerResults — by then
+// the per-leg MMR has already picked diverse items, so a second
+// bucket-aware MMR pass would be redundant. If a future caller needs
+// per-bucket diversification within a single search call, use
+// ToSearchItemsWithBucket. (Forensic 2026-05-02 fix #5: hardcoded 0 is
+// now intentional + documented; the explicit overload is the seam for
+// future cross-cube fan-out.)
 func ToSearchItems(items []map[string]any, embeddingByID map[string][]float32, memType string) []SearchItem {
+return ToSearchItemsWithBucket(items, embeddingByID, memType, nil)
+}
+
+// ToSearchItemsWithBucket is the explicit form that lets callers wire a
+// per-item bucket index. Pass nil for `bucketOf` to default every item
+// to BucketIdx=0 (legacy ToSearchItems behaviour).
+func ToSearchItemsWithBucket(items []map[string]any, embeddingByID map[string][]float32, memType string, bucketOf func(map[string]any) int) []SearchItem {
 result := make([]SearchItem, 0, len(items))
 for _, item := range items {
 memory, _ := item["memory"].(string)
@@ -167,11 +187,15 @@ var embedding []float32
 if id, ok := item["id"].(string); ok && embeddingByID != nil {
 embedding = embeddingByID[id]
 }
+bucket := 0
+if bucketOf != nil {
+bucket = bucketOf(item)
+}
 result = append(result, SearchItem{
 Memory:     memory,
 Score:      score,
 MemType:    memType,
-BucketIdx:  0,
+BucketIdx:  bucket,
 Embedding:  embedding,
 Properties: item,
 })

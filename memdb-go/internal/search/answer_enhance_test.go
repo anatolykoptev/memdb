@@ -39,8 +39,9 @@ func itemWithRel(id, memory string, rel float64) map[string]any {
 }
 
 func TestEnhance_Disabled(t *testing.T) {
-	// env off → applyAnswerEnhancement returns items unchanged and does NOT
-	// call the LLM even if cfg.APIURL is set.
+	// env off → computeAnswerEnhancement returns ok=false and does NOT
+	// call the LLM even if cfg.APIURL is set. Caller leaves the post-trim
+	// list untouched.
 	calls := 0
 	ts := newAnswerEnhanceServer(t, `{"answer":"x","source_ids":[],"confidence":0.5}`, &calls)
 	defer ts.Close()
@@ -48,12 +49,54 @@ func TestEnhance_Disabled(t *testing.T) {
 	items := []map[string]any{itemWithRel("u1", "mem A", 0.9)}
 	cfg := AnswerEnhanceConfig{APIURL: ts.URL, Model: "m"}
 
-	out := applyAnswerEnhancement(context.Background(), nil, "q", items, cfg, nil)
-	if len(out) != 1 || out[0]["id"] != "u1" {
-		t.Fatalf("expected items unchanged when env off, got %v", out)
+	res := computeAnswerEnhancement(context.Background(), nil, "q", items, cfg, nil)
+	if res.ok {
+		t.Fatalf("expected ok=false when env off, got %+v", res)
 	}
 	if calls != 0 {
 		t.Fatalf("expected 0 LLM calls when env off, got %d", calls)
+	}
+
+	// applyAnswerEnhancementAfterTrim is the public surface — verify it
+	// short-circuits to postTrim unchanged.
+	out := applyAnswerEnhancementAfterTrim(context.Background(), nil, "q", items, items, cfg, nil)
+	if len(out) != 1 || out[0]["id"] != "u1" {
+		t.Fatalf("expected post-trim list returned unchanged, got %v", out)
+	}
+}
+
+func TestEnhance_LowConfidenceWithholdsPrepend(t *testing.T) {
+	// LLM returns answered with confidence 0.3 (below floor 0.5) — synth
+	// MUST NOT be prepended; the post-trim list returns unchanged.
+	t.Setenv("MEMDB_SEARCH_ENHANCE", "true")
+	body := `{"answer":"social worker","source_ids":["u1"],"confidence":0.3}`
+	ts := newAnswerEnhanceServer(t, body, nil)
+	defer ts.Close()
+
+	items := []map[string]any{itemWithRel("u1", "Caroline works as a social worker", 0.82)}
+	cfg := AnswerEnhanceConfig{APIURL: ts.URL, Model: "m"}
+
+	out := applyAnswerEnhancementAfterTrim(context.Background(), nil, "what is Caroline's job?", items, items, cfg, nil)
+	if len(out) != 1 || out[0]["id"] != "u1" {
+		t.Fatalf("expected list unchanged on low-confidence answer, got %v", out)
+	}
+}
+
+func TestEnhance_NoSourcesWithholdsPrepend(t *testing.T) {
+	// LLM returns answered with high confidence but empty source_ids —
+	// synth MUST NOT be prepended (unsourced answer is not trustworthy
+	// enough to displace real top-K candidates).
+	t.Setenv("MEMDB_SEARCH_ENHANCE", "true")
+	body := `{"answer":"social worker","source_ids":[],"confidence":0.9}`
+	ts := newAnswerEnhanceServer(t, body, nil)
+	defer ts.Close()
+
+	items := []map[string]any{itemWithRel("u1", "Caroline works as a social worker", 0.82)}
+	cfg := AnswerEnhanceConfig{APIURL: ts.URL, Model: "m"}
+
+	out := applyAnswerEnhancementAfterTrim(context.Background(), nil, "job?", items, items, cfg, nil)
+	if len(out) != 1 || out[0]["id"] != "u1" {
+		t.Fatalf("expected list unchanged on no-source answer, got %v", out)
 	}
 }
 
@@ -206,8 +249,10 @@ func TestPrependEnhancedAnswer(t *testing.T) {
 	if meta["memory_type"] != "EnhancedAnswer" {
 		t.Errorf("expected memory_type=EnhancedAnswer, got %v", meta["memory_type"])
 	}
-	if meta["relativity"] != 1.0 {
-		t.Errorf("expected synth relativity=1.0, got %v", meta["relativity"])
+	// Forensic 2026-05-02 fix #3: synth relativity is anchored at
+	// top1+0.001, not a hardcoded 1.0. Top-1 here is 0.9 → expect ~0.901.
+	if rel, _ := meta["relativity"].(float64); rel < 0.9 || rel > 0.91 {
+		t.Errorf("expected synth relativity ≈ 0.901 (top1+epsilon), got %v", rel)
 	}
 	if meta["enhanced"] != true {
 		t.Errorf("expected enhanced=true, got %v", meta["enhanced"])
@@ -216,18 +261,20 @@ func TestPrependEnhancedAnswer(t *testing.T) {
 		t.Errorf("expected confidence=0.88, got %v", conf)
 	}
 
-	// Original items are at positions 1..3 in the same order.
+	// Original items are at positions 1..3 in the same order. The legacy
+	// global mutation that stamped enhanced_answer / enhanced_confidence
+	// onto every other item has been REMOVED — those keys must NOT be
+	// present on real items (forensic 2026-05-02 fix #3).
 	for i, wantID := range []string{"a", "b", "c"} {
 		if out[i+1]["id"] != wantID {
 			t.Errorf("at position %d: expected id=%s, got %v", i+1, wantID, out[i+1]["id"])
 		}
-		// Each original item's metadata should have enhanced_answer injected.
 		m, _ := out[i+1]["metadata"].(map[string]any)
-		if m["enhanced_answer"] != "social worker" {
-			t.Errorf("item %s: expected enhanced_answer to be set, got %v", wantID, m["enhanced_answer"])
+		if _, has := m["enhanced_answer"]; has {
+			t.Errorf("item %s: enhanced_answer mutation must be gone, got %v", wantID, m["enhanced_answer"])
 		}
-		if ec, _ := m["enhanced_confidence"].(float64); ec != 0.88 {
-			t.Errorf("item %s: expected enhanced_confidence=0.88, got %v", wantID, ec)
+		if _, has := m["enhanced_confidence"]; has {
+			t.Errorf("item %s: enhanced_confidence mutation must be gone, got %v", wantID, m["enhanced_confidence"])
 		}
 	}
 

@@ -226,6 +226,47 @@ func TestFilterMemoriesByThreshold_Empty(t *testing.T) {
 	}
 }
 
+func TestFilterMemoriesByThreshold_FloorReinjectsBySortedScore(t *testing.T) {
+	// Forensic 2026-05-02 fix #2: when filtered<minNum but the threshold
+	// pass kept some rows, the floor re-injection must pick the
+	// highest-scoring SUB-THRESHOLD personal rows (in score-DESC order),
+	// not the next items in the original insertion-order slice.
+	//
+	// Arrangement (insertion order intentionally NOT score-sorted):
+	//   - mid_below   : 0.20 (sub-threshold, mid score)
+	//   - high        : 0.90 (above threshold)
+	//   - top_below   : 0.45 (sub-threshold, HIGHEST sub-threshold)
+	//   - low_below   : 0.05 (sub-threshold, lowest)
+	// Threshold 0.50, minNum 3 → 1 above → must inject 2 highest
+	// sub-threshold by score: top_below (0.45) and mid_below (0.20).
+	memories := []map[string]any{
+		{"id": "mid", "memory": "mid_below", "metadata": map[string]any{"relativity": 0.20, "memory_type": "PersonalMemory"}},
+		{"id": "hi", "memory": "high", "metadata": map[string]any{"relativity": 0.90, "memory_type": "PersonalMemory"}},
+		{"id": "top", "memory": "top_below", "metadata": map[string]any{"relativity": 0.45, "memory_type": "PersonalMemory"}},
+		{"id": "lo", "memory": "low_below", "metadata": map[string]any{"relativity": 0.05, "memory_type": "PersonalMemory"}},
+	}
+	result := filterMemoriesByThreshold(memories, 0.50, 3)
+	if len(result) != 3 {
+		t.Fatalf("expected 3 memories (min floor), got %d", len(result))
+	}
+	// Result is sorted DESC by relativity at the end of the function.
+	wantIDs := []string{"hi", "top", "mid"}
+	for i, w := range wantIDs {
+		got, _ := result[i]["id"].(string)
+		if got != w {
+			t.Errorf("position %d: want id=%q, got %q (score-sorted floor)", i, w, got)
+		}
+	}
+	// Negative assertion: the lowest-scoring sub-threshold row must NOT
+	// have been pulled in even though it appears later in the insertion
+	// order — that was the legacy bug.
+	for _, r := range result {
+		if id, _ := r["id"].(string); id == "lo" {
+			t.Errorf("low-score sub-threshold row 'lo' must not displace higher-scored 'top' / 'mid'")
+		}
+	}
+}
+
 // M12.1 — chatPromptNow honours MEMDB_CHAT_NOW_OVERRIDE so harnesses can
 // pin the "Current Time" baseline against historic conversation dates.
 
