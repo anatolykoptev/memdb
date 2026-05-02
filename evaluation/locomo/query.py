@@ -914,8 +914,11 @@ def _build_dual_speaker_system_prompt(
         "against the dated memory, NOT against the 'Current time' header. "
         "When asked WHEN an event happened, answer with the most specific "
         "date or relative phrase present in the memories themselves.\n\n"
-        "Answer the user's question with a short, direct factual response. "
-        "If the memories do not contain the answer, say so plainly."
+        "Answer in as few words as possible — prefer a noun phrase, number, "
+        "or single date over a full sentence unless the question explicitly asks for explanation. "
+        "Do not echo the question in your answer. Do not add filler like "
+        "'According to the memories' or 'Based on what is provided'. "
+        "If the memories do not contain the answer, say so plainly in 3 words or fewer."
     )
 
 
