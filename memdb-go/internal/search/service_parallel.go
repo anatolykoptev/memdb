@@ -6,11 +6,24 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
+
+// fulltextEnabledEnv gates Postgres tsquery FTS leg. Default ON.
+// When set to "0", skip FT spawn — pipeline runs dense + SPLADE only.
+// Motivation: SPLADE-v3 strictly dominates BM25-style FTS on quality
+// (BEIR +2-5pp nDCG) AND covers term-expansion / synonym recall that
+// Postgres tsquery's stem-only matching misses. Drop FT to reduce
+// pipeline latency without losing recall, A/B confirms.
+const fulltextEnabledEnv = "MEMDB_FULLTEXT_ENABLED"
+
+func fulltextEnabled() bool {
+	return os.Getenv(fulltextEnabledEnv) != "0"
+}
 
 // runParallelSearches executes all DB searches concurrently.
 func (s *SearchService) runParallelSearches(
@@ -63,7 +76,7 @@ func (s *SearchService) spawnTextSearches(
 		}
 		return err
 	})
-	if tsquery != "" {
+	if tsquery != "" && fulltextEnabled() {
 		g.Go(func() error {
 			var err error
 			if hasCutoff {
@@ -88,7 +101,7 @@ func (s *SearchService) spawnSkillToolSearches(
 			psr.skillVec, err = s.postgres.VectorSearch(ctx, queryVec, p.CubeID, p.UserName, SkillScopes, p.AgentID, budget.skillK)
 			return err
 		})
-		if tsquery != "" {
+		if tsquery != "" && fulltextEnabled() {
 			g.Go(func() error {
 				var err error
 				psr.skillFT, err = s.postgres.FulltextSearch(ctx, tsquery, p.CubeID, p.UserName, SkillScopes, p.AgentID, budget.skillK)
@@ -103,7 +116,7 @@ func (s *SearchService) spawnSkillToolSearches(
 			psr.toolVec, err = s.postgres.VectorSearch(ctx, queryVec, p.CubeID, p.UserName, ToolScopes, p.AgentID, budget.toolK)
 			return err
 		})
-		if tsquery != "" {
+		if tsquery != "" && fulltextEnabled() {
 			g.Go(func() error {
 				var err error
 				psr.toolFT, err = s.postgres.FulltextSearch(ctx, tsquery, p.CubeID, p.UserName, ToolScopes, p.AgentID, budget.toolK)
