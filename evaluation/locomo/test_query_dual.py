@@ -326,5 +326,78 @@ class MainSelectorTests(unittest.TestCase):
         self.assertFalse(out["meta"]["dual_speaker"])
 
 
+class CategoryBrevityTests(unittest.TestCase):
+    """Unit tests for _category_brevity_instruction and per-category system prompts."""
+
+    def setUp(self):
+        self.q = _fresh_query_module({})
+        self.items_a = [{"id": "a1", "content": "They have two children.", "score": 0.9, "speaker_label": "A", "ts": "2022-09-01"}]
+        self.items_b = [{"id": "b1", "content": "She felt relieved after the news.", "score": 0.85, "speaker_label": "B", "ts": "2022-09-01"}]
+
+    def _prompt(self, category):
+        return self.q._build_dual_speaker_system_prompt(
+            self.items_a, self.items_b, category=category
+        )
+
+    def test_cat1_noun_phrase_instruction(self):
+        sp = self._prompt(1)
+        self.assertIn("1-3 words", sp)
+        self.assertIn("No full sentences", sp)
+
+    def test_cat2_date_instruction(self):
+        sp = self._prompt(2)
+        self.assertIn("YYYY-MM-DD", sp)
+        self.assertIn("relative", sp)
+
+    def test_cat3_temporal_instruction(self):
+        sp = self._prompt(3)
+        self.assertIn("most specific date", sp)
+
+    def test_cat4_clause_instruction(self):
+        sp = self._prompt(4)
+        self.assertIn("one brief clause", sp)
+        self.assertNotIn("No full sentences", sp)
+
+    def test_cat5_yesno_instruction(self):
+        sp = self._prompt(5)
+        self.assertIn("Start with 'Yes' or 'No'", sp)
+        self.assertIn("Never refuse", sp)
+        # The string "No answer." appears only as a prohibition, not as permitted output.
+        self.assertIn("Never refuse with 'No answer.'", sp)
+
+    def test_none_category_back_compat(self):
+        sp = self._prompt(None)
+        self.assertIn("as few words as possible", sp)
+
+    def test_unknown_category_back_compat(self):
+        sp = self._prompt(99)
+        self.assertIn("as few words as possible", sp)
+
+    def test_cat5_prompt_threaded_through_query_chat_dual(self):
+        """category=5 kwarg must reach the system_prompt in the POST body."""
+        chat_payloads: list[dict] = []
+
+        def fake_post(url, json=None, headers=None, timeout=None):  # noqa: A002
+            chat_payloads.append({"url": url, "json": json})
+            return _fake_response({"data": "Yes, they did."})
+
+        with patch.object(self.q.requests, "post", side_effect=fake_post):
+            answer, _, _, _ = self.q.query_chat_dual(
+                "http://memdb.test",
+                "conv-26",
+                "Did Alice visit the museum?",
+                top_k=10,
+                speaker_a_items=self.items_a,
+                speaker_b_items=self.items_b,
+                category=5,
+            )
+
+        self.assertEqual(answer, "Yes, they did.")
+        sp = chat_payloads[0]["json"]["system_prompt"]
+        self.assertIn("Start with 'Yes' or 'No'", sp)
+        self.assertIn("[speaker:A]", sp)
+        self.assertIn("[speaker:B]", sp)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -80,6 +80,19 @@ func applyAnswerEnhancement(
 			attribute.String("hinted", hintedLabel(hinted)),
 		)
 	}
+	// Forensic 2026-05-01: D10 entry trace. memdb_search_d10_enhance_total=0
+	// in prod despite MEMDB_D10_CLASSIFIER_ENABLED=true — the actual gate
+	// is MEMDB_SEARCH_ENHANCE (answerEnhanceEnabled()), defaulted off in
+	// docker-compose. Logging at Debug confirms whether D10 is being
+	// reached at all without forcing a metric label change.
+	if logger != nil {
+		logger.Debug("D10 enhance: entered",
+			slog.String("query", query),
+			slog.Int("item_count", len(items)),
+			slog.Bool("enhance_enabled", answerEnhanceEnabled()),
+			slog.Bool("classifier_enabled", d10ClassifierEnabled()),
+		)
+	}
 	if !answerEnhanceEnabled() || len(items) == 0 || cfg.APIURL == "" {
 		searchMx().D10Enhance.Add(ctx, 1, d10Attrs("skipped", false))
 		observability.RecordD10EnhanceOutcome(ctx, "skipped")

@@ -91,6 +91,48 @@ type searchMetricsInstruments struct {
 	// moved="false" when the guard fired but no demotion was needed.
 	// Gate: MEMDB_DEMOTE_BARE_ATOMS (default ON).
 	BareAtomDemoted metric.Int64Counter
+	// Per-stage telemetry (forensic 2026-05-01 telemetry-gap fix).
+	// All histograms exported by the Prometheus bridge as
+	// memdb_search_<name>_seconds — operators get p50/p95/p99 for retrieve,
+	// rerank (per strategy) and the chat LLM call.
+	//
+	// RetrieveDuration — wall time of the parallel DB fan-out (vector +
+	// fulltext + sparse) at the start of a search request. Labels:
+	// {cube_id, scope}. cube_id is the param's CubeID (or empty when
+	// multi-cube search routes via CubeIDs[]); scope is the recall-budget
+	// category ("cat2"|"other") so dashboards can split tail latency by
+	// query family.
+	RetrieveDuration metric.Float64Histogram
+	// RerankDuration — per-strategy rerank wall time. Emitted once per
+	// strategy that fired in postProcessResults (cosine, cross_encoder,
+	// llm_judge, mmr, staged). Strategies that didn't fire emit nothing
+	// for the request — operators count series via _count.
+	RerankDuration metric.Float64Histogram
+	// LLMChatDuration — wall time of the LLM chat completion call from the
+	// /product/chat/complete and /product/chat/stream handlers. Label
+	// {model} comes from the LLM client. Lets ops separate retrieval p95
+	// from generation p95 — the two were silently merged in the legacy
+	// "search pipeline timing" slog line.
+	LLMChatDuration metric.Float64Histogram
+	// DedupDrop — count of items dropped by each dedup / threshold pass.
+	// reason ∈ {sim_threshold, mmr_high_sim, exact_text, cross_source,
+	// threshold_filter}. Emitted by postProcessResults caller after each
+	// helper returns (delta = before - after) — keeps the helpers
+	// signature-pure.
+	DedupDrop metric.Int64Counter
+	// ContextTruncated — bumped once per chat request whose memory list
+	// was truncated by the formatMemories token-budget cap (the
+	// chatMinPersonalMem floor was already met when the break fired, i.e.
+	// at least one memory was actually dropped to honour MaxContextTokens).
+	ContextTruncated metric.Int64Counter
+	// ThresholdFilterKept / ThresholdFilterDropped — per-item outcome
+	// counters for filterMemoriesByThreshold. floor_active="true" when
+	// the chatMinPersonalMem floor was triggered (filtered<minNum), i.e.
+	// some sub-threshold rows were re-injected. Lets operators detect
+	// "everything below threshold" cubes (floor active 100% of the time =
+	// signal that MEMDB_M15_CHAT_DEFAULT_THRESHOLD is too high).
+	ThresholdFilterKept    metric.Int64Counter
+	ThresholdFilterDropped metric.Int64Counter
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -164,6 +206,27 @@ func searchMx() *searchMetricsInstruments {
 			metric.WithDescription("CE→MathReranker fallback invocations per live CE call (reason=degraded|low_quality). degraded = ceClient StatusDegraded; low_quality = top-1 CE score below MEMDB_CE_QUALITY_FLOOR."))
 		bareAtom, _ := m.Int64Counter("memdb_search_bare_atom_demoted_total",
 			metric.WithDescription("Pattern-B bare-token atom demotion outcomes per search call (moved=true|false). true = rank-1 swapped with a longer candidate; false = guard checked but no swap needed. Gate: MEMDB_DEMOTE_BARE_ATOMS."))
+		// Per-stage telemetry instruments (forensic 2026-05-01).
+		// Bucket boundaries cover the realistic search-stage range: 5ms
+		// (in-memory cosine on tiny pool) → 10s (LLM rerank with retries).
+		stageBuckets := []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0}
+		retrieveDur, _ := m.Float64Histogram("memdb.search.retrieve_duration_seconds",
+			metric.WithDescription("Wall time of the parallel DB fan-out (vector + fulltext + sparse) per search request. Labels: cube_id, scope (cat2|other)."),
+			metric.WithExplicitBucketBoundaries(stageBuckets...))
+		rerankDur, _ := m.Float64Histogram("memdb.search.rerank_duration_seconds",
+			metric.WithDescription("Per-strategy rerank wall time. Label strategy ∈ {cosine,cross_encoder,llm_judge,mmr,staged}. Emitted once per strategy that fired in the request."),
+			metric.WithExplicitBucketBoundaries(stageBuckets...))
+		llmChatDur, _ := m.Float64Histogram("memdb.search.llm_chat_duration_seconds",
+			metric.WithDescription("Wall time of the LLM chat completion call from /product/chat/{complete,stream}. Label model from the LLM client."),
+			metric.WithExplicitBucketBoundaries(stageBuckets...))
+		dedupDrop, _ := m.Int64Counter("memdb.search.dedup_drop_total",
+			metric.WithDescription("Items dropped by dedup / threshold passes. reason ∈ {sim_threshold,mmr_high_sim,exact_text,cross_source,threshold_filter}."))
+		ctxTrunc, _ := m.Int64Counter("memdb.search.context_truncated_total",
+			metric.WithDescription("Chat requests whose memory list was truncated by formatMemories token budget (after honouring chatMinPersonalMem floor)."))
+		thrKept, _ := m.Int64Counter("memdb.search.threshold_filter_kept_total",
+			metric.WithDescription("Per-item kept count from filterMemoriesByThreshold. Label floor_active=true when chatMinPersonalMem floor re-injected sub-threshold rows."))
+		thrDropped, _ := m.Int64Counter("memdb.search.threshold_filter_dropped_total",
+			metric.WithDescription("Per-item dropped count from filterMemoriesByThreshold. Label floor_active=true when chatMinPersonalMem floor was triggered."))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -193,6 +256,13 @@ func searchMx() *searchMetricsInstruments {
 			AttributionFilter: attrFilter,
 			CEMathFallback:    ceMath,
 			BareAtomDemoted:   bareAtom,
+			RetrieveDuration:       retrieveDur,
+			RerankDuration:         rerankDur,
+			LLMChatDuration:        llmChatDur,
+			DedupDrop:              dedupDrop,
+			ContextTruncated:       ctxTrunc,
+			ThresholdFilterKept:    thrKept,
+			ThresholdFilterDropped: thrDropped,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -294,6 +364,26 @@ func searchMx() *searchMetricsInstruments {
 		for _, moved := range []string{"true", "false"} {
 			bareAtom.Add(ctx, 0, metric.WithAttributes(attribute.String("moved", moved)))
 		}
+		// Pre-register per-stage histograms / counters so dashboards see the
+		// full series space immediately. Forensic 2026-05-01.
+		for _, scope := range []string{"cat2", "other"} {
+			retrieveDur.Record(ctx, 0, metric.WithAttributes(
+				attribute.String("cube_id", ""),
+				attribute.String("scope", scope),
+			))
+		}
+		for _, strat := range []string{"cosine", "cross_encoder", "llm_judge", "mmr", "staged"} {
+			rerankDur.Record(ctx, 0, metric.WithAttributes(attribute.String("strategy", strat)))
+		}
+		llmChatDur.Record(ctx, 0, metric.WithAttributes(attribute.String("model", "")))
+		for _, reason := range []string{"sim_threshold", "mmr_high_sim", "exact_text", "cross_source", "threshold_filter"} {
+			dedupDrop.Add(ctx, 0, metric.WithAttributes(attribute.String("reason", reason)))
+		}
+		ctxTrunc.Add(ctx, 0)
+		for _, fa := range []string{"true", "false"} {
+			thrKept.Add(ctx, 0, metric.WithAttributes(attribute.String("floor_active", fa)))
+			thrDropped.Add(ctx, 0, metric.WithAttributes(attribute.String("floor_active", fa)))
+		}
 	})
 	return searchMetrics
 }
@@ -310,6 +400,95 @@ func recordAttributionOutcome(ctx context.Context, outcome string, n int) {
 		return
 	}
 	mx.AttributionFilter.Add(ctx, int64(n), metric.WithAttributes(attribute.String("outcome", outcome)))
+}
+
+// recordRetrieveDuration emits the retrieve-stage histogram. cubeID may be
+// empty (multi-cube fan-out via CubeIDs[]); scope is the recall-budget
+// category produced by applyCat2Threshold.
+func recordRetrieveDuration(ctx context.Context, cubeID, scope string, secs float64) {
+	mx := searchMx()
+	if mx.RetrieveDuration == nil {
+		return
+	}
+	mx.RetrieveDuration.Record(ctx, secs, metric.WithAttributes(
+		attribute.String("cube_id", cubeID),
+		attribute.String("scope", scope),
+	))
+}
+
+// recordRerankDuration emits the per-strategy rerank histogram.
+// dur < 0 is ignored (defensive — durations come from time.Since).
+func recordRerankDuration(ctx context.Context, strategy string, secs float64) {
+	if secs < 0 {
+		return
+	}
+	mx := searchMx()
+	if mx.RerankDuration == nil {
+		return
+	}
+	mx.RerankDuration.Record(ctx, secs, metric.WithAttributes(attribute.String("strategy", strategy)))
+}
+
+// RecordLLMChatDuration emits the chat-LLM histogram. model is the LLM
+// client's configured model name; empty string is allowed (degraded
+// telemetry beats a missing observation). Exported so the handlers
+// package can call it without a circular import.
+func RecordLLMChatDuration(ctx context.Context, model string, secs float64) {
+	mx := searchMx()
+	if mx.LLMChatDuration == nil {
+		return
+	}
+	mx.LLMChatDuration.Record(ctx, secs, metric.WithAttributes(attribute.String("model", model)))
+}
+
+// recordDedupDrop bumps the dedup-drop counter by `n` items for `reason`.
+// n <= 0 short-circuits — keeps the call sites trivial (`recordDedupDrop(ctx,
+// "exact_text", before-after)` even when the helper kept everything).
+func recordDedupDrop(ctx context.Context, reason string, n int) {
+	if n <= 0 {
+		return
+	}
+	mx := searchMx()
+	if mx.DedupDrop == nil {
+		return
+	}
+	mx.DedupDrop.Add(ctx, int64(n), metric.WithAttributes(attribute.String("reason", reason)))
+}
+
+// RecordContextTruncated bumps the format-budget truncation counter by 1.
+// Called once per chat request whose memory list was actually truncated by
+// formatMemories (after honouring chatMinPersonalMem floor). Exported so
+// the handlers package can call it without a circular import.
+func RecordContextTruncated(ctx context.Context) {
+	mx := searchMx()
+	if mx.ContextTruncated == nil {
+		return
+	}
+	mx.ContextTruncated.Add(ctx, 1)
+}
+
+// RecordThresholdFilter emits per-item kept/dropped counts from
+// filterMemoriesByThreshold. floorActive=true marks the case where
+// filtered<minNum triggered the chatMinPersonalMem floor (sub-threshold rows
+// re-injected). 0-counts short-circuit to avoid uselessly increasing series
+// hits for empty pools. Exported so the handlers package can call it.
+func RecordThresholdFilter(ctx context.Context, kept, dropped int, floorActive bool) {
+	mx := searchMx()
+	if mx.ThresholdFilterKept == nil || mx.ThresholdFilterDropped == nil {
+		return
+	}
+	floorLabel := "false"
+	if floorActive {
+		floorLabel = "true"
+	}
+	if kept > 0 {
+		mx.ThresholdFilterKept.Add(ctx, int64(kept),
+			metric.WithAttributes(attribute.String("floor_active", floorLabel)))
+	}
+	if dropped > 0 {
+		mx.ThresholdFilterDropped.Add(ctx, int64(dropped),
+			metric.WithAttributes(attribute.String("floor_active", floorLabel)))
+	}
 }
 
 // recallBudgetTopKBuckets is the bounded set of top_k label values used by

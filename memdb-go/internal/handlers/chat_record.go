@@ -52,13 +52,38 @@ func promptTemplateLabel(basePrompt, answerStyle string, decision factualPromptD
 	return answerStyleConversational
 }
 
-// recordChatPromptUsed bumps memdb.chat.prompt_template_used_total{template=...}.
+// promptStyleLabel returns the answer-style attribute orthogonal to
+// `template`. Until 2026-05-01 the only emitted attribute was `template`,
+// which collapsed to "custom" whenever basePrompt!="" — that hid the
+// fact that LoCoMo dual-speaker harness requests are factual-style yet
+// always carry a non-empty system prompt. The new `style` attribute
+// always reflects answerStyle so factual signal survives the custom branch.
+//
+// Returns: factual | conversational | none.
+func promptStyleLabel(answerStyle string) string {
+	switch answerStyle {
+	case answerStyleFactual:
+		return answerStyleFactual
+	case answerStyleConversational:
+		return answerStyleConversational
+	default:
+		return "none"
+	}
+}
+
+// recordChatPromptUsed bumps memdb.chat.prompt_template_used_total{template,style}.
 // Called once per chat request right after buildSystemPromptWithDecision returns.
-// `decision` carries the variant (high/low/zero/none) so the label is granular:
-// factual_high | factual_low | factual_zero | conversational | custom.
+// `decision` carries the variant (high/low/zero/none) so the template label is
+// granular: factual_high | factual_low | factual_zero | conversational | custom.
+// The orthogonal `style` attribute (factual | conversational | none) preserves
+// answer-style signal even on the custom branch where template collapses to
+// "custom" by basePrompt-wins precedence.
 func recordChatPromptUsed(ctx context.Context, basePrompt, answerStyle string, decision factualPromptDecision) {
 	chatPromptMx().TemplateUsed.Add(ctx, 1,
-		metric.WithAttributes(attribute.String("template", promptTemplateLabel(basePrompt, answerStyle, decision))),
+		metric.WithAttributes(
+			attribute.String("template", promptTemplateLabel(basePrompt, answerStyle, decision)),
+			attribute.String("style", promptStyleLabel(answerStyle)),
+		),
 	)
 }
 

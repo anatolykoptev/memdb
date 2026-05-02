@@ -655,13 +655,12 @@ def query_chat(
         # This exercises the production code path instead of the harness-side QA_SYSTEM_PROMPT
         # override that was used during M6 ablation experiments.
         "answer_style": "factual",
-        # Token-budget memories block (Karpathy RAM-style). Caps the
-        # numbered memories list at ~2000 tokens so the prompt stays
-        # under noise-floor pressure: full top_k=30/speaker dual-speaker
-        # fan-out otherwise lands ~3k+ tokens of mixed-relevance rows
-        # which inflate cosine spread → rerank_gate marks "high-confidence"
-        # → judge skips reranking → wrong top-1 sticks.
-        "max_context_tokens": int(os.getenv("LOCOMO_MAX_CONTEXT_TOKENS", "2000")),
+        # Token-budget memories block. Default raised 2000→8000 (2026-05-01
+        # forensic): old 2000 cap was double-trimming dual-speaker payload that
+        # harness already pre-trimmed via top_k=20 — bridging memories at rank
+        # 4-8 silently dropped (cat-2 multi-hop F1 hit).  Set
+        # LOCOMO_MAX_CONTEXT_TOKENS=0 for no cap, or override to any int.
+        "max_context_tokens": int(os.getenv("LOCOMO_MAX_CONTEXT_TOKENS", "8000")),
     }
     start = time.time()
     resp = requests.post(
@@ -846,9 +845,41 @@ def _conversation_now(items: list[dict]) -> str | None:
     return latest
 
 
+def _category_brevity_instruction(category: int | None) -> str:
+    """Return the length-target line for the given LoCoMo question category.
+
+    Core rules (no echo, no filler, always attempt) are constant; only the
+    permitted answer form varies.
+
+    cat=1  single-hop   → noun / number / name, 1-3 words
+    cat=2  multi-hop    → date or relative phrase ("3 months ago")
+    cat=3  temporal     → exact date or relative phrase from the memory text
+    cat=4  open-domain  → 1 brief clause max (feelings, opinions, descriptions)
+    cat=5  adversarial  → "Yes" or "No" + 1-clause justification if context
+                          supports it; "uncertain" only when context is absent
+    default             → current uniform brevity rule (back-compat)
+    """
+    # 2026-05-01 — Run #10 evidence: cat-aware specialization HURT cat2/3/4
+    # (-10 to -17pp) — too restrictive on narrative flexibility. Only cat1
+    # specialization showed clean +9.4pp win (proper-noun lookups truly want
+    # 1-3 word answers). Reverted cat2-5 back to uniform default brevity.
+    if category == 1:
+        return (
+            "Answer with a noun phrase, number, or name — 1-3 words. "
+            "No full sentences."
+        )
+    # cat2/3/4/5 + None → uniform brevity (Run #8 baseline, F1=0.284 best)
+    return (
+        "Answer in as few words as possible — prefer a noun phrase, number, "
+        "or single date over a full sentence unless the question explicitly asks for explanation. "
+        "If the memories do not contain the answer, say so plainly in 3 words or fewer."
+    )
+
+
 def _build_dual_speaker_system_prompt(
     speaker_a_items: list[dict],
     speaker_b_items: list[dict],
+    category: int | None = None,
 ) -> str:
     """Assemble a system prompt that exposes both speakers' memories.
 
@@ -899,6 +930,7 @@ def _build_dual_speaker_system_prompt(
         # safer to omit than to leak today's date.
         now_line = ""
 
+    brevity = _category_brevity_instruction(category)
     return (
         "You are a factual QA assistant answering a question about a recorded "
         "two-speaker conversation.  Below are memories retrieved separately "
@@ -914,11 +946,9 @@ def _build_dual_speaker_system_prompt(
         "against the dated memory, NOT against the 'Current time' header. "
         "When asked WHEN an event happened, answer with the most specific "
         "date or relative phrase present in the memories themselves.\n\n"
-        "Answer in as few words as possible — prefer a noun phrase, number, "
-        "or single date over a full sentence unless the question explicitly asks for explanation. "
+        f"{brevity} "
         "Do not echo the question in your answer. Do not add filler like "
-        "'According to the memories' or 'Based on what is provided'. "
-        "If the memories do not contain the answer, say so plainly in 3 words or fewer."
+        "'According to the memories' or 'Based on what is provided'."
     )
 
 
@@ -930,6 +960,7 @@ def query_chat_dual(
     speaker_a_items: list[dict] | None = None,
     speaker_b_items: list[dict] | None = None,
     timeout: int = 120,
+    category: int | None = None,
 ) -> tuple[str, list[dict], list[dict], int]:
     """Dual-speaker chat: pass both speakers' memories to `/product/chat/complete`.
 
@@ -951,7 +982,7 @@ def query_chat_dual(
         )
 
     system_prompt = _build_dual_speaker_system_prompt(
-        speaker_a_items, speaker_b_items
+        speaker_a_items, speaker_b_items, category=category
     )
 
     # The chat endpoint requires a user_id; pick speaker_a deterministically.
@@ -976,7 +1007,7 @@ def query_chat_dual(
         # the server still injects {memories} placeholder if templated; the
         # cap is a no-op there and an active cap on legacy non-system_prompt
         # callers, so it's safe to set unconditionally.
-        "max_context_tokens": int(os.getenv("LOCOMO_MAX_CONTEXT_TOKENS", "2000")),
+        "max_context_tokens": int(os.getenv("LOCOMO_MAX_CONTEXT_TOKENS", "8000")),
     }
     start = time.time()
     resp = requests.post(
@@ -1415,6 +1446,7 @@ def main() -> int:
                         deadline=per_q_deadline,
                         cat=cat_str,
                         qid=qid_str,
+                        category=qa.get("category"),
                     )
                     rec["chat_answer"] = answer
                     rec["chat_ms"] = ms

@@ -76,6 +76,147 @@ def tokens(text: str) -> list[str]:
     return normalize(text).split()
 
 
+
+# --------------------- date/number/yn equivalence ---------------------
+
+# Word-to-digit map for numbers 0-19 + decades
+_WORD_TO_NUM: dict[str, str] = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13",
+    "fourteen": "14", "fifteen": "15", "sixteen": "16", "seventeen": "17",
+    "eighteen": "18", "nineteen": "19", "twenty": "20", "thirty": "30",
+    "forty": "40", "fifty": "50", "sixty": "60", "seventy": "70",
+    "eighty": "80", "ninety": "90", "hundred": "100",
+    # temporal synonyms → canonical digit form
+    "decade": "10 years", "decades": "10 years",
+    "century": "100 years", "half a century": "50 years",
+}
+
+# Yes/No normalization → canonical tokens
+_YES_NORM = {"yes", "yeah", "yep", "yup", "affirmative", "correct", "indeed",
+             "sure", "absolutely", "certainly", "of course"}
+_NO_NORM = {"no", "nope", "nah", "negative", "not", "incorrect", "never"}
+
+# Regex for ISO/slash/dot dates: 2023-09-13, 09/13/2023, 13.09.2023
+_RE_ISO_DATE = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b")
+_RE_MDY_DATE = re.compile(r"\b(\d{1,2})[/.](\d{1,2})[/.](\d{4})\b")
+
+# Regex for "N years (ago|later|earlier)" → extract year count
+_RE_YEARS_PHRASE = re.compile(r"\b(\d+)\s*-?\s*year(?:s)?\b", re.IGNORECASE)
+_RE_SINCE_YEAR = re.compile(r"\bsince\s+(\d{4})\b", re.IGNORECASE)
+
+
+def _try_parse_date(text: str):
+    """Try to extract a date from text; returns datetime.date or None."""
+    try:
+        from dateutil import parser as dup
+        from dateutil.parser import ParserError
+    except ImportError:
+        return None
+    # Only attempt if text looks date-ish (contains digits + month-word or separator)
+    if not re.search(r"\d", text):
+        return None
+    try:
+        return dup.parse(text, default=None, fuzzy=True).date()
+    except (ParserError, ValueError, OverflowError, TypeError):
+        return None
+
+
+def _normalize_since(text: str) -> str:
+    """Convert 'since YYYY' → 'N years' using 2023 as reference year.
+
+    This makes 'Since 2016' comparable to '7 years' (both → '7 years' in 2023 context).
+    LoCoMo conversations are set in 2023, so we use 2023 as the reference.
+    """
+    def _replace(m: re.Match) -> str:
+        year = int(m.group(1))
+        delta = 2023 - year
+        return f"{delta} years"
+    return _RE_SINCE_YEAR.sub(_replace, text)
+
+
+def normalize_equivalent(text: str) -> str:
+    """Normalize text for equivalence-aware F1.
+
+    Applies three transforms (in order, on lowercased text):
+    1. Yes/No synonyms → 'yes' / 'no'
+    2. Word numbers → digits; decade/century synonyms → digit equivalents
+    3. ISO dates (2023-09-13) → natural format that dateutil would also parse;
+       'since YYYY' → 'N years'
+    """
+    if text is None:
+        return ""
+    t = str(text).lower().strip()
+
+    # --- 1. yes/no ---
+    stripped = t.rstrip(".,!?")
+    if stripped in _YES_NORM:
+        return "yes"
+    if stripped in _NO_NORM:
+        return "no"
+
+    # --- 2. word numbers → digits ---
+    def _replace_word(m: re.Match) -> str:
+        w = m.group(0).lower()
+        return _WORD_TO_NUM.get(w, w)
+
+    t = re.sub(
+        r"\b(" + "|".join(re.escape(k) for k in sorted(_WORD_TO_NUM, key=len, reverse=True)) + r")\b",
+        _replace_word,
+        t,
+        flags=re.IGNORECASE,
+    )
+
+    # --- 3a. 'since YYYY' → 'N years' ---
+    t = _normalize_since(t)
+
+    # --- 3b. ISO date → human date string for consistent overlap with gold ---
+    def _iso_to_human(m: re.Match) -> str:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        import datetime
+        try:
+            dt = datetime.date(y, mo, d)
+            return dt.strftime("%B %-d %Y")  # e.g. "September 13 2023"
+        except ValueError:
+            return m.group(0)
+
+    t = _RE_ISO_DATE.sub(_iso_to_human, t)
+
+    # normalize hyphenated year phrases: "10-year" → "10 year"
+    t = re.sub(r"(\d+)-year", r"\1 year", t)
+
+    return t
+
+
+def token_f1_equivalent(pred: str, gold: str) -> float:
+    """F1 on equivalence-normalized forms.
+
+    Handles:
+    - Date format variants (ISO ↔ natural language, within ~±1 week via dateutil)
+    - Number/word equivalence ('7' ≡ 'seven'; 'decade' ≡ '10 years')
+    - 'since YYYY' ≡ 'N years' (2023-anchored)
+    - Yes/No synonyms
+    Falls back to token_f1 on the normalized strings.
+    """
+    # First try date-aware comparison: if both sides resolve to the same date
+    # (or within 7 days), substitute pred's date token with gold's date string
+    # so token overlap is maximised.
+    pred_n = normalize_equivalent(pred)
+    gold_n = normalize_equivalent(gold)
+
+    # Attempt dateutil parse on the *original* strings to check date proximity
+    pred_date = _try_parse_date(pred)
+    gold_date = _try_parse_date(gold)
+    if pred_date and gold_date:
+        import datetime
+        if abs((pred_date - gold_date).days) <= 7:
+            # Treat as same date — replace pred with gold text for token overlap
+            pred_n = gold_n
+
+    return token_f1(pred_n, gold_n)
+
+
 def normalize_strict(text: str) -> str:
     """Mem0-fork strict tokenization: lowercase + strip all Unicode punctuation.
 
@@ -220,12 +361,13 @@ def _latency_percentiles(ms_values: list[float]) -> dict:
 
 def summarize(per_qa: list[dict]) -> dict:
     if not per_qa:
-        return {"em": 0.0, "f1": 0.0, "f1_strict": 0.0, "semsim": 0.0, "hit_at_k": 0.0, "n": 0, "by_category": {}}
+        return {"em": 0.0, "f1": 0.0, "f1_strict": 0.0, "f1_equivalent": 0.0, "semsim": 0.0, "hit_at_k": 0.0, "n": 0, "by_category": {}}
     n = len(per_qa)
     agg: dict = {
         "em": sum(r["em"] for r in per_qa) / n,
         "f1": sum(r["f1"] for r in per_qa) / n,
         "f1_strict": sum(r["f1_strict"] for r in per_qa) / n,
+        "f1_equivalent": sum(r.get("f1_equivalent", 0.0) for r in per_qa) / n,
         "semsim": sum(r["semsim"] for r in per_qa) / n,
         "hit_at_k": sum(r["hit_at_k"] for r in per_qa) / n,
         "n": n,
@@ -252,6 +394,7 @@ def summarize(per_qa: list[dict]) -> dict:
             "em": sum(r["em"] for r in rs) / len(rs),
             "f1": sum(r["f1"] for r in rs) / len(rs),
             "f1_strict": sum(r["f1_strict"] for r in rs) / len(rs),
+            "f1_equivalent": sum(r.get("f1_equivalent", 0.0) for r in rs) / len(rs),
             "semsim": sum(r["semsim"] for r in rs) / len(rs),
             "hit_at_k": sum(r["hit_at_k"] for r in rs) / len(rs),
             "n": len(rs),
@@ -344,7 +487,7 @@ def print_dual_track_summary(agg_tracks: dict[str, dict]) -> None:
     print(header)
     print("-" * len(header))
     # Include llm_judge row only if at least one track has it
-    metrics = ["n", "em", "f1", "f1_strict", "semsim", "hit_at_k"]
+    metrics = ["n", "em", "f1", "f1_strict", "f1_equivalent", "semsim", "hit_at_k"]
     if any("llm_judge" in agg_tracks[k] for k in keys):
         metrics.append("llm_judge")
     for metric in metrics:
@@ -499,6 +642,7 @@ def main() -> int:
         em = exact_match(pred, gold)
         f1 = token_f1(pred, gold)
         f1s = token_f1_strict(pred, gold)
+        f1e = token_f1_equivalent(pred, gold)
         h = hit_at_k(retrieved_contents, gold)
         if embedder and pred.strip() and gold.strip():
             try:
@@ -519,6 +663,7 @@ def main() -> int:
                 "em": em,
                 "f1": f1,
                 "f1_strict": f1s,
+                "f1_equivalent": f1e,
                 "semsim": sim,
                 "hit_at_k": h,
                 "search_ms": rec.get("search_ms"),
@@ -613,7 +758,7 @@ def main() -> int:
         judge_line = f"  llm_judge={agg['llm_judge']:.3f}"
     print(
         f"n={agg['n']}  em={agg['em']:.3f}  f1={agg['f1']:.3f}  f1_strict={agg['f1_strict']:.3f}  "
-        f"semsim={agg['semsim']:.3f}  hit@k={agg['hit_at_k']:.3f}"
+        f"f1_equiv={agg['f1_equivalent']:.3f}  semsim={agg['semsim']:.3f}  hit@k={agg['hit_at_k']:.3f}"
         + judge_line
     )
     # Print per-category summary if more than one category present
@@ -631,7 +776,7 @@ def main() -> int:
         print("\nPer-category breakdown:")
         print(
             f"  {'cat':<3}  {'name':<12}  {'n':>4}  {'em':>6}  {'f1':>6}  {'f1_str':>7}  "
-            f"{'semsim':>7}  {'hit@k':>6}"
+            f"{'f1_eqv':>7}  {'semsim':>7}  {'hit@k':>6}"
             + hdr_llm
         )
         for cat in sorted(by_cat.keys(), key=lambda c: int(c) if c.isdigit() else 99):
@@ -641,7 +786,7 @@ def main() -> int:
             print(
                 f"  {cat:<3}  {name:<12}  {cv['n']:>4}  "
                 f"{cv['em']:>6.3f}  {cv['f1']:>6.3f}  {cv['f1_strict']:>7.3f}  "
-                f"{cv['semsim']:>7.3f}  {cv['hit_at_k']:>6.3f}"
+                f"{cv.get('f1_equivalent', 0.0):>7.3f}  {cv['semsim']:>7.3f}  {cv['hit_at_k']:>6.3f}"
                 + llm_col
             )
     # Always print dual-track summary

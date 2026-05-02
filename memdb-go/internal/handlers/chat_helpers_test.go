@@ -117,3 +117,52 @@ func TestFilterOuterMemory_MixedTypes(t *testing.T) {
 		t.Errorf("expected 2 personal memories, got %d", len(result))
 	}
 }
+
+// ---- M15 — chat magic-number env exposure ---------------------------------
+
+func TestM15_ChatMinPersonalMem_Default(t *testing.T) {
+	if got := chatMinPersonalMem(); got != defaultChatMinPersonalMem {
+		t.Errorf("default: got %d want %d", got, defaultChatMinPersonalMem)
+	}
+}
+
+func TestM15_ChatMinPersonalMem_Override(t *testing.T) {
+	t.Setenv("MEMDB_M15_CHAT_MIN_PERSONAL_MEM", "7")
+	if got := chatMinPersonalMem(); got != 7 {
+		t.Errorf("override: got %d want 7", got)
+	}
+}
+
+func TestM15_ChatMinPersonalMem_Invalid(t *testing.T) {
+	for _, v := range []string{"-1", "51", "abc"} {
+		t.Setenv("MEMDB_M15_CHAT_MIN_PERSONAL_MEM", v)
+		if got := chatMinPersonalMem(); got != defaultChatMinPersonalMem {
+			t.Errorf("invalid %q: got %d want %d", v, got, defaultChatMinPersonalMem)
+		}
+	}
+}
+
+func TestM15_ChatDefaultThreshold_Default(t *testing.T) {
+	got := chatDefaultThreshold()
+	if got < defaultChatThreshold-1e-9 || got > defaultChatThreshold+1e-9 {
+		t.Errorf("default: got %v want %v", got, defaultChatThreshold)
+	}
+}
+
+func TestM15_ChatDefaultThreshold_Override(t *testing.T) {
+	t.Setenv("MEMDB_M15_CHAT_DEFAULT_THRESHOLD", "0.5")
+	got := chatDefaultThreshold()
+	if got < 0.5-1e-9 || got > 0.5+1e-9 {
+		t.Errorf("override: got %v want 0.5", got)
+	}
+}
+
+func TestM15_ChatDefaultThreshold_Invalid(t *testing.T) {
+	for _, v := range []string{"-0.1", "1.5", "abc"} {
+		t.Setenv("MEMDB_M15_CHAT_DEFAULT_THRESHOLD", v)
+		got := chatDefaultThreshold()
+		if got < defaultChatThreshold-1e-9 || got > defaultChatThreshold+1e-9 {
+			t.Errorf("invalid %q: got %v want %v", v, got, defaultChatThreshold)
+		}
+	}
+}
