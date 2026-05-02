@@ -1,16 +1,25 @@
 package rerank
 
-// ce_math_fallback.go — CrossEncoder → MathReranker fallback.
+// ce_math_fallback.go — CrossEncoder → MathReranker fallback (+ pre-bypass).
 //
-// Two failure modes of gte-multi-rerank running on embed-server motivate
-// this file:
+// Three failure modes of the live CE call motivate this file:
 //
 //  1. Availability — ceClient returns StatusDegraded (timeout, 5xx,
 //     ErrCircuitOpen). Pattern from go-search PR #10.
 //  2. Quality — ceClient returns StatusOk but the top-1 score is below
-//     MEMDB_CE_QUALITY_FLOOR (default 0.1). gte-multi-rerank hallucinates
-//     near-zero scores on narrow OOD English queries even when cosine
-//     similarity is 0.9+. Pattern from go-search PR #14.
+//     MEMDB_CE_QUALITY_FLOOR. gte-multi-rerank hallucinates near-zero
+//     scores on narrow OOD queries. Pattern from go-search PR #14.
+//  3. Spread — top-1 / top-2 ratio < MEMDB_CE_SPREAD_FLOOR (default 1.5).
+//     CE returns scores all clustered near zero — no relevance separation.
+//     Math fallback gives better ranking on these queries. NEW 2026-05-02.
+//
+// Plus a PRE-BYPASS optimization (NEW 2026-05-02): if cosine top-1 across
+// the input docs is already > MEMDB_CE_BYPASS_COSINE_THRESHOLD (default 0
+// = disabled; recommended 0.85), skip the live CE call entirely and return
+// math scores. Saves ~500ms/query on high-confidence retrieval where CE
+// would only re-confirm the cosine ranking. Forensic 2026-05-02 found 86%
+// of CE calls dispatched to math fallback anyway — pre-bypass eliminates
+// the wasted CE compute.
 //
 // Without a fallback the require_positive_ce / threshold_filter gate
 // downstream drops every result on either failure. With it, the chat
@@ -33,46 +42,153 @@ const (
 	// CE returning StatusOk with top-1 score below this floor is treated
 	// as a hallucination and routes through cosine. Set to 0 to disable
 	// the quality gate (preserve pre-#14 behaviour).
+	//
+	// 2026-05-02 — default lowered 0.1 → 0.01 after embed-server flipped
+	// to sigmoid normalization by default. Sigmoid range is [0,1]; 0.01
+	// equals raw logit ≈ -4.6 (hard negative). The old 0.1 default was
+	// tuned for raw-logit scale [-10,+10] where 0.1 ~ logit -2.2 (soft
+	// negative); on sigmoid scale the same threshold caught all near-zero
+	// CE outputs and routed 86% of calls through math fallback (Run #13
+	// forensic). Lower default keeps the gate sharp for genuine
+	// hallucinations only.
 	ceQualityFloorEnv     = "MEMDB_CE_QUALITY_FLOOR"
-	ceQualityFloorDefault = 0.1
+	ceQualityFloorDefault = 0.01
+
+	// ceSpreadFloorEnv triggers the low-quality fallback when CE returns
+	// scores with insufficient spread (top-1 / top-2 < floor). Value 1.0
+	// (default) disables — top-1 must beat top-2 by ≥1.0× to be considered
+	// "discriminating". Recommended 1.5 (top-1 50% above runner-up).
+	//
+	// Rationale: CE returning [0.06, 0.05, 0.04] passes the absolute floor
+	// (0.06 > 0.01) but provides zero ranking signal — math cosine on the
+	// same docs usually picks a clearer winner. Spread floor catches this
+	// case the absolute floor misses.
+	ceSpreadFloorEnv     = "MEMDB_CE_SPREAD_FLOOR"
+	ceSpreadFloorDefault = 1.0 // disabled by default; opt-in via env
+
+	// ceBypassCosineThresholdEnv enables the pre-bypass optimization. When
+	// cosine top-1 (computed from QueryVec + EmbeddingsByID, already loaded)
+	// exceeds this threshold, the live CE call is skipped entirely — math
+	// cosine handles the ranking. Saves ~500ms/query on high-confidence
+	// retrieval where CE would only re-confirm cosine order.
+	//
+	// Default 0 = disabled (preserve legacy "always call CE" behaviour).
+	// Recommended 0.85 — gte-multi-rerank rarely overturns cosine top-1
+	// when cosine confidence is that high; the per-query CE compute is
+	// pure waste on those queries.
+	ceBypassCosineThresholdEnv     = "MEMDB_CE_BYPASS_COSINE_THRESHOLD"
+	ceBypassCosineThresholdDefault = 0.0
 )
 
 // ceQualityFloor reads MEMDB_CE_QUALITY_FLOOR; returns the default on
 // missing / malformed / negative values.
 func ceQualityFloor() float64 {
-	raw := strings.TrimSpace(os.Getenv(ceQualityFloorEnv))
-	if raw == "" {
-		return ceQualityFloorDefault
-	}
-	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil || v < 0 {
-		return ceQualityFloorDefault
+	return parseFloatEnv(ceQualityFloorEnv, ceQualityFloorDefault)
+}
+
+// ceSpreadFloor reads MEMDB_CE_SPREAD_FLOOR; returns the default on
+// missing / malformed / out-of-range values. Range [1.0, 100.0].
+func ceSpreadFloor() float64 {
+	v := parseFloatEnv(ceSpreadFloorEnv, ceSpreadFloorDefault)
+	if v < 1.0 {
+		return ceSpreadFloorDefault
 	}
 	return v
 }
 
-// rerankWithMathFallback is the CE-or-cosine wrapper. Healthy path returns
-// CE scores directly; degraded or low-quality responses route through
-// MathReranker when QueryVec is set. Returns nil only when CE was degraded
-// AND no QueryVec — caller is expected to treat nil as "no scores, leave
-// items as-is" (callers in ce_live.go already do).
+// ceBypassCosineThreshold reads MEMDB_CE_BYPASS_COSINE_THRESHOLD; returns
+// the default on missing / malformed / out-of-range values. Range [0, 1].
+// 0 = disabled (no pre-bypass).
+func ceBypassCosineThreshold() float64 {
+	v := parseFloatEnv(ceBypassCosineThresholdEnv, ceBypassCosineThresholdDefault)
+	if v < 0 || v > 1 {
+		return ceBypassCosineThresholdDefault
+	}
+	return v
+}
+
+// parseFloatEnv reads an env var as float64. Returns def on empty / parse
+// error / negative. Bounds-checking is callee's responsibility.
+func parseFloatEnv(name string, def float64) float64 {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil || v < 0 {
+		return def
+	}
+	return v
+}
+
+// rerankWithMathFallback is the CE-or-cosine wrapper. Three paths:
+//
+//  1. Pre-bypass (NEW 2026-05-02): if cosine top-1 from QueryVec exceeds
+//     MEMDB_CE_BYPASS_COSINE_THRESHOLD (default 0=disabled), skip live CE
+//     entirely and return math scores. OnMathFallback fires with reason
+//     "bypass_cosine".
+//  2. Healthy: live CE returns StatusOk + scores pass quality+spread floors
+//     → return CE scores directly.
+//  3. Degraded / low-quality / poor-spread: route through MathReranker
+//     (cosine on QueryVec). OnMathFallback fires with reason
+//     "degraded" | "low_quality" | "low_spread".
+//
+// Returns nil only when the live path failed AND no QueryVec — caller is
+// expected to treat nil as "no scores, leave items as-is" (callers in
+// ce_live.go already do).
 func (ce CrossEncoder) rerankWithMathFallback(ctx context.Context, query string, docs []rerank.Doc) []rerank.Scored {
+	// Path 1 — pre-bypass on cosine confidence. Cheap (cosine already
+	// computed by retrieval); only fires when we have QueryVec to bypass to.
+	bypassFloor := ceBypassCosineThreshold()
+	if bypassFloor > 0 && len(ce.QueryVec) > 0 && len(docs) > 0 {
+		topCosine := topCosineScore(ce.QueryVec, docs)
+		if topCosine >= float32(bypassFloor) {
+			slog.Debug("ce_rerank: pre-bypass via cosine confidence",
+				slog.Float64("top_cosine", float64(topCosine)),
+				slog.Float64("threshold", bypassFloor),
+			)
+			if ce.OnMathFallback != nil {
+				ce.OnMathFallback(ctx, "bypass_cosine")
+			}
+			return mathRerankCosine(ce.QueryVec, docs)
+		}
+	}
+
+	// Path 2/3 — live CE call.
 	res, err := ce.Client.RerankWithResult(ctx, query, docs)
 
 	ceDegraded := res == nil || res.Status == rerank.StatusDegraded
 	ceLowQuality := false
-	floor := ceQualityFloor()
-	if !ceDegraded && floor > 0 && len(res.Scored) > 0 {
-		topScore := float64(res.Scored[0].Score)
+	ceLowSpread := false
+
+	if !ceDegraded && len(res.Scored) > 0 {
+		floor := ceQualityFloor()
+		spreadFloor := ceSpreadFloor()
+
+		// Compute top-1 and top-2 in one pass.
+		var top1, top2 float64
 		for _, s := range res.Scored {
-			if float64(s.Score) > topScore {
-				topScore = float64(s.Score)
+			score := float64(s.Score)
+			switch {
+			case score > top1:
+				top2 = top1
+				top1 = score
+			case score > top2:
+				top2 = score
 			}
 		}
-		ceLowQuality = topScore < floor
+
+		if floor > 0 {
+			ceLowQuality = top1 < floor
+		}
+		// Spread check only when both scores are non-trivial; avoids
+		// 0/0 noise on tiny batches or all-zero CE output.
+		if !ceLowQuality && spreadFloor > 1.0 && top1 > 0 && top2 > 0 {
+			ceLowSpread = (top1 / top2) < spreadFloor
+		}
 	}
 
-	if !ceDegraded && !ceLowQuality {
+	if !ceDegraded && !ceLowQuality && !ceLowSpread {
 		return res.Scored
 	}
 
@@ -86,8 +202,11 @@ func (ce CrossEncoder) rerankWithMathFallback(ctx context.Context, query string,
 	}
 
 	reason := "degraded"
-	if ceLowQuality {
+	switch {
+	case ceLowQuality:
 		reason = "low_quality"
+	case ceLowSpread:
+		reason = "low_spread"
 	}
 	slog.Warn("ce_rerank: falling back to MathReranker",
 		slog.String("reason", reason),
@@ -97,6 +216,26 @@ func (ce CrossEncoder) rerankWithMathFallback(ctx context.Context, query string,
 		ce.OnMathFallback(ctx, reason)
 	}
 	return mathRerankCosine(ce.QueryVec, docs)
+}
+
+// topCosineScore returns the maximum cosine similarity between queryVec
+// and any doc's EmbedVector. Docs without an EmbedVector (or mismatched
+// dim) contribute 0. Returns 0 on empty input.
+func topCosineScore(queryVec []float32, docs []rerank.Doc) float32 {
+	if len(queryVec) == 0 || len(docs) == 0 {
+		return 0
+	}
+	var top float32
+	for _, d := range docs {
+		if len(d.EmbedVector) != len(queryVec) {
+			continue
+		}
+		s := cosineFloat32(queryVec, d.EmbedVector)
+		if s > top {
+			top = s
+		}
+	}
+	return top
 }
 
 // mathRerankCosine reorders docs by cosine similarity to queryVec. Docs
