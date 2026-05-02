@@ -151,7 +151,7 @@ def judge(
     gold: str,
     prediction: str,
     *,
-    model: str = "gemini-2.5-flash",
+    model: str | None = None,
     api_base: str | None = None,
     api_key: str | None = None,
     timeout: int = 30,
@@ -162,6 +162,10 @@ def judge(
     Falls back to {"score": 0, "reason": "judge_error: <msg>"} on any failure.
     Uses shared module cache unless an explicit cache instance is provided.
     """
+    # Env override: LOCOMO_JUDGE_MODEL=gpt-4o-mini allows A/B against Mem0 reference model.
+    # Priority: explicit arg > env > built-in default.
+    effective_model = model or os.getenv("LOCOMO_JUDGE_MODEL", "gemini-2.5-flash")
+
     if cache is None:
         cache = _shared_cache
 
@@ -174,7 +178,7 @@ def judge(
         question,
         gold,
         prediction,
-        model=model,
+        model=effective_model,
         api_base=api_base,
         api_key=api_key,
         timeout=timeout,
