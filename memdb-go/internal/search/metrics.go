@@ -133,6 +133,13 @@ type searchMetricsInstruments struct {
 	// signal that MEMDB_M15_CHAT_DEFAULT_THRESHOLD is too high).
 	ThresholdFilterKept    metric.Int64Counter
 	ThresholdFilterDropped metric.Int64Counter
+	// EnhanceTruncated — count of items dropped by EnhanceMemories when
+	// the input pool exceeds enhanceMaxMemories (15). Forensic 2026-05-02
+	// fix #4: the legacy code path used insertion-order truncation, now
+	// replaced with relativity-DESC truncation. The counter surfaces
+	// pools that habitually overflow the cap (signal that the upstream
+	// retrieve+rerank is over-producing or that the cap should grow).
+	EnhanceTruncated metric.Int64Counter
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -227,6 +234,8 @@ func searchMx() *searchMetricsInstruments {
 			metric.WithDescription("Per-item kept count from filterMemoriesByThreshold. Label floor_active=true when chatMinPersonalMem floor re-injected sub-threshold rows."))
 		thrDropped, _ := m.Int64Counter("memdb.search.threshold_filter_dropped_total",
 			metric.WithDescription("Per-item dropped count from filterMemoriesByThreshold. Label floor_active=true when chatMinPersonalMem floor was triggered."))
+		enhTrunc, _ := m.Int64Counter("memdb.search.enhance_truncated_total",
+			metric.WithDescription("Items dropped by EnhanceMemories relativity-DESC truncation when the input pool exceeds enhanceMaxMemories (15). Forensic 2026-05-02 fix #4."))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -263,6 +272,7 @@ func searchMx() *searchMetricsInstruments {
 			ContextTruncated:       ctxTrunc,
 			ThresholdFilterKept:    thrKept,
 			ThresholdFilterDropped: thrDropped,
+			EnhanceTruncated:       enhTrunc,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -384,6 +394,7 @@ func searchMx() *searchMetricsInstruments {
 			thrKept.Add(ctx, 0, metric.WithAttributes(attribute.String("floor_active", fa)))
 			thrDropped.Add(ctx, 0, metric.WithAttributes(attribute.String("floor_active", fa)))
 		}
+		enhTrunc.Add(ctx, 0)
 	})
 	return searchMetrics
 }
@@ -489,6 +500,19 @@ func RecordThresholdFilter(ctx context.Context, kept, dropped int, floorActive b
 		mx.ThresholdFilterDropped.Add(ctx, int64(dropped),
 			metric.WithAttributes(attribute.String("floor_active", floorLabel)))
 	}
+}
+
+// recordEnhanceTruncated bumps the EnhanceMemories truncation counter by
+// `dropped`. n <= 0 short-circuits — most calls don't truncate.
+func recordEnhanceTruncated(ctx context.Context, dropped int) {
+	if dropped <= 0 {
+		return
+	}
+	mx := searchMx()
+	if mx.EnhanceTruncated == nil {
+		return
+	}
+	mx.EnhanceTruncated.Add(ctx, int64(dropped))
 }
 
 // recallBudgetTopKBuckets is the bounded set of top_k label values used by
