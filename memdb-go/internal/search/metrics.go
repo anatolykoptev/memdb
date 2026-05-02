@@ -85,6 +85,12 @@ type searchMetricsInstruments struct {
 	// 0.1) — known gte-multi-rerank failure mode on narrow OOD queries.
 	// Pattern lifted from go-search PRs #10 + #14.
 	CEMathFallback metric.Int64Counter
+	// BareAtomDemoted — Pattern-B bare-token atomic poisoning fix.
+	// Fires once per search call that passes through DemoteBareAtoms.
+	// moved="true" when rank-1 was swapped with a longer candidate;
+	// moved="false" when the guard fired but no demotion was needed.
+	// Gate: MEMDB_DEMOTE_BARE_ATOMS (default ON).
+	BareAtomDemoted metric.Int64Counter
 }
 
 func searchMx() *searchMetricsInstruments {
@@ -156,6 +162,8 @@ func searchMx() *searchMetricsInstruments {
 			metric.WithDescription("Memobase attributed_to post-filter outcomes per row (outcome=kept|dropped|missing|disabled)"))
 		ceMath, _ := m.Int64Counter("memdb.search.ce_math_fallback_total",
 			metric.WithDescription("CE→MathReranker fallback invocations per live CE call (reason=degraded|low_quality). degraded = ceClient StatusDegraded; low_quality = top-1 CE score below MEMDB_CE_QUALITY_FLOOR."))
+		bareAtom, _ := m.Int64Counter("memdb_search_bare_atom_demoted_total",
+			metric.WithDescription("Pattern-B bare-token atom demotion outcomes per search call (moved=true|false). true = rank-1 swapped with a longer candidate; false = guard checked but no swap needed. Gate: MEMDB_DEMOTE_BARE_ATOMS."))
 		searchMetrics = &searchMetricsInstruments{
 			D4Rewrite:        d4,
 			D7CoT:            d7,
@@ -184,6 +192,7 @@ func searchMx() *searchMetricsInstruments {
 			CountingBoost:     cntBoost,
 			AttributionFilter: attrFilter,
 			CEMathFallback:    ceMath,
+			BareAtomDemoted:   bareAtom,
 		}
 		// Pre-register at zero (like db/metrics.go pattern) so scrapers see
 		// the series before the first real event fires — avoids a
@@ -279,6 +288,11 @@ func searchMx() *searchMetricsInstruments {
 		// AttributedTo-scoped query arrives.
 		for _, oc := range []string{"kept", "dropped", "missing", "disabled"} {
 			attrFilter.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
+		}
+		// Pre-register bare-atom demotion outcomes so dashboards see both
+		// series from container start, before the first qualifying search.
+		for _, moved := range []string{"true", "false"} {
+			bareAtom.Add(ctx, 0, metric.WithAttributes(attribute.String("moved", moved)))
 		}
 	})
 	return searchMetrics

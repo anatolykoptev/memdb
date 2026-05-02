@@ -27,6 +27,7 @@ func (s *SearchService) mergeSearchResults(ctx context.Context, psr *parallelSea
 	}
 
 	textMerged = mergeVectorAndFulltextDispatch(psr.textVec, psr.textFT)
+	textMerged = DemoteBareAtoms(ctx, textMerged)
 	skillMerged = mergeVectorAndFulltextDispatch(psr.skillVec, psr.skillFT)
 	toolMerged = mergeVectorAndFulltextDispatch(psr.toolVec, psr.toolFT)
 
