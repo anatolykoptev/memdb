@@ -986,50 +986,38 @@ short of MemOS**, **-2.64pp short of Zep**, **-3.28pp short of Memobase leader**
 
 ---
 
-### 2026-05-01 — M14: Karpathy 7-run optimization sprint (PRs #277, #278, #279, embed-server #21)
+### 2026-05-01 — M14: Karpathy 8-run sprint (PRs #277-282 merged, embed-server #21 open)
 
-Multi-track optimization session (chat-50 stratified, conv-26): SPLADE hybrid retrieval + CE no-retry/FTS toggle/lower quality floor + embed-server Phase H.1-H.4+H.7 (RERANKER_BATCH_MAX, zero-alloc tokenize, semaphore, ModernBERT mounted, token cache) + **brevity prompt fix** (the actual win — see lesson below).
+Final F1 = **0.284** (chat-50 stratified, conv-26, 50 QAs). +**80% relative** vs M11 v12 baseline 0.158. New `f1_strict=0.296` (Mem0 normalization) added for leaderboard comparison.
 
-| Metric | v12 baseline (M11) | M14 final (Run #7) | Δ rel |
+| Metric | v12 (M11) | **Run #8 final** | Δ rel |
 |---|---|---|---|
-| **F1 aggregate** | 0.158 | **0.214** | **+35%** |
-| F1 excl5 | — | 0.254 | — |
-| EM | 0.000 | **0.040** | first non-zero |
-| semsim | — | 0.840 | — |
-| LLM judge | 0.640 | 0.520 | −19% (verbose-pref tradeoff) |
-| cat1 single-hop | 0.187 | **0.258** | +38% |
-| **cat2 multi-hop** | 0.137 | **0.360** | **×2.6** |
-| cat3 temporal | 0.134 | 0.129 | flat |
-| cat4 open-domain | 0.240 | 0.270 | +13% |
-| cat5 adversarial | 0.091 | 0.054 | −41% (concise=overconfident tradeoff) |
-| pred_length p50 | 87 chars | **32 chars** | 3× shorter |
+| F1 aggregate | 0.158 | **0.284** | **+80%** |
+| F1 strict (Mem0) | — | **0.296** | new |
+| F1 excl5 | — | 0.324 | — |
+| EM | 0.000 | **0.080** | first ever non-trivial |
+| semsim | — | 0.855 | — |
+| LLM judge | 0.640 | 0.560 | −12% (concise tradeoff) |
+| cat1 | 0.187 | 0.254 | +36% |
+| **cat2** | 0.137 | **0.396** | **×2.9** |
+| cat3 | 0.134 | 0.252 | +88% |
+| cat4 | 0.240 | 0.394 | +64% |
+| cat5 | 0.091 | 0.125 | +37% |
 
-**7-run F1 progression** (chat-50 conv-26, full per-cat in `project_karpathy_rerank_optimization_2026-05-01.md`):
-- Run #1 SPLADE basic: 0.163 (CE retry on, MAX_DOCS 10)
-- Run #2 (CE no-retry, MAX_DOCS 5, MAX_CHARS 1000): 0.160 (cat1 0.239, healthy CE 43%)
-- Run #3 (FTS off): 0.159 (cat3 0.169 win, cat2/cat4 net loss → reverted)
-- Run #4 (workers 5 saturated CE): 0.156 (cat1 0.153)
-- Run #6 (full infra bundle): 0.165 (cat2 0.200 record so far)
-- **Run #7 (brevity prompt)**: **0.214** ← biggest single-edit win of the entire MemDB project
+**8-run progression**: v12 0.158 → #1 0.163 → #2 0.160 → #6 0.165 → #7 (brevity prompt) 0.214 → **#8 (Pattern B + telemetry + dozor fresh deploy) 0.284**.
 
-### Key lesson — when retrieval is healthy, prompt is the binding constraint
+**Single biggest win**: 5-line brevity prompt edit (#279) — +5.6pp F1. Validated lesson: when retrieval+rerank pipeline healthy, the LLM answering prompt is binding constraint on token-precision F1.
 
-**6 runs of infrastructure tuning** (SPLADE hybrid, CE optimizations, embed-server Phase H, ModernBERT A/B, FTS toggle, semaphore, token cache, RERANKER_BATCH_MAX): **+0.7pp F1 cumulative**.
+**6 PRs merged** (MemDB main): #277 SPLADE hybrid · #278 CE no-retry/FTS/floor · #279 brevity prompt · #280 milestones · #281 atomic demote · #282 eval telemetry. **embed-server PR #21** open (Phase H.1-H.4+H.7).
 
-**1 prompt edit** (5 lines in `query.py:917`, "as few words as possible" + filler-suppression): **+5.6pp F1**.
-
-8× more impact from a 5-minute change than 6 hours of infrastructure work. Cat4 forensic agent predicted +3pp, measured +10.6pp (3.5× underestimate). LoCoMo gold answers are 2-token noun phrases ("7 years", "Yes", "by carving out me-time") — verbose 8-token sentences with correct content tank token-precision F1 even when retrieval is perfect.
-
-**Future protocol**: ALWAYS test the answer prompt FIRST before infrastructure rabbit holes. Forensic agent on cat regression FIRST when chasing per-category gains.
-
-### Validated architectural findings (saved in memory + embed-server ROADMAP H.1-H.14)
-
-- **`rerank.WithRetry(NoRetry)` from go-search prior art** — gokit retry burns timeout budget before MathReranker fallback fires. 84% degraded → 1%
-- **Cross-encoder pairs независимы** → batched coalesce НЕ amortizes (linear in batch_dim). pool=1+INTRA=4+WAIT=100 measured WORSE → reverted
-- **ModernBERT INT8 NOT viable on ARM** — 90 DynamicQuantizeLinear ops/inference + RMSNorm chains. q4f16 fails on `com.microsoft.Gelu(1)` for `tensor(float16)` in CPUExecutionProvider. 12-18% slower than gte-multi at apples-to-apples max_len=256
-- **Token cache (H.7) works but tokenize не bottleneck для CE** — 50ms / 2000ms = 2.5%. Cache hit 18% in eval, no observable wall-clock impact
-- **embed-server already best-in-class on ARM ONNX + INT8** per competitive audit (TEI ORT backend FP32-only)
-- **0.62 CE/sec close to theoretical ceiling** for INT8 GTE-multi on 4-core Neoverse-N1
+**Validated architectural findings** (full list in `~/.claude/projects/-home-krolik/memory/project_karpathy_rerank_optimization_2026-05-01.md`):
+- `rerank.WithRetry(NoRetry)` from go-search prior art killed 84% degraded fallback → 1%
+- Cross-encoder pairs are independent → batched coalesce does NOT amortize linearly. pool=1+INTRA=4+WAIT=100 measured WORSE → reverted
+- ModernBERT INT8 NOT viable on ARM (90 DynamicQuantizeLinear ops + RMSNorm chains; q4f16 fails on com.microsoft.Gelu fp16 CPU EP)
+- Token cache (H.7) works (18% hit) but tokenize не bottleneck для CE (50ms/2000ms)
+- embed-server already best-in-class on ARM ONNX + INT8 per competitive audit
+- 0.62 CE/sec close to theoretical ceiling for INT8 GTE-multi on 4-core Neoverse-N1
+- Pattern B atomic demote heuristic too strict — 0 of 150 fires in eval. Loosen thresholds for next run.
 
 ### Files
 

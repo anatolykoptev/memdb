@@ -94,21 +94,39 @@ var chatPromptTemplateLabels = []string{
 	"custom",
 }
 
+// chatPromptStyleLabels lists the canonical style label values for
+// memdb.chat.prompt_template_used_total. The `style` attribute (added
+// 2026-05-01) is orthogonal to `template` and preserves answer_style
+// signal on the custom branch where template collapses to "custom".
+// Labels: factual | conversational | none.
+var chatPromptStyleLabels = []string{
+	"factual",
+	"conversational",
+	"none",
+}
+
 // chatPromptMx returns the singleton chat-prompt instruments, lazy-initialised.
-// Counter memdb.chat.prompt_template_used_total{template=factual_high|factual_low|factual_zero|conversational|custom}.
+// Counter memdb.chat.prompt_template_used_total{template,style}.
+//   - template ∈ factual_high | factual_low | factual_zero | conversational | custom
+//   - style    ∈ factual | conversational | none
 func chatPromptMx() *chatPromptMetricsInstruments {
 	chatPromptOnce.Do(func() {
 		meter := otel.Meter("memdb-go/chat")
 		used, _ := meter.Int64Counter("memdb.chat.prompt_template_used_total",
-			metric.WithDescription("Count of chat requests per system-prompt template (factual_high/factual_low/factual_zero/conversational/custom)."),
+			metric.WithDescription("Count of chat requests per (system-prompt template, answer style). template={factual_high,factual_low,factual_zero,conversational,custom}; style={factual,conversational,none}."),
 		)
-		// Pre-register all template label values at zero so Prometheus emits
-		// the series before the first real chat request. Matches the enum in
-		// promptTemplateLabel (chat_record.go).
+		// Pre-register the template×style cartesian product at zero so Prometheus
+		// emits each series before the first real chat request. Matches the enums
+		// in promptTemplateLabel + promptStyleLabel (chat_record.go).
 		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		ctx := context.Background()
 		for _, tpl := range chatPromptTemplateLabels {
-			used.Add(ctx, 0, metric.WithAttributes(attribute.String("template", tpl)))
+			for _, style := range chatPromptStyleLabels {
+				used.Add(ctx, 0, metric.WithAttributes(
+					attribute.String("template", tpl),
+					attribute.String("style", style),
+				))
+			}
 		}
 		chatPromptMetrics = &chatPromptMetricsInstruments{TemplateUsed: used}
 	})

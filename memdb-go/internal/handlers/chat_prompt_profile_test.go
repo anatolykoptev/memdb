@@ -96,8 +96,9 @@ func TestFormatProfileSection_TruncatesOnOversize(t *testing.T) {
 	}
 
 	got := formatProfileSection(context.Background(), entries)
-	if approxTokens(got) > profileMaxApproxToken+50 {
-		t.Errorf("section not truncated: %d approx tokens (cap %d)", approxTokens(got), profileMaxApproxToken)
+	cap := profileMaxApproxToken()
+	if approxTokens(got) > cap+50 {
+		t.Errorf("section not truncated: %d approx tokens (cap %d)", approxTokens(got), cap)
 	}
 	if !strings.HasPrefix(got, "## User Profile\n") {
 		t.Errorf("truncated section missing header")
@@ -337,5 +338,29 @@ func TestProfileCubeIDForRequest_NilSafe(t *testing.T) {
 	empty := ""
 	if got := profileCubeIDForRequest(&nativeChatRequest{MemCubeID: &empty}); got != "" {
 		t.Errorf("all-empty inputs should yield empty cube_id, got %q", got)
+	}
+}
+
+// ---- M15 — profile token cap env exposure ---------------------------------
+
+func TestM15_ProfileMaxApproxToken_Default(t *testing.T) {
+	if got := profileMaxApproxToken(); got != defaultProfileMaxApproxToken {
+		t.Errorf("default: got %d want %d", got, defaultProfileMaxApproxToken)
+	}
+}
+
+func TestM15_ProfileMaxApproxToken_Override(t *testing.T) {
+	t.Setenv("MEMDB_M15_PROFILE_MAX_TOKENS", "2500")
+	if got := profileMaxApproxToken(); got != 2500 {
+		t.Errorf("override: got %d want 2500", got)
+	}
+}
+
+func TestM15_ProfileMaxApproxToken_Invalid(t *testing.T) {
+	for _, v := range []string{"-1", "100001", "abc"} {
+		t.Setenv("MEMDB_M15_PROFILE_MAX_TOKENS", v)
+		if got := profileMaxApproxToken(); got != defaultProfileMaxApproxToken {
+			t.Errorf("invalid %q: got %d want %d", v, got, defaultProfileMaxApproxToken)
+		}
 	}
 }

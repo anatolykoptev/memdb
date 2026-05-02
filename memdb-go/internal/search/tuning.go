@@ -69,6 +69,19 @@ func LogTuningOverrides(logger *slog.Logger) {
 	})
 }
 
+// ParseEnvFloat is the exported wrapper around parseEnvFloat for use from
+// sibling packages (e.g. handlers) that need the same env-bounded float
+// parsing semantics. Behaviour is identical: in-range value or `def`.
+func ParseEnvFloat(name string, lo, hi, def float64) float64 {
+	return parseEnvFloat(name, lo, hi, def)
+}
+
+// ParseEnvInt is the exported wrapper around parseEnvInt for use from
+// sibling packages. In-range value or `def`.
+func ParseEnvInt(name string, lo, hi, def int) int {
+	return parseEnvInt(name, lo, hi, def)
+}
+
 // parseEnvFloat reads env var `name`, parses as float64, and returns it
 // if in [lo, hi]. Otherwise returns `def`. Silent on all errors.
 func parseEnvFloat(name string, lo, hi, def float64) float64 {
@@ -350,4 +363,69 @@ var cat4QueryRe = regexp.MustCompile(
 // Used by F7 metrics tagging and by future cat-4-only tuning paths.
 func isCat4Query(q string) bool {
 	return cat4QueryRe.MatchString(strings.TrimSpace(q))
+}
+
+// ---- M15 — search/handlers magic-number exposure ---------------------------
+//
+// The 2026-05-01 forensic atomic-pipeline audit
+// (docs/2026-05-01-pipeline-atomic-audit.md) flagged 7 hard-coded floats /
+// ints across dedup/MMR/profile/chat as silent regression vectors — they
+// drift the pipeline without showing up in env diffs and resist A/B sweeps.
+// The accessors below expose them as MEMDB_M15_* env knobs following the
+// same default-preserving, bounded-validation pattern as the D-series.
+
+const (
+	// defaultDedupSimThreshold — cosine-similarity ceiling for the greedy
+	// DedupSim selector. Items above this similarity to an already-selected
+	// item are dropped. 0.92 is the legacy near-duplicate cutoff that
+	// matches the Python searcher; lowering increases diversity at the cost
+	// of recall, raising it lets near-duplicates through.
+	defaultDedupSimThreshold float32 = 0.92
+
+	// defaultMMRSimThreshold — diversity-penalty kick-in point inside MMR
+	// phase 2. Below this, diversity == raw cosine; above, the
+	// DefaultMMRAlpha exponential penalty is applied. 0.9 was hard-coded
+	// inside phase2MMR — exposing it lets sweep runs probe softer/harder
+	// diversity regimes without rebuilds.
+	defaultMMRSimThreshold float32 = 0.9
+
+	// defaultMMRPrefillTopN — how many top-relevance items the MMR phase 1
+	// seeds the selection with before the diversity loop kicks in. 2
+	// matches the legacy Python heuristic ("two strong anchors then
+	// diversify").
+	defaultMMRPrefillTopN = 2
+
+	// defaultPrefThresholdOffset — preference-relativity is filtered at
+	// (params.Relativity - offset). 0.10 keeps preferences slightly more
+	// permissive than text memories (preferences are usually high-signal,
+	// low-cosine).
+	defaultPrefThresholdOffset = 0.10
+)
+
+// dedupSimThreshold returns the cosine-similarity ceiling used by DedupSim
+// to drop near-duplicates from the greedy selection.
+// Env: MEMDB_M15_DEDUP_SIM_THRESHOLD in [0.5, 1.0].
+func dedupSimThreshold() float32 {
+	return float32(parseEnvFloat("MEMDB_M15_DEDUP_SIM_THRESHOLD", 0.5, 1.0, float64(defaultDedupSimThreshold)))
+}
+
+// mmrSimThreshold returns the diversity-penalty kick-in similarity used by
+// MMR phase 2. Below this value diversity == raw cosine; above it the
+// exponential DefaultMMRAlpha penalty applies.
+// Env: MEMDB_M15_MMR_SIM_THRESHOLD in [0.5, 1.0].
+func mmrSimThreshold() float32 {
+	return float32(parseEnvFloat("MEMDB_M15_MMR_SIM_THRESHOLD", 0.5, 1.0, float64(defaultMMRSimThreshold)))
+}
+
+// mmrPrefillTopN returns the seed count for MMR phase 1.
+// Env: MEMDB_M15_MMR_PREFILL_TOP_N in [0, 10].
+func mmrPrefillTopN() int {
+	return parseEnvInt("MEMDB_M15_MMR_PREFILL_TOP_N", 0, 10, defaultMMRPrefillTopN)
+}
+
+// prefThresholdOffset returns the offset subtracted from params.Relativity
+// when filtering preference memories.
+// Env: MEMDB_M15_PREF_THRESHOLD_OFFSET in [0, 0.5].
+func prefThresholdOffset() float64 {
+	return parseEnvFloat("MEMDB_M15_PREF_THRESHOLD_OFFSET", 0, 0.5, defaultPrefThresholdOffset)
 }

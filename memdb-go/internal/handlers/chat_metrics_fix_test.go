@@ -94,6 +94,35 @@ func TestChatPromptTemplateMetric_Factual(t *testing.T) {
 	}
 }
 
+// TestChatPromptStyleLabel verifies the orthogonal `style` attribute
+// (added 2026-05-01) preserves answer_style signal even on the custom
+// branch where template collapses to "custom" by basePrompt-wins precedence.
+// Without this attribute the LoCoMo dual-speaker harness path (basePrompt!="",
+// answerStyle="factual") was emitting only template=custom — factual signal
+// was invisible in /metrics.
+func TestChatPromptStyleLabel(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		style     string
+		wantLabel string
+	}{
+		{"factual", answerStyleFactual, "factual"},
+		{"conversational", answerStyleConversational, "conversational"},
+		{"empty_style_maps_to_none", "", "none"},
+		{"unknown_style_maps_to_none", "weird", "none"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got := promptStyleLabel(tt.style)
+			if got != tt.wantLabel {
+				t.Errorf("promptStyleLabel(%q) = %q, want %q", tt.style, got, tt.wantLabel)
+			}
+		})
+	}
+}
+
 // TestChatPromptTemplateMetric_AllTemplatesPreRegistered confirms that the
 // chatPromptTemplateLabels slice contains all labels that promptTemplateLabel
 // can return — these must stay in sync for the pre-registration loop

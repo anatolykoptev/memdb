@@ -9,6 +9,7 @@ import (
 	"context"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // cat2QueryRe matches the leading temporal interrogative phrases that
@@ -112,7 +113,13 @@ func (s *SearchService) stageParallelDB(ctx context.Context, st *pipelineState) 
 	cat := applyCat2Threshold(st)
 	searchMx().RecallBudget.Add(ctx, 1, recallBudgetAttrs(cat, st.Budget.textK))
 
+	// Forensic 2026-05-01: per-stage retrieve histogram. Wraps the entire
+	// parallel DB fan-out (vector + fulltext + sparse + working-mem +
+	// internet) so operators see retrieve p95 separately from rerank /
+	// LLM. Label `scope` reuses the cat2 heuristic.
+	t0 := time.Now()
 	psr, err := s.runParallelSearches(ctx, st.QueryVec, st.Tokens, st.TSQuery, st.CutoffISO, st.HasCutoff, st.Params, st.Budget)
+	recordRetrieveDuration(ctx, st.Params.CubeID, cat, time.Since(t0).Seconds())
 	if err != nil {
 		return err
 	}

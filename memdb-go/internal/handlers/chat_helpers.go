@@ -12,9 +12,29 @@ import (
 )
 
 const (
-	memTypeOuter       = "OuterMemory" // memory type for internet-sourced memories
-	chatMinPersonalMem = 3             // minimum personal memories to keep after threshold filtering
+	memTypeOuter = "OuterMemory" // memory type for internet-sourced memories
+
+	// defaultChatMinPersonalMem — minimum personal memories to keep after
+	// threshold filtering. M15: env-tunable via MEMDB_M15_CHAT_MIN_PERSONAL_MEM.
+	defaultChatMinPersonalMem = 3
+
+	// defaultChatThreshold — fallback cosine-relativity floor when the
+	// chat request omits an explicit threshold. M15: env-tunable via
+	// MEMDB_M15_CHAT_DEFAULT_THRESHOLD.
+	defaultChatThreshold = 0.30
 )
+
+// chatMinPersonalMem returns the minimum personal-memory floor.
+// Env: MEMDB_M15_CHAT_MIN_PERSONAL_MEM in [0, 50].
+func chatMinPersonalMem() int {
+	return search.ParseEnvInt("MEMDB_M15_CHAT_MIN_PERSONAL_MEM", 0, 50, defaultChatMinPersonalMem)
+}
+
+// chatDefaultThreshold returns the fallback chat-search relativity floor.
+// Env: MEMDB_M15_CHAT_DEFAULT_THRESHOLD in [0, 1].
+func chatDefaultThreshold() float64 {
+	return search.ParseEnvFloat("MEMDB_M15_CHAT_DEFAULT_THRESHOLD", 0, 1, defaultChatThreshold)
+}
 
 // parseChatLevel parses the level field from a chat request.
 // Returns LevelAll + nil for omitted/empty; error for invalid values.
@@ -73,11 +93,11 @@ func (h *Handler) chatSearchMemories(ctx context.Context, req *nativeChatRequest
 		memories = filterOuterMemory(memories)
 	}
 
-	threshold := 0.30
+	threshold := chatDefaultThreshold()
 	if req.Threshold != nil {
 		threshold = *req.Threshold
 	}
-	filtered := filterMemoriesByThreshold(memories, threshold, chatMinPersonalMem)
+	filtered := filterMemoriesByThreshold(memories, threshold, chatMinPersonalMem())
 
 	// Post-retrieval enhancement: disambiguate pronouns, resolve relative times, merge related.
 	enhanced := search.EnhanceMemories(ctx, *req.Query, filtered, h.searchService.Enhance)
