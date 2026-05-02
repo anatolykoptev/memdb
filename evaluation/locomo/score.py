@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """
-score.py — compute EM / F1 / semsim / hit@k / LLM Judge on a predictions JSON.
+score.py — compute EM / F1 / f1_strict / semsim / hit@k / LLM Judge on a predictions JSON.
 
 Reads the output of query.py, writes a results JSON:
 
 {
   "meta": {...},
-  "aggregate": {"em": 0.33, "f1": 0.51, "semsim": 0.78, "hit_at_k": 0.72,
+  "aggregate": {"em": 0.33, "f1": 0.51, "f1_strict": 0.49, "semsim": 0.78,
+                "hit_at_k": 0.72,
                 "llm_judge": 0.62,  # only when --llm-judge
                 "n": 20, "by_category": {...}},
   "aggregate_with_excl_none": {...},   # all categories included (same as aggregate)
   "aggregate_with_excl_5": {...},       # category 5 excluded (mirrors Memobase benchmark)
-  "per_qa": [{"conv_id", "question_idx", "em", "f1", "semsim", "hit_at_k",
+  "per_qa": [{"conv_id", "question_idx", "em", "f1", "f1_strict", "semsim", "hit_at_k",
               "llm_score": 0|1, "llm_reason": str}, ...]  # llm_* only with --llm-judge
 }
+
+f1_strict uses Mem0-fork tokenization: lowercase + strip all Unicode punctuation.
+Does NOT replace f1 (BoW with article/article removal); both are reported.
 
 Two-track reporting: the JSON always contains BOTH aggregate_with_excl_none
 (no exclusions) and aggregate_with_excl_5 (category 5 excluded) regardless of
@@ -48,6 +52,7 @@ import re
 import string
 import subprocess
 import sys
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from collections import Counter, defaultdict
@@ -69,6 +74,41 @@ def normalize(text: str) -> str:
 
 def tokens(text: str) -> list[str]:
     return normalize(text).split()
+
+
+def normalize_strict(text: str) -> str:
+    """Mem0-fork strict tokenization: lowercase + strip all Unicode punctuation.
+
+    Differs from normalize() which additionally removes English articles and
+    uses string.punctuation (ASCII only).  Matches the Mem0 eval harness F1
+    computation for apples-to-apples comparison.
+    """
+    if text is None:
+        return ""
+    text = str(text).lower()
+    # Strip all Unicode punctuation categories (P*) and symbol categories (S*)
+    text = "".join(ch if not unicodedata.category(ch).startswith(("P", "S")) else " " for ch in text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def tokens_strict(text: str) -> list[str]:
+    return normalize_strict(text).split()
+
+
+def token_f1_strict(pred: str, gold: str) -> float:
+    """F1 using Mem0-fork strict tokenization (no article removal, Unicode punct strip)."""
+    p_toks = tokens_strict(pred)
+    g_toks = tokens_strict(gold)
+    if not p_toks or not g_toks:
+        return float(p_toks == g_toks)
+    common = Counter(p_toks) & Counter(g_toks)
+    num_same = sum(common.values())
+    if num_same == 0:
+        return 0.0
+    precision = num_same / len(p_toks)
+    recall = num_same / len(g_toks)
+    return 2 * precision * recall / (precision + recall)
 
 
 # --------------------- metrics ---------------------
@@ -168,13 +208,24 @@ def pick_prediction_text(rec: dict, retrieval_only: bool) -> str:
     return " ".join(item.get("content", "") for item in top)
 
 
+def _latency_percentiles(ms_values: list[float]) -> dict:
+    """Return p50/p95 for a list of millisecond values; None entries are skipped."""
+    vals = sorted(v for v in ms_values if v is not None)
+    if not vals:
+        return {"p50_ms": None, "p95_ms": None}
+    p50 = vals[len(vals) // 2]
+    p95 = vals[min(len(vals) - 1, int(len(vals) * 0.95))]
+    return {"p50_ms": p50, "p95_ms": p95}
+
+
 def summarize(per_qa: list[dict]) -> dict:
     if not per_qa:
-        return {"em": 0.0, "f1": 0.0, "semsim": 0.0, "hit_at_k": 0.0, "n": 0, "by_category": {}}
+        return {"em": 0.0, "f1": 0.0, "f1_strict": 0.0, "semsim": 0.0, "hit_at_k": 0.0, "n": 0, "by_category": {}}
     n = len(per_qa)
     agg: dict = {
         "em": sum(r["em"] for r in per_qa) / n,
         "f1": sum(r["f1"] for r in per_qa) / n,
+        "f1_strict": sum(r["f1_strict"] for r in per_qa) / n,
         "semsim": sum(r["semsim"] for r in per_qa) / n,
         "hit_at_k": sum(r["hit_at_k"] for r in per_qa) / n,
         "n": n,
@@ -185,6 +236,12 @@ def summarize(per_qa: list[dict]) -> dict:
         agg["llm_judge"] = sum(llm_rows) / len(llm_rows)
         agg["llm_judge_n"] = len(llm_rows)
 
+    # Latency aggregates (search + chat, from query.py captured fields)
+    agg["latency"] = {
+        "search": _latency_percentiles([r.get("search_ms") for r in per_qa]),
+        "chat": _latency_percentiles([r.get("chat_ms") for r in per_qa]),
+    }
+
     by_cat: dict[str, list[dict]] = defaultdict(list)
     for r in per_qa:
         by_cat[str(r.get("category"))].append(r)
@@ -194,9 +251,14 @@ def summarize(per_qa: list[dict]) -> dict:
         cat_agg: dict = {
             "em": sum(r["em"] for r in rs) / len(rs),
             "f1": sum(r["f1"] for r in rs) / len(rs),
+            "f1_strict": sum(r["f1_strict"] for r in rs) / len(rs),
             "semsim": sum(r["semsim"] for r in rs) / len(rs),
             "hit_at_k": sum(r["hit_at_k"] for r in rs) / len(rs),
             "n": len(rs),
+            "latency": {
+                "search": _latency_percentiles([r.get("search_ms") for r in rs]),
+                "chat": _latency_percentiles([r.get("chat_ms") for r in rs]),
+            },
         }
         cat_llm = [r["llm_score"] for r in rs if "llm_score" in r]
         if cat_llm:
@@ -282,7 +344,7 @@ def print_dual_track_summary(agg_tracks: dict[str, dict]) -> None:
     print(header)
     print("-" * len(header))
     # Include llm_judge row only if at least one track has it
-    metrics = ["n", "em", "f1", "semsim", "hit_at_k"]
+    metrics = ["n", "em", "f1", "f1_strict", "semsim", "hit_at_k"]
     if any("llm_judge" in agg_tracks[k] for k in keys):
         metrics.append("llm_judge")
     for metric in metrics:
@@ -294,6 +356,64 @@ def print_dual_track_summary(agg_tracks: dict[str, dict]) -> None:
             else:
                 row += f"  {val:<{col_w}.3f}"
         print(row)
+
+
+def _fmt_ms(val: float | None) -> str:
+    if val is None:
+        return "  n/a"
+    return f"{int(val):>5}ms"
+
+
+def _print_telemetry(
+    per_qa: list[dict],
+    by_cat: dict[str, dict],
+    cat_names: dict[str, str],
+) -> None:
+    """Print competitor-comparable telemetry block (latency p50/p95 per category).
+
+    Token fields (prompt_tokens / completion_tokens) are NOT yet captured by
+    query.py — if they appear in future predictions, add them here.
+    """
+    print("\n── Telemetry ──")
+
+    # Overall latency
+    all_search = [r.get("search_ms") for r in per_qa]
+    all_chat = [r.get("chat_ms") for r in per_qa]
+    s_lat = _latency_percentiles(all_search)
+    c_lat = _latency_percentiles(all_chat)
+
+    has_latency = any(v is not None for v in all_search + all_chat)
+    if not has_latency:
+        print("  (no latency data in predictions file)")
+    else:
+        print(
+            f"  {'overall':<12}  search p50={_fmt_ms(s_lat['p50_ms'])}  "
+            f"p95={_fmt_ms(s_lat['p95_ms'])}   "
+            f"chat p50={_fmt_ms(c_lat['p50_ms'])}  p95={_fmt_ms(c_lat['p95_ms'])}"
+        )
+
+    if len(by_cat) > 1 and has_latency:
+        print(f"\n  {'cat':<3}  {'name':<12}  {'srch p50':>8}  {'srch p95':>8}  {'chat p50':>8}  {'chat p95':>8}")
+        for cat in sorted(by_cat.keys(), key=lambda c: int(c) if c.isdigit() else 99):
+            cv = by_cat[cat]
+            lat = cv.get("latency", {})
+            s = lat.get("search", {})
+            c = lat.get("chat", {})
+            name = cat_names.get(cat, "unknown")
+            print(
+                f"  {cat:<3}  {name:<12}  "
+                f"{_fmt_ms(s.get('p50_ms')):>8}  {_fmt_ms(s.get('p95_ms')):>8}  "
+                f"{_fmt_ms(c.get('p50_ms')):>8}  {_fmt_ms(c.get('p95_ms')):>8}"
+            )
+
+    # Token usage — not available until query.py captures them from the LLM response
+    total_prompt = sum(r.get("prompt_tokens") or 0 for r in per_qa)
+    total_completion = sum(r.get("completion_tokens") or 0 for r in per_qa)
+    if total_prompt or total_completion:
+        print(f"\n  tokens (total): prompt={total_prompt}  completion={total_completion}  "
+              f"sum={total_prompt + total_completion}")
+    else:
+        print("\n  tokens: not captured (add prompt_tokens/completion_tokens to query.py predictions)")
 
 
 def main() -> int:
@@ -378,6 +498,7 @@ def main() -> int:
         retrieved_contents = [i.get("content", "") for i in (rec.get("retrieved") or [])]
         em = exact_match(pred, gold)
         f1 = token_f1(pred, gold)
+        f1s = token_f1_strict(pred, gold)
         h = hit_at_k(retrieved_contents, gold)
         if embedder and pred.strip() and gold.strip():
             try:
@@ -397,8 +518,11 @@ def main() -> int:
                 "prediction": pred[:500],
                 "em": em,
                 "f1": f1,
+                "f1_strict": f1s,
                 "semsim": sim,
                 "hit_at_k": h,
+                "search_ms": rec.get("search_ms"),
+                "chat_ms": rec.get("chat_ms"),
                 "error": rec.get("error"),
             }
         )
@@ -488,25 +612,26 @@ def main() -> int:
     if "llm_judge" in agg:
         judge_line = f"  llm_judge={agg['llm_judge']:.3f}"
     print(
-        f"n={agg['n']}  em={agg['em']:.3f}  f1={agg['f1']:.3f}  "
+        f"n={agg['n']}  em={agg['em']:.3f}  f1={agg['f1']:.3f}  f1_strict={agg['f1_strict']:.3f}  "
         f"semsim={agg['semsim']:.3f}  hit@k={agg['hit_at_k']:.3f}"
         + judge_line
     )
     # Print per-category summary if more than one category present
     by_cat = agg.get("by_category", {})
     has_llm = any("llm_judge" in cv for cv in by_cat.values())
+    cat_names = {
+        "1": "single-hop",
+        "2": "multi-hop",
+        "3": "temporal",
+        "4": "open-domain",
+        "5": "adversarial",
+    }
     if len(by_cat) > 1:
-        cat_names = {
-            "1": "single-hop",
-            "2": "multi-hop",
-            "3": "temporal",
-            "4": "open-domain",
-            "5": "adversarial",
-        }
         hdr_llm = f"  {'llm_j':>6}" if has_llm else ""
         print("\nPer-category breakdown:")
         print(
-            f"  {'cat':<3}  {'name':<12}  {'n':>4}  {'em':>6}  {'f1':>6}  {'semsim':>7}  {'hit@k':>6}"
+            f"  {'cat':<3}  {'name':<12}  {'n':>4}  {'em':>6}  {'f1':>6}  {'f1_str':>7}  "
+            f"{'semsim':>7}  {'hit@k':>6}"
             + hdr_llm
         )
         for cat in sorted(by_cat.keys(), key=lambda c: int(c) if c.isdigit() else 99):
@@ -515,12 +640,16 @@ def main() -> int:
             llm_col = f"  {cv['llm_judge']:>6.3f}" if "llm_judge" in cv else ""
             print(
                 f"  {cat:<3}  {name:<12}  {cv['n']:>4}  "
-                f"{cv['em']:>6.3f}  {cv['f1']:>6.3f}  "
+                f"{cv['em']:>6.3f}  {cv['f1']:>6.3f}  {cv['f1_strict']:>7.3f}  "
                 f"{cv['semsim']:>7.3f}  {cv['hit_at_k']:>6.3f}"
                 + llm_col
             )
     # Always print dual-track summary
     print_dual_track_summary(agg_tracks)
+
+    # ── Telemetry ──
+    _print_telemetry(per_qa, by_cat, cat_names)
+
     print(f"wrote → {args.out}")
     return 0
 
