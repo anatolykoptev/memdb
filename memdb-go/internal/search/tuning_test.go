@@ -155,6 +155,92 @@ func TestTuning_D1DecayAlpha_ComputedFromHalfLife(t *testing.T) {
 	}
 }
 
+// ---- M15 — search/handlers magic-number exposure ---------------------------
+
+func TestM15_DedupSimThreshold(t *testing.T) {
+	if got := dedupSimThreshold(); math.Abs(float64(got)-float64(defaultDedupSimThreshold)) > 1e-6 {
+		t.Fatalf("default: got %v want %v", got, defaultDedupSimThreshold)
+	}
+	t.Setenv("MEMDB_M15_DEDUP_SIM_THRESHOLD", "0.85")
+	if got := dedupSimThreshold(); math.Abs(float64(got)-0.85) > 1e-6 {
+		t.Fatalf("override: got %v want 0.85", got)
+	}
+	for _, v := range []string{"0.4", "1.1", "abc", "-0.5"} {
+		t.Setenv("MEMDB_M15_DEDUP_SIM_THRESHOLD", v)
+		if got := dedupSimThreshold(); math.Abs(float64(got)-float64(defaultDedupSimThreshold)) > 1e-6 {
+			t.Errorf("invalid %q: got %v want default %v", v, got, defaultDedupSimThreshold)
+		}
+	}
+}
+
+func TestM15_MMRSimThreshold(t *testing.T) {
+	if got := mmrSimThreshold(); math.Abs(float64(got)-float64(defaultMMRSimThreshold)) > 1e-6 {
+		t.Fatalf("default: got %v want %v", got, defaultMMRSimThreshold)
+	}
+	t.Setenv("MEMDB_M15_MMR_SIM_THRESHOLD", "0.75")
+	if got := mmrSimThreshold(); math.Abs(float64(got)-0.75) > 1e-6 {
+		t.Fatalf("override: got %v want 0.75", got)
+	}
+	for _, v := range []string{"0.4", "1.1", "abc"} {
+		t.Setenv("MEMDB_M15_MMR_SIM_THRESHOLD", v)
+		if got := mmrSimThreshold(); math.Abs(float64(got)-float64(defaultMMRSimThreshold)) > 1e-6 {
+			t.Errorf("invalid %q: got %v want default", v, got)
+		}
+	}
+}
+
+func TestM15_MMRPrefillTopN(t *testing.T) {
+	if got := mmrPrefillTopN(); got != defaultMMRPrefillTopN {
+		t.Fatalf("default: got %d want %d", got, defaultMMRPrefillTopN)
+	}
+	t.Setenv("MEMDB_M15_MMR_PREFILL_TOP_N", "5")
+	if got := mmrPrefillTopN(); got != 5 {
+		t.Fatalf("override: got %d want 5", got)
+	}
+	for _, v := range []string{"-1", "11", "abc"} {
+		t.Setenv("MEMDB_M15_MMR_PREFILL_TOP_N", v)
+		if got := mmrPrefillTopN(); got != defaultMMRPrefillTopN {
+			t.Errorf("invalid %q: got %d want %d", v, got, defaultMMRPrefillTopN)
+		}
+	}
+}
+
+func TestM15_PrefThresholdOffset(t *testing.T) {
+	if got := prefThresholdOffset(); math.Abs(got-defaultPrefThresholdOffset) > 1e-9 {
+		t.Fatalf("default: got %v want %v", got, defaultPrefThresholdOffset)
+	}
+	t.Setenv("MEMDB_M15_PREF_THRESHOLD_OFFSET", "0.05")
+	if got := prefThresholdOffset(); math.Abs(got-0.05) > 1e-9 {
+		t.Fatalf("override: got %v want 0.05", got)
+	}
+	for _, v := range []string{"-0.1", "0.6", "abc"} {
+		t.Setenv("MEMDB_M15_PREF_THRESHOLD_OFFSET", v)
+		if got := prefThresholdOffset(); math.Abs(got-defaultPrefThresholdOffset) > 1e-9 {
+			t.Errorf("invalid %q: got %v want %v", v, got, defaultPrefThresholdOffset)
+		}
+	}
+}
+
+func TestM15_ParseEnvFloat_ExportedWrapper(t *testing.T) {
+	t.Setenv("MEMDB_M15_TEST_FLOAT", "0.55")
+	if got := ParseEnvFloat("MEMDB_M15_TEST_FLOAT", 0, 1, 0.42); math.Abs(got-0.55) > 1e-9 {
+		t.Fatalf("override: got %v want 0.55", got)
+	}
+	if got := ParseEnvFloat("MEMDB_M15_TEST_FLOAT_UNSET", 0, 1, 0.42); math.Abs(got-0.42) > 1e-9 {
+		t.Fatalf("default: got %v want 0.42", got)
+	}
+}
+
+func TestM15_ParseEnvInt_ExportedWrapper(t *testing.T) {
+	t.Setenv("MEMDB_M15_TEST_INT", "7")
+	if got := ParseEnvInt("MEMDB_M15_TEST_INT", 0, 100, 3); got != 7 {
+		t.Fatalf("override: got %d want 7", got)
+	}
+	if got := ParseEnvInt("MEMDB_M15_TEST_INT_UNSET", 0, 100, 3); got != 3 {
+		t.Fatalf("default: got %d want 3", got)
+	}
+}
+
 func TestTuning_HierarchyBoostRespectsEnv(t *testing.T) {
 	// Verify the rerank.go hierarchyBoost honours the env accessors.
 	t.Setenv("MEMDB_D1_BOOST_SEMANTIC", "1.30")

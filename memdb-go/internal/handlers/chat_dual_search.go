@@ -80,7 +80,7 @@ func (h *Handler) chatSearchMemoriesDual(
 	h.logDualLegFailures(legs)
 
 	merged := mergeDualLegs(legs, mergeParams)
-	filtered := filterMemoriesByThreshold(merged, mergeParams.threshold, chatMinPersonalMem)
+	filtered := filterMemoriesByThreshold(merged, mergeParams.threshold, chatMinPersonalMem())
 
 	observability.RecordDualSpeakerMerged(ctx, dualSpeakerSurfaceChat, len(merged))
 	observability.RecordDualSpeakerLatency(ctx, dualSpeakerSurfaceChat,
@@ -117,7 +117,7 @@ func resolveDualSpeakerParams(req *nativeChatRequest) (dualSpeakerLegParams, dua
 		mergeStrategy = *req.MergeStrategy
 	}
 
-	threshold := 0.30
+	threshold := chatDefaultThreshold()
 	if req.Threshold != nil {
 		threshold = *req.Threshold
 	}

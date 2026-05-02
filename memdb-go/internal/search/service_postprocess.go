@@ -297,7 +297,9 @@ func (s *SearchService) applyRelativity(text, skill, tool, pref []map[string]any
 	text = FilterByRelativity(text, p.Relativity)
 	skill = FilterByRelativity(skill, p.Relativity)
 	tool = FilterByRelativity(tool, p.Relativity)
-	prefThreshold := p.Relativity - 0.10
+	// M15: pref threshold offset env-tunable via
+	// MEMDB_M15_PREF_THRESHOLD_OFFSET (default 0.10).
+	prefThreshold := p.Relativity - prefThresholdOffset()
 	if prefThreshold > 0 {
 		pref = FilterByRelativity(pref, prefThreshold)
 	}

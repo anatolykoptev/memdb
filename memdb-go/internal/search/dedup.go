@@ -51,7 +51,8 @@ func DedupSim(items []SearchItem, targetK int) []SearchItem {
 	// Compute similarity matrix
 	simMatrix := CosineSimilarityMatrix(sorted)
 
-	const threshold float32 = 0.92
+	// M15: env-tunable via MEMDB_M15_DEDUP_SIM_THRESHOLD (default 0.92).
+	threshold := dedupSimThreshold()
 
 	selected := make([]int, 0, targetK)
 	for i := range sorted {
@@ -192,8 +193,10 @@ func (st *mmrState) phase1Prefill() {
 }
 
 // computePrefillN returns the target prefill count for phase 1.
+// M15: seed count env-tunable via MEMDB_M15_MMR_PREFILL_TOP_N (default 2).
 func (st *mmrState) computePrefillN() int {
-	prefillTopN := 2
+	seed := mmrPrefillTopN()
+	prefillTopN := seed
 	if st.prefTopK < prefillTopN {
 		prefillTopN = st.prefTopK
 	}
@@ -201,7 +204,7 @@ func (st *mmrState) computePrefillN() int {
 		prefillTopN = st.textTopK
 	}
 	if len(st.prefBucketIndices) == 0 {
-		prefillTopN = 2
+		prefillTopN = seed
 		if st.textTopK < prefillTopN {
 			prefillTopN = st.textTopK
 		}
@@ -242,7 +245,8 @@ func (st *mmrState) trySelectItem(idx int, memText string) {
 
 // phase2MMR runs the MMR greedy selection loop until all buckets are full.
 func (st *mmrState) phase2MMR() {
-	const similarityThreshold float32 = 0.9
+	// M15: env-tunable via MEMDB_M15_MMR_SIM_THRESHOLD (default 0.9).
+	similarityThreshold := mmrSimThreshold()
 
 	remaining := st.buildRemainingSet()
 	for len(remaining) > 0 {

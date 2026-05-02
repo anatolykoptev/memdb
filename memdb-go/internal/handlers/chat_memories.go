@@ -52,7 +52,7 @@ func formatMemories(memories []map[string]any, prefString string, maxTokens int)
 			text, _ := m["memory"].(string)
 			line := fmt.Sprintf("%d. %s", i+1, text)
 			cost := approxTokens(line)
-			if used+cost > maxTokens && len(lines) >= chatMinPersonalMem {
+			if used+cost > maxTokens && len(lines) >= chatMinPersonalMem() {
 				break
 			}
 			lines = append(lines, line)
