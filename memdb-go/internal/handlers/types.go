@@ -316,6 +316,26 @@ type nativeChatRequest struct {
 	// MergeStrategy — same semantics as searchRequest.MergeStrategy.
 	MergeStrategy *string `json:"merge_strategy,omitempty"`
 
+	// ExternalMemoryCount — when the caller pre-supplied N memories inside
+	// SystemPrompt (LoCoMo dual-speaker harness pattern: harness fans out
+	// per-speaker retrieval client-side, embeds them into the system prompt,
+	// then asks the server to suppress its own retrieval via top_k=1 +
+	// threshold=0.99). Server-side `memories` will be empty in that case,
+	// which used to route the factual branch to variant=Zero and inject the
+	// strict "Reply exactly: no answer" rules block ON TOP OF the harness's
+	// own brevity instruction. Two refusal contracts in one prompt → 50% of
+	// Karpathy r3 forensic regressions came from the LLM picking the strictest
+	// one and refusing despite the gold answer being right there in the
+	// system prompt.
+	//
+	// When set > 0 AND server memories pool is empty, the factual variant
+	// gate treats the request as "high confidence" (trust the harness) so
+	// the rules block — if any — is the high-commit variant, not the
+	// strict-refusal variant.
+	//
+	// Empty / nil / 0 preserves legacy variant selection byte-for-byte.
+	ExternalMemoryCount *int `json:"external_memory_count,omitempty"`
+
 	// MaxContextTokens — token budget for the memories block injected
 	// into the system prompt. When set, formatMemories adds rows in
 	// relativity-descending order until the budget is exhausted, then

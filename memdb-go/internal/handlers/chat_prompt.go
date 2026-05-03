@@ -78,7 +78,7 @@ func buildSystemPromptWithProfile(ctx context.Context, query string, memories []
 // The profile section is also prepended to custom basePrompt branches so the
 // two-section ordering contract holds regardless of which template wins.
 func buildSystemPromptWithDecision(_ context.Context, query string, memories []map[string]any, prefString, basePrompt, answerStyle, profileSection string) (string, factualPromptDecision) {
-	return buildSystemPromptWithBudget(query, memories, prefString, basePrompt, answerStyle, profileSection, 0)
+	return buildSystemPromptWithBudget(query, memories, prefString, basePrompt, answerStyle, profileSection, 0, 0)
 }
 
 // buildSystemPromptWithBudget mirrors buildSystemPromptWithDecision but
@@ -87,7 +87,13 @@ func buildSystemPromptWithDecision(_ context.Context, query string, memories []m
 // NativeChatStream) route through here; legacy callers stay on the
 // 7-arg wrapper above with maxContextTokens=0 (no cap, byte-identical
 // behaviour).
-func buildSystemPromptWithBudget(query string, memories []map[string]any, prefString, basePrompt, answerStyle, profileSection string, maxContextTokens int) (string, factualPromptDecision) {
+//
+// externalMemoryCount: see nativeChatRequest.ExternalMemoryCount. When > 0
+// and `memories` is empty, the factual-variant decision is upgraded from
+// Zero → High (Karpathy r3 fix #3): the harness has supplied N memories
+// inside basePrompt, so the strict "no answer" refusal contract is wrong-
+// pool and biases the LLM to refuse despite the gold being in context.
+func buildSystemPromptWithBudget(query string, memories []map[string]any, prefString, basePrompt, answerStyle, profileSection string, maxContextTokens, externalMemoryCount int) (string, factualPromptDecision) {
 	memCtx := formatMemories(memories, prefString, maxContextTokens)
 
 	decision := factualPromptDecision{Variant: factualVariantNone, Reason: refusalReasonNone}
@@ -103,7 +109,7 @@ func buildSystemPromptWithBudget(query string, memories []map[string]any, prefSt
 	// caller's prompt and BEFORE the memory section.
 	customFactual := basePrompt != "" && answerStyle == answerStyleFactual
 	if customFactual {
-		decision = decideFactualPrompt(memories)
+		decision = decideFactualPromptWithExternal(memories, externalMemoryCount)
 	}
 
 	var rendered string
@@ -128,22 +134,18 @@ func buildSystemPromptWithBudget(query string, memories []map[string]any, prefSt
 		// (caller decides), but the rules are still in scope of the same
 		// system message.
 		rendered = strings.Replace(basePrompt, "{memories}", memCtx, 1)
-		if customFactual {
+		if customFactual && shouldInjectFactualRules(decision.Variant, externalMemoryCount) {
 			rendered = rendered + "\n\n" + buildFactualRulesBlock(decision.Variant)
 		}
 	case len(memories) > 0:
 		rendered = basePrompt
-		if customFactual {
+		if customFactual && shouldInjectFactualRules(decision.Variant, externalMemoryCount) {
 			rendered += "\n\n" + buildFactualRulesBlock(decision.Variant)
 		}
 		rendered += "\n\n## Fact Memories:\n" + memCtx
 	default:
 		rendered = basePrompt
-		if customFactual {
-			// Zero-memory custom-factual: still emit the rules block so the
-			// model sees the "no answer" refusal contract from the low-conf
-			// body (decision.Variant=zero falls into the low-EN path inside
-			// buildFactualRulesBlock).
+		if customFactual && shouldInjectFactualRules(decision.Variant, externalMemoryCount) {
 			rendered += "\n\n" + buildFactualRulesBlock(decision.Variant)
 		}
 	}
