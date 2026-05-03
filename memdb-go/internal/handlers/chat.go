@@ -253,11 +253,18 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 	}
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
 	profileSection := h.resolveProfileSection(ctx, &req)
+	// Path X (Memobase parity, 2026-05-01): inline atomic facts as a
+	// guaranteed "## Key Facts" block ahead of the profile section so they
+	// stop competing on cosine vs paragraph rows in generic search and
+	// always reach the LLM for every chat query.
+	queryVec := h.chatEmbedQuery(ctx, *req.Query)
+	factsSection := h.chatAtomicFactsSection(ctx, allCubeIDsForChat(&req), queryVec)
+	combinedSection := joinPromptSections(factsSection, profileSection)
 	// M12.4: buildSystemPromptWithDecision now also routes the custom-prompt +
 	// factual branch (LoCoMo dual-speaker harness etc.), populating decision
 	// AND injecting the variant-marked anti-refusal rules block. No post-hoc
 	// decideFactualPrompt call needed here.
-	prompt, decision := buildSystemPromptWithBudget(*req.Query, memories, prefString, basePrompt, answerStyle, profileSection, derefIntOr(req.MaxContextTokens, 0), derefIntOr(req.ExternalMemoryCount, 0))
+	prompt, decision := buildSystemPromptWithBudget(*req.Query, memories, prefString, basePrompt, answerStyle, combinedSection, derefIntOr(req.MaxContextTokens, 0), derefIntOr(req.ExternalMemoryCount, 0))
 	recordChatPromptUsed(ctx, basePrompt, answerStyle, decision)
 	recordFactualPromptDecision(ctx, w, decision)
 	// M12.5: chat-path observability — top-1 cosine, context tokens. Recorded
@@ -346,9 +353,15 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 	}
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
 	profileSection := h.resolveProfileSection(ctx, &req)
+	// Path X (Memobase parity, 2026-05-01): same Key Facts injection as the
+	// non-streaming branch — kept verbatim so both code paths render the
+	// identical system prompt for the same request shape.
+	queryVec := h.chatEmbedQuery(ctx, *req.Query)
+	factsSection := h.chatAtomicFactsSection(ctx, allCubeIDsForChat(&req), queryVec)
+	combinedSection := joinPromptSections(factsSection, profileSection)
 	// M12.4: buildSystemPromptWithDecision routes the custom-prompt + factual
 	// branch and injects the anti-refusal rules block. See NativeChatComplete.
-	prompt, decision := buildSystemPromptWithBudget(*req.Query, memories, prefString, basePrompt, answerStyle, profileSection, derefIntOr(req.MaxContextTokens, 0), derefIntOr(req.ExternalMemoryCount, 0))
+	prompt, decision := buildSystemPromptWithBudget(*req.Query, memories, prefString, basePrompt, answerStyle, combinedSection, derefIntOr(req.MaxContextTokens, 0), derefIntOr(req.ExternalMemoryCount, 0))
 	recordChatPromptUsed(ctx, basePrompt, answerStyle, decision)
 	// Set debug header BEFORE rpc.SSEHeaders writes response status — once
 	// SSEHeaders fires the header set is frozen.
