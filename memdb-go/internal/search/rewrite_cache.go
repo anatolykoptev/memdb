@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	rewriteCacheVersion = "v1"
+	rewriteCacheVersion = "v2"
 	rewriteCacheDefault = 10000
 )
 
@@ -55,11 +55,18 @@ type rewriteCacheEntry struct {
 	expires time.Time // zero → no expiry
 }
 
-// rewriteCacheKey returns the 16-char hex cache key for (query, modelName).
+// rewriteCacheKey returns the 16-char hex cache key for
+// (query, modelName, nowDay). nowDay is the YYYY-MM-DD slice of the
+// nowISO temporal anchor passed to D4 ("Now: %s" interpolation in the
+// rewrite user message); D4 callers pass nowISO[:10], D7 callers pass ""
+// (D7 does not interpolate nowISO into the prompt). Day-granularity is
+// chosen so callers within the same UTC day share a cache while next-day
+// invocations naturally invalidate.
+//
 // The first 8 bytes of sha256 provide 64-bit key space — ample for any
 // realistic query corpus.
-func rewriteCacheKey(query, modelName string) string {
-	h := sha256.Sum256([]byte(query + "|" + modelName + "|" + rewriteCacheVersion))
+func rewriteCacheKey(query, modelName, nowDay string) string {
+	h := sha256.Sum256([]byte(query + "|" + modelName + "|" + nowDay + "|" + rewriteCacheVersion))
 	key64 := binary.BigEndian.Uint64(h[:8])
 	return fmt.Sprintf("%016x", key64)
 }

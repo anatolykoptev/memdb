@@ -45,7 +45,7 @@ func TestRewriteCache_HitReturnsCached(t *testing.T) {
 		evictRing: make([]string, 100),
 	}
 
-	key := rewriteCacheKey("what did Alice say", "model-x")
+	key := rewriteCacheKey("what did Alice say", "model-x", "2026-05-02")
 	const want = "User's statement from Alice about the project"
 
 	c.Set(key, want)
@@ -162,5 +162,20 @@ func TestRewriteCache_DifferentModelsDifferentKeys(t *testing.T) {
 
 	if callCount.Load() != 2 {
 		t.Fatalf("expected 2 LLM calls (different models = different cache keys), got %d — possible key collision", callCount.Load())
+	}
+}
+
+
+// TestRewriteCacheKey_DiffersByDay ensures that two D4 calls on different
+// UTC days produce distinct cache keys, since the prompt interpolates
+// nowISO ("Now: %s\n\n..."). Without day-granularity in the key, a
+// rewrite cached on Monday would be served against a Tuesday prompt
+// asking "yesterday" — wrong answer relative to the new temporal anchor.
+func TestRewriteCacheKey_DiffersByDay(t *testing.T) {
+	t.Parallel()
+	a := rewriteCacheKey("what happened yesterday", "m", "2026-05-01")
+	b := rewriteCacheKey("what happened yesterday", "m", "2026-05-02")
+	if a == b {
+		t.Fatalf("expected different keys for different days, got identical %s", a)
 	}
 }

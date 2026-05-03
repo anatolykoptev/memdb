@@ -84,7 +84,7 @@ func DecomposeQuery(ctx context.Context, logger *slog.Logger, query string, cfg 
 
 	// Cache lookup — bypass LLM on hit.
 	cache := getRewriteCache()
-	cacheKey := rewriteCacheKey("d7:"+query, cfg.Model)
+	cacheKey := rewriteCacheKey("d7:"+query, cfg.Model, "")
 	if cached, ok := cache.Get(cacheKey); ok {
 		searchMx().RewriteCacheHit.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", "d7")))
 		searchMx().D7CoT.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "decomposed")))
