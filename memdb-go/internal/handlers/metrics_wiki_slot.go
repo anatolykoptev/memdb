@@ -35,6 +35,12 @@ const (
 	wikiSlotOutcomeNoResults     = "no_results"
 	wikiSlotOutcomeBelowMinScore = "below_min_score"
 	wikiSlotOutcomeMerged        = "merged"
+	// wikiSlotOutcomeOptInSkipped fires when the chat caller did NOT set
+	// IncludeWiki=true on the request. This is the new default after the
+	// Karpathy r2 forensic (2026-05-01) flipped the slot from always-on to
+	// opt-in. Counter visibility lets dashboards confirm the flip rolled out
+	// and quantify how many turns would have triggered the slot historically.
+	wikiSlotOutcomeOptInSkipped = "opt_in_skipped"
 )
 
 var wikiSlotOutcomes = []string{
@@ -46,6 +52,7 @@ var wikiSlotOutcomes = []string{
 	wikiSlotOutcomeNoResults,
 	wikiSlotOutcomeBelowMinScore,
 	wikiSlotOutcomeMerged,
+	wikiSlotOutcomeOptInSkipped,
 }
 
 var (

@@ -28,7 +28,9 @@ func ceLiveHook(ctx context.Context) {
 }
 
 // ceMathFallbackHook bumps the CE→MathReranker fallback counter. reason ∈
-// {"degraded", "low_quality"}. Wired into rerank.CrossEncoder.OnMathFallback
+// {"degraded", "low_quality", "low_spread", "bypass_cosine", "circuit_open"}.
+// circuit_open = per-cube CE breaker tripped on sustained low_spread rate
+// (ce_circuit_breaker.go). Wired into rerank.CrossEncoder.OnMathFallback
 // by the postProcessResults chain construction; precompute_wrapper does NOT
 // route through this path (offline, no live cosine signal needed).
 func ceMathFallbackHook(ctx context.Context, reason string) {

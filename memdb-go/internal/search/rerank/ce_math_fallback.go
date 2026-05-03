@@ -154,6 +154,20 @@ func (ce CrossEncoder) rerankWithMathFallback(ctx context.Context, query string,
 		}
 	}
 
+	// Per-cube circuit breaker (Karpathy r2). Cubes whose recent CE
+	// history shows >50% low_spread outcomes skip the live HTTP call
+	// entirely — math fallback handles the ranking. Self-recovers when
+	// fresh outcomes drop the rate. Empty QueryCubeID disables the check.
+	if globalCECircuit.shouldSkipCE(ce.QueryCubeID) && len(ce.QueryVec) > 0 && len(docs) > 0 {
+		slog.Debug("ce_rerank: per-cube circuit open, skipping live CE",
+			slog.String("cube_id", ce.QueryCubeID),
+		)
+		if ce.OnMathFallback != nil {
+			ce.OnMathFallback(ctx, "circuit_open")
+		}
+		return mathRerankCosine(ce.QueryVec, docs)
+	}
+
 	// Path 2/3 — live CE call.
 	res, err := ce.Client.RerankWithResult(ctx, query, docs)
 
@@ -187,6 +201,11 @@ func (ce CrossEncoder) rerankWithMathFallback(ctx context.Context, query string,
 			ceLowSpread = (top1 / top2) < spreadFloor
 		}
 	}
+
+	// Feed the per-cube circuit breaker. We record on every live CE call
+	// (including healthy ones) so the rate reflects real recent history
+	// and the breaker self-recovers when CE quality returns.
+	globalCECircuit.recordOutcome(ce.QueryCubeID, ceLowSpread)
 
 	if !ceDegraded && !ceLowQuality && !ceLowSpread {
 		return res.Scored
