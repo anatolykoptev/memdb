@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -90,6 +92,23 @@ type searchKeyFields struct {
 	Level     string // level tier ("", "l1", "l2", "l3")
 	AgentID   string // agent_id ("" = cross-agent)
 	PrefTopK  int    // pref_top_k (0 = default)
+
+	// v3 additions — these all change the response payload but were missing
+	// from v1/v2 keys, leading to silent cache collisions across requests
+	// that should have returned different data.
+	Mode             string // "", "fast", "fine" — different code paths
+	NumStages        int    // 0/2/3 — iterative-expansion changes result set
+	LLMRerank        bool   // affects ranking
+	IncludeEmbedding bool   // changes response payload format (vector returned or not)
+	Profile          string // search profile selector
+	Relativity       float64 // min relativity threshold filters output
+	ToolMemTopK      int    // tool memory bucket size
+	SkillMemTopK     int    // skill memory bucket size
+	IncludeSkillMem  bool   // type filter
+	IncludePref      bool   // type filter
+	SearchToolMem    bool   // type filter
+	AttributedTo     string // speaker-attribution single-user filter
+	ReadableCubes    string // sorted+joined ReadableCubeIDs (csv)
 }
 
 // SearchCacheKey generates a cache key for POST /product/search.
@@ -101,40 +120,77 @@ type searchKeyFields struct {
 // needed because the cache is non-authoritative (source-of-truth is Postgres).
 func SearchCacheKey(f searchKeyFields) string {
 	// Canonical pipe-separated concatenation; pipes are not valid in any field.
-	parts := fmt.Sprintf("%s|%s|%v|%s|%s|%s|%d",
-		f.UserID, f.Query, f.TopK, f.Dedup, f.Level, f.AgentID, f.PrefTopK)
+	// Field order is part of the contract — never reorder, only append.
+	parts := fmt.Sprintf("%s|%s|%v|%s|%s|%s|%d|%s|%d|%t|%t|%s|%g|%d|%d|%t|%t|%t|%s|%s",
+		f.UserID, f.Query, f.TopK, f.Dedup, f.Level, f.AgentID, f.PrefTopK,
+		f.Mode, f.NumStages, f.LLMRerank, f.IncludeEmbedding, f.Profile,
+		f.Relativity, f.ToolMemTopK, f.SkillMemTopK,
+		f.IncludeSkillMem, f.IncludePref, f.SearchToolMem,
+		f.AttributedTo, f.ReadableCubes)
 	hash := sha256.Sum256([]byte(parts))
-	return "memdb:cache:search:v2:" + hex.EncodeToString(hash[:16])
+	return "memdb:cache:search:v3:" + hex.EncodeToString(hash[:16])
 }
 
 // ParseSearchCacheKey extracts searchKeyFields from a raw JSON request body
 // so the middleware can build the cache key before passing control to the handler.
 // Returns zero-value fields (empty strings / 0) for absent JSON keys.
+//
+// v3: extended to cover all response-affecting request fields. Previously
+// requests differing only in InternetSearch / Mode / NumStages / etc.
+// silently collided in cache and returned wrong payloads.
 func ParseSearchCacheKey(body []byte) (searchKeyFields, error) {
 	var m struct {
-		UserID   string `json:"user_id"`
-		Query    string `json:"query"`
-		TopK     *int   `json:"top_k"`
-		Dedup    string `json:"dedup"`
-		Level    string `json:"level"`
-		AgentID  string `json:"agent_id"`
-		PrefTopK int    `json:"pref_top_k"`
+		UserID           string   `json:"user_id"`
+		Query            string   `json:"query"`
+		TopK             *int     `json:"top_k"`
+		Dedup            string   `json:"dedup"`
+		Level            string   `json:"level"`
+		AgentID          string   `json:"agent_id"`
+		PrefTopK         int      `json:"pref_top_k"`
+		Mode             string   `json:"mode"`
+		NumStages        *int     `json:"num_stages"`
+		LLMRerank        *bool    `json:"llm_rerank"`
+		IncludeEmbedding *bool    `json:"include_embedding"`
+		Profile          string   `json:"profile"`
+		Relativity       *float64 `json:"relativity"`
+		ToolMemTopK      *int     `json:"tool_mem_top_k"`
+		SkillMemTopK     *int     `json:"skill_mem_top_k"`
+		IncludeSkillMem  *bool    `json:"include_skill_memory"`
+		IncludePref      *bool    `json:"include_preference"`
+		SearchToolMem    *bool    `json:"search_tool_memory"`
+		AttributedTo     string   `json:"attributed_to"`
+		ReadableCubeIDs  []string `json:"readable_cube_ids"`
 	}
 	if err := json.Unmarshal(body, &m); err != nil {
 		return searchKeyFields{}, err
 	}
-	topK := 0
-	if m.TopK != nil {
-		topK = *m.TopK
-	}
+	deref := func(p *int) int { if p != nil { return *p }; return 0 }
+	derefF := func(p *float64) float64 { if p != nil { return *p }; return 0 }
+	derefB := func(p *bool) bool { if p != nil { return *p }; return false }
+	// Sort+join readable_cube_ids for stable keying regardless of input order.
+	cubes := append([]string(nil), m.ReadableCubeIDs...)
+	sort.Strings(cubes)
 	return searchKeyFields{
-		UserID:   m.UserID,
-		Query:    m.Query,
-		TopK:     topK,
-		Dedup:    m.Dedup,
-		Level:    m.Level,
-		AgentID:  m.AgentID,
-		PrefTopK: m.PrefTopK,
+		UserID:           m.UserID,
+		Query:            m.Query,
+		TopK:             deref(m.TopK),
+		Dedup:            m.Dedup,
+		Level:            m.Level,
+		AgentID:          m.AgentID,
+		PrefTopK:         m.PrefTopK,
+		Mode:             m.Mode,
+		NumStages:        deref(m.NumStages),
+		LLMRerank:        derefB(m.LLMRerank),
+		IncludeEmbedding: derefB(m.IncludeEmbedding),
+		Profile:          m.Profile,
+		Relativity:       derefF(m.Relativity),
+		ToolMemTopK:      deref(m.ToolMemTopK),
+		SkillMemTopK:     deref(m.SkillMemTopK),
+		IncludeSkillMem:  derefB(m.IncludeSkillMem),
+		IncludePref:      derefB(m.IncludePref),
+		SearchToolMem:    derefB(m.SearchToolMem),
+		AttributedTo:     m.AttributedTo,
+		ReadableCubes:    strings.Join(cubes, ","),
 	}, nil
 }
 

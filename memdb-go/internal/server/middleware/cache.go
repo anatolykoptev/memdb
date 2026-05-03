@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -45,6 +46,12 @@ var cacheRules = map[string]cacheRule{
 	"POST /product/search": {
 		ttl: 30 * time.Second,
 		keyFn: func(_ *http.Request, body []byte) string {
+			// Bypass cache for requests that take a fundamentally different
+			// code path or hit external sources whose results change every
+			// call. Returning empty string opts the request out of caching.
+			if shouldBypassSearchCache(body) {
+				return ""
+			}
 			fields, err := cache.ParseSearchCacheKey(body)
 			if err != nil {
 				return ""
@@ -167,4 +174,35 @@ func (r *responseRecorder) Flush() {
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// shouldBypassSearchCache returns true for /product/search requests that must
+// NEVER be served from cache. Two cases:
+//   1. internet_search=true — content is fetched from external APIs, results
+//      change between calls, caching would freeze stale fetched docs.
+//   2. len(speakers)>=2 — handler takes the dual-speaker fan-out branch
+//      (handleDualSpeakerSearch). Different code path produces a
+//      request-shaped merged response that the v3 cache key only partially
+//      covers; safer to bypass entirely.
+//
+// Implementation note: we do a minimal JSON unmarshal here rather than
+// reusing ParseSearchCacheKey because that function does not (yet) parse
+// internet_search / speakers and we want this gate to fire even on parse
+// errors of those specific fields. If body is malformed we fall through
+// to the keyFn which will also fail and bypass — same outcome.
+func shouldBypassSearchCache(body []byte) bool {
+	var m struct {
+		InternetSearch *bool    `json:"internet_search"`
+		Speakers       []string `json:"speakers"`
+	}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return false // let downstream parser handle the malformed body
+	}
+	if m.InternetSearch != nil && *m.InternetSearch {
+		return true
+	}
+	if len(m.Speakers) >= 2 {
+		return true
+	}
+	return false
 }
