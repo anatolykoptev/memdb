@@ -163,6 +163,7 @@ func (h *Handler) NativeUpdateMemory(w http.ResponseWriter, r *http.Request) {
 		cachePrefix+"search:*:"+cubeID+":*",
 		cachePrefix+"memory:"+memoryID,
 		cachePrefix+"post_get_memory:"+cubeID+":*",
+		cachePrefix+"post_get_memory_filter:"+cubeID+":*",
 	)
 
 	h.writeJSON(w, http.StatusOK, map[string]any{

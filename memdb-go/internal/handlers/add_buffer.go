@@ -353,6 +353,7 @@ func (h *Handler) checkAndFlushStale(ctx context.Context, client *redis.Client, 
 		h.cacheInvalidate(ctx,
 			cachePrefix+"get_all:"+cubeID+":*",
 			cachePrefix+"post_get_memory:"+cubeID+":*",
+			cachePrefix+"post_get_memory_filter:"+cubeID+":*",
 		)
 		h.logger.Info("buffer flusher: flushed stale buffer",
 			slog.String("cube_id", cubeID),

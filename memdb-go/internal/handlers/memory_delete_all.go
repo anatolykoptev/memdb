@@ -65,6 +65,8 @@ func (h *Handler) NativeDeleteAll(w http.ResponseWriter, r *http.Request) {
 		cachePrefix+"get_all:"+userID+":*",
 		cachePrefix+"search:*:"+userID+":*",
 		cachePrefix+"users:*",
+		cachePrefix+"post_get_memory:"+userID+":*",
+		cachePrefix+"post_get_memory_filter:"+userID+":*",
 	)
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
