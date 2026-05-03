@@ -27,6 +27,73 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
+// linkAtomicEntitiesAsync mirrors linkEntitiesAsync but records the
+// memdb.atomic.entities_promoted_total counter so we can verify in
+// /metrics that NamedEntitiesInText is actually landing in entity_nodes
+// post-deploy. Pre-fix the atomic path produced 0 entity rows because
+// atomicToExtracted did not populate ExtractedFact.Entities — see the
+// fix(atomic) commit body for the forensic trace. Behaviour delta vs
+// linkEntitiesAsync: identical except for the counter; never fails the
+// atomic fact persist (entity wiring is best-effort).
+func (h *Handler) linkAtomicEntitiesAsync(reqCtx context.Context, embedded []embeddedFact, cubeID, now string) {
+	if h.postgres == nil {
+		return
+	}
+	pairs := collectHandlerEntityPairs(embedded)
+	if len(pairs) == 0 {
+		return
+	}
+	bgCtx := context.WithoutCancel(reqCtx)
+	go func() {
+		ctx, cancel := context.WithTimeout(bgCtx, entityLinkTimeout)
+		defer cancel()
+
+		embByName := h.batchEmbedHandlerEntities(ctx, pairs)
+		for _, p := range pairs {
+			ok, fail := h.linkHandlerPairCounted(ctx, p, cubeID, now, embByName)
+			recordAtomicEntityPromoted(ctx, "success", ok)
+			recordAtomicEntityPromoted(ctx, "failed", fail)
+		}
+	}()
+}
+
+// linkHandlerPairCounted is a thin wrapper around linkHandlerPair that
+// returns per-entity success/failure counts so the atomic path can emit
+// promotion metrics without forking the legacy linkHandlerPair signature.
+// Implemented as a re-do of the entity loop (relations are skipped — atomic
+// facts do not emit Relations because the LLM only fills Entities via the
+// NamedEntitiesInText promotion in atomicToExtracted).
+func (h *Handler) linkHandlerPairCounted(ctx context.Context, p entityLinkPair, cubeID, now string, embByName map[string]string) (success int, failed int) {
+	for _, ent := range p.entities {
+		if ent.Name == "" {
+			continue
+		}
+		entityID, err := h.postgres.UpsertEntityNodeWithEmbedding(ctx, ent.Name, ent.Type, cubeID, now, embByName[ent.Name])
+		if err != nil || entityID == "" {
+			failed++
+			h.logger.Debug("atomic entity link: upsert entity node failed",
+				slog.String("name", ent.Name), slog.Any("error", err))
+			continue
+		}
+		if edgeErr := h.postgres.CreateMemoryEdge(ctx, p.ltmID, entityID, db.EdgeMentionsEntity, now, p.validAt); edgeErr != nil {
+			// Edge failure still counts the entity as promoted — the node
+			// exists; the join from memory is just missing. Surface via
+			// debug log so post-deploy smoke can correlate any drop in
+			// recall with edge-write churn.
+			h.logger.Debug("atomic entity link: create edge failed",
+				slog.String("ltm_id", p.ltmID), slog.String("entity_id", entityID), slog.Any("error", edgeErr))
+		}
+		success++
+	}
+	if p.invalidAt != "" {
+		if err := h.postgres.InvalidateEdgesByMemoryID(ctx, p.ltmID, p.invalidAt); err != nil {
+			h.logger.Debug("atomic entity link: stamp memory_edges invalid_at failed",
+				slog.String("ltm_id", p.ltmID), slog.Any("error", err))
+		}
+	}
+	return success, failed
+}
+
 // applyAtomicAndPersist takes embedded atomic facts + a parallel slice of
 // per-fact info maps (from applyAtomicInfoToFacts) and writes one
 // WorkingMemory + one LongTermMemory row per fact, with kind=atomic_fact
@@ -195,7 +262,7 @@ func (h *Handler) applyAtomicAndPersist(
 				}
 			}
 		}
-		h.linkEntitiesAsync(ctx, embedded, fc.CubeID, fc.Now)
+		h.linkAtomicEntitiesAsync(ctx, embedded, fc.CubeID, fc.Now)
 	}
 	h.cleanupWorkingMemory(ctx, fc.CubeID)
 	return items, nil
