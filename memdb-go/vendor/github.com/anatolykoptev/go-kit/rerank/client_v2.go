@@ -79,7 +79,7 @@ func WithDryRun() RerankOpt {
 func (c *Client) RerankWithResult(ctx context.Context, query string, docs []Doc, opts ...RerankOpt) (*Result, error) {
 	var res *Result
 	if c.cfg.fallback != nil {
-		res = rerankWithFallback(ctx, c, c.cfg.fallback, query, docs, opts...)
+		res = rerankWithFallback(ctx, c, c.cfg.fallback, c.cfg.fallbackName, query, docs, opts...)
 	} else {
 		res = c.rerankInternal(ctx, query, docs, opts...)
 	}

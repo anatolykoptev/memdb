@@ -16,7 +16,8 @@ import (
 func rerankWithFallback(
 	ctx context.Context,
 	primary *Client,
-	secondary *Client,
+	secondary Reranker,
+	secondaryName string,
 	query string,
 	docs []Doc,
 	opts ...RerankOpt,
@@ -30,15 +31,16 @@ func rerankWithFallback(
 		recordGiveup(primary.cfg.model, "4xx")
 		return res
 	}
-	if secondary == nil {
+	if secondary == nil || !secondary.Available() {
 		return res
 	}
 
-	// Attempt secondary.
-	fallRes := secondary.rerankInternal(ctx, query, docs, opts...)
-	if fallRes.Status == StatusOk {
+	// Attempt secondary via the public Reranker interface so any backend
+	// (Voyage, Jina, future LLM-based rerankers, etc.) plugs in cleanly.
+	fallRes, _ := secondary.RerankWithResult(ctx, query, docs, opts...)
+	if fallRes != nil && fallRes.Status == StatusOk {
 		fallRes.Status = StatusFallback
-		recordFallbackUsed(primary.cfg.model, secondary.cfg.model)
+		recordFallbackUsed(primary.cfg.model, secondaryName)
 		return fallRes
 	}
 	// Both failed — return primary's Degraded result.
