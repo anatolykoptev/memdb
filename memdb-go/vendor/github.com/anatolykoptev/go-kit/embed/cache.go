@@ -6,6 +6,15 @@ import (
 	"encoding/hex"
 )
 
+// cacheKeyVersion is a sentinel mixed into every cacheKey to invalidate
+// previously persisted entries when the key shape changes.
+//
+//	v1 — model, dim, docPrefix, queryPrefix, text
+//	v2 — adds role (query|passage|"") to disambiguate EmbedQuery vs Embed
+//	     on backends that apply role-based prefixing server-side (e.g. HTTP
+//	     embed-server with "query: " / "passage: " prepending).
+const cacheKeyVersion = "v2"
+
 // Cache abstracts a (text → vector) lookup table. go-kit/embed ships NO concrete
 // implementation — callers wire LRU/Redis/sync.Map per their runtime.
 // Implementations MUST be safe for concurrent reads and writes.
@@ -38,7 +47,7 @@ type Cache interface {
 }
 
 // WithCache wires a Cache. When set, every (model, dim, docPrefix, queryPrefix,
-// text) tuple is looked up before backend Embed call. Full-batch hit
+// text, role) tuple is looked up before backend Embed call. Full-batch hit
 // short-circuits the backend entirely. Partial misses fall through to the
 // backend for the full batch (no cherry-pick; keeps API symmetric across all
 // backends). A nil Cache is ignored (caching stays disabled).
@@ -51,23 +60,30 @@ func WithCache(c Cache) Opt {
 }
 
 // cacheKey computes the deterministic key for a (model, dim, docPrefix,
-// queryPrefix, text) tuple.
-// Format: sha256(model NUL itoa(dim) NUL docPrefix NUL queryPrefix NUL text).
+// queryPrefix, text, role) tuple.
+// Format: sha256(version NUL model NUL itoa(dim) NUL docPrefix NUL queryPrefix NUL text NUL role).
 // Hex-encoded 64-char string.
 //
-// Why all 5 fields:
+// Why each field:
 //
+//	version     — bumps invalidate prior persisted entries when shape changes
 //	model       — different models produce different vector spaces
 //	dim         — Matryoshka truncation (E4) changes output when dim < full
 //	docPrefix   — e5-family "passage: " prepends to text before embedding
 //	queryPrefix — "query: " for retrieval asymmetry (stored vs queried)
 //	text        — the input itself
+//	role        — "query" / "passage" / "" — server-side role prefixing
+//	              (HTTP embed-server applies different prefixes by role even
+//	              when client docPrefix/queryPrefix are both empty). Without
+//	              role, EmbedQuery("foo") and Embed(["foo"]) silently collide.
 //
 // SHA-256 (not MD5): FIPS-compatible, collision-resistant for arbitrary inputs.
 // NUL separator: prevents collision when a field value contains another's boundary
 // (e.g. model="ab\x00" text="" vs model="ab" text="\x00").
-func cacheKey(model string, dim int, docPrefix, queryPrefix, text string) string {
+func cacheKey(model string, dim int, docPrefix, queryPrefix, text, role string) string {
 	h := sha256.New()
+	h.Write([]byte(cacheKeyVersion))
+	h.Write([]byte{0})
 	h.Write([]byte(model))
 	h.Write([]byte{0})
 	h.Write([]byte(itoa(dim)))
@@ -77,19 +93,21 @@ func cacheKey(model string, dim int, docPrefix, queryPrefix, text string) string
 	h.Write([]byte(queryPrefix))
 	h.Write([]byte{0})
 	h.Write([]byte(text))
+	h.Write([]byte{0})
+	h.Write([]byte(role))
 	return hex.EncodeToString(h.Sum(nil))
 }
 
 // tryCacheFullBatchGet returns a slice of vectors (ordered matching texts[]) if
 // ALL texts have cached entries. Returns nil on any single miss — the caller
 // must fall through to the backend for the full batch.
-func tryCacheFullBatchGet(ctx context.Context, cache Cache, model string, dim int, docPrefix, queryPrefix string, texts []string) [][]float32 {
+func tryCacheFullBatchGet(ctx context.Context, cache Cache, model string, dim int, docPrefix, queryPrefix string, texts []string, role string) [][]float32 {
 	out := make([][]float32, len(texts))
 	for i, t := range texts {
 		if ctx.Err() != nil {
 			return nil // ctx cancelled — abort cache lookup
 		}
-		vec, ok := cache.Get(ctx, cacheKey(model, dim, docPrefix, queryPrefix, t))
+		vec, ok := cache.Get(ctx, cacheKey(model, dim, docPrefix, queryPrefix, t, role))
 		if !ok {
 			return nil // partial miss — fall through to backend
 		}

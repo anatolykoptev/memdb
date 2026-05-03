@@ -4,7 +4,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 )
+
+// cacheKeyVersion is a sentinel mixed into every cacheKey to invalidate
+// previously persisted entries when the key shape changes.
+//
+//	v1 — model, serverNormalize, queryInstr, docInstr, query, docText
+//	v2 — adds maxCharsPerDoc + maxTokensPerDoc to invalidate when truncation
+//	     caps change (server truncates before scoring; same docText returns
+//	     different scores under different caps).
+const cacheKeyVersion = "v2"
 
 // Cache abstracts a (model, query, doc.Text) → score lookup table. go-kit/rerank
 // ships NO concrete implementation — callers wire Redis, LRU, sync.Map, or any
@@ -41,15 +51,23 @@ func WithCache(c Cache) Opt {
 	}
 }
 
-// cacheKey computes the deterministic key for a (model, query, doc.Text) triple.
-// Format: sha256(model + NUL + serverNormalize + NUL + queryInstr + NUL + docInstr + NUL + query + NUL + docText).
+// cacheKey computes the deterministic key for a (model, query, doc.Text) triple
+// plus all server-side knobs that change the returned score.
+// Format: sha256(version NUL model NUL serverNormalize NUL queryInstr NUL docInstr
+//                NUL query NUL docText NUL maxCharsPerDoc NUL maxTokensPerDoc).
 // All inputs that change the upstream rerank response MUST be in the key —
 // otherwise a cached score from one config gets returned under another, silently.
 //
+// maxCharsPerDoc / maxTokensPerDoc are included because the server truncates
+// docText to those caps BEFORE scoring; bumping a cap (e.g. 2000 → 4000) would
+// otherwise return stale scores under the same key.
+//
 // Why SHA-256: FIPS-compatible, collision-resistant for arbitrarily long inputs,
 // produces a fixed 64-char hex string that fits any key-value store.
-func cacheKey(model, serverNormalize, queryInstr, docInstr, query, docText string) string {
+func cacheKey(model, serverNormalize, queryInstr, docInstr, query, docText string, maxCharsPerDoc, maxTokensPerDoc int) string {
 	h := sha256.New()
+	h.Write([]byte(cacheKeyVersion))
+	h.Write([]byte{0})
 	h.Write([]byte(model))
 	h.Write([]byte{0})
 	h.Write([]byte(serverNormalize))
@@ -61,5 +79,9 @@ func cacheKey(model, serverNormalize, queryInstr, docInstr, query, docText strin
 	h.Write([]byte(query))
 	h.Write([]byte{0})
 	h.Write([]byte(docText))
+	h.Write([]byte{0})
+	h.Write([]byte(strconv.Itoa(maxCharsPerDoc)))
+	h.Write([]byte{0})
+	h.Write([]byte(strconv.Itoa(maxTokensPerDoc)))
 	return hex.EncodeToString(h.Sum(nil))
 }

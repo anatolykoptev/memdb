@@ -67,6 +67,17 @@ type EmbedOpt func(*embedCallCfg)
 
 type embedCallCfg struct {
 	DryRun bool
+	// Role is "query" / "passage" / "" — included in cacheKey to prevent
+	// EmbedQuery/Embed collisions on backends that apply role-based prefixing
+	// server-side (e.g. HTTP embed-server). Set internally by EmbedQuery via
+	// withRole; not exposed publicly.
+	Role string
+}
+
+// withRole sets the role on the call config. Internal — not exported.
+// EmbedQuery uses "query"; Embed uses "passage" (default when unset is "").
+func withRole(role string) EmbedOpt {
+	return func(c *embedCallCfg) { c.Role = role }
 }
 
 // WithDryRun skips the backend call entirely and returns Status=Skipped vectors
@@ -141,7 +152,7 @@ func (c *Client) embedWithResultUnchained(ctx context.Context, texts []string, o
 	// Partial miss (any single text absent) → fall through to backend for the full batch.
 	if c.cache != nil {
 		dim := c.inner.Dimension()
-		cached := tryCacheFullBatchGet(ctx, c.cache, c.model, dim, c.docPrefix, c.queryPrefix, texts)
+		cached := tryCacheFullBatchGet(ctx, c.cache, c.model, dim, c.docPrefix, c.queryPrefix, texts, callCfg.Role)
 		if cached != nil {
 			safeCall(func() { c.observer.OnCacheHit(ctx, len(texts)) })
 			recordCacheHit(c.model)
@@ -194,7 +205,7 @@ func (c *Client) embedWithResultUnchained(ctx context.Context, texts []string, o
 	if c.cache != nil {
 		dim := c.inner.Dimension()
 		for i, vec := range raw {
-			c.cache.Set(ctx, cacheKey(c.model, dim, c.docPrefix, c.queryPrefix, texts[i]), vec)
+			c.cache.Set(ctx, cacheKey(c.model, dim, c.docPrefix, c.queryPrefix, texts[i], callCfg.Role), vec)
 		}
 		recordCacheSet(c.model, len(raw))
 	}

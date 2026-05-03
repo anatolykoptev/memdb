@@ -179,7 +179,7 @@ func (c *Client) rerankInternal(ctx context.Context, query string, docs []Doc, o
 	// Cache key includes serverNormalize and instruction prefixes so that
 	// Clients with different configs sharing a Cache cannot cross-contaminate.
 	if c.cfg.cache != nil {
-		if cachedScores := tryCacheFullBatchGet(ctx, c.cfg.cache, c.cfg.model, c.cfg.serverNormalize, c.cfg.queryInstruction, c.cfg.docInstruction, query, head); cachedScores != nil {
+		if cachedScores := tryCacheFullBatchGet(ctx, c.cfg.cache, c.cfg.model, c.cfg.serverNormalize, c.cfg.queryInstruction, c.cfg.docInstruction, query, head, c.cfg.maxCharsPerDoc, c.cfg.maxTokensPerDoc); cachedScores != nil {
 			safeCall(func() { c.cfg.observer.OnCacheHit(ctx, len(head)) })
 			recordCacheHit(c.cfg.model)
 			return c.finalizeScoredFromCache(ctx, cachedScores, head, tail, maxDocs, callCfg)
@@ -234,7 +234,7 @@ func (c *Client) rerankInternal(ctx context.Context, query string, docs []Doc, o
 		var setCount int
 		for i, d := range head {
 			if seen[i] {
-				c.cfg.cache.Set(ctx, cacheKey(c.cfg.model, c.cfg.serverNormalize, c.cfg.queryInstruction, c.cfg.docInstruction, query, d.Text), scores[i])
+				c.cfg.cache.Set(ctx, cacheKey(c.cfg.model, c.cfg.serverNormalize, c.cfg.queryInstruction, c.cfg.docInstruction, query, d.Text, c.cfg.maxCharsPerDoc, c.cfg.maxTokensPerDoc), scores[i])
 				setCount++
 			}
 		}
@@ -422,10 +422,10 @@ func (c *Client) finalizeScoredFromCache(ctx context.Context, cachedScores []flo
 // tryCacheFullBatchGet returns cached scores for all docs in head, or nil if
 // any doc is missing from the cache (partial miss → fall through to HTTP).
 // All inputs that affect the upstream server response are included in the key.
-func tryCacheFullBatchGet(ctx context.Context, cache Cache, model, serverNormalize, queryInstr, docInstr, query string, head []Doc) []float32 {
+func tryCacheFullBatchGet(ctx context.Context, cache Cache, model, serverNormalize, queryInstr, docInstr, query string, head []Doc, maxCharsPerDoc, maxTokensPerDoc int) []float32 {
 	scores := make([]float32, len(head))
 	for i, d := range head {
-		s, ok := cache.Get(ctx, cacheKey(model, serverNormalize, queryInstr, docInstr, query, d.Text))
+		s, ok := cache.Get(ctx, cacheKey(model, serverNormalize, queryInstr, docInstr, query, d.Text, maxCharsPerDoc, maxTokensPerDoc))
 		if !ok {
 			return nil // partial miss — abort, fall through to HTTP
 		}
