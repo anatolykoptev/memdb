@@ -474,7 +474,17 @@ func (h *Handler) getWorkingMemoryLimit(ctx context.Context, cubeID string) int 
 		return maxWorkingMemory
 	}
 
-	cacheKey := cachePrefix + "config:" + cubeID
+	// Bug 5 fix: cache namespace v2 is keyed by user_id + cube_id so that the
+	// PUT /product/users/{user_id}/config invalidator (which only knows user_id)
+	// can sweep all of a user's cube configs via wildcard. Resolve owner via
+	// cube store; fall back to cubeID as the user segment if unavailable.
+	ownerID := cubeID
+	if h.cubeStore != nil {
+		if cube, err := h.cubeStore.GetCube(ctx, cubeID); err == nil && cube != nil && cube.OwnerID != "" {
+			ownerID = cube.OwnerID
+		}
+	}
+	cacheKey := cachePrefix + "config:v2:" + ownerID + ":" + cubeID
 	var config map[string]any
 
 	// 1. Try cache
