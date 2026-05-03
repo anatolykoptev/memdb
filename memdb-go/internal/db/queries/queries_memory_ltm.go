@@ -194,6 +194,14 @@ SELECT
     properties->>(('memory'::text))                     AS memory_text,
     COALESCE(properties->>(('user_id'::text)), '')      AS user_id,
     COALESCE(properties->>(('memory_type'::text)), '')  AS memory_type,
+    -- M12.1 Phase 1B: project observation_date so the tree reorganizer can
+    -- inherit it on cluster parents (max-of-children). chat_time is a
+    -- forward-compat fallback when an older row carried it instead.
+    COALESCE(
+        SUBSTRING(properties->>(('observation_date'::text)) FROM 1 FOR 10),
+        SUBSTRING(properties->>(('chat_time'::text))        FROM 1 FOR 10),
+        ''
+    )                                                   AS observation_date,
     embedding::text                                     AS embedding_text
 FROM %[1]s."Memory"
 WHERE properties->>(('user_name'::text)) = $1

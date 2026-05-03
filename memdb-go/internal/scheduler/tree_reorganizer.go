@@ -18,10 +18,11 @@ import (
 // clustering. Embedding is required — rows without one are filtered out
 // upstream by ListMemoriesByHierarchyLevel's `embedding IS NOT NULL` predicate.
 type hierarchyNode struct {
-	ID        string
-	Text      string
-	UserID    string
-	Embedding []float32
+	ID              string
+	Text            string
+	UserID          string
+	ObservationDate string // M12.1: inherited from db.HierarchyMemory; "" when the source row carried no chat_time/observation_date.
+	Embedding       []float32
 }
 
 // clusterByCosine groups memories into clusters connected by pairwise cosine
@@ -39,7 +40,13 @@ func clusterByCosine(mems []db.HierarchyMemory, threshold float64, minSize int) 
 		if len(m.Embedding) == 0 {
 			continue
 		}
-		nodes = append(nodes, hierarchyNode{ID: m.ID, Text: m.Text, UserID: m.UserID, Embedding: m.Embedding})
+		nodes = append(nodes, hierarchyNode{
+			ID:              m.ID,
+			Text:            m.Text,
+			UserID:          m.UserID,
+			ObservationDate: m.ObservationDate,
+			Embedding:       m.Embedding,
+		})
 	}
 	if len(nodes) < minSize {
 		return nil

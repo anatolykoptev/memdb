@@ -201,9 +201,10 @@ func makeHierarchyMems(prefix string, n int, groupVec []float32) []db.HierarchyM
 		// small jitter on one axis — keeps cosine in the high-0.99 range.
 		v[0] += float32(i) * 1e-4
 		out[i] = db.HierarchyMemory{
-			ID:        fmt.Sprintf("%s-%d", prefix, i),
-			Text:      fmt.Sprintf("mem-%s-%d", prefix, i),
-			Embedding: v,
+			ID:              fmt.Sprintf("%s-%d", prefix, i),
+			Text:            fmt.Sprintf("mem-%s-%d", prefix, i),
+			ObservationDate: "2023-08-25",
+			Embedding:       v,
 		}
 	}
 	return out

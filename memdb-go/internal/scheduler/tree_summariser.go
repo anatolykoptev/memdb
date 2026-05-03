@@ -20,6 +20,7 @@ import (
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/memprops"
 )
 
 // tierParentResult carries everything the caller needs about a freshly-created
@@ -104,21 +105,52 @@ func (r *Reorganizer) persistTierParent(ctx context.Context, cubeID string, clus
 		}
 	}
 
+	// M12.1: derive the parent's observation_date as max over the cluster
+	// children. The parent represents "what the cube knew by date X" — using
+	// max anchors retrieval to the latest in-conversation moment the
+	// cluster covers. Using min would push the parent backward through
+	// long-tail history; using created_at would resurrect the today-leak
+	// (this exact bug — 2219 tree_reorganizer rows globally with
+	// observation_date absent — see PR #299 forensic SQL).
+	clusterObsDate := ""
+	for _, n := range cluster {
+		d := n.ObservationDate
+		if len(d) >= 10 {
+			d = d[:10]
+		}
+		if d > clusterObsDate {
+			clusterObsDate = d
+		}
+	}
+	if clusterObsDate == "" {
+		// Defence-in-depth: skip rather than poison memory with NOW. The
+		// upstream SQL projects observation_date COALESCE'd with chat_time,
+		// so empty here means EVERY child row was missing both — a
+		// regression worth tracking but not worth materialising into a
+		// today-leaking tree parent.
+		// TODO(phase-2): emit memdb_tree_reorg_skipped_total{reason="no_observation_date"}.
+		r.logger.WarnContext(ctx, "tree reorg: skipping tier parent — no observation_date on any child",
+			slog.String("cube_id", cubeID), slog.String("tier", targetLevel),
+			slog.Int("children", len(cluster)))
+		return tierParentResult{PromptSHA: promptSHA}, nil
+	}
+
 	parentID := uuid.New().String()
-	props := map[string]any{
-		"id":               parentID,
-		"memory":           summary,
-		"memory_type":      memoryType,
-		"user_name":        cubeID,
-		"user_id":          userID,
-		"status":           "activated",
-		"created_at":       now,
-		"updated_at":       now,
-		"confidence":       0.9,
-		"source":           "tree_reorganizer",
-		"hierarchy_level":  targetLevel,
-		"parent_memory_id": nil,
-		"tags":             []string{"mode:fine", "tier:" + targetLevel},
+	props, err := memprops.BuildDerivedMemoryProps(memprops.DerivedMemoryProps{
+		ID:              parentID,
+		Memory:          summary,
+		MemoryType:      memoryType,
+		UserID:          userID,
+		UserName:        cubeID,
+		Now:             now,
+		ObservationDate: clusterObsDate,
+		Source:          "tree_reorganizer",
+		HierarchyLevel:  targetLevel,
+		Confidence:      0.9,
+		Tags:            []string{"mode:fine", "tier:" + targetLevel},
+	})
+	if err != nil {
+		return tierParentResult{PromptSHA: promptSHA}, fmt.Errorf("build tier parent props: %w", err)
 	}
 	propsJSON, err := json.Marshal(props)
 	if err != nil {
