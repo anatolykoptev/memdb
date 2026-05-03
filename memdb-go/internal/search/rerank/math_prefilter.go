@@ -78,7 +78,15 @@ func (m MathPrefilter) Rerank(ctx context.Context, _ string, items []Item) ([]It
 		Lambda:      m.Lambda,
 	}
 	res, err := mr.RerankWithResult(ctx, "", docs)
-	if err != nil || res == nil || res.Status != gokitrerank.StatusOk {
+	if err != nil {
+		// Surface real failures so Chain emits recordOutcome("error") —
+		// dashboards can distinguish bugs (vector dim mismatch, panics)
+		// from legit "no embeddings" skips. Returning items (not nil)
+		// preserves Chain contract: rerankers MUST NEVER return nil items
+		// on a non-fatal failure.
+		return items, err
+	}
+	if res == nil || res.Status != gokitrerank.StatusOk {
 		RecordSkipped(ctx, m.Name())
 		return items, nil
 	}

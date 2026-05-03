@@ -163,10 +163,10 @@ var preregNames = []string{"cosine", "cross_encoder", "llm_judge", "mmr", "stage
 func init() {
 	m := otel.Meter("memdb-go/search/rerank")
 	c, _ := m.Int64Counter("memdb.search.rerank_strategy_total",
-		metric.WithDescription("Per-strategy rerank outcome (name in cosine|cross_encoder|llm_judge|staged, outcome in success|skipped|error)"))
+		metric.WithDescription("Per-strategy rerank outcome (name in cosine|cross_encoder|llm_judge|mmr|staged|math_prefilter, outcome in success|skipped|error)"))
 	rerankCounter = c
 	t1, _ := m.Int64Counter("memdb.search.rerank_top1_changed_total",
-		metric.WithDescription("Whether a rerank stage moved a different item to position 1 (stage in cosine|cross_encoder|llm_judge|mmr|staged, changed in true|false)"))
+		metric.WithDescription("Whether a rerank stage moved a different item to position 1 (stage in cosine|cross_encoder|llm_judge|mmr|staged|math_prefilter, changed in true|false)"))
 	top1ChangedCounter = t1
 	h, _ := m.Int64Histogram(
 		"memdb.search.rerank_strategy_duration_ms",

@@ -18,6 +18,7 @@
 package rerank
 
 import (
+	"os"
 	"context"
 
 	"go.opentelemetry.io/otel"
@@ -54,15 +55,23 @@ type MMR struct {
 	TopK           int     // 0 = no cap; override via MEMDB_MMR_TOPK
 }
 
-// NewMMRFromEnv reads MEMDB_MMR_BAR (float, default 0.8) and
-// MEMDB_MMR_TOPK (int, default 0 = no cap) and returns a configured MMR.
-// EmbeddingsByID must be set by the caller before use.
-func NewMMRFromEnv(embByID map[string][]float32) MMR {
+// NewMMRFromEnv reads MEMDB_MMR_ENABLED (gate, default "1" = on),
+// MEMDB_MMR_BAR (float, default 0.8) and MEMDB_MMR_TOPK (int, default
+// 0 = no cap). Returns (MMR, true) when enabled, (MMR{}, false) when
+// MEMDB_MMR_ENABLED="0". Default ON preserves the pre-2026-05-03
+// behaviour where MMR ran on every search; the kill-switch lets
+// operators run forensic comparisons (e.g., does MMR drop legitimate
+// paraphrases on this corpus?) without bumping MMR_BAR to 1.01 as
+// a hack. EmbeddingsByID must be set by the caller before use.
+func NewMMRFromEnv(embByID map[string][]float32) (MMR, bool) {
+	if os.Getenv("MEMDB_MMR_ENABLED") == "0" {
+		return MMR{}, false
+	}
 	return MMR{
 		EmbeddingsByID: embByID,
 		Bar:            envcfg.Float("MEMDB_MMR_BAR", 0.8),
 		TopK:           envcfg.Int("MEMDB_MMR_TOPK", 0),
-	}
+	}, true
 }
 
 // Name implements Reranker.
