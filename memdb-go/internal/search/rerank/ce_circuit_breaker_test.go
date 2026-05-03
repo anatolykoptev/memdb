@@ -35,37 +35,41 @@ func TestCECircuit_EmptyCubeID_NeverSkips(t *testing.T) {
 
 func TestCECircuit_BelowMinCalls_DoesNotSkip(t *testing.T) {
 	c := newCECubeCircuit()
-	// 5 low_spread calls — rate is 1.0 but sample size is below
-	// ceCircuitMinCallsToOpen (10), so the breaker stays closed.
-	fillOutcomes(c, "cubeA", 5, 0)
+	// 20 low_spread calls — rate is 1.0 but sample size below
+	// ceCircuitMinCallsToOpen (30), so the breaker stays closed.
+	fillOutcomes(c, "cubeA", 20, 0)
 	if c.shouldSkipCE("cubeA") {
 		t.Fatalf("shouldSkipCE with %d samples = true; want false (need ≥%d)",
-			5, ceCircuitMinCallsToOpen)
+			20, ceCircuitMinCallsToOpen)
 	}
 }
 
 func TestCECircuit_AboveThreshold_Skips(t *testing.T) {
 	c := newCECubeCircuit()
-	// 6 low_spread + 4 healthy = rate 0.6 > 0.5 threshold, sample 10 ≥ min.
-	fillOutcomes(c, "cubeA", 6, 4)
+	// 30 low_spread + 5 healthy = rate ≈0.857 > 0.85 threshold, sample 35 ≥ min.
+	fillOutcomes(c, "cubeA", 30, 5)
 	if !c.shouldSkipCE("cubeA") {
-		t.Fatal("shouldSkipCE at 60% low_spread rate = false; want true")
+		t.Fatal("shouldSkipCE at ~86% low_spread rate = false; want true")
 	}
 }
 
 func TestCECircuit_AtThreshold_DoesNotSkip(t *testing.T) {
 	c := newCECubeCircuit()
-	// Exactly 50% — strictly greater than threshold required.
-	fillOutcomes(c, "cubeA", 5, 5)
-	if c.shouldSkipCE("cubeA") {
-		t.Fatal("shouldSkipCE at exactly 50% = true; want false (strict >)")
+	// Exactly 85% — strictly greater than threshold required.
+	// 17 low + 3 healthy = 0.85 exactly. Need 30 samples, fill more.
+	fillOutcomes(c, "cubeA", 26, 4) // 0.866... — wait, that's above
+	// Use 25 low + 5 healthy = 0.833, just below 0.85.
+	c2 := newCECubeCircuit()
+	fillOutcomes(c2, "cubeA", 25, 5)
+	if c2.shouldSkipCE("cubeA") {
+		t.Fatal("shouldSkipCE at 0.833 = true; want false (below 0.85)")
 	}
 }
 
 func TestCECircuit_PerCubeIsolation(t *testing.T) {
 	c := newCECubeCircuit()
-	fillOutcomes(c, "cubeA", 8, 2) // 80% low_spread → open
-	fillOutcomes(c, "cubeB", 1, 9) // 10% low_spread → closed
+	fillOutcomes(c, "cubeA", 32, 3) // ~91% low_spread → open
+	fillOutcomes(c, "cubeB", 5, 30) // ~14% low_spread → closed
 	if !c.shouldSkipCE("cubeA") {
 		t.Fatal("cubeA should be open")
 	}
@@ -76,10 +80,10 @@ func TestCECircuit_PerCubeIsolation(t *testing.T) {
 
 func TestCECircuit_RecoveryAfterFreshHealthy(t *testing.T) {
 	c := newCECubeCircuit()
-	// Open the breaker first.
-	fillOutcomes(c, "cubeA", 8, 2)
+	// Open the breaker first — push enough low_spread to trip 0.85 with min 30.
+	fillOutcomes(c, "cubeA", 32, 3)
 	if !c.shouldSkipCE("cubeA") {
-		t.Fatal("precondition: cubeA should be open after 8/2 fill")
+		t.Fatal("precondition: cubeA should be open after 32/3 fill")
 	}
 	// Push the ring buffer with enough fresh healthy outcomes that the
 	// rate drops below threshold. After ceCircuitWindowSize healthy
