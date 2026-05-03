@@ -67,10 +67,10 @@ func (h *Handler) triggerBackgroundExtractors(in extractorTriggerInput) {
 	h.generateEpisodicSummary(in.ReqCtx, in.CubeID, in.UserID, in.SessionID, in.Conversation, in.Now, in.ObservationDate, in.FactCount)
 
 	// 2. Skill memory — extract reusable skill chunks from sufficiently long convs.
-	h.generateSkillMemory(in.ReqCtx, in.CubeID, in.UserID, in.Conversation, in.MessageCount)
+	h.generateSkillMemory(in.ReqCtx, in.CubeID, in.UserID, in.Conversation, in.MessageCount, in.ObservationDate)
 
 	// 3. Tool trajectory — capture tool-call traces if any are present.
-	h.generateToolTrajectory(in.ReqCtx, in.CubeID, in.UserID, in.Conversation)
+	h.generateToolTrajectory(in.ReqCtx, in.CubeID, in.UserID, in.Conversation, in.ObservationDate)
 
 	// 4. Legacy profile summary refresh — runs only if the profiler is wired in.
 	if h.profiler != nil {

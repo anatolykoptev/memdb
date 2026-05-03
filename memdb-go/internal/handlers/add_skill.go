@@ -13,6 +13,7 @@ import (
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/memprops"
 )
 
 const (
@@ -22,7 +23,7 @@ const (
 )
 
 // generateSkillMemory asynchronously extracts skill memories from the conversation.
-func (h *Handler) generateSkillMemory(reqCtx context.Context, cubeID, userID, conversation string, messageCount int) {
+func (h *Handler) generateSkillMemory(reqCtx context.Context, cubeID, userID, conversation string, messageCount int, observationDate string) {
 	if h.llmChat == nil || h.postgres == nil || h.embedder == nil {
 		return
 	}
@@ -56,13 +57,13 @@ func (h *Handler) generateSkillMemory(reqCtx context.Context, cubeID, userID, co
 			if chunk.Messages == "" {
 				continue
 			}
-			h.processSkillChunk(ctx, cubeID, userID, chunk)
+			h.processSkillChunk(ctx, cubeID, userID, chunk, observationDate)
 		}
 	}()
 }
 
 // processSkillChunk handles a single task chunk: recall → extract → store.
-func (h *Handler) processSkillChunk(ctx context.Context, cubeID, userID string, chunk llm.TaskChunk) {
+func (h *Handler) processSkillChunk(ctx context.Context, cubeID, userID string, chunk llm.TaskChunk, observationDate string) {
 	existing := h.recallExistingSkills(ctx, cubeID, chunk.TaskName)
 	skill, err := llm.ExtractSkill(ctx, h.llmChat, chunk.Messages, existing)
 	if err != nil {
@@ -90,7 +91,17 @@ func (h *Handler) processSkillChunk(ctx context.Context, cubeID, userID string, 
 	id := uuid.New().String()
 	now := nowTimestamp()
 
-	props := buildSkillProperties(id, cubeID, userID, now, skill)
+	if observationDate == "" {
+		h.logger.Debug("skill extraction: skipping — empty observationDate",
+			slog.String("cube_id", cubeID), slog.String("name", skill.Name))
+		return
+	}
+
+	props, err := buildSkillProperties(id, cubeID, userID, now, observationDate, skill)
+	if err != nil {
+		h.logger.Debug("skill extraction: props build failed", slog.Any("error", err))
+		return
+	}
 	propsJSON, err := json.Marshal(props)
 	if err != nil {
 		return
@@ -161,35 +172,36 @@ func parseExistingSkill(propsJSON string) llm.ExistingSkill {
 	return es
 }
 
-// buildSkillProperties constructs the JSONB properties for a SkillMemory node.
-func buildSkillProperties(id, cubeID, userID, now string, skill *llm.SkillMemory) map[string]any {
-	props := map[string]any{
-		"id":          id,
-		"memory":      skill.Description,
-		"memory_type": "SkillMemory",
-		// user_name is the cube partition key (upstream MemOS convention; populated from cube_id)
-		"user_name":   cubeID,
-		"user_id":     userID,
-		"status":      "activated",
-		"created_at":  now,
-		"updated_at":  now,
-		"confidence":  0.99,
-		"source":      "skill_extractor",
-		"name":        skill.Name,
-		"description": skill.Description,
-		"procedure":   skill.Procedure,
-		"experience":  skill.Experience,
-		"preference":  skill.Preference,
-		"examples":    skill.Examples,
-		"tags":        skill.Tags,
+// buildSkillProperties constructs the JSONB properties for a SkillMemory node
+// via memprops.BuildDerivedMemoryProps, then overlays skill-specific fields.
+func buildSkillProperties(id, cubeID, userID, now, observationDate string, skill *llm.SkillMemory) (map[string]any, error) {
+	props, err := memprops.BuildDerivedMemoryProps(memprops.DerivedMemoryProps{
+		ID:              id,
+		Memory:          skill.Description,
+		MemoryType:      "SkillMemory",
+		UserName:        cubeID,
+		UserID:          userID,
+		Now:             now,
+		ObservationDate: observationDate,
+		Source:          "skill_extractor",
+	})
+	if err != nil {
+		return nil, err
 	}
+	props["name"] = skill.Name
+	props["description"] = skill.Description
+	props["procedure"] = skill.Procedure
+	props["experience"] = skill.Experience
+	props["preference"] = skill.Preference
+	props["examples"] = skill.Examples
+	props["tags"] = skill.Tags
 	if skill.Scripts != nil {
 		props["scripts"] = skill.Scripts
 	}
 	if skill.Others != nil {
 		props["others"] = skill.Others
 	}
-	return props
+	return props, nil
 }
 
 // strFromMap extracts a string value from a map, returning "" if absent or wrong type.
