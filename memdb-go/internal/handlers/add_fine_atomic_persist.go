@@ -349,7 +349,8 @@ func (h *Handler) runAtomicFineForCube(ctx context.Context, req *fullAddRequest,
 		ReqCtx: ctx,
 		CubeID: cubeID, UserID: *req.UserID, SessionID: sessionID,
 		Conversation: conversation, Now: now,
-		FactCount: len(extracted), MessageCount: len(req.Messages),
+		ObservationDate: fc.ObservationDate,
+		FactCount:       len(extracted), MessageCount: len(req.Messages),
 	})
 	// Stage 5b: F12 linked_memory_ids resolver — fire-and-forget. Runs only
 	// for atomic facts (the legacy paragraph path doesn't carry the
