@@ -142,7 +142,7 @@ func TestMMR_BarFromEnv(t *testing.T) {
 	b := newStub("b", 0.8)
 
 	// Use NewMMRFromEnv to pick up the env override.
-	m := NewMMRFromEnv(map[string][]float32{"a": v1, "b": v2})
+	m, _ := NewMMRFromEnv(map[string][]float32{"a": v1, "b": v2})
 	out, err := m.Rerank(context.Background(), "q", []Item{a, b})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -155,7 +155,7 @@ func TestMMR_BarFromEnv(t *testing.T) {
 func TestMMR_BarFromEnv_DefaultFallback(t *testing.T) {
 	// Unset env should fall back to 0.8 default.
 	os.Unsetenv("MEMDB_MMR_BAR")
-	m := NewMMRFromEnv(nil)
+	m, _ := NewMMRFromEnv(nil)
 	if m.Bar != 0.8 {
 		t.Errorf("expected default bar=0.8, got %v", m.Bar)
 	}
