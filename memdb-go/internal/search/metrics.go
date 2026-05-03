@@ -210,7 +210,7 @@ func searchMx() *searchMetricsInstruments {
 		attrFilter, _ := m.Int64Counter("memdb.search.attribution_filter_total",
 			metric.WithDescription("Memobase attributed_to post-filter outcomes per row (outcome=kept|dropped|missing|disabled)"))
 		ceMath, _ := m.Int64Counter("memdb.search.ce_math_fallback_total",
-			metric.WithDescription("CE→MathReranker fallback invocations per live CE call (reason=degraded|low_quality). degraded = ceClient StatusDegraded; low_quality = top-1 CE score below MEMDB_CE_QUALITY_FLOOR."))
+			metric.WithDescription("CE→MathReranker fallback invocations per live CE call (reason=degraded|low_quality|low_spread|bypass_cosine|circuit_open). circuit_open = per-cube breaker tripped on sustained low_spread rate (ce_circuit_breaker.go)."))
 		bareAtom, _ := m.Int64Counter("memdb_search_bare_atom_demoted_total",
 			metric.WithDescription("Pattern-B bare-token atom demotion outcomes per search call (moved=true|false). true = rank-1 swapped with a longer candidate; false = guard checked but no swap needed. Gate: MEMDB_DEMOTE_BARE_ATOMS."))
 		// Per-stage telemetry instruments (forensic 2026-05-01).

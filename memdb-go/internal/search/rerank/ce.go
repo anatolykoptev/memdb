@@ -52,6 +52,12 @@ type CrossEncoder struct {
 	QueryUserID    string
 	QuerySessionID string
 	QueryTags      []string
+	// QueryCubeID is the search request's CubeID. Used by the per-cube
+	// CE low_spread circuit breaker (ce_circuit_breaker.go) to short-
+	// circuit live CE calls on cubes whose recent history shows CE
+	// returns no ranking signal. Empty string disables the breaker for
+	// this call (no per-cube tracking possible).
+	QueryCubeID string
 	// BoostWeights configures the per-factor multipliers. Zero value
 	// (all fields = 0) disables all boosting silently. Use
 	// DefaultBoostWeights() for MemOS-parity defaults.
