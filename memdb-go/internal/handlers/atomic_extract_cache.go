@@ -26,6 +26,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
 	"errors"
 	"log/slog"
 	"sync"
@@ -47,7 +48,11 @@ const (
 	// v1 keys held PRE-NER fact sets; serving them on hit would silently
 	// suppress the rescue path. Bumping the prefix invalidates the v1
 	// keyspace at deploy time without requiring an explicit Redis FLUSHDB.
-	atomicExtractCachePrefix = "atomic-extract:v2:"
+	atomicExtractCachePrefix = "atomic-extract:v3:"
+	// atomicCacheMaxTokens mirrors internal/llm/atomic_extractor.go atomicMaxTokens.
+	// Keep in sync; the source const is package-private. Drift is detectable
+	// by a fresh atomic-extract:v4 prefix bump on the next change.
+	atomicCacheMaxTokens = 8192
 	// defaultAtomicExtractCacheTTL — 24h. Atomic extraction is deterministic
 	// for a given (input, prompt) pair, so long TTL is safe. Tuned down via
 	// env override if a prompt iteration cadence demands faster invalidation.
@@ -160,11 +165,25 @@ func (a *atomicExtractCache) Set(ctx context.Context, key string, facts []llm.At
 // Future work: if linked_memory_ids becomes load-bearing, switch from full-
 // fact caching to a two-layer cache (fact text cached here + linked_ids
 // recomputed at read time via embedding lookup).
-func computeAtomicCacheKey(cubeID, observationDate, conversation string, candidates []llm.Candidate, promptBody string) string {
+func computeAtomicCacheKey(cubeID, observationDate, conversation string, candidates []llm.Candidate, promptBody, modelName string) string {
 	_ = candidates // intentionally unused; see docblock for rationale
 
 	h := sha256.New()
 	h.Write([]byte(cubeID))
+	h.Write([]byte{0})
+	// modelName: a model swap (e.g. flash-3.1 -> flash-3.5) MUST invalidate
+	// per-cube entries, not silently return facts the previous model produced.
+	// The atomicExtractCachePrefix bump v2 -> v3 ensures a clean keyspace at
+	// deploy.
+	h.Write([]byte(modelName))
+	h.Write([]byte{0})
+	// atomicCacheMaxTokens: the LLM completion cap is part of the
+	// (input -> output) contract; raising it could admit longer fact lists.
+	h.Write([]byte(strconv.Itoa(atomicCacheMaxTokens)))
+	h.Write([]byte{0})
+	// "jsonmode" sentinel: locks the key against a future non-JSON output
+	// mode without an explicit prefix bump.
+	h.Write([]byte("jsonmode"))
 	h.Write([]byte{0})
 	h.Write([]byte(observationDate))
 	h.Write([]byte{0})

@@ -237,9 +237,27 @@ func TestShouldDecompose_OverLengthCapSkips(t *testing.T) {
 
 func TestCotCacheKey_Stable(t *testing.T) {
 	t.Parallel()
-	a := cotCacheKey("Hello World")
-	b := cotCacheKey("  hello world  ")
+	a := cotCacheKey("Hello World", "m", 5)
+	b := cotCacheKey("  hello world  ", "m", 5)
 	if a != b {
 		t.Errorf("cache key not normalized: %s vs %s", a, b)
+	}
+}
+
+func TestCotCacheKey_DiffersByMaxSubQueries(t *testing.T) {
+	t.Parallel()
+	a := cotCacheKey("q", "m", 3)
+	b := cotCacheKey("q", "m", 5)
+	if a == b {
+		t.Errorf("expected different keys for different MaxSubQueries")
+	}
+}
+
+func TestCotCacheKey_DiffersByModel(t *testing.T) {
+	t.Parallel()
+	a := cotCacheKey("q", "model-a", 5)
+	b := cotCacheKey("q", "model-b", 5)
+	if a == b {
+		t.Errorf("expected different keys for different model")
 	}
 }

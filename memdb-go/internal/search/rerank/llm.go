@@ -13,6 +13,7 @@ package rerank
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -76,15 +77,30 @@ func (j LLMJudge) Rerank(ctx context.Context, query string, items []Item) ([]Ite
 	candidates := items[:prefixSize]
 	rest := items[prefixSize:]
 
-	// Cache key: query + sorted candidate IDs.
-	nodeIDs := make([]string, 0, len(candidates))
+	// Cache key: version || model || query || sorted (id : sha256(text)[:8]) pairs.
+	// Folding the candidate EmbeddingText hash into the key prevents stale
+	// hits when a memory's text mutates after the previous LLM judgement
+	// (re-ingest, perspective swap, summarisation rewrite). Model and "v2"
+	// version sentinel ensure model swaps and key-shape rollouts invalidate
+	// cleanly.
+	type keyPair struct{ id, txtHash string }
+	pairs := make([]keyPair, 0, len(candidates))
 	for _, it := range candidates {
-		if id := it.ID(); id != "" {
-			nodeIDs = append(nodeIDs, id)
+		id := it.ID()
+		if id == "" {
+			continue
 		}
+		th := sha256.Sum256([]byte(it.EmbeddingText()))
+		pairs = append(pairs, keyPair{id: id, txtHash: hex.EncodeToString(th[:8])})
 	}
-	sort.Strings(nodeIDs)
-	cacheKey := fmt.Sprintf("%x", sha256.Sum256([]byte(query+"\x00"+strings.Join(nodeIDs, ","))))
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].id < pairs[j].id })
+	parts := make([]string, len(pairs))
+	for i, p := range pairs {
+		parts[i] = p.id + ":" + p.txtHash
+	}
+	cacheKey := fmt.Sprintf("%x", sha256.Sum256(
+		[]byte("v2"+"\x00"+j.Config.Model+"\x00"+query+"\x00"+strings.Join(parts, ",")),
+	))
 
 	// M12.5: capture pre-rerank top-1 ID so we can detect swaps after the
 	// LLM scores land. Distinct from M12.7's rerank_gate_decision_total
