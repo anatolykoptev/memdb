@@ -36,14 +36,20 @@ const (
 	ceCircuitWindowSize = 50
 
 	// ceCircuitOpenThreshold is the low_spread fraction above which the
-	// breaker opens for the cube. 0.5 means a majority of recent CE calls
-	// gave no ranking signal — calling CE again is unlikely to help.
-	ceCircuitOpenThreshold = 0.5
+	// breaker opens for the cube. Tuned 2026-05-02 (Run #17): 0.5 → 0.85.
+	// Initial 0.5 was too aggressive — Run #17 showed cat2/cat4 F1 collapse
+	// (-23% / -46%) когда breaker skipped CE on cubes where retrieval
+	// hit@k=0.9 but cosine ranking ordered wrong fact first. CE was
+	// providing real discrimination on those cubes; breaker masked it.
+	// 0.85 catches genuinely dead cubes (truly random CE output) while
+	// preserving CE on cubes where it matters even if signal is weak.
+	ceCircuitOpenThreshold = 0.85
 
 	// ceCircuitMinCallsToOpen is the minimum sample size before the rate
-	// is evaluated. Without this, a single low_spread call (rate 1.0)
-	// would trip the breaker.
-	ceCircuitMinCallsToOpen = 10
+	// is evaluated. Tuned 2026-05-02: 10 → 30. Larger sample requires
+	// sustained pattern before opening — single eval batch (50 calls) at
+	// rate 0.55 must show 30+ low_spread before breaker engages, not 10.
+	ceCircuitMinCallsToOpen = 30
 )
 
 // ceCubeCircuit tracks low_spread CE outcomes per cube_id and opens
