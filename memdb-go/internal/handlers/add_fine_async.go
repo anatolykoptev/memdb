@@ -33,8 +33,14 @@ type extractorTriggerInput struct {
 	SessionID    string
 	Conversation string
 	Now          string
-	FactCount    int
-	MessageCount int
+	// ObservationDate is the in-conversation date (YYYY-MM-DD) of the
+	// source messages — threaded into every derived row so retrieval reads
+	// the conversation timeline, not the ingest wall-clock. Empty means
+	// the caller failed to plumb a chat_time through and the affected
+	// derived extractors must skip rather than poison memory with NOW.
+	ObservationDate string
+	FactCount       int
+	MessageCount    int
 }
 
 // triggerBackgroundExtractors runs the five fire-and-forget extractors that
@@ -58,7 +64,7 @@ func (h *Handler) triggerBackgroundExtractors(in extractorTriggerInput) {
 		return
 	}
 	// 1. Episodic summary — session-level overview node.
-	h.generateEpisodicSummary(in.ReqCtx, in.CubeID, in.UserID, in.SessionID, in.Conversation, in.Now, in.FactCount)
+	h.generateEpisodicSummary(in.ReqCtx, in.CubeID, in.UserID, in.SessionID, in.Conversation, in.Now, in.ObservationDate, in.FactCount)
 
 	// 2. Skill memory — extract reusable skill chunks from sufficiently long convs.
 	h.generateSkillMemory(in.ReqCtx, in.CubeID, in.UserID, in.Conversation, in.MessageCount)

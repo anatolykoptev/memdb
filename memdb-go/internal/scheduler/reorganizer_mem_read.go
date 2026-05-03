@@ -31,6 +31,12 @@ type wmInfo struct {
 	sessionID      string
 	agentID        string
 	processedWMIDs []string
+	// observationDate is max(observation_date | chat_time) across the
+	// processed WM rows — the in-conversation anchor for any derived row
+	// produced by this batch (episodic summary, mem_read LTM nodes).
+	// Empty when no source row carried a usable date — derived writers
+	// must skip rather than fall back to wall-clock.
+	observationDate string
 }
 
 // actionCounts holds outcome counters for Step 7.
@@ -103,7 +109,10 @@ func (r *Reorganizer) processRawMemoryFine(ctx context.Context, userID, cubeID s
 	r.deleteWMNodes(ctx, cubeID, info.processedWMIDs, log)
 
 	if info.sessionID != "" {
-		r.generateEpisodicSummary(userID, cubeID, info.sessionID, conversation, now)
+		// observationDate is the max chat_time/observation_date across the
+		// WM rows we just processed — anchors the episodic summary to the
+		// conversation timeline instead of ingest wall-clock (M12.1).
+		r.generateEpisodicSummary(userID, cubeID, info.sessionID, conversation, now, info.observationDate)
 	}
 	if r.profiler != nil {
 		r.profiler.TriggerRefresh(cubeID)

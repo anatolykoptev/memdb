@@ -24,6 +24,7 @@ import (
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/memprops"
 )
 
 const (
@@ -39,7 +40,12 @@ const (
 // The node captures a 3-5 sentence overview of the conversation window.
 // reqCtx is the request context; the goroutine uses context.WithoutCancel so
 // the OTel trace propagates without inheriting the request cancellation signal.
-func (h *Handler) generateEpisodicSummary(reqCtx context.Context, cubeID, userID, sessionID, conversation, now string, factCount int) {
+//
+// observationDate is the in-conversation YYYY-MM-DD anchor of the source
+// messages (M12.1). When empty the goroutine skips and emits a
+// memdb_derived_memory_skipped_total{reason="no_observation_date"} counter
+// rather than poison memory with a wall-clock today-leak.
+func (h *Handler) generateEpisodicSummary(reqCtx context.Context, cubeID, userID, sessionID, conversation, now, observationDate string, factCount int) {
 	if h.llmExtractor == nil || h.llmChat == nil || h.postgres == nil || h.embedder == nil {
 		return
 	}
@@ -51,6 +57,16 @@ func (h *Handler) generateEpisodicSummary(reqCtx context.Context, cubeID, userID
 	}
 	if len(strings.TrimSpace(conversation)) < 100 {
 		return // too short to be worth summarising
+	}
+	if strings.TrimSpace(observationDate) == "" {
+		// M12.1: no in-conversation date plumbed → skip rather than write a
+		// today-leaking row. Buffer-flush is the known offender (Phase 2 will
+		// retain chat_time on buffered messages); LoCoMo-style sync ingest
+		// always supplies a date.
+		// TODO(phase-2): emit memdb_derived_memory_skipped_total{reason="no_observation_date"}.
+		h.logger.Debug("episodic summary: skipped — no observation_date plumbed (would today-leak)",
+			slog.String("cube_id", cubeID), slog.String("session_id", sessionID))
+		return
 	}
 	// Detect session type for focused summary.
 	sessionType := detectSessionType(conversation)
@@ -77,21 +93,26 @@ func (h *Handler) generateEpisodicSummary(reqCtx context.Context, cubeID, userID
 		}
 		vec := vecs[0]
 
-		// Build node properties
+		// Build node properties via memprops — observation_date enforced.
 		id := uuid.New().String()
-		props := map[string]any{
-			"id":          id,
-			"memory":      summary,
-			"memory_type": episodicMemoryType,
-			// user_name is the cube partition key (upstream MemOS convention; populated from cube_id)
-			"user_name":  cubeID,
-			"user_id":    userID,
-			"session_id": sessionID,
-			"status":     "activated",
-			"created_at": now,
-			"updated_at": now,
-			"confidence": 0.9,
-			"source":     "episodic_summarizer",
+		props, err := memprops.BuildDerivedMemoryProps(memprops.DerivedMemoryProps{
+			ID:              id,
+			Memory:          summary,
+			MemoryType:      episodicMemoryType,
+			UserID:          userID,
+			UserName:        cubeID,
+			SessionID:       sessionID,
+			Now:             now,
+			ObservationDate: observationDate,
+			Source:          "episodic_summarizer",
+			HierarchyLevel:  "episodic",
+			Confidence:      0.9,
+			Tags:            []string{"mode:fine"},
+		})
+		if err != nil {
+			h.logger.Warn("episodic summary: build props failed",
+				slog.String("cube_id", cubeID), slog.Any("error", err))
+			return
 		}
 		propsJSON, err := json.Marshal(props)
 		if err != nil {
