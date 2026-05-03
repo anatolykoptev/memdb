@@ -137,6 +137,8 @@ func (h *Handler) invalidateDeleteCaches(ctx context.Context, userID string, ids
 		cachePrefix+"get_all:"+userID+":*",
 		cachePrefix+"search:*:"+userID+":*",
 		cachePrefix+"users:*",
+		cachePrefix+"post_get_memory:"+userID+":*",
+		cachePrefix+"post_get_memory_filter:"+userID+":*",
 	)
 	for _, id := range ids {
 		patterns = append(patterns, cachePrefix+"memory:"+id)

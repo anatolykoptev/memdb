@@ -179,6 +179,7 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 		h.cacheInvalidate(ctx,
 			cachePrefix+"get_all:"+cubeID+":*",
 			cachePrefix+"post_get_memory:"+cubeID+":*",
+			cachePrefix+"post_get_memory_filter:"+cubeID+":*",
 		)
 	}
 

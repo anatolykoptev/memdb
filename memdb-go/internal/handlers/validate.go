@@ -139,6 +139,7 @@ func (h *Handler) ValidatedFeedback(w http.ResponseWriter, r *http.Request) {
 	h.cacheInvalidate(ctx,
 		cachePrefix+"get_all:"+*req.UserID+":*",
 		cachePrefix+"post_get_memory:"+*req.UserID+":*",
+		cachePrefix+"post_get_memory_filter:"+*req.UserID+":*",
 	)
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
