@@ -28,6 +28,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
@@ -113,7 +114,123 @@ func atomicToExtracted(f llm.AtomicFact) llm.ExtractedFact {
 		// Tags are populated from the topic_tag plus a marker so the existing
 		// search-side tag filters still see the fact.
 		Tags: tagsForAtomic(f),
+		// Promote NamedEntitiesInText to Entities so the shared
+		// linkEntitiesAsync path (collectHandlerEntityPairs filters on
+		// len(Entities)>0) upserts entity_nodes + MENTIONS_ENTITY edges
+		// for atomic facts. Without this, query-time NER lookups
+		// (GetMemoriesByEntityIDs) returned 0 entities for atomic-only
+		// cubes, skipping AGE graph traversal entirely and degrading
+		// cat2 multi-hop recall ("Melanie's pets") to plain dense+sparse.
+		Entities: namedEntitiesToMentions(f.NamedEntitiesInText),
 	}
+}
+
+// namedEntitiesToMentions converts the LLM's flat string list of proper nouns
+// into typed EntityMention rows. The atomic prompt does NOT classify entity
+// types (Mem0 ADDITIVE schema returns names only), so we apply a tiny
+// heuristic at convert time:
+//
+//   - quoted strings (`"Becoming Nicole"`, `“…”`) → "WORK"   (titles)
+//   - all-uppercase tokens of len>=2                → "ORG"    (acronyms)
+//   - single-token capitalized name                 → "PERSON" (default)
+//   - everything else                                → "ENTITY" (safe fallback)
+//
+// The type label primarily drives entity_type analytics — search/recall
+// uses normalized id (lowercased name) for joins, so misclassification
+// degrades reporting only, not retrieval. Empty input → nil (no-op).
+func namedEntitiesToMentions(names []string) []llm.EntityMention {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make([]llm.EntityMention, 0, len(names))
+	seen := make(map[string]bool, len(names))
+	for _, raw := range names {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			continue
+		}
+		// Dedup within the same fact — the LLM occasionally repeats a
+		// proper noun across enumerations. Idempotency is the upsert
+		// layer's job, but cheaper to filter here.
+		key := strings.ToLower(name)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, llm.EntityMention{
+			Name: stripEntityQuotes(name),
+			Type: inferEntityType(name),
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// stripEntityQuotes removes wrapping ASCII or smart quotes from a name so
+// the canonical form stored in entity_nodes.name doesn't double up on
+// punctuation when the LLM emits `"Becoming Nicole"` verbatim.
+func stripEntityQuotes(s string) string {
+	if len(s) < 2 {
+		return s
+	}
+	pairs := [][2]rune{{'"', '"'}, {'\'', '\''}, {'“', '”'}, {'«', '»'}}
+	r := []rune(s)
+	for _, p := range pairs {
+		if r[0] == p[0] && r[len(r)-1] == p[1] {
+			return strings.TrimSpace(string(r[1 : len(r)-1]))
+		}
+	}
+	return s
+}
+
+// inferEntityType returns a coarse type label for a raw entity string from
+// NamedEntitiesInText. See namedEntitiesToMentions for the heuristic table.
+func inferEntityType(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "ENTITY"
+	}
+	// Quoted → title of a work / book / film / song.
+	if len(trimmed) >= 2 {
+		first, last := trimmed[0], trimmed[len(trimmed)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+			return "WORK"
+		}
+		// Smart quotes (UTF-8 multi-byte): cheap byte-prefix check.
+		if strings.HasPrefix(trimmed, "“") && strings.HasSuffix(trimmed, "”") {
+			return "WORK"
+		}
+	}
+	// All-uppercase short token → acronym/org (NASA, IBM).
+	if isAllUpper(trimmed) && len(trimmed) >= 2 {
+		return "ORG"
+	}
+	// Single-token capitalized word → PERSON default.
+	if !strings.ContainsAny(trimmed, " \t") {
+		runes := []rune(trimmed)
+		if len(runes) > 0 && unicode.IsUpper(runes[0]) {
+			return "PERSON"
+		}
+	}
+	return "ENTITY"
+}
+
+// isAllUpper returns true when every letter rune in s is uppercase. Digits
+// and punctuation are ignored so "F-35" still classifies as ORG.
+func isAllUpper(s string) bool {
+	hasLetter := false
+	for _, r := range s {
+		if !unicode.IsLetter(r) {
+			continue
+		}
+		hasLetter = true
+		if !unicode.IsUpper(r) {
+			return false
+		}
+	}
+	return hasLetter
 }
 
 // tagsForAtomic builds the Tag list. Always includes "atomic_fact" plus

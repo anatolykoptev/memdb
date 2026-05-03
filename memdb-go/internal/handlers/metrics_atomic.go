@@ -46,10 +46,15 @@ var (
 )
 
 type atomicMetricsStruct struct {
-	Extracted     metric.Int64Counter     // labels: outcome
-	FactsPerChunk metric.Float64Histogram // unlabeled
-	FactWordCount metric.Float64Histogram // unlabeled
+	Extracted         metric.Int64Counter     // labels: outcome
+	FactsPerChunk     metric.Float64Histogram // unlabeled
+	FactWordCount     metric.Float64Histogram // unlabeled
+	EntitiesPromoted  metric.Int64Counter     // labels: outcome (success|failed)
 }
+
+// promoteOutcomes covers all label values for atomic_entities_promoted_total
+// so Grafana panels survive cold start (parity with atomicOutcomes).
+var promoteOutcomes = []string{"success", "failed"}
 
 func atomicMx() *atomicMetricsStruct {
 	atomicMetricsOnce.Do(func() {
@@ -65,13 +70,20 @@ func atomicMx() *atomicMetricsStruct {
 			metric.WithDescription("Word count per extracted atomic fact"),
 			metric.WithExplicitBucketBoundaries(5, 15, 40, 80, 120),
 		)
+		ent, _ := meter.Int64Counter("memdb.atomic.entities_promoted_total",
+			metric.WithDescription("Atomic-fact entity promotion outcomes (success|failed) — covers entity_nodes upserts driven by NamedEntitiesInText"),
+		)
 		atomicInstruments = &atomicMetricsStruct{
 			Extracted: ext, FactsPerChunk: fpc, FactWordCount: fwc,
+			EntitiesPromoted: ent,
 		}
 		// context.Background(): metric pre-registration inside sync.Once, no request in scope.
 		ctx := context.Background()
 		for _, oc := range atomicOutcomes {
 			ext.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
+		}
+		for _, oc := range promoteOutcomes {
+			ent.Add(ctx, 0, metric.WithAttributes(attribute.String("outcome", oc)))
 		}
 	})
 	return atomicInstruments
@@ -101,4 +113,19 @@ func recordAtomicFactWordCount(ctx context.Context, words int) {
 		return
 	}
 	mx.FactWordCount.Record(ctx, float64(words))
+}
+
+// recordAtomicEntityPromoted bumps the promotion counter once per attempted
+// entity_nodes upsert driven by an atomic fact's NamedEntitiesInText.
+// outcome ∈ {"success","failed"}. Caller-side: success on UpsertEntityNode
+// returning a non-empty id, failed on error or empty id.
+func recordAtomicEntityPromoted(ctx context.Context, outcome string, n int) {
+	if n <= 0 {
+		return
+	}
+	mx := atomicMx()
+	if mx.EntitiesPromoted == nil {
+		return
+	}
+	mx.EntitiesPromoted.Add(ctx, int64(n), metric.WithAttributes(attribute.String("outcome", outcome)))
 }
