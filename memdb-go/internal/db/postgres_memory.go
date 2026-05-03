@@ -57,8 +57,9 @@ type RawMemory struct {
 // consolidation per tier. Embedding is parsed from the text representation so
 // callers can use it for local cosine clustering without re-embedding.
 type HierarchyMemory struct {
-	ID        string
-	Text      string
-	UserID    string
-	Embedding []float32
+	ID         string
+	Text       string
+	UserID     string
+	MemoryType string // 'LongTermMemory'|'UserMemory'|'EpisodicMemory'|'WorkingMemory' — used to filter for CE precompute (search excludes WM).
+	Embedding  []float32
 }

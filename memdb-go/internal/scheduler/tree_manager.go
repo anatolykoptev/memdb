@@ -16,6 +16,8 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
 // TreeHierarchyEnabled reports whether the D3 tree reorganizer is active.
@@ -198,11 +200,33 @@ func (r *Reorganizer) RunTreeReorgForCube(ctx context.Context, cubeID string) {
 	// Reuses rawMems already loaded above; no extra DB read for neighbour
 	// discovery. Persists Memory.properties->>'ce_score_topk' so search-
 	// time CE rerank can short-circuit the live HTTP call.
-	r.runCEPrecomputePass(ctx, cubeID, rawMems)
+	//
+	// Filter out WorkingMemory rows: search default scope excludes WM
+	// (internal/search/config.go: TextScopes), so cached neighbour_ids
+	// pointing at WM rows would never hit at search time. WM is included
+	// upstream in ListMemoriesByHierarchyLevel for D3 small-cube cluster
+	// gate (queries_memory_ltm.go comment), but precompute MUST align
+	// with search scope. Without this filter cache hit rate is 0%.
+	r.runCEPrecomputePass(ctx, cubeID, filterOutWorkingMemory(rawMems))
 
 	log.Info("tree reorg: cycle complete",
 		slog.Int("episodic_created", episodicCreated),
 		slog.Int("semantic_created", semanticCreated),
 		slog.Int("parents_collected", len(parents)),
 	)
+}
+
+// filterOutWorkingMemory drops WorkingMemory rows from a HierarchyMemory
+// slice. Used by the CE precompute pass to align its neighbour pool with
+// the search default scope (TextScopes excludes WM). The upstream SQL
+// keeps WM for D3 cluster-gate reasons; this is a precompute-only filter.
+func filterOutWorkingMemory(in []db.HierarchyMemory) []db.HierarchyMemory {
+	out := in[:0]
+	for _, m := range in {
+		if m.MemoryType == "WorkingMemory" {
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }

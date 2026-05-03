@@ -193,6 +193,7 @@ SELECT
     properties->>(('id'::text))                         AS memory_id,
     properties->>(('memory'::text))                     AS memory_text,
     COALESCE(properties->>(('user_id'::text)), '')      AS user_id,
+    COALESCE(properties->>(('memory_type'::text)), '')  AS memory_type,
     embedding::text                                     AS embedding_text
 FROM %[1]s."Memory"
 WHERE properties->>(('user_name'::text)) = $1
