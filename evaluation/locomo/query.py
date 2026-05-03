@@ -1017,6 +1017,13 @@ def query_chat_dual(
         # cap is a no-op there and an active cap on legacy non-system_prompt
         # callers, so it's safe to set unconditionally.
         "max_context_tokens": int(os.getenv("LOCOMO_MAX_CONTEXT_TOKENS", "8000")),
+        # Karpathy r3 Fix #3 — signal to server that harness pre-supplied N
+        # memories in basePrompt. Server uses this to upgrade variant from
+        # Zero (which would inject strict "no answer" refusal rules) to High
+        # (commit-to-best-evidence). Without this field, server's empty pool
+        # (top_k=1 + threshold=0.99) → variant=Zero → 11 false-negative
+        # refusals в Run #19 где hit@k=1.0 но LLM рефузит.
+        "external_memory_count": len(speaker_a_items) + len(speaker_b_items),
     }
     start = time.time()
     resp = requests.post(
