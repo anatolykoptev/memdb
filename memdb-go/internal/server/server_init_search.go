@@ -168,6 +168,33 @@ func initSearchService(
 			slog.Duration("fail_rate_window", cbCfg.FailRateWindow),
 		)
 	}
+	// Voyage rerank-2.5 fallback (go-kit v0.40 Reranker-interface fallback).
+	// Local gte-multi-rerank on ARM saturates under load — circuit opens,
+	// timeouts, OOM all trigger StatusDegraded. When that happens, falling
+	// back to Voyage rerank-2.5 keeps user-facing latency low (~150ms vs the
+	// alternative of math-fallback noise). Voyage call is paid per-token but
+	// only on local CE failure, so quota burn is bounded by upstream health.
+	//
+	// Gated by VOYAGE_API_KEY presence + opt-in env MEMDB_VOYAGE_RERANK_FALLBACK=1
+	// (default off — operator must consciously enable to start spending Voyage
+	// quota). Model defaults to rerank-2.5; override via MEMDB_VOYAGE_RERANK_MODEL.
+	if voyageKey := os.Getenv("VOYAGE_API_KEY"); voyageKey != "" && os.Getenv("MEMDB_VOYAGE_RERANK_FALLBACK") == "1" {
+		voyageModel := os.Getenv("MEMDB_VOYAGE_RERANK_MODEL")
+		if voyageModel == "" {
+			voyageModel = "rerank-2.5"
+		}
+		voyageClient := rerank.NewVoyageRerankClient(voyageKey, voyageModel, logger)
+		if voyageClient != nil && voyageClient.Available() {
+			rerankOpts = append(rerankOpts,
+				rerank.WithFallback(voyageClient),
+				rerank.WithFallbackName("voyage-"+voyageModel),
+			)
+			logger.Info("voyage rerank fallback enabled",
+				slog.String("primary", cfg.CrossEncoderModel),
+				slog.String("secondary", "voyage-"+voyageModel),
+			)
+		}
+	}
 	svc.RerankClient = rerank.NewClient(cfg.CrossEncoderURL, rerankOpts...)
 	if svc.RerankClient.Available() {
 		logger.Info("cross_encoder rerank enabled",
