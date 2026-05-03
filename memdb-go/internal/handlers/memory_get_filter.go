@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strconv"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/filter"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
@@ -49,11 +48,15 @@ func (h *Handler) handlePostGetMemoryWithFilter(
 		limit = filterGetMemoryMaxLimit
 	}
 
-	// Cache key includes user + filter hash + limit to prevent cross-user poisoning.
-	filterBytes, _ := json.Marshal(req.Filter)
-	filterHash := sha256.Sum256(filterBytes)
+	// Cache key hashes the FULL request (excluding MemCubeID, which stays as a
+	// literal segment so wildcard invalidation can match per-cube). The previous
+	// version only hashed Filter+limit, so Page=1 and Page=2 collided.
+	hashable := req
+	hashable.MemCubeID = nil
+	reqBytes, _ := json.Marshal(hashable)
+	reqHash := sha256.Sum256(reqBytes)
 	cacheKey := cachePrefix + "post_get_memory_filter:" + memCubeID +
-		":" + strconv.Itoa(limit) + ":" + hex.EncodeToString(filterHash[:])
+		":" + hex.EncodeToString(reqHash[:])
 
 	ctx := r.Context()
 	if cached := h.cacheGet(ctx, cacheKey); cached != nil {

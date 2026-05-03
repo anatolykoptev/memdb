@@ -106,7 +106,9 @@ func (h *Handler) NativeUpdateUserConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	h.cacheDelete(r.Context(), cachePrefix+"config:"+userID)
+	// Bug 5 fix: writer key is composite (config:v2:<user>:<cube>); sweep all
+	// cubes owned by this user. Old (config:<id>) namespace is abandoned post-bump.
+	h.cacheInvalidate(r.Context(), cachePrefix+"config:v2:"+userID+":*")
 
 	h.writeJSON(w, http.StatusOK, map[string]any{
 		"code": 200, "message": "ok",
