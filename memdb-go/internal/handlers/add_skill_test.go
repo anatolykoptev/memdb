@@ -103,7 +103,10 @@ func TestBuildSkillProperties_AllFields(t *testing.T) {
 		Others:      map[string]string{"notes.md": "# Notes"},
 	}
 
-	props := buildSkillProperties("id-1", "cube-a", "user-a", "2026-03-03T00:00:00", skill)
+	props, err := buildSkillProperties("id-1", "cube-a", "user-a", "2026-03-03T00:00:00", "2025-08-19", skill)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if props["id"] != "id-1" {
 		t.Errorf("expected id='id-1', got %v", props["id"])
@@ -126,6 +129,9 @@ func TestBuildSkillProperties_AllFields(t *testing.T) {
 	if props["confidence"] != 0.99 {
 		t.Errorf("expected confidence=0.99, got %v", props["confidence"])
 	}
+	if props["observation_date"] != "2025-08-19" {
+		t.Errorf("expected observation_date='2025-08-19', got %v", props["observation_date"])
+	}
 	if props["status"] != "activated" {
 		t.Errorf("expected status='activated', got %v", props["status"])
 	}
@@ -145,7 +151,10 @@ func TestBuildSkillProperties_NilScriptsAndOthers(t *testing.T) {
 		Others:      nil,
 	}
 
-	props := buildSkillProperties("id-2", "cube-b", "user-b", "2026-03-03T00:00:00", skill)
+	props, err := buildSkillProperties("id-2", "cube-b", "user-b", "2026-03-03T00:00:00", "2025-08-19", skill)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if _, ok := props["scripts"]; ok {
 		t.Error("expected scripts to be absent for nil")
@@ -164,7 +173,10 @@ func TestBuildSkillProperties_SerializesToValidJSON(t *testing.T) {
 		Tags:        []string{"tag1"},
 	}
 
-	props := buildSkillProperties("id-3", "cube-c", "user-c", "2026-03-03T00:00:00", skill)
+	props, err := buildSkillProperties("id-3", "cube-c", "user-c", "2026-03-03T00:00:00", "2025-08-19", skill)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	data, err := json.Marshal(props)
 	if err != nil {
 		t.Fatalf("failed to marshal skill properties: %v", err)
@@ -204,13 +216,13 @@ func TestStrFromMap(t *testing.T) {
 func TestGenerateSkillMemory_NilDependencies(t *testing.T) {
 	h := &Handler{}
 	// Should not panic with nil dependencies
-	h.generateSkillMemory(context.Background(), "cube", "user-1", "user: hello\nassistant: hi", 15)
+	h.generateSkillMemory(context.Background(), "cube", "user-1", "user: hello\nassistant: hi", 15, "2025-08-19")
 }
 
 func TestGenerateSkillMemory_TooFewMessages(t *testing.T) {
 	// messageCount < 10 should return early
 	h := &Handler{}
-	h.generateSkillMemory(context.Background(), "cube", "user-1", "user: hello", 5)
+	h.generateSkillMemory(context.Background(), "cube", "user-1", "user: hello", 5, "2025-08-19")
 	// No panic = success (no LLM/DB configured to call)
 }
 
@@ -218,5 +230,5 @@ func TestGenerateSkillMemory_HighCodeRatio(t *testing.T) {
 	h := &Handler{}
 	code := "```go\npackage main\nfunc main() {}\n```"
 	// 100% code → should skip
-	h.generateSkillMemory(context.Background(), "cube", "user-1", code, 15)
+	h.generateSkillMemory(context.Background(), "cube", "user-1", code, 15, "2025-08-19")
 }

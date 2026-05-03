@@ -14,6 +14,7 @@ import (
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/memprops"
 )
 
 const (
@@ -22,7 +23,7 @@ const (
 
 // generateToolTrajectory asynchronously extracts tool call trajectories from the conversation.
 // Fire-and-forget: errors are logged but never returned to the caller.
-func (h *Handler) generateToolTrajectory(reqCtx context.Context, cubeID, userID, conversation string) {
+func (h *Handler) generateToolTrajectory(reqCtx context.Context, cubeID, userID, conversation, observationDate string) {
 	if h.llmChat == nil || h.postgres == nil || h.embedder == nil {
 		return
 	}
@@ -48,13 +49,13 @@ func (h *Handler) generateToolTrajectory(reqCtx context.Context, cubeID, userID,
 			slog.Int("count", len(items)), slog.String("cube_id", cubeID))
 
 		for i := range items {
-			h.storeToolTrajectory(ctx, cubeID, userID, &items[i])
+			h.storeToolTrajectory(ctx, cubeID, userID, &items[i], observationDate)
 		}
 	}()
 }
 
 // storeToolTrajectory embeds and persists a single trajectory item.
-func (h *Handler) storeToolTrajectory(ctx context.Context, cubeID, userID string, item *llm.TrajectoryItem) {
+func (h *Handler) storeToolTrajectory(ctx context.Context, cubeID, userID string, item *llm.TrajectoryItem, observationDate string) {
 	// Choose text to embed: trajectory summary, or experience as fallback.
 	embedText := item.Trajectory
 	if embedText == "" {
@@ -73,7 +74,17 @@ func (h *Handler) storeToolTrajectory(ctx context.Context, cubeID, userID string
 	id := uuid.New().String()
 	now := nowTimestamp()
 
-	props := buildToolTrajectoryProperties(id, cubeID, userID, now, item)
+	if observationDate == "" {
+		h.logger.Debug("tool trajectory extraction: skipping — empty observationDate",
+			slog.String("cube_id", cubeID))
+		return
+	}
+
+	props, err := buildToolTrajectoryProperties(id, cubeID, userID, now, observationDate, item)
+	if err != nil {
+		h.logger.Debug("tool trajectory extraction: props build failed", slog.Any("error", err))
+		return
+	}
 	propsJSON, err := json.Marshal(props)
 	if err != nil {
 		return
@@ -104,23 +115,25 @@ func hasToolContent(conversation string) bool {
 		strings.Contains(conversation, "<tool_schema>")
 }
 
-// buildToolTrajectoryProperties constructs the JSONB properties for a ToolTrajectoryMemory node.
-func buildToolTrajectoryProperties(id, cubeID, userID, now string, item *llm.TrajectoryItem) map[string]any {
-	return map[string]any{
-		"id":          id,
-		"memory":      item.Experience,
-		"memory_type": "ToolTrajectoryMemory",
-		// user_name is the cube partition key (upstream MemOS convention; populated from cube_id)
-		"user_name":        cubeID,
-		"user_id":          userID,
-		"status":           "activated",
-		"created_at":       now,
-		"updated_at":       now,
-		"confidence":       0.99,
-		"source":           "tool_trajectory_extractor",
-		"correctness":      item.Correctness,
-		"trajectory":       item.Trajectory,
-		"experience":       item.Experience,
-		"tool_used_status": item.ToolUsedStatus,
+// buildToolTrajectoryProperties constructs the JSONB properties for a
+// ToolTrajectoryMemory node via memprops, then overlays domain-specific fields.
+func buildToolTrajectoryProperties(id, cubeID, userID, now, observationDate string, item *llm.TrajectoryItem) (map[string]any, error) {
+	props, err := memprops.BuildDerivedMemoryProps(memprops.DerivedMemoryProps{
+		ID:              id,
+		Memory:          item.Experience,
+		MemoryType:      "ToolTrajectoryMemory",
+		UserName:        cubeID,
+		UserID:          userID,
+		Now:             now,
+		ObservationDate: observationDate,
+		Source:          "tool_trajectory_extractor",
+	})
+	if err != nil {
+		return nil, err
 	}
+	props["correctness"] = item.Correctness
+	props["trajectory"] = item.Trajectory
+	props["experience"] = item.Experience
+	props["tool_used_status"] = item.ToolUsedStatus
+	return props, nil
 }
