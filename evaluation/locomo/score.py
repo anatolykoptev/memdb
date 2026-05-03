@@ -271,14 +271,44 @@ def token_f1(pred: str, gold: str) -> float:
     return 2 * precision * recall / (precision + recall)
 
 
-def hit_at_k(retrieved_contents: list[str], gold: str) -> float:
+# Stop words that match in any text and produce false positives.
+# Original hit_at_k counted any single token overlap — "in", "of", "the"
+# were matching every memory and reporting hit@k=1.0 even when no real
+# evidence was retrieved. Karpathy r3 forensic 2026-05-02 found that 11/15
+# of "successful" retrievals on cat4/5 were actually false positives —
+# gold "in awe of the universe" matched memos about painting/camping just
+# because both contained "the/of/in".
+_HIT_AT_K_STOP = frozenset((
+    "a an the and or but if then else when where while of in on at to for from "
+    "by with about as is are was were be been being am has have had do does did "
+    "will would could should may might must can shall this that these those "
+    "i you he she it we they me him her us them my your his its our their "
+    "not no yes so very also too only just any some all each every other"
+).split())
+
+
+def hit_at_k(retrieved_contents: list[str], gold: str, *, min_overlap: int = 2) -> float:
+    """Hit@k with stopword filtering + min overlap requirement.
+
+    Counts a hit only when at least `min_overlap` content tokens of length>=4
+    survive the stopword filter AND appear together in any retrieved memory.
+    Falls back to single-overlap on len<3 — short answers like "Yes"/"3"/"2022"
+    have only one informative token and shouldn't be penalised by the threshold.
+    """
     if not retrieved_contents:
         return 0.0
-    g_toks = set(tokens(gold))
-    if not g_toks:
-        return 0.0
+    raw_toks = [t for t in tokens(gold) if t not in _HIT_AT_K_STOP]
+    g_toks_long = [t for t in raw_toks if len(t) >= 4]
+    g_set = set(g_toks_long) if g_toks_long else set(raw_toks)
+    if not g_set:
+        # gold is all stopwords (shouldn't normally happen) — fall back to original.
+        g_set = set(tokens(gold))
+        if not g_set:
+            return 0.0
+    threshold = min_overlap if len(g_set) >= min_overlap else 1
     for content in retrieved_contents:
-        if g_toks & set(tokens(content)):
+        c_toks = set(tokens(content))
+        if len(g_set & c_toks) >= threshold:
             return 1.0
     return 0.0
 
