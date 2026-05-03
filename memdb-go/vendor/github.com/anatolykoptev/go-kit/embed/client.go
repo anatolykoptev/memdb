@@ -51,7 +51,7 @@ func (c *Client) Embed(ctx context.Context, texts []string) ([][]float32, error)
 	if c == nil || c.inner == nil {
 		return nil, nil
 	}
-	res, err := c.EmbedWithResult(ctx, texts)
+	res, err := c.EmbedWithResult(ctx, texts, withRole("passage"))
 	if err != nil {
 		return nil, err
 	}
@@ -83,14 +83,21 @@ func (c *Client) EmbedQuery(ctx context.Context, text string) ([]float32, error)
 	if c == nil || c.inner == nil {
 		return nil, nil
 	}
-	vecs, err := c.Embed(ctx, []string{text})
+	res, err := c.EmbedWithResult(ctx, []string{text}, withRole("query"))
 	if err != nil {
 		return nil, err
 	}
-	if len(vecs) == 0 {
+	if res == nil || len(res.Vectors) == 0 {
 		return nil, nil
 	}
-	return vecs[0], nil
+	if res.Status == StatusDegraded && res.Err != nil {
+		return nil, res.Err
+	}
+	v := res.Vectors[0]
+	if v == nil {
+		return nil, nil
+	}
+	return v.Embedding, nil
 }
 
 // Dimension satisfies Embedder.
