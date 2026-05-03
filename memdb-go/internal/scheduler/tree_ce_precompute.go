@@ -276,7 +276,18 @@ func cePrecomputeNeighbours(ctx context.Context, target db.HierarchyMemory, pool
 
 // cePrecomputeScoreNeighbours fires one rerank HTTP call (memory.text as
 // query, neighbour texts as docs) and returns entries sorted DESC by CE
-// score. Returns nil on rerank error (best-effort — pass continues).
+// score. Returns nil on rerank error AND on degraded results — best-effort
+// (pass continues, will retry next cycle).
+//
+// Why we MUST check Status: client.Rerank() (the convenience wrapper) drops
+// the error and on Status=Degraded returns docs in original order with
+// Score=0. If we persist those zeroes, search-time read sees score=0 and
+// can't distinguish "genuine low-relevance" from "failed inference".
+// Empirically that path also feeds back: zero-scored cache entries don't
+// short-circuit live CE → live CE pressure → circuit-breaker opens →
+// next precompute cycle returns Degraded → more zeroes written. Skipping
+// on non-Ok status breaks the loop. (root cause of 0% precompute hit
+// rate observed 2026-05-03.)
 func cePrecomputeScoreNeighbours(
 	ctx context.Context,
 	client *rerank.Client,
@@ -290,9 +301,14 @@ func cePrecomputeScoreNeighbours(
 	if len(docs) == 0 {
 		return nil
 	}
-	scored := client.Rerank(ctx, queryText, docs)
-	entries := make([]db.CEScoreEntry, 0, len(scored))
-	for _, s := range scored {
+	res, err := client.RerankWithResult(ctx, queryText, docs)
+	if err != nil || res == nil || res.Status != rerank.StatusOk {
+		// Skip persisting placeholder zeroes. Caller logs at debug; future
+		// reorg cycle will retry once the upstream stabilises.
+		return nil
+	}
+	entries := make([]db.CEScoreEntry, 0, len(res.Scored))
+	for _, s := range res.Scored {
 		if s.ID == "" {
 			continue
 		}
