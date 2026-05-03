@@ -123,7 +123,7 @@ func IterativeExpand(
 // Returns (phrases, true) on success, (nil, false) if expansion should stop.
 func getExpansionPhrases(ctx context.Context, query string, stage int, all []map[string]any, cfg IterativeConfig) ([]string, bool) {
 	memCtx := buildMemoryContext(all, iterativeMemContextTopK)
-	cacheKey := buildStageKey(query, stage, all)
+	cacheKey := buildStageKey(query, cfg.Model, stage, all)
 	if phrases, cached := globalIterativeCache.get(cacheKey); cached {
 		return phrases, true
 	}
@@ -217,8 +217,10 @@ func buildMemoryContext(items []map[string]any, n int) string {
 	return sb.String()
 }
 
-// buildStageKey produces a cache key for a given stage.
-func buildStageKey(query string, stage int, items []map[string]any) string {
+// buildStageKey produces a cache key for a given stage. Includes the LLM
+// model so callers swapping models do not silently share cached
+// retrieval-phrase decisions.
+func buildStageKey(query, model string, stage int, items []map[string]any) string {
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		if id, ok := item["id"].(string); ok {
@@ -226,7 +228,7 @@ func buildStageKey(query string, stage int, items []map[string]any) string {
 		}
 	}
 	sort.Strings(ids)
-	raw := fmt.Sprintf("%s\x00%d\x00%s", query, stage, strings.Join(ids, ","))
+	raw := fmt.Sprintf("%s\x00%s\x00%d\x00%s", query, model, stage, strings.Join(ids, ","))
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))
 }
 
