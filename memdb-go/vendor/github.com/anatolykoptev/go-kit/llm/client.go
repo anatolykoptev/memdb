@@ -271,10 +271,20 @@ func ExtractJSON(s string) string {
 
 	switch {
 	case objOK && arrOK:
-		if firstObj <= firstArr {
-			return s[firstObj : lastObj+1]
+		// Earliest opener wins ("object before array" returns the outer object;
+		// "array before object" returns the array). Closer is the LATEST of
+		// either type, which captures the case  where the
+		// caller wants both JSON values returned for downstream multi-value
+		// parsing — not just the leading array.
+		start := firstObj
+		if firstArr < firstObj {
+			start = firstArr
 		}
-		return s[firstArr : lastArr+1]
+		end := lastObj
+		if lastArr > lastObj {
+			end = lastArr
+		}
+		return s[start : end+1]
 	case objOK:
 		return s[firstObj : lastObj+1]
 	case arrOK:
