@@ -248,9 +248,12 @@ func (h *Handler) runFinePipeline(ctx context.Context, conversation, cubeID stri
 	// Cleanup
 	h.cleanupWorkingMemory(ctx, cubeID)
 
-	// Episodic summary for the entire batch
+	// Episodic summary for the entire batch.
 	// Buffer flush has no original request — use cubeID as userID fallback.
-	h.generateEpisodicSummary(ctx, cubeID, cubeID, "", conversation, now, len(facts))
+	// ObservationDate plumbing: buffer storage strips chat_time today (Phase 2
+	// will retain it). Until then we pass "" — generateEpisodicSummary will
+	// metric-and-skip rather than write a today-leaking row.
+	h.generateEpisodicSummary(ctx, cubeID, cubeID, "", conversation, now, "", len(facts))
 
 	// Profile refresh
 	if h.profiler != nil {

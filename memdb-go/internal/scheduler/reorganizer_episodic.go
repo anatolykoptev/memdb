@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/memprops"
 )
 
 const (
@@ -27,12 +28,27 @@ const (
 // generateEpisodicSummary asynchronously creates an EpisodicMemory node for the session.
 // Uses r.callLLM() for summarization and r.embedder for embedding.
 // Runs in background goroutine (45s timeout). Non-fatal.
-func (r *Reorganizer) generateEpisodicSummary(userID, cubeID, sessionID, conversation, now string) {
+//
+// observationDate is the in-conversation YYYY-MM-DD anchor derived by the
+// caller from the source WM rows' chat_time/observation_date (M12.1).
+// Empty observationDate causes the function to skip rather than poison
+// memory with a wall-clock today-leak.
+func (r *Reorganizer) generateEpisodicSummary(userID, cubeID, sessionID, conversation, now, observationDate string) {
 	if r.embedder == nil {
 		return
 	}
 	if len(strings.TrimSpace(conversation)) < 100 {
 		return // too short to be worth summarising
+	}
+	if strings.TrimSpace(observationDate) == "" {
+		// M12.1: no in-conversation date plumbed → skip rather than write a
+		// today-leaking row. Callers (processRawMemoryFine) compute this
+		// from extractWMInfo; "" means none of the source WM rows carried
+		// a chat_time, which is itself a regression to investigate.
+		// TODO(phase-2): emit memdb_derived_memory_skipped_total metric.
+		r.logger.Debug("mem_read episodic summary: skipped — no observation_date plumbed",
+			slog.String("cube_id", cubeID), slog.String("session_id", sessionID))
+		return
 	}
 
 	go func() {
@@ -72,20 +88,26 @@ func (r *Reorganizer) generateEpisodicSummary(userID, cubeID, sessionID, convers
 			return
 		}
 
-		// Build node properties.
+		// Build node properties via memprops — observation_date enforced.
 		id := uuid.New().String()
-		props := map[string]any{
-			"id":          id,
-			"memory":      summary,
-			"memory_type": episodicMemType,
-			"user_name":   cubeID, // partition key (upstream convention)
-			"user_id":     userID, // person identity — Phase 2 split
-			"session_id":  sessionID,
-			"status":      "activated",
-			"created_at":  now,
-			"updated_at":  now,
-			"confidence":  0.9,
-			"source":      "episodic_summarizer",
+		props, err := memprops.BuildDerivedMemoryProps(memprops.DerivedMemoryProps{
+			ID:              id,
+			Memory:          summary,
+			MemoryType:      episodicMemType,
+			UserID:          userID,
+			UserName:        cubeID,
+			SessionID:       sessionID,
+			Now:             now,
+			ObservationDate: observationDate,
+			Source:          "episodic_summarizer",
+			HierarchyLevel:  "episodic",
+			Confidence:      0.9,
+			Tags:            []string{"mode:fine", "scope:mem_read"},
+		})
+		if err != nil {
+			r.logger.WarnContext(ctx, "mem_read episodic summary: build props failed",
+				slog.String("cube_id", cubeID), slog.Any("error", err))
+			return
 		}
 		propsJSON, err := json.Marshal(props)
 		if err != nil {

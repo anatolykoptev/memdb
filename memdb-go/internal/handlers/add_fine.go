@@ -106,7 +106,8 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 		ReqCtx: ctx,
 		CubeID: cubeID, UserID: *req.UserID, SessionID: sessionID,
 		Conversation: conversation, Now: now,
-		FactCount: len(facts), MessageCount: len(req.Messages),
+		ObservationDate: fc.ObservationDate,
+		FactCount:       len(facts), MessageCount: len(req.Messages),
 	})
 	recordStageDuration(ctx, "fanout", t)
 	return items, nil
