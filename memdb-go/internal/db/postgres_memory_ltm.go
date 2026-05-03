@@ -188,7 +188,7 @@ func (p *Postgres) ListMemoriesByHierarchyLevel(ctx context.Context, userName, l
 	for rows.Next() {
 		var r HierarchyMemory
 		var embText string
-		if err := rows.Scan(&r.ID, &r.Text, &r.UserID, &embText); err != nil {
+		if err := rows.Scan(&r.ID, &r.Text, &r.UserID, &r.MemoryType, &embText); err != nil {
 			return nil, fmt.Errorf("list memories by hierarchy level scan: %w", err)
 		}
 		r.Embedding = ParseVectorString(embText)

@@ -209,7 +209,9 @@ func buildTextRerankSuffix(s *SearchService, llmEnabled bool, llmCap int, embByI
 			Cap: llmCap,
 		})
 	}
-	chain = append(chain, rerankpkg.NewMMRFromEnv(embByID))
+	if mmr, ok := rerankpkg.NewMMRFromEnv(embByID); ok {
+		chain = append(chain, mmr)
+	}
 	chain = append(chain, rerankpkg.Staged{
 		Config: rerankpkg.LLMConfig{
 			APIURL: s.LLMReranker.APIURL,
