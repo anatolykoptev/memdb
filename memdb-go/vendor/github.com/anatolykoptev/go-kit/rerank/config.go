@@ -19,7 +19,8 @@ type cfgInternal struct {
 	// G1 fields
 	retry    RetryPolicy
 	circuit  *CircuitBreaker
-	fallback *Client
+	fallback     Reranker // *Client OR any Reranker (Voyage/Jina/...)
+	fallbackName string   // metric label for non-*Client secondaries
 	// G2-client fields
 	normalizeMode    NormalizeMode      // local client-side normalize (MinMax/ZScore); default None
 	serverNormalize  string             // "" | "sigmoid" — sent in cohereRequest.Normalize
@@ -44,7 +45,8 @@ func defaultCfg() *cfgInternal {
 		hc:       &http.Client{},
 		retry:    defaultRetryPolicy(),
 		circuit:  nil, // off by default; opt-in via WithCircuit
-		fallback: nil, // off by default; opt-in via WithFallback
+		fallback:     nil, // off by default; opt-in via WithFallback
+		fallbackName: "",
 	}
 }
 
@@ -124,8 +126,35 @@ func WithCircuit(cfg CircuitConfig) Opt {
 // WithFallback configures a secondary Client to try if the primary fails with
 // a non-4xx error. StatusFallback is returned on secondary success.
 // A nil secondary is a no-op.
-func WithFallback(secondary *Client) Opt {
-	return func(c *cfgInternal) { c.fallback = secondary }
+//
+// Backward compatible: *Client implements Reranker, so existing callers
+// passing *Client compile unchanged. For non-*Client secondaries (e.g.
+// *VoyageRerankClient, *JinaRerankClient), the metric label defaults to
+// "fallback" — override via WithFallbackName.
+func WithFallback(secondary Reranker) Opt {
+	return func(c *cfgInternal) {
+		c.fallback = secondary
+		// Auto-derive metric label for *Client secondaries; leave others at
+		// "fallback" unless explicitly overridden via WithFallbackName.
+		if cl, ok := secondary.(*Client); ok && cl != nil {
+			c.fallbackName = cl.cfg.model
+		} else if c.fallbackName == "" {
+			c.fallbackName = "fallback"
+		}
+	}
+}
+
+// WithFallbackName overrides the secondary's metric label. Use when the
+// fallback is not a *Client and the auto-derived "fallback" label would
+// collide with another configuration on the same dashboard. Has no effect
+// when WithFallback was given a *Client (its configured model wins).
+func WithFallbackName(name string) Opt {
+	return func(c *cfgInternal) {
+		// Set first so a later WithFallback(*Client) call still wins for
+		// *Client (auto-derive overrides this), but other Reranker impls
+		// keep the explicit name.
+		c.fallbackName = name
+	}
 }
 
 // ── G2-client options ─────────────────────────────────────────────────────────
