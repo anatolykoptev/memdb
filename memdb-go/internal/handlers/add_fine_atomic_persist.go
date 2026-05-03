@@ -195,6 +195,10 @@ func (h *Handler) applyAtomicAndPersist(
 		allTags := append([]string{}, fc.CustomTags...)
 		allTags = append(allTags, f.Tags...)
 
+		// M12.1: ObservationDate must propagate from the per-request factContext
+		// or atomic LTM/WM rows fall through to created_at = wall-clock at
+		// retrieval time (LoCoMo cat-2 today-leak). add_fast.go threads this
+		// correctly; the atomic path must mirror it.
 		wmProps := buildNodeProps(memoryNodeProps{
 			ID: wmID, Memory: f.Memory, MemoryType: "WorkingMemory",
 			UserName: fc.CubeID, UserID: fc.UserID, AgentID: fc.AgentID, SessionID: fc.SessionID,
@@ -202,6 +206,7 @@ func (h *Handler) applyAtomicAndPersist(
 			Info: factInfo, CustomTags: allTags, Sources: fc.Sources, Background: "",
 			RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
 			Key:             fc.Key,
+			ObservationDate: fc.ObservationDate,
 			ExtractionState: extractionStateExtracted,
 		})
 		ltProps := buildNodeProps(memoryNodeProps{
@@ -211,6 +216,7 @@ func (h *Handler) applyAtomicAndPersist(
 			Info: factInfo, CustomTags: allTags, Sources: fc.Sources, Background: background,
 			RawText: f.RawText, PreferenceCategory: f.PreferenceCategory,
 			Key:             fc.Key,
+			ObservationDate: fc.ObservationDate,
 			ExtractionState: extractionStateExtracted,
 		})
 		// Critical: lift atomic-fact discriminator keys to TOP-LEVEL properties.

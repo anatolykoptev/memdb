@@ -61,5 +61,10 @@ type HierarchyMemory struct {
 	Text       string
 	UserID     string
 	MemoryType string // 'LongTermMemory'|'UserMemory'|'EpisodicMemory'|'WorkingMemory' — used to filter for CE precompute (search excludes WM).
-	Embedding  []float32
+	// ObservationDate is the in-conversation YYYY-MM-DD anchor (M12.1).
+	// Empty when the source row carried no observation_date / chat_time.
+	// The tree reorganizer takes max(ObservationDate) across a cluster so
+	// the parent stamps a conversation-anchored ts (not ingest wall-clock).
+	ObservationDate string
+	Embedding       []float32
 }
