@@ -118,7 +118,7 @@ func (d *CoTDecomposer) Decompose(ctx context.Context, logger *slog.Logger, quer
 		))
 		return original
 	}
-	cacheKey := cotCacheKey(query)
+	cacheKey := cotCacheKey(query, d.cfg.Model, d.cfg.MaxSubQueries)
 	if cached, ok := d.cache.get(cacheKey); ok {
 		searchMx().D11CoTCacheHit.Add(ctx, 1)
 		searchMx().D11CoTSubqueries.Record(ctx, int64(len(cached)))

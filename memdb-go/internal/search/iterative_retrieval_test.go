@@ -77,3 +77,15 @@ func TestProcessLLM_Fallback(t *testing.T) {
 		t.Error("expected error from bad json")
 	}
 }
+
+// TestBuildStageKey_DiffersByModel verifies that two callers with the same
+// query/stage/items but different LLM models produce distinct cache keys.
+func TestBuildStageKey_DiffersByModel(t *testing.T) {
+	t.Parallel()
+	items := []map[string]any{{"id": "a"}, {"id": "b"}}
+	a := buildStageKey("q", "model-a", 0, items)
+	b := buildStageKey("q", "model-b", 0, items)
+	if a == b {
+		t.Fatalf("expected different keys for different models, got identical %s", a)
+	}
+}

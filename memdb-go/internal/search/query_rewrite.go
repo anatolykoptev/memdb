@@ -98,7 +98,11 @@ func RewriteQueryForRetrieval(ctx context.Context, query, nowISO string, cfg Que
 
 	// Cache lookup — bypass LLM on hit.
 	cache := getRewriteCache()
-	cacheKey := rewriteCacheKey(query, cfg.Model)
+	nowDay := ""
+	if len(nowISO) >= 10 {
+		nowDay = nowISO[:10]
+	}
+	cacheKey := rewriteCacheKey(query, cfg.Model, nowDay)
 	if cached, ok := cache.Get(cacheKey); ok {
 		searchMx().RewriteCacheHit.Add(ctx, 1, metric.WithAttributes(attribute.String("stage", "d4")))
 		searchMx().D4Rewrite.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "rewritten")))

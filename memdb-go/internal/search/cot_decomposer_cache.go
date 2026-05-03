@@ -8,6 +8,7 @@ package search
 import (
 	"crypto/sha256"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -52,11 +53,22 @@ func (c *cotDecomposerCache) set(key string, subs []string, ttl time.Duration) {
 	c.entries[key] = cotDecomposerCacheEntry{expires: time.Now().Add(ttl), subs: cp}
 }
 
-// cotCacheKey is sha256(lowercased + trimmed query) — deterministic, collision-
-// resistant for any practical query corpus.
-func cotCacheKey(query string) string {
-	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(query))))
-	return fmt.Sprintf("%x", sum)
+// cotCacheKey is sha256(lowercased+trimmed query || model || maxSubQueries
+// || version) — deterministic, collision-resistant. Model and MaxSubQueries
+// are folded in because both feed the prompt template ("Output a JSON array
+// of 1-%d simpler sub-questions") and a swap of either MUST invalidate
+// cached results. Version sentinel "v2" added when model+maxSubQueries
+// were introduced into the key.
+func cotCacheKey(query, model string, maxSubQueries int) string {
+	h := sha256.New()
+	h.Write([]byte(strings.ToLower(strings.TrimSpace(query))))
+	h.Write([]byte{0})
+	h.Write([]byte(model))
+	h.Write([]byte{0})
+	h.Write([]byte(strconv.Itoa(maxSubQueries)))
+	h.Write([]byte{0})
+	h.Write([]byte("v2"))
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // normalizeSubqueries trims, dedupes (case-insensitive), drops empties, and

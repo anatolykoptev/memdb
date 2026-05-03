@@ -388,7 +388,7 @@ func (h *Handler) runAtomicFineExtractionFull(
 	// LLM. Saves ~4.5s per cache hit (Flash 3.1 extract avg). Cold runs and
 	// reverse-role passes (perspective swap → different conversation text)
 	// still miss; warm re-ingest of the same chunk is the primary win.
-	cacheKey := computeAtomicCacheKey(cubeID, obs, conversation, candidates, llm.AtomicSkillBody(ctx))
+	cacheKey := computeAtomicCacheKey(cubeID, obs, conversation, candidates, llm.AtomicSkillBody(ctx), ext.Model())
 	if cached, ok := h.atomicCache.Get(ctx, cacheKey); ok {
 		recordAtomicExtractOutcome(ctx, atomicOutcomeSuccess)
 		recordAtomicFactsPerChunk(ctx, len(cached))
