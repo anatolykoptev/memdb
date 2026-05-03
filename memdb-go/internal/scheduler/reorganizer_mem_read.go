@@ -71,7 +71,7 @@ func (r *Reorganizer) ProcessRawMemory(ctx context.Context, userID, cubeID strin
 
 // processRawMemoryFine runs the full fine-level pipeline for async mem_read.
 func (r *Reorganizer) processRawMemoryFine(ctx context.Context, userID, cubeID string, wmIDs []string, log *slog.Logger) {
-	now := time.Now().UTC().Format("2006-01-02T15:04:05.000000")
+	wallclockNow := time.Now().UTC().Format("2006-01-02T15:04:05.000000")
 
 	fullNodes, err := r.postgres.GetMemoriesByPropertyIDs(ctx, wmIDs)
 	if err != nil || len(fullNodes) == 0 {
@@ -103,16 +103,16 @@ func (r *Reorganizer) processRawMemoryFine(ctx context.Context, userID, cubeID s
 	facts = r.filterAddsByContentHash(ctx, facts, cubeID, log)
 	embedded := r.embedFacts(ctx, facts, log)
 
-	allNodes, counts := r.applyMemoryActions(ctx, embedded, userID, cubeID, info.agentID, info.sessionID, now, log)
-	r.insertAndLinkLTMNodes(ctx, allNodes, info.processedWMIDs, now, log)
-	r.linkEntities(embedded, cubeID, now)
+	allNodes, counts := r.applyMemoryActions(ctx, embedded, userID, cubeID, info.agentID, info.sessionID, wallclockNow, info.observationDate, log)
+	r.insertAndLinkLTMNodes(ctx, allNodes, info.processedWMIDs, wallclockNow, log)
+	r.linkEntities(embedded, cubeID, wallclockNow)
 	r.deleteWMNodes(ctx, cubeID, info.processedWMIDs, log)
 
 	if info.sessionID != "" {
 		// observationDate is the max chat_time/observation_date across the
 		// WM rows we just processed — anchors the episodic summary to the
 		// conversation timeline instead of ingest wall-clock (M12.1).
-		r.generateEpisodicSummary(userID, cubeID, info.sessionID, conversation, now, info.observationDate)
+		r.generateEpisodicSummary(userID, cubeID, info.sessionID, conversation, wallclockNow, info.observationDate)
 	}
 	if r.profiler != nil {
 		r.profiler.TriggerRefresh(cubeID)

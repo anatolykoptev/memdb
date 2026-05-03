@@ -30,7 +30,7 @@ const (
 // This replaces Python's pref_mem service — no Qdrant dependency required.
 //
 // Non-fatal: errors are logged; the method always returns normally.
-func (r *Reorganizer) ExtractAndStorePreferences(ctx context.Context, userID, cubeID, conversation string) {
+func (r *Reorganizer) ExtractAndStorePreferences(ctx context.Context, userID, cubeID, conversation, observationDate string) {
 	if conversation == "" {
 		return
 	}
@@ -87,6 +87,9 @@ func (r *Reorganizer) ExtractAndStorePreferences(ctx context.Context, userID, cu
 			"tags":             []string{"mode:pref_add"},
 			"delete_time":      "",
 			"delete_record_id": "",
+		}
+		if observationDate != "" {
+			props["observation_date"] = observationDate
 		}
 		propsJSON, _ := json.Marshal(props)
 		nodes = append(nodes, db.MemoryInsertNode{
