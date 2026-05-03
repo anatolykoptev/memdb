@@ -103,7 +103,7 @@ func (r *Reorganizer) processRawMemoryFine(ctx context.Context, userID, cubeID s
 	facts = r.filterAddsByContentHash(ctx, facts, cubeID, log)
 	embedded := r.embedFacts(ctx, facts, log)
 
-	allNodes, counts := r.applyMemoryActions(ctx, embedded, userID, cubeID, info.agentID, info.sessionID, now, log)
+	allNodes, counts := r.applyMemoryActions(ctx, embedded, userID, cubeID, info.agentID, info.sessionID, now, info.observationDate, log)
 	r.insertAndLinkLTMNodes(ctx, allNodes, info.processedWMIDs, now, log)
 	r.linkEntities(embedded, cubeID, now)
 	r.deleteWMNodes(ctx, cubeID, info.processedWMIDs, log)

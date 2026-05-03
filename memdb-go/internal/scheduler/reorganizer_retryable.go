@@ -74,7 +74,7 @@ func (r *Reorganizer) RefreshWorkingMemoryWithError(ctx context.Context, userID,
 
 // ExtractAndStorePreferencesWithError extracts preferences and returns a critical
 // error if the LLM call fails (retryable).
-func (r *Reorganizer) ExtractAndStorePreferencesWithError(ctx context.Context, userID, cubeID, conversation string) error {
+func (r *Reorganizer) ExtractAndStorePreferencesWithError(ctx context.Context, userID, cubeID, conversation, observationDate string) error {
 	if conversation == "" {
 		return nil
 	}
@@ -86,7 +86,7 @@ func (r *Reorganizer) ExtractAndStorePreferencesWithError(ctx context.Context, u
 		return nil
 	}
 	// Delegate storage to original (non-fatal) implementation.
-	r.ExtractAndStorePreferences(ctx, userID, cubeID, conversation)
+	r.ExtractAndStorePreferences(ctx, userID, cubeID, conversation, observationDate)
 	return nil
 }
 
