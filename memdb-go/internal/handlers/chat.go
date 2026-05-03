@@ -46,6 +46,87 @@ func (h *Handler) chatCanNative() bool {
 	return h.searchService != nil && h.searchService.CanSearch() && h.llmChat != nil
 }
 
+// resolveProfileSection picks the profile-section strategy based on the
+// request shape. Karpathy r3 fix #2:
+//   - len(Speakers) >= 2: per-speaker labelled sections (chatProfileSectionMulti)
+//     so neither speaker's profile is silently dropped in dual mode.
+//   - else: single-speaker path (chatProfileSection) — back-compat byte-
+//     for-byte for production callers that never set Speakers.
+func (h *Handler) resolveProfileSection(ctx context.Context, req *nativeChatRequest) string {
+	if len(req.Speakers) >= 2 {
+		return h.chatProfileSectionMulti(ctx, req.Speakers)
+	}
+	return h.chatProfileSection(ctx, chatProfileUserID(req), profileCubeIDForRequest(req))
+}
+
+// chatProfileSectionMulti renders profile sections for ALL speakers in a
+// dual/multi-speaker chat request. Karpathy r3 fix #2: the single-cube
+// chatProfileSection silently dropped speaker_b's profile in dual mode,
+// so any profile-derived signal (preferences, persistent traits) was
+// asymmetrically biased toward speaker_a. Each speaker is its own user_id
+// AND cube_id (chat_dual_search.runOneDualLeg sets UserName=CubeID=speaker)
+// so isolation is preserved — we just emit one labelled section per speaker.
+//
+// Section layout (matches existing single-speaker formatProfileSection
+// header but adds a per-speaker suffix):
+//
+//	## User Profile (speaker_a)
+//	<profile_fact ...>...</profile_fact>
+//
+//	## User Profile (speaker_b)
+//	<profile_fact ...>...</profile_fact>
+//
+// Returns "" when:
+//   - profile injection is disabled (env gate)
+//   - postgres is unavailable
+//   - all speakers returned empty / errored profiles
+//
+// Errors per speaker are logged and swallowed (best-effort, matches the
+// single-speaker contract). When a subset of speakers have profiles, only
+// the populated sections are emitted — empty speakers contribute nothing
+// instead of "(none)" placeholders to keep the prompt budget tight.
+func (h *Handler) chatProfileSectionMulti(ctx context.Context, speakers []string) string {
+	if !profileInjectEnabled() {
+		return ""
+	}
+	if h.postgres == nil || len(speakers) == 0 {
+		return ""
+	}
+	var sections []string
+	for _, sp := range speakers {
+		if sp == "" {
+			continue
+		}
+		entries, err := h.postgres.GetProfilesByUserCube(ctx, sp, sp)
+		if err != nil {
+			h.logger.Warn("chat profile fetch failed (multi)",
+				slog.String("speaker", sp),
+				slog.Any("error", err))
+			continue
+		}
+		if len(entries) == 0 {
+			continue
+		}
+		// Render the section, then rewrite the header to tag the speaker so
+		// downstream LLM can attribute facts to the right person. Reuses
+		// formatProfileSection so the per-speaker layout (guard sentence,
+		// <profile_fact> tags, truncation) stays in lockstep with the
+		// single-speaker path.
+		section := formatProfileSection(ctx, entries)
+		labelled := strings.Replace(
+			section,
+			profileSectionHeader,
+			profileSectionHeader+" ("+sp+")",
+			1,
+		)
+		sections = append(sections, labelled)
+	}
+	if len(sections) == 0 {
+		return ""
+	}
+	return strings.Join(sections, "\n")
+}
+
 // chatProfileSection fetches the user's profile rows (M10 Stream 3) for a
 // SINGLE cube and renders them as the "## User Profile" prompt section.
 //
@@ -171,12 +252,12 @@ func (h *Handler) NativeChatComplete(w http.ResponseWriter, r *http.Request) {
 		basePrompt = wikiBlock + "\n" + basePrompt
 	}
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
-	profileSection := h.chatProfileSection(ctx, chatProfileUserID(&req), profileCubeIDForRequest(&req))
+	profileSection := h.resolveProfileSection(ctx, &req)
 	// M12.4: buildSystemPromptWithDecision now also routes the custom-prompt +
 	// factual branch (LoCoMo dual-speaker harness etc.), populating decision
 	// AND injecting the variant-marked anti-refusal rules block. No post-hoc
 	// decideFactualPrompt call needed here.
-	prompt, decision := buildSystemPromptWithBudget(*req.Query, memories, prefString, basePrompt, answerStyle, profileSection, derefIntOr(req.MaxContextTokens, 0))
+	prompt, decision := buildSystemPromptWithBudget(*req.Query, memories, prefString, basePrompt, answerStyle, profileSection, derefIntOr(req.MaxContextTokens, 0), derefIntOr(req.ExternalMemoryCount, 0))
 	recordChatPromptUsed(ctx, basePrompt, answerStyle, decision)
 	recordFactualPromptDecision(ctx, w, decision)
 	// M12.5: chat-path observability — top-1 cosine, context tokens. Recorded
@@ -264,10 +345,10 @@ func (h *Handler) NativeChatStream(w http.ResponseWriter, r *http.Request) {
 		basePrompt = wikiBlock + "\n" + basePrompt
 	}
 	answerStyle := h.resolveAndRecordAnswerStyle(ctx, &req)
-	profileSection := h.chatProfileSection(ctx, chatProfileUserID(&req), profileCubeIDForRequest(&req))
+	profileSection := h.resolveProfileSection(ctx, &req)
 	// M12.4: buildSystemPromptWithDecision routes the custom-prompt + factual
 	// branch and injects the anti-refusal rules block. See NativeChatComplete.
-	prompt, decision := buildSystemPromptWithBudget(*req.Query, memories, prefString, basePrompt, answerStyle, profileSection, derefIntOr(req.MaxContextTokens, 0))
+	prompt, decision := buildSystemPromptWithBudget(*req.Query, memories, prefString, basePrompt, answerStyle, profileSection, derefIntOr(req.MaxContextTokens, 0), derefIntOr(req.ExternalMemoryCount, 0))
 	recordChatPromptUsed(ctx, basePrompt, answerStyle, decision)
 	// Set debug header BEFORE rpc.SSEHeaders writes response status — once
 	// SSEHeaders fires the header set is frozen.

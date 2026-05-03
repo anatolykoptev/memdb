@@ -868,11 +868,20 @@ def _category_brevity_instruction(category: int | None) -> str:
             "Answer with a noun phrase, number, or name — 1-3 words. "
             "No full sentences."
         )
-    # cat2/3/4/5 + None → uniform brevity (Run #8 baseline, F1=0.284 best)
+    # cat2/3/4/5 + None → uniform brevity (Run #8 baseline, F1=0.284 best).
+    #
+    # Karpathy r3 forensic (2026-05-01) fix #4: dropped the second sentence
+    # ("If the memories do not contain the answer, say so plainly in 3 words
+    # or fewer."). The server-side "## Answer Rules" block (injected by
+    # buildFactualRulesBlock when answer_style=factual + custom system_prompt)
+    # already owns the refusal contract. Carrying a second refusal instruction
+    # in the harness tail caused the LLM to pick the strictest contract and
+    # refuse despite the gold being in context — measured on Run #18 as 50%
+    # of F1 regressions vs the Run #17 brevity-pattB peak. The brevity tail
+    # now ONLY enforces answer length; refusal-bias is server-side only.
     return (
         "Answer in as few words as possible — prefer a noun phrase, number, "
-        "or single date over a full sentence unless the question explicitly asks for explanation. "
-        "If the memories do not contain the answer, say so plainly in 3 words or fewer."
+        "or single date over a full sentence unless the question explicitly asks for explanation."
     )
 
 

@@ -181,6 +181,73 @@ func decideFactualPrompt(memories []map[string]any) factualPromptDecision {
 	}
 }
 
+// decideFactualPromptWithExternal mirrors decideFactualPrompt but treats a
+// caller-supplied externalMemoryCount > 0 as evidence that the harness has
+// pre-loaded N memories into basePrompt — server-side `memories` is empty
+// not because retrieval failed but because the caller deliberately suppressed
+// it (top_k=1 + threshold=0.99 in the LoCoMo dual-speaker harness).
+//
+// Behaviour:
+//   - externalMemoryCount <= 0: identical to decideFactualPrompt(memories)
+//     (legacy path, byte-for-byte for production callers that never set the
+//     field).
+//   - externalMemoryCount > 0 AND len(memories) == 0: upgrade variant to
+//     factualVariantHigh with reason=none. Trust the harness — refusing on
+//     a zero-server-pool would inject the strict "Reply exactly: no answer"
+//     contract on top of the harness's own brevity tail, biasing the LLM to
+//     refuse despite the gold being right there in basePrompt.
+//   - externalMemoryCount > 0 AND len(memories) > 0: treat the server pool
+//     as authoritative (decideFactualPrompt). The external pool is additive
+//     evidence, not a replacement.
+//
+// Trade-off: we lose the ability to distinguish "harness gave us 20 weak
+// memories" from "harness gave us 20 strong memories" — the simpler "trust
+// the harness" gate avoids a second round-trip to score the external pool
+// (which the server doesn't have access to anyway). If a future caller
+// supplies external memories AND wants confidence-aware variant selection,
+// extend the request struct with a top1 hint and route through
+// decideFactualPrompt with a synthetic memory.
+func decideFactualPromptWithExternal(memories []map[string]any, externalMemoryCount int) factualPromptDecision {
+	if externalMemoryCount <= 0 {
+		return decideFactualPrompt(memories)
+	}
+	if len(memories) > 0 {
+		return decideFactualPrompt(memories)
+	}
+	threshold := factualConfidenceThreshold()
+	return factualPromptDecision{
+		Variant:    factualVariantHigh,
+		Reason:     refusalReasonNone,
+		TopScore:   0,
+		Threshold:  threshold,
+		Components: map[string]float64{"top1": 0, "spread": 0, "density": 0, "median": 0, "combined": 0},
+	}
+}
+
+// shouldInjectFactualRules reports whether buildSystemPromptWithBudget should
+// append the "## Answer Rules" block for a custom-basePrompt + factual
+// request. Karpathy r3 fix #1: when the caller passed externalMemoryCount > 0
+// AND the server pool is empty AND the variant is Zero, the harness has
+// already supplied a brevity / refusal tail in basePrompt; injecting a
+// SECOND refusal contract on top causes the LLM to pick the strictest one
+// and refuse despite the gold being in context.
+//
+// Logic:
+//   - externalMemoryCount <= 0: legacy behaviour, always inject.
+//   - externalMemoryCount > 0 AND variant != Zero: still inject (high/low
+//     variants carry the commit/best-effort preambles, not the strict-
+//     refusal one — they reinforce, not conflict).
+//   - externalMemoryCount > 0 AND variant == Zero: SKIP. With the upgrade
+//     in decideFactualPromptWithExternal this branch should never fire in
+//     practice (variant is bumped to High), but the guard is explicit for
+//     defence in depth in case a future caller bypasses the upgrade.
+func shouldInjectFactualRules(variant factualPromptVariant, externalMemoryCount int) bool {
+	if externalMemoryCount <= 0 {
+		return true
+	}
+	return variant != factualVariantZero
+}
+
 // pickFactualTemplate returns the prompt template for the given variant + lang.
 // Falls back to the low-confidence variant on unknown variant values
 // (defensive — variant is enum-typed so this should never hit).
