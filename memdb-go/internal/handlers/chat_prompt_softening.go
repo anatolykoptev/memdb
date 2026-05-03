@@ -313,8 +313,7 @@ const factualRulesBodyHighEN = `1. Reply with a concise but complete factual ans
 6. **Commit**: at least one memory above carries strong evidence for the question. Synthesize an answer even if the phrasing is approximate. Reply "no answer" only if every memory is unambiguously off-topic — NOT because the wording differs from the question.
 7. Match the phrasing and register used in the memories themselves — do not paraphrase more than needed.
 8. For counting questions (how many, how often, how much): count ALL distinct mentions across every memory, even if the total is not stated explicitly. Never base a count on a single memory when multiple memories contribute.
-9. **Synthesize from evidence**: When the question asks about a property or trait and the memories show a related action or behaviour (not the trait stated directly), SYNTHESIZE the answer from that evidence. Do NOT add disclaimers like "memories do not explicitly state" — commit to your best-fit inference. Example: Q "Is X religious?" + memory "X made stained glass windows for a church" → answer "Somewhat religious" based on the evidence.
-10. **Cross-character shared events**: When the question asks about person X but the memories reference a SHARED event involving person Y (accident, party, trip, conversation), facts about Y's experience often apply to X as witness, family, or co-participant. Do NOT refuse solely because the name in the memory differs from the name in the question. Example: Q "How did X feel after the accident?" + memory "Y's family was scared but resilient after the accident" → X as a family member shares that emotional scope; answer accordingly. When in doubt, prefer cross-applying shared-event facts over refusing.`
+9. **Synthesize from evidence**: When the question asks about a property or trait and the memories show a related action or behaviour (not the trait stated directly), SYNTHESIZE the answer from that evidence. Do NOT add disclaimers like "memories do not explicitly state" — commit to your best-fit inference. Example: Q "Is X religious?" + memory "X made stained glass windows for a church" → answer "Somewhat religious" based on the evidence.`
 
 // factualRulesBodyLowEN — rules 1-10 of factualQAPromptLowConfidenceEN. Rule
 // 6 is the low/zero-confidence variant ("provide best answer from any
@@ -331,8 +330,19 @@ const factualRulesBodyLowEN = `1. Reply with a concise but complete factual answ
 6. Provide the best answer you can from any relevant memory, even if the match is partial or approximate. Reply exactly: no answer — only when every memory is entirely unrelated to the question.
 7. Match the phrasing and register used in the memories themselves — do not paraphrase more than needed.
 8. For counting questions (how many, how often, how much): count ALL distinct mentions across every memory, even if the total is not stated explicitly. Never base a count on a single memory when multiple memories contribute.
-9. **Synthesize from evidence**: When the question asks about a property or trait and the memories show a related action or behaviour (not the trait stated directly), SYNTHESIZE the answer from that evidence. Do NOT add disclaimers like "memories do not explicitly state" — commit to your best-fit inference. Example: Q "Is X religious?" + memory "X made stained glass windows for a church" → answer "Somewhat religious" based on the evidence.
+9. **Synthesize from evidence**: When the question asks about a property or trait and the memories show a related action or behaviour (not the trait stated directly), SYNTHESIZE the answer from that evidence. Do NOT add disclaimers like "memories do not explicitly state" — commit to your best-fit inference. Example: Q "Is X religious?" + memory "X made stained glass windows for a church" → answer "Somewhat religious" based on the evidence.`
+
+// crossCharBleedRule is rule #10, conditionally appended when
+// MEMDB_CROSS_CHAR_BLEED=true. This rule actively encourages the LLM to
+// copy person Y's facts onto person X for shared events — correct for
+// LoCoMo cat-5 adversarial gold but a hallucination policy in production.
+//
+//nolint:lll
+const crossCharBleedRule = `
 10. **Cross-character shared events**: When the question asks about person X but the memories reference a SHARED event involving person Y (accident, party, trip, conversation), facts about Y's experience often apply to X as witness, family, or co-participant. Do NOT refuse solely because the name in the memory differs from the name in the question. Example: Q "How did X feel after the accident?" + memory "Y's family was scared but resilient after the accident" → X as a family member shares that emotional scope; answer accordingly. When in doubt, prefer cross-applying shared-event facts over refusing.`
+
+// crossCharBleedEnabled is read once at init; default false (safe for prod).
+var crossCharBleedEnabled = os.Getenv("MEMDB_CROSS_CHAR_BLEED") == "true"
 
 // buildFactualRulesBlock returns the variant-conditional anti-refusal block
 // to inject after a custom system_prompt. Only English — Chinese custom
@@ -350,5 +360,9 @@ func buildFactualRulesBlock(variant factualPromptVariant) string {
 	if variant == factualVariantHigh {
 		preamble, body = factualRulesPreambleHighEN, factualRulesBodyHighEN
 	}
-	return "## Answer Rules\n" + preamble + "\n\n" + body
+	rules := "## Answer Rules\n" + preamble + "\n\n" + body
+	if crossCharBleedEnabled {
+		rules += crossCharBleedRule
+	}
+	return rules
 }

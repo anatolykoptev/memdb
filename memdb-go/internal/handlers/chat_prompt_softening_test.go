@@ -281,7 +281,6 @@ func TestBuildSystemPrompt_FactualCustomBaseRulesPerVariant(t *testing.T) {
 				"actively search for confirming",      // rule 5
 				"count ALL distinct mentions",         // rule 8
 				"Synthesize from evidence",            // rule 9
-				"Cross-character shared events",       // rule 10
 				"Reply \"no answer\" only if every memory is unambiguously off-topic",
 			},
 			mustAbsent: []string{factualLowConfidenceMarker},
@@ -295,7 +294,6 @@ func TestBuildSystemPrompt_FactualCustomBaseRulesPerVariant(t *testing.T) {
 				"Use any relevant context to answer",
 				"only when every memory is entirely unrelated",
 				"Synthesize from evidence",
-				"Cross-character shared events",
 			},
 			mustAbsent: []string{factualHighConfidenceMarker},
 		},
@@ -622,5 +620,37 @@ func TestTopRetrievalScore(t *testing.T) {
 				t.Errorf("topRetrievalScore = %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// ── Cross-character bleed toggle tests ────────────────────────────────────────
+
+// TestBuildFactualRulesBlock_CrossCharBleedDefault verifies that rule #10 is
+// absent when MEMDB_CROSS_CHAR_BLEED is not set (safe for production).
+func TestBuildFactualRulesBlock_CrossCharBleedDefault(t *testing.T) {
+	saved := crossCharBleedEnabled
+	crossCharBleedEnabled = false
+	defer func() { crossCharBleedEnabled = saved }()
+
+	for _, v := range []factualPromptVariant{factualVariantHigh, factualVariantLow} {
+		block := buildFactualRulesBlock(v)
+		if strings.Contains(block, "Cross-character shared events") {
+			t.Errorf("variant %q: rule 10 present without MEMDB_CROSS_CHAR_BLEED", v)
+		}
+	}
+}
+
+// TestBuildFactualRulesBlock_CrossCharBleedEnabled verifies that rule #10 is
+// appended when the feature flag is on (LoCoMo eval harness).
+func TestBuildFactualRulesBlock_CrossCharBleedEnabled(t *testing.T) {
+	saved := crossCharBleedEnabled
+	crossCharBleedEnabled = true
+	defer func() { crossCharBleedEnabled = saved }()
+
+	for _, v := range []factualPromptVariant{factualVariantHigh, factualVariantLow} {
+		block := buildFactualRulesBlock(v)
+		if !strings.Contains(block, "Cross-character shared events") {
+			t.Errorf("variant %q: rule 10 missing with MEMDB_CROSS_CHAR_BLEED=true", v)
+		}
 	}
 }
