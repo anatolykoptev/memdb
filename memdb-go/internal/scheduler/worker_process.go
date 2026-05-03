@@ -177,7 +177,7 @@ func (w *Worker) handlePrefAdd(ctx context.Context, msg ScheduleMessage, log *sl
 		return nil
 	}
 	log.Info("scheduler: pref_add — extracting preferences")
-	return w.reorg.ExtractAndStorePreferencesWithError(ctx, msg.UserID, msg.CubeID, conv)
+	return w.reorg.ExtractAndStorePreferencesWithError(ctx, msg.UserID, msg.CubeID, conv, "")
 }
 
 // handleMemFeedback processes a mem_feedback message: applies LLM-driven keep/update/remove.

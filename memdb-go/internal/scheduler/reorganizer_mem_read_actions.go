@@ -20,7 +20,7 @@ import (
 func (r *Reorganizer) applyMemoryActions(
 	ctx context.Context,
 	embedded []embeddedMemReadFact,
-	userID, cubeID, agentID, sessionID, now string,
+	userID, cubeID, agentID, sessionID, now, observationDate string,
 	log *slog.Logger,
 ) ([]db.MemoryInsertNode, actionCounts) {
 	var allNodes []db.MemoryInsertNode
@@ -39,7 +39,7 @@ func (r *Reorganizer) applyMemoryActions(
 				counts.updated++
 			}
 		default: // llm.MemAdd
-			node, ltmID, ok := buildLTMNode(ef, userID, cubeID, agentID, sessionID, now)
+			node, ltmID, ok := buildLTMNode(ef, userID, cubeID, agentID, sessionID, now, observationDate)
 			if ok {
 				allNodes = append(allNodes, node)
 				ef.ltmID = ltmID
@@ -92,7 +92,7 @@ func (r *Reorganizer) applyMemUpdate(ctx context.Context, ef *embeddedMemReadFac
 
 // buildLTMNode constructs a MemoryInsertNode for a MemAdd fact.
 // Returns (node, ltmID, ok).
-func buildLTMNode(ef *embeddedMemReadFact, userID, cubeID, agentID, sessionID, now string) (db.MemoryInsertNode, string, bool) {
+func buildLTMNode(ef *embeddedMemReadFact, userID, cubeID, agentID, sessionID, now, observationDate string) (db.MemoryInsertNode, string, bool) {
 	f := ef.fact
 	if ef.embVec == "" {
 		return db.MemoryInsertNode{}, "", false
@@ -126,6 +126,9 @@ func buildLTMNode(ef *embeddedMemReadFact, userID, cubeID, agentID, sessionID, n
 		"background": "", "delete_time": "", "delete_record_id": "",
 		"confidence": f.Confidence, "type": "fact", "info": factInfo,
 		"graph_id": uuid.New().String(), "importance_score": 1.0, "retrieval_count": 0,
+	}
+	if observationDate != "" {
+		props["observation_date"] = observationDate
 	}
 	propsJSON, err := json.Marshal(props)
 	if err != nil {
