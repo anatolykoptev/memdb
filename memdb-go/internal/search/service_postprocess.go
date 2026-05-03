@@ -307,10 +307,63 @@ func (s *SearchService) applyTemporalDecay(text, skill, tool []map[string]any, p
 	if decayAlpha <= 0 {
 		return text, skill, tool
 	}
-	now := time.Now()
+	now := corpusReferenceNow(text, skill, tool)
 	return ApplyTemporalDecay(text, now, decayAlpha),
 		ApplyTemporalDecay(skill, now, decayAlpha),
 		ApplyTemporalDecay(tool, now, decayAlpha)
+}
+
+// decayCorpusFreshnessThreshold is the boundary between "live" and "archived"
+// corpora. If the newest item in the candidate pool is within this window of
+// wall-clock time, decay anchors to time.Now() (production behaviour). If the
+// newest item is older than this, decay anchors to that newest item — keeping
+// recency relativity usable on archived/eval corpora where every item is years
+// old (Karpathy r2 forensic 2026-05-01: 180-day half-life × 3 years on conv-26
+// collapses recency to ~0.014, threshold filter then drops half the pool and
+// floor injection rescues blindly).
+const decayCorpusFreshnessThreshold = 30 * 24 * time.Hour // 30 days
+
+// corpusReferenceNow returns the reference timestamp for temporal decay.
+//
+// Returns time.Now() when the candidate pool is empty, when no item carries a
+// parseable timestamp, OR when the newest item is within
+// decayCorpusFreshnessThreshold of wall-clock (production live chats —
+// preserves existing behaviour). Otherwise returns the newest item's
+// timestamp, anchoring decay to the conversation's own timeline.
+func corpusReferenceNow(pools ...[]map[string]any) time.Time {
+	wallNow := time.Now()
+	var maxTS time.Time
+	for _, pool := range pools {
+		for _, it := range pool {
+			ts := extractItemTimestamp(it)
+			if !ts.IsZero() && ts.After(maxTS) {
+				maxTS = ts
+			}
+		}
+	}
+	if maxTS.IsZero() {
+		return wallNow
+	}
+	if wallNow.Sub(maxTS) < decayCorpusFreshnessThreshold {
+		return wallNow
+	}
+	return maxTS
+}
+
+// extractItemTimestamp returns the most relevant timestamp from an item's
+// metadata, using the same priority as resolveRefTimestamp:
+// last_accessed_at > updated_at > created_at. Returns the zero time.Time
+// when no parseable timestamp is present.
+func extractItemTimestamp(item map[string]any) time.Time {
+	meta, ok := item["metadata"].(map[string]any)
+	if !ok || meta == nil {
+		return time.Time{}
+	}
+	ts, ok := resolveRefTimestamp(meta)
+	if !ok {
+		return time.Time{}
+	}
+	return ts
 }
 
 // applyRelativity filters all result slices by the relativity threshold.
