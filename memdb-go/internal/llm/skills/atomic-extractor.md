@@ -255,9 +255,9 @@ Observation Date: 2025-08-19
 
 Output:
 {"memory": [
-  {"id": "0", "text": "User's name is Marcus and was promoted to Senior Engineer at Shopify around August 12, 2025 after working toward it for two years"},
-  {"id": "1", "text": "Marcus has a wife named Elena and they celebrate special occasions at Osteria Francescana, their go-to restaurant"},
-  {"id": "2", "text": "Marcus and his wife Elena are expecting their first baby in March 2026"}
+  {"id": "0", "text": "User's name is Marcus and was promoted to Senior Engineer at Shopify around August 12, 2025 after working toward it for two years", "named_entities_in_text": ["Marcus", "Shopify"]},
+  {"id": "1", "text": "Marcus has a wife named Elena and they celebrate special occasions at Osteria Francescana, their go-to restaurant", "named_entities_in_text": ["Marcus", "Elena", "Osteria Francescana"]},
+  {"id": "2", "text": "Marcus and his wife Elena are expecting their first baby in March 2026", "named_entities_in_text": ["Marcus", "Elena"]}
 ]}
 
 Three distinct topics — career, relationship/dining, family milestone — each get their own memory with full context.
@@ -435,9 +435,9 @@ Observation Date: 2023-08-11
 
 Output:
 {"memory": [
-  {"id": "0", "text": "John and his dog Max went on a camping trip in the summer of 2023 where they hiked, swam, and found it a peaceful experience", "linked_memory_ids": ["a1b2c3d4-0000-0000-0000-111111111111"]},
-  {"id": "1", "text": "Maria got a new cat named Bailey around early August 2023 and describes her as a joy"},
-  {"id": "2", "text": "John has a daughter named Sara and the family took a trip for her birthday in fall 2022"}
+  {"id": "0", "text": "John and his dog Max went on a camping trip in the summer of 2023 where they hiked, swam, and found it a peaceful experience", "linked_memory_ids": ["a1b2c3d4-0000-0000-0000-111111111111"], "named_entities_in_text": ["John", "Max"]},
+  {"id": "1", "text": "Maria got a new cat named Bailey around early August 2023 and describes her as a joy", "named_entities_in_text": ["Maria", "Bailey"]},
+  {"id": "2", "text": "John has a daughter named Sara and the family took a trip for her birthday in fall 2022", "named_entities_in_text": ["John", "Sara"]}
 ]}
 
 Three key lessons: (1) The existing memory "John has a dog named Max" does NOT mean all Max-related information is captured — the camping trip is a new event with specific activities (hiking, swimming) and must be extracted and linked. (2) Maria is a named speaker in the "assistant" role but shares a genuine personal fact (new cat Bailey) — this MUST be extracted with the same rigor as user facts. Her echo ("that sounds amazing", "camping is soul-nourishing") is correctly skipped, but her personal fact is not. (3) Sara's name and the birthday trip are separate factual details that each deserve their own extraction.
@@ -462,7 +462,7 @@ Return ONLY valid JSON parsable by json.loads(). No text, reasoning, explanation
 
 {
   "memory": [
-    {"id": "0", "text": "First extracted memory", "attributed_to": "user", "linked_memory_ids": ["uuid-of-related-existing-memory"], "event_dates": ["2023-05-24"]},
+    {"id": "0", "text": "First extracted memory", "attributed_to": "user", "linked_memory_ids": ["uuid-of-related-existing-memory"], "event_dates": ["2023-05-24"], "named_entities_in_text": ["Marcus", "Shopify"]},
     {"id": "1", "text": "Second extracted memory", "attributed_to": "assistant"}
   ]
 }
@@ -474,6 +474,7 @@ Return ONLY valid JSON parsable by json.loads(). No text, reasoning, explanation
 - **attributed_to** (string, required): Who this memory is about. Use "user" for facts stated by or about the user (preferences, plans, personal facts). Use "assistant" for information provided by the assistant (recommendations, confirmations, plans created, information researched).
 - **linked_memory_ids** (array of strings, optional): IDs of Existing Memories that this new memory relates to. Use the exact IDs from the Existing Memories list. Omit or pass [] if no existing memories are related.
 - **event_dates** (array of strings, optional): ISO-8601 (YYYY-MM-DD) dates the fact references, resolved against Observation Date. Include a date when the fact mentions a specific event, appointment, deadline, birthday, trip, start/end time, or any temporal anchor that can be grounded to a calendar date. Resolve relative expressions ("yesterday", "last week", "next month") to their absolute YYYY-MM-DD equivalent using Observation Date. For approximate anchors ("last summer", "early 2022", "a few months ago"), emit the best single YYYY-MM-DD approximation (e.g. "last summer" with Observation Date 2023-08-11 → "2023-06-01"). Omit the field entirely — do NOT emit [] — when the fact has no temporal anchor at all (general preferences, stable facts about a person, descriptions without any time reference).
+- **named_entities_in_text** (array of strings, optional): Every proper noun present in this fact's `text`. Include names of people ("Marcus", "Elena", "Sara"), organizations ("Shopify", "NASA"), places used as proper nouns ("Portland", "Osteria Francescana"), and titles of works in quotes ("The Last Dance", "Becoming Nicole"). Do NOT include common nouns, pronouns, generic descriptions, or the word "User". Omit the field entirely when the fact contains no proper nouns (e.g., "User prefers oat milk lattes"). The downstream system infers entity type from formatting: quoted strings → titles/works, all-uppercase tokens → organizations, single capitalized words → people. Match this convention: emit people names unquoted and capitalized ("Marcus"), organization acronyms in uppercase ("NASA"), and titles of works in quotes ('"The Last Dance"').
 
 ## Rules
 
@@ -481,4 +482,5 @@ Return ONLY valid JSON parsable by json.loads(). No text, reasoning, explanation
 - If nothing is worth extracting, return: {"memory": []}
 - No duplicate IDs. Use double quotes. No trailing commas.
 - For event_dates: omit the field when no date can be grounded; never emit a placeholder like "YYYY-MM-DD" or an empty array.
+- For named_entities_in_text: list every proper noun that appears in the fact's `text` field. Omit the field when no proper nouns are present. Do not emit an empty array.
 
