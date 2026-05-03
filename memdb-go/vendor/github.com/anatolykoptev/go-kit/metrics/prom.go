@@ -42,11 +42,20 @@ func parseLabeled(s string) (name string, keys, vals []string) {
 }
 
 // promBridge отражает операции Registry в prometheus.DefaultRegisterer.
+//
+// Maps are split per-kind (no-label vs Vec) to avoid type-collision panics
+// when the same base name is observed both with and without labels from
+// different call sites in the same process. Mixing prometheus.Counter and
+// *prometheus.CounterVec under one key caused a forcetypeassert panic in
+// production (go-search, ~206 restarts over 52h).
 type promBridge struct {
-	namespace  string
-	counters   sync.Map // base name → prometheus.Counter or *prometheus.CounterVec
-	gauges     sync.Map // base name → prometheus.Gauge or *prometheus.GaugeVec
-	histograms sync.Map // base name → prometheus.Histogram or *prometheus.HistogramVec
+	namespace        string
+	countersNoLabel  sync.Map // base name → prometheus.Counter
+	countersVec      sync.Map // base name → *prometheus.CounterVec
+	gaugesNoLabel    sync.Map // base name → prometheus.Gauge
+	gaugesVec        sync.Map // base name → *prometheus.GaugeVec
+	histogramsNoLabel sync.Map // base name → prometheus.Histogram
+	histogramsVec    sync.Map // base name → *prometheus.HistogramVec
 }
 
 var nsRe = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
