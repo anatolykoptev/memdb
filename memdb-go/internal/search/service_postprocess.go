@@ -173,6 +173,7 @@ func buildTextRerankPrefix(s *SearchService, queryVec []float32, embByID map[str
 			QueryUserID:    p.UserName,
 			QuerySessionID: p.AgentID,
 			QueryTags:      p.Tags,
+			QueryCubeID:    p.CubeID,
 			BoostWeights:   rerankpkg.DefaultBoostWeights(),
 			// Math-fallback inputs (go-search PRs #10 + #14 pattern).
 			// embByID holds the same vectors the cosine and MathPrefilter
