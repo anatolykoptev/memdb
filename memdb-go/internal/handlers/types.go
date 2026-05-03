@@ -255,6 +255,23 @@ type nativeChatRequest struct {
 	MemCubeID          *string             `json:"mem_cube_id,omitempty"`
 	InternetSearch     *bool               `json:"internet_search,omitempty"`
 
+	// IncludeWiki opts the chat retrieval pipeline into the wiki retrieval
+	// slot (W3.5). Default false.
+	//
+	// Background: the wiki slot synthesizes Wikipedia-style summary pages
+	// into the ranked memory list scored by raw cosine similarity. Real
+	// conversational memories carry temporal decay (180-day half-life), so
+	// on aged corpora (e.g. LoCoMo, ~3 years) wiki entries with un-decayed
+	// raw scores can displace the gold conversational evidence at top-1
+	// after sortByRelativity. Karpathy r2 forensic (2026-05-01) measured
+	// this on LoCoMo: 50/50 chat queries got 3 wiki pages each merged into
+	// the memory list, suppressing real evidence.
+	//
+	// Callers that genuinely want encyclopedic context (general-knowledge
+	// fallback, exploratory chat) opt in explicitly. The LoCoMo eval
+	// harness and decay-sensitive QA paths leave it nil → false.
+	IncludeWiki *bool `json:"include_wiki,omitempty"`
+
 	// AnswerStyle selects the system-prompt template.
 	// Allowed values:
 	//   - ""               — default behaviour (cloudChatPromptEN/ZH), zero regression for existing clients.

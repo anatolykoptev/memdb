@@ -103,10 +103,18 @@ func (h *Handler) chatSearchMemories(ctx context.Context, req *nativeChatRequest
 	enhanced := search.EnhanceMemories(ctx, *req.Query, filtered, h.searchService.Enhance)
 
 	// W3.5: wiki retrieval slot — synthesized pages merged into the ranked
-	// memory list. Env-gated by MEMDB_WIKI_RETRIEVAL_SLOT. Each wiki entry
-	// arrives with metadata.relativity already populated from cosine score,
-	// so the next sortByRelativity sees them as first-class candidates.
-	if cubeID := profileCubeIDForRequest(req); cubeID != "" {
+	// memory list. Env-gated by MEMDB_WIKI_RETRIEVAL_SLOT and now also
+	// caller-gated by req.IncludeWiki (default false).
+	//
+	// Karpathy r2 (2026-05-01) forensic: wiki entries arrive with raw cosine
+	// scores while real conversational memories are decayed (180-day
+	// half-life). On aged corpora wiki displaces gold at top-1 after
+	// sortByRelativity. Flip to opt-in eliminates the regression for the
+	// LoCoMo eval and decay-sensitive callers; encyclopedic-context callers
+	// can still opt in via include_wiki=true.
+	if !derefBoolOr(req.IncludeWiki, false) {
+		recordWikiSlotOutcome(ctx, wikiSlotOutcomeOptInSkipped)
+	} else if cubeID := profileCubeIDForRequest(req); cubeID != "" {
 		if wikiMems := h.fetchWikiAsMemories(ctx, cubeID, *req.Query); len(wikiMems) > 0 {
 			enhanced = append(enhanced, wikiMems...)
 			sortByRelativity(enhanced)
