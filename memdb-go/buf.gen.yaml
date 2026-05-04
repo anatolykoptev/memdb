@@ -3,7 +3,7 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/MemDBai/MemDB/memdb-go/gen/proto
+      value: github.com/anatolykoptev/memdb/memdb-go/gen/proto
 plugins:
   - remote: buf.build/protocolbuffers/go
     out: gen/proto

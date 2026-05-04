@@ -449,8 +449,8 @@ const file_memdb_v1_chat_proto_rawDesc = "" +
 	"references2\x8f\x01\n" +
 	"\vChatService\x12A\n" +
 	"\bComplete\x12\x19.memdb.v1.CompleteRequest\x1a\x1a.memdb.v1.CompleteResponse\x12=\n" +
-	"\x06Stream\x12\x17.memdb.v1.StreamRequest\x1a\x18.memdb.v1.StreamResponse0\x01B\x94\x01\n" +
-	"\fcom.memdb.v1B\tChatProtoP\x01Z8github.com/memtensor/memdb-go/gen/proto/memdb/v1;memdbv1\xa2\x02\x03MXX\xaa\x02\bMemdb.V1\xca\x02\bMemdb\\V1\xe2\x02\x14Memdb\\V1\\GPBMetadata\xea\x02\tMemdb::V1b\x06proto3"
+	"\x06Stream\x12\x17.memdb.v1.StreamRequest\x1a\x18.memdb.v1.StreamResponse0\x01B\x9e\x01\n" +
+	"\fcom.memdb.v1B\tChatProtoP\x01ZBgithub.com/anatolykoptev/memdb/memdb-go/gen/proto/memdb/v1;memdbv1\xa2\x02\x03MXX\xaa\x02\bMemdb.V1\xca\x02\bMemdb\\V1\xe2\x02\x14Memdb\\V1\\GPBMetadata\xea\x02\tMemdb::V1b\x06proto3"
 
 var (
 	file_memdb_v1_chat_proto_rawDescOnce sync.Once
