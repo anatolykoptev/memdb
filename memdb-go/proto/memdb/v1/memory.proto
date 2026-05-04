@@ -78,6 +78,18 @@ message Message {
   string content = 2;
   string name = 3;
   string tool_call_id = 4;
+
+  // chat_time is the message timestamp in RFC3339-UTC format (e.g.
+  // "2026-05-04T06:30:00Z"). When present, the first 10 chars are
+  // extracted as observation_date for the LTM index; the full string
+  // is preserved in properties.chat_time. Optional — empty string =
+  // server uses ingest time.
+  string chat_time = 5;
+
+  // message_id is a stable per-message identifier used for dedup. The
+  // ingestion path skips messages whose message_id has already been
+  // recorded for this user/session. Optional — empty = no dedup.
+  string message_id = 6;
 }
 
 message AddRequest {
