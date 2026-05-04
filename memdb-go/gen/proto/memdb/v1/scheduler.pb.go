@@ -953,8 +953,8 @@ const file_memdb_v1_scheduler_proto_rawDesc = "" +
 	"\x12GetTaskQueueStatus\x12#.memdb.v1.GetTaskQueueStatusRequest\x1a$.memdb.v1.GetTaskQueueStatusResponse\x12J\n" +
 	"\vWaitForIdle\x12\x1c.memdb.v1.WaitForIdleRequest\x1a\x1d.memdb.v1.WaitForIdleResponse\x12I\n" +
 	"\n" +
-	"WaitStream\x12\x1b.memdb.v1.WaitStreamRequest\x1a\x1c.memdb.v1.WaitStreamResponse0\x01B\x99\x01\n" +
-	"\fcom.memdb.v1B\x0eSchedulerProtoP\x01Z8github.com/memtensor/memdb-go/gen/proto/memdb/v1;memdbv1\xa2\x02\x03MXX\xaa\x02\bMemdb.V1\xca\x02\bMemdb\\V1\xe2\x02\x14Memdb\\V1\\GPBMetadata\xea\x02\tMemdb::V1b\x06proto3"
+	"WaitStream\x12\x1b.memdb.v1.WaitStreamRequest\x1a\x1c.memdb.v1.WaitStreamResponse0\x01B\xa3\x01\n" +
+	"\fcom.memdb.v1B\x0eSchedulerProtoP\x01ZBgithub.com/anatolykoptev/memdb/memdb-go/gen/proto/memdb/v1;memdbv1\xa2\x02\x03MXX\xaa\x02\bMemdb.V1\xca\x02\bMemdb\\V1\xe2\x02\x14Memdb\\V1\\GPBMetadata\xea\x02\tMemdb::V1b\x06proto3"
 
 var (
 	file_memdb_v1_scheduler_proto_rawDescOnce sync.Once

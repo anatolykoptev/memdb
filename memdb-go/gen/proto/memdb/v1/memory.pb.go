@@ -269,11 +269,21 @@ func (x *SearchResponse) GetData() *structpb.Struct {
 }
 
 type Message struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Role          string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
-	Content       string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
-	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	ToolCallId    string                 `protobuf:"bytes,4,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Role       string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
+	Content    string                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	Name       string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	ToolCallId string                 `protobuf:"bytes,4,opt,name=tool_call_id,json=toolCallId,proto3" json:"tool_call_id,omitempty"`
+	// chat_time is the message timestamp in RFC3339-UTC format (e.g.
+	// "2026-05-04T06:30:00Z"). When present, the first 10 chars are
+	// extracted as observation_date for the LTM index; the full string
+	// is preserved in properties.chat_time. Optional — empty string =
+	// server uses ingest time.
+	ChatTime string `protobuf:"bytes,5,opt,name=chat_time,json=chatTime,proto3" json:"chat_time,omitempty"`
+	// message_id is a stable per-message identifier used for dedup. The
+	// ingestion path skips messages whose message_id has already been
+	// recorded for this user/session. Optional — empty = no dedup.
+	MessageId     string `protobuf:"bytes,6,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -332,6 +342,20 @@ func (x *Message) GetName() string {
 func (x *Message) GetToolCallId() string {
 	if x != nil {
 		return x.ToolCallId
+	}
+	return ""
+}
+
+func (x *Message) GetChatTime() string {
+	if x != nil {
+		return x.ChatTime
+	}
+	return ""
+}
+
+func (x *Message) GetMessageId() string {
+	if x != nil {
+		return x.MessageId
 	}
 	return ""
 }
@@ -1404,13 +1428,16 @@ const file_memdb_v1_memory_proto_rawDesc = "" +
 	"\x0eSearchResponse\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12+\n" +
-	"\x04data\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x04data\"m\n" +
+	"\x04data\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x04data\"\xa9\x01\n" +
 	"\aMessage\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\tR\acontent\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12 \n" +
 	"\ftool_call_id\x18\x04 \x01(\tR\n" +
-	"toolCallId\"\xaa\x03\n" +
+	"toolCallId\x12\x1b\n" +
+	"\tchat_time\x18\x05 \x01(\tR\bchatTime\x12\x1d\n" +
+	"\n" +
+	"message_id\x18\x06 \x01(\tR\tmessageId\"\xaa\x03\n" +
 	"\n" +
 	"AddRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12-\n" +
@@ -1512,8 +1539,8 @@ const file_memdb_v1_memory_proto_rawDesc = "" +
 	"\aGetById\x12\x18.memdb.v1.GetByIdRequest\x1a\x19.memdb.v1.GetByIdResponse\x12D\n" +
 	"\tGetMemory\x12\x1a.memdb.v1.GetMemoryRequest\x1a\x1b.memdb.v1.GetMemoryResponse\x12;\n" +
 	"\x06Delete\x12\x17.memdb.v1.DeleteRequest\x1a\x18.memdb.v1.DeleteResponse\x12A\n" +
-	"\bFeedback\x12\x19.memdb.v1.FeedbackRequest\x1a\x1a.memdb.v1.FeedbackResponseB\x96\x01\n" +
-	"\fcom.memdb.v1B\vMemoryProtoP\x01Z8github.com/memtensor/memdb-go/gen/proto/memdb/v1;memdbv1\xa2\x02\x03MXX\xaa\x02\bMemdb.V1\xca\x02\bMemdb\\V1\xe2\x02\x14Memdb\\V1\\GPBMetadata\xea\x02\tMemdb::V1b\x06proto3"
+	"\bFeedback\x12\x19.memdb.v1.FeedbackRequest\x1a\x1a.memdb.v1.FeedbackResponseB\xa0\x01\n" +
+	"\fcom.memdb.v1B\vMemoryProtoP\x01ZBgithub.com/anatolykoptev/memdb/memdb-go/gen/proto/memdb/v1;memdbv1\xa2\x02\x03MXX\xaa\x02\bMemdb.V1\xca\x02\bMemdb\\V1\xe2\x02\x14Memdb\\V1\\GPBMetadata\xea\x02\tMemdb::V1b\x06proto3"
 
 var (
 	file_memdb_v1_memory_proto_rawDescOnce sync.Once
