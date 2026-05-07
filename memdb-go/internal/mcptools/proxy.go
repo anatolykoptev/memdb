@@ -95,7 +95,7 @@ func RegisterNativeGoProxyTools(server *mcp.Server, memdbGoURL string, serviceSe
 		Name:        "update_memory",
 		Description: "Update existing memory content. Re-embeds the text so vector search stays accurate after the change. (proxied to memdb-go native backend)",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input UpdateMemoryInput) (*mcp.CallToolResult, TextResult, error) {
-		return handleUpdateMemory(ctx, nil, memdbGoURL, serviceSecret, input)
+		return handleUpdateMemory(ctx, memdbGoURL, serviceSecret, input)
 	})
 
 	// add_memory — routes to memdb-go /product/add (NativeAdd). doc_path is currently

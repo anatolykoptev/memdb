@@ -91,7 +91,7 @@ func main() {
 	mcptools.RegisterCubeTools(server, pg, logger)
 	mcptools.RegisterNativeGoProxyTools(server, memdbGoURL, cfg.InternalServiceSecret, logger)
 
-	const mcpNativeToolCount = 9 // search + get_memory + delete_memory + delete_all_memories + users + cubes (create/list/delete/get_user_cubes)
+	const mcpNativeToolCount = 10 // search + get_memory + delete_memory + delete_all_memories + create_user + get_user_info + create_cube + list_cubes + delete_cube + get_user_cubes
 	const mcpGoProxyToolCount = 4 // update_memory, add_memory, chat, clear_chat_history → memdb-go native backend
 	logger.Info("MCP tools registered",
 		slog.Int("native", mcpNativeToolCount),
