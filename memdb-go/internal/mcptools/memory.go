@@ -12,7 +12,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// RegisterMemoryTools registers get_memory, update_memory, delete_memory, and delete_all_memories.
+// RegisterMemoryTools registers get_memory, delete_memory, and delete_all_memories.
+//
+// NOTE: update_memory is intentionally NOT registered here. It requires full
+// re-embedding (ONNX) and CE cache invalidation — those only run in the
+// memdb-go server process. update_memory is registered in
+// RegisterNativeGoProxyTools and proxied to /product/update_memory so both
+// REST and MCP follow the same code path.
 func RegisterMemoryTools(server *mcp.Server, pg *db.Postgres, qd *db.Qdrant, logger *slog.Logger) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_memory",
@@ -20,13 +26,6 @@ func RegisterMemoryTools(server *mcp.Server, pg *db.Postgres, qd *db.Qdrant, log
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input GetMemoryInput) (*mcp.CallToolResult, TextResult, error) {
 		return handleGetMemory(ctx, pg, input)
-	})
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "update_memory",
-		Description: "Update existing memory content while preserving metadata.",
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, input UpdateMemoryInput) (*mcp.CallToolResult, TextResult, error) {
-		return handleUpdateMemory(ctx, pg, input)
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -64,18 +63,39 @@ func handleGetMemory(ctx context.Context, pg *db.Postgres, input GetMemoryInput)
 	return nil, TextResult{Result: result}, nil
 }
 
-func handleUpdateMemory(ctx context.Context, pg *db.Postgres, input UpdateMemoryInput) (*mcp.CallToolResult, TextResult, error) {
+// handleUpdateMemory proxies the update to memdb-go's /product/update_memory.
+// This ensures the full update path runs (re-embed + CE cache invalidation),
+// matching what the REST endpoint does. Using the text-only UpdateMemoryContent
+// DB call would silently stale vector search and cross-encoder rerank results.
+//
+// The function signature includes memdbGoURL and serviceSecret (not *db.Postgres)
+// because Postgres is not needed — all DB side-effects happen inside memdb-go.
+func handleUpdateMemory(ctx context.Context, _ *db.Postgres, memdbGoURL, serviceSecret string, input UpdateMemoryInput) (*mcp.CallToolResult, TextResult, error) {
 	if input.MemoryID == "" {
 		return nil, TextResult{}, errors.New("memory_id is required")
 	}
 	if input.MemoryContent == "" {
 		return nil, TextResult{}, errors.New("memory_content is required")
 	}
-	updated, err := pg.UpdateMemoryContent(ctx, input.MemoryID, input.MemoryContent)
+
+	// Resolve the user/cube identifier: prefer explicit UserID, fall back to CubeID.
+	cubeID := input.UserID
+	if cubeID == "" {
+		cubeID = input.CubeID
+	}
+
+	// Build the REST payload expected by NativeUpdateMemory.
+	payload := map[string]any{
+		"memory_id": input.MemoryID,
+		"user_id":   cubeID,
+		"text":      input.MemoryContent,
+	}
+
+	result, err := proxyCall(ctx, memdbGoURL, "/product/update_memory", serviceSecret, "update_memory", payload, nil)
 	if err != nil {
 		return nil, TextResult{}, fmt.Errorf("update_memory failed: %w", err)
 	}
-	return nil, TextResult{Result: map[string]any{"memory_id": input.MemoryID, "updated": updated}}, nil
+	return nil, result, nil
 }
 
 // prefCollections are the Qdrant collections for preference memory.
