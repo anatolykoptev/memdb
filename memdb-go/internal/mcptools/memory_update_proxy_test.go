@@ -39,7 +39,7 @@ func TestHandleUpdateMemory_ProxiesToFullUpdateEndpoint(t *testing.T) {
 		MemoryContent: "updated text content",
 	}
 
-	_, result, err := handleUpdateMemory(context.Background(), nil, fakeBackend.URL, "test-secret", input)
+	_, result, err := handleUpdateMemory(context.Background(), fakeBackend.URL, "test-secret", input)
 	if err != nil {
 		t.Fatalf("handleUpdateMemory returned error: %v", err)
 	}
@@ -59,5 +59,43 @@ func TestHandleUpdateMemory_ProxiesToFullUpdateEndpoint(t *testing.T) {
 	}
 	if receivedBody["text"] != "updated text content" {
 		t.Errorf("text = %v, want 'updated text content'", receivedBody["text"])
+	}
+}
+
+// TestHandleUpdateMemory_UserIDTakesPrecedenceOverCubeID verifies the
+// UserID != "" branch: when both UserID and CubeID are supplied, UserID
+// is used as the proxied user_id (not the CubeID fallback).
+func TestHandleUpdateMemory_UserIDTakesPrecedenceOverCubeID(t *testing.T) {
+	var receivedBody map[string]any
+
+	fakeBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&receivedBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"code":    200,
+			"message": "memory updated",
+			"data":    map[string]any{"memory_id": "mem-test-002"},
+		})
+	}))
+	defer fakeBackend.Close()
+
+	// UserID is set explicitly — CubeID should be ignored for the user_id field.
+	input := UpdateMemoryInput{
+		MemoryID:      "mem-test-002",
+		UserID:        "explicit-user@example.com",
+		CubeID:        "cube-fallback@example.com",
+		MemoryContent: "content for precedence test",
+	}
+
+	_, _, err := handleUpdateMemory(context.Background(), fakeBackend.URL, "test-secret", input)
+	if err != nil {
+		t.Fatalf("handleUpdateMemory returned error: %v", err)
+	}
+
+	// UserID must win over CubeID.
+	if receivedBody["user_id"] != "explicit-user@example.com" {
+		t.Errorf("user_id = %v, want explicit-user@example.com (UserID must take precedence over CubeID)", receivedBody["user_id"])
 	}
 }
