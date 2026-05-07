@@ -68,9 +68,9 @@ func handleGetMemory(ctx context.Context, pg *db.Postgres, input GetMemoryInput)
 // matching what the REST endpoint does. Using the text-only UpdateMemoryContent
 // DB call would silently stale vector search and cross-encoder rerank results.
 //
-// The function signature includes memdbGoURL and serviceSecret (not *db.Postgres)
+// The function signature uses memdbGoURL and serviceSecret;
 // because Postgres is not needed — all DB side-effects happen inside memdb-go.
-func handleUpdateMemory(ctx context.Context, _ *db.Postgres, memdbGoURL, serviceSecret string, input UpdateMemoryInput) (*mcp.CallToolResult, TextResult, error) {
+func handleUpdateMemory(ctx context.Context, memdbGoURL, serviceSecret string, input UpdateMemoryInput) (*mcp.CallToolResult, TextResult, error) {
 	if input.MemoryID == "" {
 		return nil, TextResult{}, errors.New("memory_id is required")
 	}
