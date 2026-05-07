@@ -14,10 +14,17 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
-// memoryUpdater is a narrow interface for updating a memory node.
-// Implemented by *db.Postgres in production and by stubMemoryUpdater in tests.
+// memoryUpdater is a narrow interface for updating a memory node and
+// clearing its cross-encoder score cache after a content change.
+// Implemented by *db.Postgres in production and by ceCacheRecorder / stubMemoryUpdater in tests.
 type memoryUpdater interface {
 	UpdateMemoryByID(ctx context.Context, memoryID, cubeID string, propsJSON []byte, embedding string) error
+	// ClearCEScoresTopK removes the ce_score_topk cache for the memory whose
+	// text just changed (cached scores computed against old text are stale).
+	ClearCEScoresTopK(ctx context.Context, memoryID string) error
+	// ClearCEScoresTopKForNeighbor cascades invalidation: any memory that had
+	// the updated memory as a neighbor in its own top-K needs to be cleared too.
+	ClearCEScoresTopKForNeighbor(ctx context.Context, neighborID string) error
 }
 
 // memUpdater returns the memoryUpdater to use: test override if set, otherwise h.postgres.
@@ -153,6 +160,22 @@ func (h *Handler) NativeUpdateMemory(w http.ResponseWriter, r *http.Request) {
 			"data":    nil,
 		})
 		return
+	}
+
+	// Invalidate cross-encoder score cache: the memory's text just changed, so
+	// any pre-computed CE scores referencing it are stale.
+	// Order: clear direct cache first, then cascade to neighbors.
+	// Best-effort — a cache miss is preferable to stale scores; log errors but
+	// do NOT fail the request.
+	if err := updater.ClearCEScoresTopK(ctx, memoryID); err != nil {
+		h.logger.Error("update_memory: ClearCEScoresTopK failed (best-effort, ignoring)",
+			slog.Any("error", err),
+			slog.String("memory_id", memoryID))
+	}
+	if err := updater.ClearCEScoresTopKForNeighbor(ctx, memoryID); err != nil {
+		h.logger.Error("update_memory: ClearCEScoresTopKForNeighbor failed (best-effort, ignoring)",
+			slog.Any("error", err),
+			slog.String("memory_id", memoryID))
 	}
 
 	// Invalidate all caches that may hold the pre-update version:
