@@ -29,6 +29,7 @@ var proxyClient = &http.Client{
 }
 
 // proxyCall sends a JSON-encoded request to the Python backend and returns the result.
+// logger may be nil; if so, debug logging is skipped.
 func proxyCall(ctx context.Context, pythonURL string, endpoint string, serviceSecret string, toolName string, input any, logger *slog.Logger) (TextResult, error) {
 	body, err := json.Marshal(input)
 	if err != nil {
@@ -65,21 +66,38 @@ func proxyCall(ctx context.Context, pythonURL string, endpoint string, serviceSe
 		result = string(respBody)
 	}
 
-	logger.Debug("proxy tool call",
-		slog.String("tool", toolName),
-		slog.Int("status", resp.StatusCode),
-	)
+	if logger != nil {
+		logger.Debug("proxy tool call",
+			slog.String("tool", toolName),
+			slog.Int("status", resp.StatusCode),
+		)
+	}
 
 	return TextResult{Result: result}, nil
 }
 
 // RegisterNativeGoProxyTools registers MCP tools that proxy to the memdb-go native backend.
-// Covers add_memory, chat, and clear_chat_history — all backed by Go-native endpoints on memdb-go.
+// Covers update_memory, add_memory, chat, and clear_chat_history — all backed by
+// Go-native endpoints on memdb-go.
+//
+// update_memory is registered here (not in RegisterMemoryTools) because it requires
+// full re-embedding (ONNX) and CE cache invalidation that only run in the memdb-go
+// server process. Proxying ensures REST and MCP follow identical code paths.
 //
 // NOTE: clear_chat_history incorrectly maps to /product/chat/complete (same as chat).
 // This is a pre-existing bug inherited from the original RegisterProxyTools; left as-is
 // pending a dedicated clear-history endpoint on memdb-go.
 func RegisterNativeGoProxyTools(server *mcp.Server, memdbGoURL string, serviceSecret string, logger *slog.Logger) {
+	// update_memory — proxied to /product/update_memory (full re-embed + CE cache clear).
+	// Moved out of RegisterMemoryTools so it uses the same code path as the REST handler,
+	// preventing vector search from using stale embeddings after a content update.
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "update_memory",
+		Description: "Update existing memory content. Re-embeds the text so vector search stays accurate after the change. (proxied to memdb-go native backend)",
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, input UpdateMemoryInput) (*mcp.CallToolResult, TextResult, error) {
+		return handleUpdateMemory(ctx, nil, memdbGoURL, serviceSecret, input)
+	})
+
 	// add_memory — routes to memdb-go /product/add (NativeAdd). doc_path is currently
 	// unsupported by the Go backend (markitdown PDF/Word/Excel parser is a Phase-4.11
 	// feature gap). Fail fast instead of silently dropping the field — see MemDB

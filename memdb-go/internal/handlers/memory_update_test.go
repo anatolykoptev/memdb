@@ -14,6 +14,7 @@ import (
 )
 
 // stubMemoryUpdater is a test double for memoryUpdater.
+// Implements all methods of the memoryUpdater interface with no-op CE cache stubs.
 type stubMemoryUpdater struct {
 	err error
 }
@@ -21,6 +22,9 @@ type stubMemoryUpdater struct {
 func (s *stubMemoryUpdater) UpdateMemoryByID(_ context.Context, _, _ string, _ []byte, _ string) error {
 	return s.err
 }
+
+func (s *stubMemoryUpdater) ClearCEScoresTopK(_ context.Context, _ string) error          { return nil }
+func (s *stubMemoryUpdater) ClearCEScoresTopKForNeighbor(_ context.Context, _ string) error { return nil }
 
 func TestNativeUpdateMemory_NotFound_Returns404(t *testing.T) {
 	h := testValidateHandler()
