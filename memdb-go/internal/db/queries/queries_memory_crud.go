@@ -132,11 +132,22 @@ LIMIT $4 OFFSET $5`
 // --- Delete ---
 
 // DeleteByPropertyIDs deletes nodes by their properties->>(('id'::text)) values.
+// Uses a CTE that locks rows in deterministic (sorted) property-id order before
+// deleting, preventing deadlock with concurrent IncrRetrievalCount UPDATE which
+// uses the same lock-ordering strategy (SQLSTATE 40P01 prevention).
 // Args: $1 = property ids (text[]), $2 = user_name (text)
 const DeleteByPropertyIDs = `
-DELETE FROM %[1]s."Memory"
-WHERE properties->>(('id'::text)) = ANY($1)
-  AND properties->>(('user_name'::text)) = $2`
+WITH locked AS (
+    SELECT id FROM %[1]s."Memory"
+    WHERE properties->>(('id'::text)) = ANY($1)
+      AND properties->>(('user_name'::text)) = $2
+    ORDER BY properties->>(('id'::text))
+    FOR UPDATE
+)
+DELETE FROM %[1]s."Memory" m
+USING locked l
+WHERE m.id = l.id
+  AND m.properties->>(('user_name'::text)) = $2`
 
 // --- Update ---
 
