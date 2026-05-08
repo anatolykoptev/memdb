@@ -144,6 +144,13 @@ WHERE properties->('info'::text)->>(('content_hash'::text)) = ANY($1)
 // updating, preventing deadlock with concurrent DeleteByPropertyIDs DELETE which
 // uses the same lock-ordering strategy (SQLSTATE 40P01 prevention).
 //
+// Filter asymmetry vs DeleteByPropertyIDs is intentional: DELETE removes any
+// row regardless of status (archived/merged/activated) while this UPDATE only
+// bumps counters on activated rows — we do not want to track retrievals against
+// archived memories. Both queries still acquire locks in sorted property-id
+// order, so the deadlock-avoidance contract holds even though they lock
+// different subsets of the input ID array.
+//
 // Args: $1 = ids (text[]) — property UUIDs (properties->>'id'), NOT AGE graphids,
 //
 //	$2 = now (text, ISO timestamp)

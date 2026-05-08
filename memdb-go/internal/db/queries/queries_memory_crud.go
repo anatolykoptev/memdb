@@ -146,7 +146,8 @@ WITH locked AS (
 )
 DELETE FROM %[1]s."Memory" m
 USING locked l
-WHERE m.id = l.id`
+WHERE m.id = l.id
+  AND m.properties->>(('user_name'::text)) = $2`
 
 // --- Update ---
 
