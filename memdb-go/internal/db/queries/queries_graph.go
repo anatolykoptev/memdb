@@ -140,22 +140,33 @@ WHERE properties->('info'::text)->>(('content_hash'::text)) = ANY($1)
 //   - last_accessed_at — reflects actual usage recency, consumed by
 //     resolveRefTimestamp as the highest-priority decay reference.
 //
+// Uses a CTE that locks rows in deterministic (sorted) property-id order before
+// updating, preventing deadlock with concurrent DeleteByPropertyIDs DELETE which
+// uses the same lock-ordering strategy (SQLSTATE 40P01 prevention).
+//
 // Args: $1 = ids (text[]) — property UUIDs (properties->>'id'), NOT AGE graphids,
 //
 //	$2 = now (text, ISO timestamp)
 const IncrRetrievalCount = `
-UPDATE %[1]s."Memory"
+WITH locked AS (
+    SELECT id FROM %[1]s."Memory"
+    WHERE properties->>(('id'::text)) = ANY($1)
+      AND properties->>(('status'::text)) = 'activated'
+    ORDER BY properties->>(('id'::text))
+    FOR UPDATE
+)
+UPDATE %[1]s."Memory" m
 SET properties = (
-        (properties::text::jsonb || jsonb_build_object(
-            'retrieval_count',   COALESCE((properties->>(('retrieval_count'::text)))::int, 0) + 1,
-            'access_count',      COALESCE((properties->>(('access_count'::text)))::int, 0) + 1,
+        (m.properties::text::jsonb || jsonb_build_object(
+            'retrieval_count',   COALESCE((m.properties->>(('retrieval_count'::text)))::int, 0) + 1,
+            'access_count',      COALESCE((m.properties->>(('access_count'::text)))::int, 0) + 1,
             'last_retrieved_at', $2::text,
             'last_accessed_at',  $2::text,
-            'importance_score',  LEAST(2.0, COALESCE((properties->>(('importance_score'::text)))::float, 1.0) + 0.1)
+            'importance_score',  LEAST(2.0, COALESCE((m.properties->>(('importance_score'::text)))::float, 1.0) + 0.1)
         ))::text
     )::agtype
-WHERE properties->>(('id'::text)) = ANY($1)
-  AND properties->>(('status'::text)) = 'activated'`
+FROM locked l
+WHERE m.id = l.id`
 
 // DecayImportanceScores multiplies importance_score by 0.95 for all LTM/UserMemory nodes of a user.
 // Called periodically (e.g. every 6h) to cause infrequently-retrieved memories to fade.

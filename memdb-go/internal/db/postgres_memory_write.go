@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"time"
 
@@ -33,8 +34,11 @@ type PageRankEdge struct {
 var ErrMemoryNotFound = errors.New("memory not found")
 
 // DeleteByPropertyIDs deletes nodes matching the given property IDs and user name.
+// sort IDs to acquire row locks in deterministic order, preventing deadlock with concurrent IncrRetrievalCount
 func (p *Postgres) DeleteByPropertyIDs(ctx context.Context, propertyIDs []string, userName string) (int64, error) {
-	tag, err := p.pool.Exec(ctx, fmt.Sprintf(queries.DeleteByPropertyIDs, graphName), propertyIDs, userName)
+	sortedIDs := append([]string(nil), propertyIDs...)
+	sort.Strings(sortedIDs)
+	tag, err := p.pool.Exec(ctx, fmt.Sprintf(queries.DeleteByPropertyIDs, graphName), sortedIDs, userName)
 	if err != nil {
 		return 0, err
 	}

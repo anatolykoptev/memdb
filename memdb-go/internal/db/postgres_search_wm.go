@@ -6,6 +6,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
 )
@@ -35,12 +36,15 @@ func (p *Postgres) GetWorkingMemory(ctx context.Context, cubeID, personID string
 
 // IncrRetrievalCount increments retrieval_count and boosts importance_score (+0.1, max 2.0)
 // for a batch of memory nodes. Intended to be called asynchronously (fire-and-forget).
+// sort IDs to acquire row locks in deterministic order, preventing deadlock with concurrent DeleteByPropertyIDs
 func (p *Postgres) IncrRetrievalCount(ctx context.Context, ids []string, now string) error {
 	if len(ids) == 0 {
 		return nil
 	}
+	sortedIDs := append([]string(nil), ids...)
+	sort.Strings(sortedIDs)
 	q := fmt.Sprintf(queries.IncrRetrievalCount, graphName)
-	_, err := p.pool.Exec(ctx, q, ids, now)
+	_, err := p.pool.Exec(ctx, q, sortedIDs, now)
 	if err != nil {
 		return fmt.Errorf("incr retrieval count: %w", err)
 	}
