@@ -170,7 +170,7 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		chunk := texts[i:end]
 		cmx.ChunkSize.Record(ctx, int64(len(chunk)), modelAttr)
 
-		vecs, err := h.embedChunk(ctx, chunk)
+		vecs, err := h.embedChunk(ctx, chunk, i)
 		if err != nil {
 			outcome = "error"
 			return nil, err
@@ -195,17 +195,23 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 // before hitting the backend (client_v2.go:142). Our wrapper MUST use
 // EmbedWithResult or our cache hit-rate stays at 0% no matter how the
 // cache is wired.
-func (h *HTTPEmbedder) embedChunk(ctx context.Context, texts []string) ([][]float32, error) {
+func (h *HTTPEmbedder) embedChunk(ctx context.Context, texts []string, chunkOffset int) ([][]float32, error) {
 	res, err := h.inner.EmbedWithResult(ctx, texts)
 	if err != nil {
 		var gokitErr *gokitembed.ErrDimMismatch
 		if errors.As(err, &gokitErr) {
 			recordHTTPDimMismatch(ctx, h.model)
+			// Index reports the position in the ORIGINAL input slice
+			// (not the sub-batch). gokit currently surfaces dim-mismatch
+			// at the response level, not per-vector — so the failing
+			// vector is somewhere in [chunkOffset, chunkOffset+len(texts)).
+			// Operators see the chunk's starting index, which is enough
+			// to locate the offending record.
 			return nil, &DimMismatchError{
 				Got:   gokitErr.Got,
 				Want:  gokitErr.Want,
 				Model: h.model,
-				Index: 0,
+				Index: chunkOffset,
 			}
 		}
 		return nil, err
