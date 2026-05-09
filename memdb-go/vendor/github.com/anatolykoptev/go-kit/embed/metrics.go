@@ -155,6 +155,34 @@ var (
 		[]string{"model"},
 	)
 
+	// ── Chunking metrics (E5) ────────────────────────────────────────────────────
+
+	// embedChunksPerCall records the number of sub-batches dispatched per
+	// Embed/EmbedWithResult call. Recorded once per user-facing call (NOT per
+	// chunk). When chunkSize >= len(texts) this always equals 1.
+	// Buckets match the server cap progression: 1, 2, 4, 8, 16, +Inf.
+	embedChunksPerCall = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "embed_chunks_per_call",
+			Help:    "Number of sub-batches dispatched per Embed/EmbedWithResult call due to client-side chunking.",
+			Buckets: []float64{1, 2, 4, 8, 16},
+		},
+		[]string{"model"},
+	)
+
+	// embedChunkSizeHist records the size of each dispatched sub-batch.
+	// Recorded once per chunk. When no chunking occurs, this equals
+	// embed_batch_size for the same call.
+	// Buckets: 1, 8, 16, 32, +Inf.
+	embedChunkSizeHist = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "embed_chunk_size",
+			Help:    "Size of each dispatched sub-batch (per chunk, not per call).",
+			Buckets: []float64{1, 8, 16, 32},
+		},
+		[]string{"model"},
+	)
+
 	// ── Correctness metrics ─────────────────────────────────────────────────────
 
 	// embedDimMismatchTotal counts vectors whose length did not match the
@@ -257,6 +285,20 @@ func recordCacheSet(model string, n int) {
 // Called once per offending vector (per-text granularity).
 func recordDimMismatch(model string) {
 	embedDimMismatchTotal.WithLabelValues(model).Inc()
+}
+
+// ── E5 (chunking) helpers ─────────────────────────────────────────────────────
+
+// recordChunksPerCall records how many sub-batches were dispatched for a
+// single Embed/EmbedWithResult call. Called once per user-facing call.
+func recordChunksPerCall(model string, numChunks int) {
+	embedChunksPerCall.WithLabelValues(model).Observe(float64(numChunks))
+}
+
+// recordChunkSize records the size of a single dispatched sub-batch.
+// Called once per chunk.
+func recordChunkSize(model string, chunkSize int) {
+	embedChunkSizeHist.WithLabelValues(model).Observe(float64(chunkSize))
 }
 
 // itoa converts a non-negative integer to its decimal string representation.

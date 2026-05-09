@@ -29,51 +29,6 @@ type embedderMetricsStruct struct {
 	RetryTotal metric.Int64Counter
 }
 
-// chunkMetrics holds instruments for the client-side chunking feature added
-// 2026-05-09 as defense-in-depth against ox-embed-server OOM on large batches.
-type chunkMetricsStruct struct {
-	// ChunksPerCall is recorded once per Embed call — the number of sub-batches
-	// dispatched (1 means no chunking occurred). Useful for tuning chunkSize.
-	// Buckets: 1, 2, 4, 8, 16+.
-	ChunksPerCall metric.Int64Histogram
-	// ChunkSize is recorded once per sub-batch with the sub-batch length.
-	// Complements BatchSize (which records the original caller intent).
-	// Buckets: 1, 8, 16, 32 (cap), +Inf.
-	ChunkSize metric.Int64Histogram
-}
-
-var (
-	chunkMetricsOnce        sync.Once
-	chunkMetricsInstruments *chunkMetricsStruct
-)
-
-// embedderChunkMetrics returns the singleton chunk metrics, lazy-initialised.
-func embedderChunkMetrics() *chunkMetricsStruct {
-	chunkMetricsOnce.Do(func() {
-		meter := otel.Meter("memdb-go/embedder")
-		chunksPerCall, _ := meter.Int64Histogram("memdb.embedder.chunks_per_call",
-			metric.WithDescription("Number of HTTP sub-batches dispatched per Embed call (1 = no chunking). Tells operators how often client-side chunking triggers."),
-			metric.WithExplicitBucketBoundaries(1, 2, 4, 8, 16),
-		)
-		chunkSize, _ := meter.Int64Histogram("memdb.embedder.chunk_size",
-			metric.WithDescription("Size of each individual HTTP sub-batch sent to embed-server (≤ chunkSize cap). Complements BatchSize which records original caller intent."),
-			metric.WithExplicitBucketBoundaries(1, 8, 16, 32),
-		)
-		chunkMetricsInstruments = &chunkMetricsStruct{
-			ChunksPerCall: chunksPerCall,
-			ChunkSize:     chunkSize,
-		}
-	})
-	return chunkMetricsInstruments
-}
-
-// resetChunkMetrics resets the chunk-metrics singleton for testing purposes.
-// Only call from test code; concurrent calls are unsafe.
-func resetChunkMetrics() {
-	chunkMetricsOnce = sync.Once{}
-	chunkMetricsInstruments = nil
-}
-
 // embedderMetrics returns the singleton embedder instruments, lazy-initialised.
 func embedderMetrics() *embedderMetricsStruct {
 	embedderMetricsOnce.Do(func() {

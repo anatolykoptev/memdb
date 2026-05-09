@@ -39,9 +39,19 @@ func (s CircuitState) String() string {
 type Observer interface {
 	// OnBeforeEmbed fires before the backend call is made.
 	// n is the number of texts being embedded.
+	//
+	// Chunking note (E5): when client-side chunking is active (input length
+	// exceeds chunkSize), this fires ONCE PER DISPATCHED CHUNK, not once per
+	// user-facing EmbedWithResult call. A 100-text call with chunkSize=32
+	// fires 4 OnBeforeEmbed callbacks, each with n equal to that chunk's size
+	// (32, 32, 32, 4). Observers tracking call count vs token volume should
+	// reflect this. Use `embed_chunks_per_call` histogram to count user-facing
+	// calls.
 	OnBeforeEmbed(ctx context.Context, model string, n int)
 	// OnAfterEmbed fires after the backend call completes (success or error).
 	// n is the number of texts in the result.
+	//
+	// Chunking note (E5): same per-chunk semantics as OnBeforeEmbed.
 	OnAfterEmbed(ctx context.Context, status Status, dur time.Duration, n int)
 	// OnRetry fires each time a request is retried (E1+).
 	OnRetry(ctx context.Context, attempt int, err error)

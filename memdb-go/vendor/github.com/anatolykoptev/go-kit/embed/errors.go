@@ -26,9 +26,15 @@ type ErrDimMismatch struct {
 	Want int
 	// Model is the resolved model name (may be empty for opaque backends).
 	Model string
+	// Index is the position of the first offending vector in the ORIGINAL
+	// (pre-chunking) input slice. Zero when chunking is not in use.
+	// When client-side chunking is active, Index equals the chunk's start
+	// offset so callers can locate the offending record without iterating
+	// all vectors.
+	Index int
 }
 
 // Error implements the error interface.
 func (e *ErrDimMismatch) Error() string {
-	return fmt.Sprintf("embed: dimension mismatch (model=%q got=%d want=%d)", e.Model, e.Got, e.Want)
+	return fmt.Sprintf("embed: dimension mismatch (model=%q got=%d want=%d index=%d)", e.Model, e.Got, e.Want, e.Index)
 }

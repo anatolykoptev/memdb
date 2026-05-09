@@ -5,6 +5,12 @@ import (
 	"log/slog"
 )
 
+// defaultChunkSize is the maximum number of texts sent to the backend in a
+// single Embed call. Matches the ox-embed-server EMBED_MAX_INPUT_ARRAY
+// default (2026-05-09) so clients never trigger an HTTP 400 on that cap.
+// Override per-instance via WithChunkSize or GOKIT_EMBED_CHUNK_SIZE env.
+const defaultChunkSize = 32
+
 // Client wraps an Embedder backend with v2 features: Observer hooks, retry,
 // circuit breaker, and multi-model fallback (E1). Built via NewClient(url, opts...).
 //
@@ -34,6 +40,13 @@ type Client struct {
 	cache       Cache
 	docPrefix   string
 	queryPrefix string
+
+	// E5: client-side chunking. When len(texts) > chunkSize, Embed and
+	// EmbedWithResult split the input into sequential sub-batches of this size.
+	// Default: defaultChunkSize (32), matching ox-embed-server's cap.
+	// Override: WithChunkSize option or GOKIT_EMBED_CHUNK_SIZE env var.
+	// Invariant: chunkSize >= 1 (enforced in newClientFromInternal).
+	chunkSize int
 }
 
 // Embed satisfies the Embedder interface. Routes through EmbedWithResult so
@@ -178,13 +191,13 @@ func (c *Client) validateDim(vecs [][]float32) error {
 		return nil
 	}
 	var first *ErrDimMismatch
-	for _, v := range vecs {
+	for i, v := range vecs {
 		if len(v) == c.expectedDim {
 			continue
 		}
 		recordDimMismatch(c.model)
 		if first == nil {
-			first = &ErrDimMismatch{Got: len(v), Want: c.expectedDim, Model: c.model}
+			first = &ErrDimMismatch{Got: len(v), Want: c.expectedDim, Model: c.model, Index: i}
 		}
 	}
 	if first == nil {
