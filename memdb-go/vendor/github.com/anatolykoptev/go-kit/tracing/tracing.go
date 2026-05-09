@@ -26,7 +26,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -45,8 +47,23 @@ import (
 // single-endpoint env for symmetry with the rest of the fleet.
 const envEndpoint = "OTEL_EXPORTER_OTLP_ENDPOINT"
 
+// activeServiceName holds the service name set by Setup; used by Start to
+// attribute spans to the correct instrumentation scope in Jaeger/Tempo UIs.
+// Plain atomic.Value is safe: Setup is called once at startup before any spans
+// are created.
+var activeServiceName atomic.Value // string
+
 // ShutdownFunc flushes pending spans and tears down the provider.
 // Defer it from main on SIGTERM/SIGINT. Safe when Setup returned a no-op.
+//
+// Best practice: pass a fresh context with a 30 s timeout, NOT the cancelled
+// SIGTERM ctx. A tight context causes unflushed spans to be dropped silently:
+//
+//	defer func() {
+//	    sctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+//	    defer cancel()
+//	    _ = shutdown(sctx)
+//	}()
 type ShutdownFunc func(context.Context) error
 
 // Option configures Setup.
@@ -82,10 +99,20 @@ func WithAttributes(kv ...attribute.KeyValue) Option {
 // context flows in and out of this process even when local export is off.
 // When the endpoint is unset, no exporter is created and the provider stays
 // the default no-op — Start still returns a usable but inert span.
+//
+// Tracing is best-effort: a bad endpoint URL logs a warning via slog and
+// returns a no-op shutdown (nil error) so the service continues to start.
+// Symmetric with the no-endpoint case above.
 func Setup(ctx context.Context, serviceName string, opts ...Option) (ShutdownFunc, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if serviceName == "" {
 		return noopShutdown, errors.New("tracing.Setup: serviceName must be non-empty")
 	}
+
+	// Store for use by Start — set before any span can be opened.
+	activeServiceName.Store(serviceName)
 
 	cfg := config{sampleRatio: 1.0, batchTimeout: 5 * time.Second}
 	for _, o := range opts {
@@ -114,7 +141,11 @@ func Setup(ctx context.Context, serviceName string, opts ...Option) (ShutdownFun
 		otlptracehttp.WithEndpointURL(cfg.endpoint),
 	)
 	if err != nil {
-		return noopShutdown, fmt.Errorf("create OTLP HTTP exporter: %w", err)
+		// Tracing is best-effort — degrade gracefully rather than blocking
+		// service startup. Operator will see the misconfiguration via slog.
+		slog.Warn("tracing: OTLP exporter init failed; continuing without traces",
+			"endpoint", cfg.endpoint, "err", err)
+		return noopShutdown, nil
 	}
 
 	res, err := resource.New(ctx,
@@ -141,17 +172,31 @@ func Setup(ctx context.Context, serviceName string, opts ...Option) (ShutdownFun
 // Tracer returns a Tracer scoped by name. Convention: pass the service name
 // or "<service>/<subsystem>" for finer slicing in Tempo/Jaeger UIs.
 //
+// Callers wanting an explicit instrumentation scope should use this directly:
+//
+//	tracing.Tracer("my-service").Start(ctx, "op")
+//
 // Always safe — falls through to the global provider, no-op when Setup did
 // not initialise an exporter.
 func Tracer(name string) trace.Tracer { return otel.Tracer(name) }
 
-// Start opens a span in ctx using the global tracer. Pass attributes as
-// optional args; the returned context carries the new span — use it for
-// downstream calls so child spans nest correctly. Always defer span.End().
+// Start opens a span in ctx using the service tracer. The instrumentation
+// scope is the service name passed to Setup, so spans are attributed to the
+// correct service in Jaeger/Tempo UIs. Falls back to "go-kit/tracing" when
+// Setup has not been called (e.g., in tests that skip bootstrap).
 //
-// Convenience over the verbose otel.Tracer(...).Start(...) pattern.
+// Pass attributes as optional args; the returned context carries the new span
+// — use it for downstream calls so child spans nest correctly. Always defer
+// span.End().
+//
+// Convenience over the verbose otel.Tracer(...).Start(...) pattern. For an
+// explicit scope use Tracer(scope).Start(ctx, name) directly.
 func Start(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
-	ctx, span := otel.Tracer("go-kit/tracing").Start(ctx, name)
+	scope := "go-kit/tracing" // fallback when Setup was never called
+	if v, ok := activeServiceName.Load().(string); ok && v != "" {
+		scope = v
+	}
+	ctx, span := otel.Tracer(scope).Start(ctx, name)
 	if len(attrs) > 0 {
 		span.SetAttributes(attrs...)
 	}

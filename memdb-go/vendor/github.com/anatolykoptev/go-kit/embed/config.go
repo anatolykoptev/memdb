@@ -69,6 +69,10 @@ type cfgInternal struct {
 
 	// E3: pluggable cache interface, opt-in via WithCache. nil = disabled.
 	cache Cache
+
+	// E5: client-side chunking. 0 = unset (constructor reads env then uses defaultChunkSize).
+	// Set via WithChunkSize. Negative values are treated as unset.
+	chunkSize int
 }
 
 // Opt is a functional option for NewClient.
@@ -205,4 +209,17 @@ func WithCircuit(cfg CircuitConfig) Opt {
 // StatusDegraded with a non-4xx error. Fallback depth is capped at 1.
 func WithFallback(secondary *Client) Opt {
 	return func(c *cfgInternal) { c.fallback = secondary }
+}
+
+// WithChunkSize overrides the per-call chunking limit. When len(texts) exceeds
+// this value, Embed/EmbedWithResult splits the input into sequential sub-batches
+// of at most chunkSize. Default: 32 (matching ox-embed-server EMBED_MAX_INPUT_ARRAY).
+// Override via GOKIT_EMBED_CHUNK_SIZE env when constructing without options.
+// Values <= 0 are ignored (constructor falls back to env then default).
+func WithChunkSize(n int) Opt {
+	return func(c *cfgInternal) {
+		if n > 0 {
+			c.chunkSize = n
+		}
+	}
 }

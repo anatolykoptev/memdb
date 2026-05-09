@@ -6,7 +6,7 @@ require (
 	connectrpc.com/connect v1.19.1
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/anatolykoptev/go-engine v1.3.1
-	github.com/anatolykoptev/go-kit v0.40.0
+	github.com/anatolykoptev/go-kit v0.50.0
 	github.com/anatolykoptev/go-stealth v1.3.1
 	github.com/anatolykoptev/skillkit v0.2.2
 	github.com/daulet/tokenizers v1.25.0
