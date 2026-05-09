@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,12 +32,18 @@ import (
 // short-circuiting embed-server traffic on idempotent re-embed (reverse-role
 // pass, query rewrites, scheduler reorganiser sweeps). Saves the HTTP round
 // trip + ONNX inference whenever a vector is already cached.
+// defaultChunkSize is the number of texts sent per HTTP call to embed-server.
+// Matches the planned ox-embed-server cap default (2026-05-09 incident).
+// Override via MEMDB_EMBED_CHUNK_SIZE.
+const defaultChunkSize = 32
+
 type HTTPEmbedder struct {
-	baseURL string
-	model   string
-	inner   *gokitembed.Client
-	dim     int
-	logger  *slog.Logger
+	baseURL   string
+	model     string
+	inner     *gokitembed.Client
+	dim       int
+	logger    *slog.Logger
+	chunkSize int
 }
 
 // HTTPEmbedderOpts collects the optional dependencies wired through
@@ -91,12 +99,25 @@ func NewHTTPEmbedderWithOpts(baseURL, model string, dim int, logger *slog.Logger
 		// fall back to a broken embedder.
 		panic(fmt.Sprintf("embedder.NewHTTPEmbedderWithOpts: gokitembed.NewClient failed: %v", err))
 	}
+	chunkSize := defaultChunkSize
+	if raw := os.Getenv("MEMDB_EMBED_CHUNK_SIZE"); raw != "" {
+		if n, err := strconv.Atoi(raw); err != nil || n <= 0 {
+			logger.Warn("MEMDB_EMBED_CHUNK_SIZE: invalid value, falling back to default",
+				slog.String("value", raw),
+				slog.Int("default", defaultChunkSize),
+			)
+		} else {
+			chunkSize = n
+		}
+	}
+
 	return &HTTPEmbedder{
-		baseURL: trimmed,
-		model:   model,
-		inner:   client,
-		dim:     dim,
-		logger:  logger,
+		baseURL:   trimmed,
+		model:     model,
+		inner:     client,
+		dim:       dim,
+		logger:    logger,
+		chunkSize: chunkSize,
 	}
 }
 
@@ -104,6 +125,14 @@ func NewHTTPEmbedderWithOpts(baseURL, model string, dim int, logger *slog.Logger
 // Delegates to go-kit/embed.HTTPEmbedder which retries transient failures
 // (429/502/503/504) with exponential backoff (200ms → 400ms → 800ms, cap 5s,
 // 3 attempts total). Non-retriable errors (4xx validation, unmarshal) fail fast.
+//
+// Client-side chunking (2026-05-09): when len(texts) > h.chunkSize, the input
+// is split into ceil(len/chunkSize) sub-batches sent sequentially. This caps
+// per-call attention scratch at chunkSize × 12 × 512² × 4 bytes, preventing
+// BFCArena OOM on ox-embed-server. Sequential (not parallel) dispatch avoids
+// batcher contention on the server side and keeps client memory bounded too.
+// On any sub-batch error, returns that error with no partial results
+// (all-or-nothing contract matching caller expectations).
 func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
@@ -111,6 +140,9 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 
 	start := time.Now()
 	mx := embedderMetrics()
+	// Record original caller intent — NOT the chunked sub-batch size.
+	// ChunkSize metric (per sub-batch) is recorded below and covers the
+	// dispatched dimension separately.
 	mx.BatchSize.Record(ctx, float64(len(texts)),
 		metric.WithAttributes(attribute.String("backend", "http")))
 	outcome := "success"
@@ -123,16 +155,49 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		))
 	}()
 
-	// 2026-05-01: route through EmbedWithResult, NOT Client.Embed. The plain
-	// Client.Embed entry point in go-kit/embed bypasses the cache layer
-	// entirely (it calls callBackendResilient directly — see go-kit
-	// client.go:45). Only EmbedWithResult performs the WithCache(...) lookup
-	// before hitting the backend (client_v2.go:142). Our wrapper MUST use
-	// EmbedWithResult or our cache hit-rate stays at 0% no matter how the
-	// cache is wired.
+	cmx := embedderChunkMetrics()
+	modelAttr := metric.WithAttributes(attribute.String("model", h.model))
+
+	numChunks := (len(texts) + h.chunkSize - 1) / h.chunkSize
+	cmx.ChunksPerCall.Record(ctx, int64(numChunks), modelAttr)
+
+	result := make([][]float32, 0, len(texts))
+	for i := 0; i < len(texts); i += h.chunkSize {
+		end := i + h.chunkSize
+		if end > len(texts) {
+			end = len(texts)
+		}
+		chunk := texts[i:end]
+		cmx.ChunkSize.Record(ctx, int64(len(chunk)), modelAttr)
+
+		vecs, err := h.embedChunk(ctx, chunk)
+		if err != nil {
+			outcome = "error"
+			return nil, err
+		}
+		result = append(result, vecs...)
+	}
+
+	h.logger.Debug("http embed complete",
+		slog.Int("texts", len(texts)),
+		slog.Int("chunks", numChunks),
+	)
+	return result, nil
+}
+
+// embedChunk sends a single sub-batch to embed-server and returns vectors.
+// This is the inner call that wraps EmbedWithResult; Embed handles chunking above.
+//
+// 2026-05-01: route through EmbedWithResult, NOT Client.Embed. The plain
+// Client.Embed entry point in go-kit/embed bypasses the cache layer
+// entirely (it calls callBackendResilient directly — see go-kit
+// client.go:45). Only EmbedWithResult performs the WithCache(...) lookup
+// before hitting the backend (client_v2.go:142). Our wrapper MUST use
+// EmbedWithResult or our cache hit-rate stays at 0% no matter how the
+// cache is wired.
+func (h *HTTPEmbedder) embedChunk(ctx context.Context, texts []string) ([][]float32, error) {
 	res, err := h.inner.EmbedWithResult(ctx, texts)
 	if err != nil {
-		outcome = "error"
 		var gokitErr *gokitembed.ErrDimMismatch
 		if errors.As(err, &gokitErr) {
 			recordHTTPDimMismatch(ctx, h.model)
@@ -146,7 +211,6 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		return nil, err
 	}
 	if res == nil || res.Status != gokitembed.StatusOk {
-		outcome = "error"
 		if res != nil && res.Err != nil {
 			return nil, res.Err
 		}
@@ -160,10 +224,6 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		}
 		vecs[i] = v.Embedding
 	}
-
-	h.logger.Debug("http embed complete",
-		slog.Int("texts", len(texts)),
-	)
 	return vecs, nil
 }
 
