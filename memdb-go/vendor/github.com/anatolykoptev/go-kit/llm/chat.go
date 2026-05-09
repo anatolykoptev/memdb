@@ -8,18 +8,53 @@ import (
 )
 
 // Message is a chat message.
+//
+// ChatTime, MessageID, and Name are wire-compatible additions aligned
+// with the MemDB ingestion schema (api/openapi.yaml on memdb-go) so a
+// service can emit one Message and route it both to the LLM and to
+// MemDB without per-system reshaping. All three fields are
+// `omitempty`, byte-identical to today on default-zero calls.
+//
+// Provider safety: OpenAI's /v1/chat/completions and Anthropic's
+// /v1/messages ignore unknown top-level keys on message objects (same
+// guarantee that lets ContentPart.CacheControl flow through). `name`
+// is OpenAI-native; `chat_time` and `message_id` are MemDB-aligned
+// snake_case names that providers silently drop.
+//
+// To make ChatTime visible to the model, pair it with the
+// WithMessageTimestamps ChatOption — it prepends a bracketed UTC
+// timestamp to text Content right before send. Without that option
+// the field is wire-only metadata invisible to the LLM.
 type Message struct {
 	Role       string     `json:"role"`
 	Content    any        `json:"content"` // string or []ContentPart for multimodal
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+
+	// ChatTime is the message timestamp in RFC3339 (e.g. "2026-05-04T06:30:00Z").
+	// MemDB indexes the first 10 chars (YYYY-MM-DD) as observation_date and
+	// keeps the full string in properties.chat_time. Empty = no timestamp.
+	ChatTime string `json:"chat_time,omitempty"`
+
+	// MessageID is a stable per-message identifier. Used by MemDB for
+	// dedup. Optional. Empty = let the upstream system assign.
+	MessageID string `json:"message_id,omitempty"`
+
+	// Name is an optional speaker label (OpenAI-native; MemDB-honoured).
+	// Useful for multi-party conversations or attributing system blocks.
+	Name string `json:"name,omitempty"`
 }
 
 // ContentPart is a part of a multimodal message.
+//
+// CacheControl is honoured by Anthropic-compatible APIs as a prompt-cache
+// breakpoint; see CacheControl docs in cache.go. Other providers ignore
+// the unknown field, so it is safe to always send.
 type ContentPart struct {
-	Type     string    `json:"type"`
-	Text     string    `json:"text,omitempty"`
-	ImageURL *ImageURL `json:"image_url,omitempty"`
+	Type         string        `json:"type"`
+	Text         string        `json:"text,omitempty"`
+	ImageURL     *ImageURL     `json:"image_url,omitempty"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 // ImageURL holds an image reference for vision requests.
@@ -53,16 +88,34 @@ type ChatRequest struct {
 }
 
 // Usage holds token usage from the API response.
+//
+// The struct is shape-tolerant: UnmarshalJSON (in cache.go) reads BOTH
+// OpenAI's {prompt_tokens, completion_tokens, total_tokens,
+// prompt_tokens_details.cached_tokens} and Anthropic's {input_tokens,
+// output_tokens, cache_read_input_tokens, cache_creation_input_tokens}
+// shapes and normalises into the fields below.
+//
+// CachedTokens is the count served from the prompt cache on this call —
+// emit as a span/metric attribute to verify caching is actually working
+// in production. CacheCreationTokens is Anthropic-only (tokens written
+// to the cache; OpenAI's automatic caching does not separate creation).
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+	CachedTokens        int `json:"cached_tokens,omitempty"`
+	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
 }
 
 // Tool defines a function tool for the API.
+//
+// CacheControl marks the tool definition as a cache breakpoint (Anthropic
+// only — useful when a long, stable tool catalog is sent on every turn).
+// Set on the LAST tool in the slice to cache the cumulative tools prefix.
 type Tool struct {
-	Type     string       `json:"type"`
-	Function ToolFunction `json:"function"`
+	Type         string        `json:"type"`
+	Function     ToolFunction  `json:"function"`
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
 }
 
 // ToolFunction describes a callable function.
@@ -105,11 +158,12 @@ type ChatResponse struct {
 type ChatOption func(*chatConfig)
 
 type chatConfig struct {
-	tools          []Tool
-	toolChoice     any
-	responseFormat any
-	temperature    *float64
-	maxTokens      *int
+	tools             []Tool
+	toolChoice        any
+	responseFormat    any
+	temperature       *float64
+	maxTokens         *int
+	timestampMessages bool
 }
 
 func (cfg *chatConfig) apply(req *ChatRequest) {
@@ -128,6 +182,9 @@ func (cfg *chatConfig) apply(req *ChatRequest) {
 	}
 	if cfg.maxTokens != nil {
 		req.MaxTokens = *cfg.maxTokens
+	}
+	if cfg.timestampMessages {
+		applyMessageTimestamps(req.Messages)
 	}
 }
 
@@ -149,6 +206,23 @@ func WithChatTemperature(t float64) ChatOption {
 // WithChatMaxTokens overrides the max tokens for a single call.
 func WithChatMaxTokens(n int) ChatOption {
 	return func(c *chatConfig) { c.maxTokens = &n }
+}
+
+// WithMessageTimestamps prepends a bracketed UTC timestamp to each
+// Message.Content (string-typed only) for messages whose ChatTime is
+// non-empty. Format: "[YYYY-MM-DD HH:MM UTC] <original content>".
+//
+// Pair with Message.ChatTime to give the LLM time-awareness without
+// leaking timestamps into messages that were not authored at a
+// specific moment (system blocks, tool results — leave ChatTime "").
+//
+// Multimodal messages (Content is []ContentPart) are NOT modified to
+// avoid disturbing image_url shapes; if you need timestamped multimodal,
+// prepend a leading text ContentPart yourself.
+//
+// Opt-in. Off by default — calls remain byte-identical to before.
+func WithMessageTimestamps() ChatOption {
+	return func(c *chatConfig) { c.timestampMessages = true }
 }
 
 // WithJSONSchema sets the response format to structured JSON output.
