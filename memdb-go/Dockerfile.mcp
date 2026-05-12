@@ -1,6 +1,6 @@
 # ─── Build stage ─────────────────────────────────────────────────────
 # MCP server — no ONNX/CGO needed (search proxied to memdb-go).
-FROM golang:1.26rc3 AS builder
+FROM golang:1.26 AS builder
 
 WORKDIR /app
 
