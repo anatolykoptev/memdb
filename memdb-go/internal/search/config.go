@@ -1,18 +1,22 @@
 // Package search — shared configuration for search handlers.
 package search
 
-import "time"
+import (
+	"log/slog"
+	"os"
+	"strconv"
+	"time"
+)
 
 // Default budgets per memory type.
 const (
-	DefaultTextTopK  = 10
-	DefaultSkillTopK = 3
-	DefaultPrefTopK  = 6
-	DefaultToolTopK  = 6
-	InflateFactor    = 5    // inflate top_k for dedup modes
-	MinPrefLen       = 30   // minimum preference content length
+	DefaultTextTopK   = 10
+	DefaultSkillTopK  = 3
+	DefaultPrefTopK   = 6
+	DefaultToolTopK   = 6
+	InflateFactor     = 5   // inflate top_k for dedup modes
+	MinPrefLen        = 30  // minimum preference content length
 	DefaultRelativity = 0.5 // minimum relevance threshold (filters noise from search results)
-	CacheTTL         = 30 * time.Second
 
 	// MMR tuning.
 	// LangChain and MemOS default lambda=0.5 (pure balance).
@@ -42,6 +46,26 @@ const (
 	// MemOS uses 365. We use 730 (2 years) — gentler cutoff.
 	MaxDecayAgeDays = 730
 )
+
+// CacheTTL is resolved at startup from MEMDB_SEARCH_CACHE_TTL_S (positive int seconds).
+// Default 300s (was 30s) — 10× cache hit rate uplift for repeated identical searches.
+var CacheTTL = resolveSearchCacheTTL()
+
+// resolveSearchCacheTTL reads MEMDB_SEARCH_CACHE_TTL_S (positive int seconds, default 300).
+// Rejects zero/negative values and falls back to default with a log warning.
+func resolveSearchCacheTTL() time.Duration {
+	const defaultS = 300
+	const envKey = "MEMDB_SEARCH_CACHE_TTL_S"
+	if v := os.Getenv(envKey); v != "" {
+		if s, err := strconv.Atoi(v); err == nil && s > 0 {
+			slog.Info("search: CacheTTL resolved", slog.String("env", envKey), slog.Int("seconds", s))
+			return time.Duration(s) * time.Second
+		}
+		slog.Warn("search: invalid "+envKey+", using default", slog.String("value", v), slog.Int("default_seconds", defaultS))
+	}
+	slog.Info("search: CacheTTL using default", slog.Int("seconds", defaultS))
+	return defaultS * time.Second
+}
 
 // Default limits for graph recall and working memory.
 const (

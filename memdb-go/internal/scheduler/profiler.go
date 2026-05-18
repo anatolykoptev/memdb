@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,26 +29,45 @@ import (
 )
 
 const (
-	profileRefreshTimeout  = 60 * time.Second // timeout for background profile refresh
-	profileFactsMaxChars   = 4000             // truncate facts to avoid prompt overflow
-	profileRespBodyLimit   = 16 * 1024        // 16 KB max LLM response body
+	profileRefreshTimeout = 60 * time.Second // timeout for background profile refresh
+	profileFactsMaxChars  = 4000             // truncate facts to avoid prompt overflow
+	profileRespBodyLimit  = 16 * 1024        // 16 KB max LLM response body
 )
 
 const (
-	profileKeyPrefix    = "profile:"
-	profileTTL          = time.Hour
-	profileMinLength    = 50              // minimum chars of UserMemory content needed to generate
-	profileRefreshCooldown = 10 * time.Minute // min interval between LLM refreshes per cube
+	profileKeyPrefix = "profile:"
+	profileTTL       = time.Hour
+	profileMinLength = 50 // minimum chars of UserMemory content needed to generate
 )
+
+// profileRefreshCooldown is resolved at startup from MEMDB_PROFILE_REFRESH_COOLDOWN_M (positive int minutes).
+// Default 60m (was 10m) — 6× reduction in profiler LLM volume.
+var profileRefreshCooldown = resolveProfileRefreshCooldown()
+
+// resolveProfileRefreshCooldown reads MEMDB_PROFILE_REFRESH_COOLDOWN_M (positive int minutes, default 60).
+// Rejects zero/negative values and falls back to default with a log warning.
+func resolveProfileRefreshCooldown() time.Duration {
+	const defaultM = 60
+	const envKey = "MEMDB_PROFILE_REFRESH_COOLDOWN_M"
+	if v := os.Getenv(envKey); v != "" {
+		if m, err := strconv.Atoi(v); err == nil && m > 0 {
+			slog.Info("scheduler: profileRefreshCooldown resolved", slog.String("env", envKey), slog.Int("minutes", m))
+			return time.Duration(m) * time.Minute
+		}
+		slog.Warn("scheduler: invalid "+envKey+", using default", slog.String("value", v), slog.Int("default_minutes", defaultM))
+	}
+	slog.Info("scheduler: profileRefreshCooldown using default", slog.Int("minutes", defaultM))
+	return defaultM * time.Minute
+}
 
 // Profiler generates and caches user profile summaries in Redis.
 type Profiler struct {
-	postgres      *db.Postgres
-	redis         *db.Redis
-	llmProxyURL   string
-	llmProxyKey   string
-	llmModel      string
-	logger        *slog.Logger
+	postgres    *db.Postgres
+	redis       *db.Redis
+	llmProxyURL string
+	llmProxyKey string
+	llmModel    string
+	logger      *slog.Logger
 
 	mu          sync.Mutex
 	lastRefresh map[string]time.Time // per-cube last refresh time (cooldown)
