@@ -58,7 +58,7 @@ func (w *Worker) startPeriodicReorgLoop(ctx context.Context) {
 	(&periodicLoop{
 		name:     "periodic_reorg",
 		interval: periodicReorgInterval,
-		stagger:  periodicReorgInterval / 2,
+		stagger:  min(periodicReorgInterval/2, time.Hour),
 		runOnce: func(ctx context.Context) error {
 			w.runPeriodicReorg(ctx)
 			return nil

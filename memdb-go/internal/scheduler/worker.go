@@ -13,58 +13,74 @@ package scheduler
 //   worker_parsers.go           — pure parse helpers (no Redis dependency)
 
 import (
-"context"
-"log/slog"
-"time"
+	"context"
+	"log/slog"
+	"os"
+	"strconv"
+	"time"
 
-"github.com/redis/go-redis/v9"
+	"github.com/redis/go-redis/v9"
 
-"github.com/anatolykoptev/memdb/memdb-go/internal/db"
-"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
 const (
-// consumerName identifies this worker instance inside the consumer group.
-consumerName = "memdb_go_worker"
+	// consumerName identifies this worker instance inside the consumer group.
+	consumerName = "memdb_go_worker"
 
-// readBatchSize is the max number of messages read per XREADGROUP call per stream.
-readBatchSize = 10
+	// readBatchSize is the max number of messages read per XREADGROUP call per stream.
+	readBatchSize = 10
 
-// blockDuration is how long XREADGROUP blocks waiting for new messages.
-// Kept short so total scan cycle (N streams × blockDuration) stays under scanInterval.
-blockDuration = 100 * time.Millisecond
+	// blockDuration is how long XREADGROUP blocks waiting for new messages.
+	// Kept short so total scan cycle (N streams × blockDuration) stays under scanInterval.
+	blockDuration = 100 * time.Millisecond
 
-// scanInterval is how often the worker re-scans Redis for new stream keys.
-// Kept short (2s) so async-submitted tasks are picked up quickly.
-scanInterval = 2 * time.Second
+	// scanInterval is how often the worker re-scans Redis for new stream keys.
+	// Kept short (2s) so async-submitted tasks are picked up quickly.
+	scanInterval = 2 * time.Second
 
-// reclaimInterval is how often the worker checks for abandoned pending messages.
-reclaimInterval = 30 * time.Second
+	// reclaimInterval is how often the worker checks for abandoned pending messages.
+	reclaimInterval = 30 * time.Second
 
-// minIdleTime is the minimum time a pending message must be idle before
-// XAUTOCLAIM reclaims it (mirrors Python's DEFAULT_PENDING_CLAIM_MIN_IDLE_MS = 1h).
-minIdleTime = time.Hour
+	// minIdleTime is the minimum time a pending message must be idle before
+	// XAUTOCLAIM reclaims it (mirrors Python's DEFAULT_PENDING_CLAIM_MIN_IDLE_MS = 1h).
+	minIdleTime = time.Hour
 
-// highMsgChanBuffer is the size of the high-priority message channel.
-// Smaller than low because high-priority messages are processed immediately.
-highMsgChanBuffer = 32
+	// highMsgChanBuffer is the size of the high-priority message channel.
+	// Smaller than low because high-priority messages are processed immediately.
+	highMsgChanBuffer = 32
 
-// lowMsgChanBuffer is the size of the low-priority (background) message channel.
-lowMsgChanBuffer = 128
+	// lowMsgChanBuffer is the size of the low-priority (background) message channel.
+	lowMsgChanBuffer = 128
 
-// periodicReorgInterval is how often the worker runs the reorganizer for all
-// active cubes regardless of incoming stream messages.
-// Inspired by MemOS RedisStreamsScheduler periodic timer pattern.
-// 6h balances freshness vs LLM cost (each cube = 1 FindNearDuplicates + N LLM calls).
-periodicReorgInterval = 6 * time.Hour
+	// vsetKeyPrefix is duplicated here to scan active cubes without importing db package.
+	vsetKeyScanPattern = "wm:v:*"
 
-// vsetKeyPrefix is duplicated here to scan active cubes without importing db package.
-vsetKeyScanPattern = "wm:v:*"
-
-// scanBatchSize is the max number of Redis keys returned per SCAN iteration.
-// 200 is a safe value that balances iteration speed vs per-call latency.
-scanBatchSize = 200
+	// scanBatchSize is the max number of Redis keys returned per SCAN iteration.
+	// 200 is a safe value that balances iteration speed vs per-call latency.
+	scanBatchSize = 200
 )
+
+// periodicReorgInterval is resolved at startup from MEMDB_REORG_INTERVAL_H (positive int hours).
+// Default 24h (was 6h) — 4× reduction in periodic-reorg LLM volume.
+var periodicReorgInterval = resolveReorgInterval()
+
+// resolveReorgInterval reads MEMDB_REORG_INTERVAL_H (positive int hours, default 24).
+// Rejects zero/negative values and falls back to default with a log warning.
+func resolveReorgInterval() time.Duration {
+	const defaultH = 24
+	const envKey = "MEMDB_REORG_INTERVAL_H"
+	if v := os.Getenv(envKey); v != "" {
+		if h, err := strconv.Atoi(v); err == nil && h > 0 {
+			slog.Info("scheduler: periodicReorgInterval resolved", slog.String("env", envKey), slog.Int("hours", h))
+			return time.Duration(h) * time.Hour
+		}
+		slog.Warn("scheduler: invalid "+envKey+", using default", slog.String("value", v), slog.Int("default_hours", defaultH))
+	}
+	slog.Info("scheduler: periodicReorgInterval using default", slog.Int("hours", defaultH))
+	return defaultH * time.Hour
+}
 
 // streamMsg bundles a parsed message with its origin stream key.
 type streamMsg struct {
@@ -82,8 +98,9 @@ type streamMsg struct {
 //   - pageRankLoop: computes per-cube PageRank on memory_edges every 6h (M10 S7).
 //
 // Priority classification (see isHighPriority in message.go):
-//   HIGH: mem_update, query, mem_feedback  — user-triggered, latency-sensitive
-//   LOW:  mem_organize, mem_read, pref_add, add, answer — background work
+//
+//	HIGH: mem_update, query, mem_feedback  — user-triggered, latency-sensitive
+//	LOW:  mem_organize, mem_read, pref_add, add, answer — background work
 //
 // The worker uses its own consumer group (memdb_go_scheduler) which is independent
 // from Python's scheduler_group — both consume all messages in parallel.
@@ -92,15 +109,15 @@ type streamMsg struct {
 // using the same schema as Python — enabling the Python API's /scheduler/wait endpoints
 // to observe Go-processed tasks.
 type Worker struct {
-	redis      *redis.Client
-	reorg      *Reorganizer
-	pg         *db.Postgres // optional; required for PageRank goroutine
-	llmJudge   *llm.Client  // optional; required for F11 bitemporal_validator loop
-	logger     *slog.Logger
-	highMsgCh  chan streamMsg // high-priority: mem_update, query, mem_feedback
-	lowMsgCh   chan streamMsg // low-priority:  mem_organize, mem_read, pref_add, add, answer
-	stopCh     chan struct{}
-	tracker    *TaskStatusTracker // writes memos:task_meta:{user_id} — shared with Python API
+	redis     *redis.Client
+	reorg     *Reorganizer
+	pg        *db.Postgres // optional; required for PageRank goroutine
+	llmJudge  *llm.Client  // optional; required for F11 bitemporal_validator loop
+	logger    *slog.Logger
+	highMsgCh chan streamMsg // high-priority: mem_update, query, mem_feedback
+	lowMsgCh  chan streamMsg // low-priority:  mem_organize, mem_read, pref_add, add, answer
+	stopCh    chan struct{}
+	tracker   *TaskStatusTracker // writes memos:task_meta:{user_id} — shared with Python API
 }
 
 // NewWorker creates a Worker. reorg may be nil if no LLM/postgres is configured
@@ -133,38 +150,38 @@ func (w *Worker) SetLLMJudge(c *llm.Client) {
 
 // Run starts the worker goroutines and blocks until ctx is cancelled.
 func (w *Worker) Run(ctx context.Context) {
-w.logger.InfoContext(ctx, "scheduler worker: starting",
-slog.String("consumer_group", ConsumerGroup),
-slog.String("stream_prefix", StreamKeyPrefix),
-)
+	w.logger.InfoContext(ctx, "scheduler worker: starting",
+		slog.String("consumer_group", ConsumerGroup),
+		slog.String("stream_prefix", StreamKeyPrefix),
+	)
 
-go w.readLoop(ctx)
-go w.reclaimLoop(ctx)
-go w.retryLoop(ctx)
-if w.reorg != nil {
-go w.startPeriodicReorgLoop(ctx)
-}
-// M10 Stream 7: PageRank background goroutine — requires Postgres + feature gate.
-if w.pg != nil && pageRankEnabled() {
-	go w.startPageRankLoop(ctx, w.pg)
-	w.logger.InfoContext(ctx, "pagerank: background goroutine started",
-		slog.Duration("interval", pageRankInterval()),
-	)
-}
-// M11 F11: bi-temporal validator loop — requires Postgres + LLM judge + feature gate.
-// Disabled by default; enable with MEMDB_F11_VALIDATOR_ENABLED=true once sync-path
-// invalidation rates have stabilised in prod.
-if w.pg != nil && w.llmJudge != nil && validatorEnabled() {
-	go w.startBitemporalValidatorLoop(ctx)
-	w.logger.InfoContext(ctx, "bitemporal_validator: background goroutine started",
-		slog.Duration("interval", validatorInterval()),
-		slog.Duration("staleness", validatorStaleness()),
-	)
-}
-w.processLoop(ctx) // blocks until ctx cancelled
+	go w.readLoop(ctx)
+	go w.reclaimLoop(ctx)
+	go w.retryLoop(ctx)
+	if w.reorg != nil {
+		go w.startPeriodicReorgLoop(ctx)
+	}
+	// M10 Stream 7: PageRank background goroutine — requires Postgres + feature gate.
+	if w.pg != nil && pageRankEnabled() {
+		go w.startPageRankLoop(ctx, w.pg)
+		w.logger.InfoContext(ctx, "pagerank: background goroutine started",
+			slog.Duration("interval", pageRankInterval()),
+		)
+	}
+	// M11 F11: bi-temporal validator loop — requires Postgres + LLM judge + feature gate.
+	// Disabled by default; enable with MEMDB_F11_VALIDATOR_ENABLED=true once sync-path
+	// invalidation rates have stabilised in prod.
+	if w.pg != nil && w.llmJudge != nil && validatorEnabled() {
+		go w.startBitemporalValidatorLoop(ctx)
+		w.logger.InfoContext(ctx, "bitemporal_validator: background goroutine started",
+			slog.Duration("interval", validatorInterval()),
+			slog.Duration("staleness", validatorStaleness()),
+		)
+	}
+	w.processLoop(ctx) // blocks until ctx cancelled
 }
 
 // Stop signals the worker to stop. Blocks until internal channels are drained.
 func (w *Worker) Stop() {
-close(w.stopCh)
+	close(w.stopCh)
 }
