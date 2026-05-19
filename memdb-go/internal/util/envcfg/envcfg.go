@@ -6,6 +6,7 @@
 package envcfg
 
 import (
+	"log/slog"
 	"math"
 	"os"
 	"strconv"
@@ -100,4 +101,27 @@ func Duration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return v
+}
+
+// PositiveDuration reads envKey as a positive integer, multiplies by unit, and
+// returns def*unit when the env is unset, empty, non-numeric, zero, or negative.
+//
+// On invalid non-empty input: logs slog.Warn with the env name and raw value.
+// Always logs slog.Info with the resolved value and env name.
+//
+// Intended for package-level var initialisers (called once at startup).
+// Log format: envcfg: positive_duration env=<key> value=<n*unit>.
+func PositiveDuration(envKey string, def int, unit time.Duration) time.Duration {
+	if v := os.Getenv(envKey); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			d := time.Duration(n) * unit
+			slog.Info("envcfg: positive_duration resolved", slog.String("env", envKey), slog.Duration("value", d))
+			return d
+		}
+		slog.Warn("envcfg: invalid positive_duration, using default",
+			slog.String("env", envKey), slog.String("raw", v), slog.Duration("default", time.Duration(def)*unit))
+	}
+	d := time.Duration(def) * unit
+	slog.Info("envcfg: positive_duration using default", slog.String("env", envKey), slog.Duration("value", d))
+	return d
 }
