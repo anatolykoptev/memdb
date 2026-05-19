@@ -15,14 +15,13 @@ package scheduler
 import (
 	"context"
 	"log/slog"
-	"os"
-	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
 const (
@@ -64,23 +63,8 @@ const (
 
 // periodicReorgInterval is resolved at startup from MEMDB_REORG_INTERVAL_H (positive int hours).
 // Default 24h (was 6h) — 4× reduction in periodic-reorg LLM volume.
-var periodicReorgInterval = resolveReorgInterval()
+var periodicReorgInterval = envcfg.PositiveDuration("MEMDB_REORG_INTERVAL_H", 24, time.Hour)
 
-// resolveReorgInterval reads MEMDB_REORG_INTERVAL_H (positive int hours, default 24).
-// Rejects zero/negative values and falls back to default with a log warning.
-func resolveReorgInterval() time.Duration {
-	const defaultH = 24
-	const envKey = "MEMDB_REORG_INTERVAL_H"
-	if v := os.Getenv(envKey); v != "" {
-		if h, err := strconv.Atoi(v); err == nil && h > 0 {
-			slog.Info("scheduler: periodicReorgInterval resolved", slog.String("env", envKey), slog.Int("hours", h))
-			return time.Duration(h) * time.Hour
-		}
-		slog.Warn("scheduler: invalid "+envKey+", using default", slog.String("value", v), slog.Int("default_hours", defaultH))
-	}
-	slog.Info("scheduler: periodicReorgInterval using default", slog.Int("hours", defaultH))
-	return defaultH * time.Hour
-}
 
 // streamMsg bundles a parsed message with its origin stream key.
 type streamMsg struct {
