@@ -246,3 +246,52 @@ func TestDuration_Default_OnBadValue(t *testing.T) {
 		t.Fatalf("want default 10s, got %v", got)
 	}
 }
+
+// ---- PositiveDuration -------------------------------------------------------
+
+func TestPositiveDuration_Default_WhenUnset(t *testing.T) {
+	const key = "TEST_ENVCFG_PD_UNSET_XYZ"
+	if got := envcfg.PositiveDuration(key, 5, time.Minute); got != 5*time.Minute {
+		t.Fatalf("want 5m, got %v", got)
+	}
+}
+
+func TestPositiveDuration_Default_WhenEmpty(t *testing.T) {
+	const key = "TEST_ENVCFG_PD_EMPTY"
+	setenv(t, key, "")
+	if got := envcfg.PositiveDuration(key, 5, time.Minute); got != 5*time.Minute {
+		t.Fatalf("want 5m for empty string, got %v", got)
+	}
+}
+
+func TestPositiveDuration_Default_WhenZero(t *testing.T) {
+	const key = "TEST_ENVCFG_PD_ZERO"
+	setenv(t, key, "0")
+	if got := envcfg.PositiveDuration(key, 5, time.Minute); got != 5*time.Minute {
+		t.Fatalf("want 5m for zero, got %v", got)
+	}
+}
+
+func TestPositiveDuration_Default_WhenNegative(t *testing.T) {
+	const key = "TEST_ENVCFG_PD_NEG"
+	setenv(t, key, "-5")
+	if got := envcfg.PositiveDuration(key, 5, time.Minute); got != 5*time.Minute {
+		t.Fatalf("want 5m for negative, got %v", got)
+	}
+}
+
+func TestPositiveDuration_Default_WhenNonNumeric(t *testing.T) {
+	const key = "TEST_ENVCFG_PD_NAN"
+	setenv(t, key, "abc")
+	if got := envcfg.PositiveDuration(key, 5, time.Minute); got != 5*time.Minute {
+		t.Fatalf("want 5m for non-numeric, got %v", got)
+	}
+}
+
+func TestPositiveDuration_Override_WhenPositive(t *testing.T) {
+	const key = "TEST_ENVCFG_PD_OK"
+	setenv(t, key, "12")
+	if got := envcfg.PositiveDuration(key, 5, time.Minute); got != 12*time.Minute {
+		t.Fatalf("want 12m, got %v", got)
+	}
+}

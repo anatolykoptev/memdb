@@ -2,10 +2,9 @@
 package search
 
 import (
-	"log/slog"
-	"os"
-	"strconv"
 	"time"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
 // Default budgets per memory type.
@@ -49,23 +48,8 @@ const (
 
 // CacheTTL is resolved at startup from MEMDB_SEARCH_CACHE_TTL_S (positive int seconds).
 // Default 300s (was 30s) — 10× cache hit rate uplift for repeated identical searches.
-var CacheTTL = resolveSearchCacheTTL()
+var CacheTTL = envcfg.PositiveDuration("MEMDB_SEARCH_CACHE_TTL_S", 300, time.Second)
 
-// resolveSearchCacheTTL reads MEMDB_SEARCH_CACHE_TTL_S (positive int seconds, default 300).
-// Rejects zero/negative values and falls back to default with a log warning.
-func resolveSearchCacheTTL() time.Duration {
-	const defaultS = 300
-	const envKey = "MEMDB_SEARCH_CACHE_TTL_S"
-	if v := os.Getenv(envKey); v != "" {
-		if s, err := strconv.Atoi(v); err == nil && s > 0 {
-			slog.Info("search: CacheTTL resolved", slog.String("env", envKey), slog.Int("seconds", s))
-			return time.Duration(s) * time.Second
-		}
-		slog.Warn("search: invalid "+envKey+", using default", slog.String("value", v), slog.Int("default_seconds", defaultS))
-	}
-	slog.Info("search: CacheTTL using default", slog.Int("seconds", defaultS))
-	return defaultS * time.Second
-}
 
 // Default limits for graph recall and working memory.
 const (
