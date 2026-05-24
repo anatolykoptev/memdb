@@ -3,6 +3,7 @@ package sparse
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 )
 
@@ -18,6 +19,12 @@ func NewClient(url string, opts ...Opt) (*Client, error) {
 	cfg.url = url
 	for _, opt := range opts {
 		opt(cfg)
+	}
+	// Bearer token: explicit opt > env (EMBED_TOKEN). Mirror of embed v2.
+	if cfg.httpBearerToken == "" {
+		if tok := os.Getenv("EMBED_TOKEN"); tok != "" {
+			cfg.httpBearerToken = tok
+		}
 	}
 	return newClientFromInternal(cfg)
 }
