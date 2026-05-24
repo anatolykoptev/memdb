@@ -36,6 +36,10 @@ type cfgInternal struct {
 	topK      int
 	minWeight float32
 
+	// HTTP backend bearer token (mirror of embed.cfgInternal.httpBearerToken).
+	// Auto-resolved from EMBED_TOKEN env in newClientFromInternal when unset.
+	httpBearerToken string
+
 	customEmbedder SparseEmbedder
 
 	observer Observer

@@ -114,6 +114,9 @@ func newFromInternal(cfg *cfgInternal) (SparseEmbedder, error) {
 		if cfg.retry.MaxAttempts > 0 {
 			opts = append(opts, WithHTTPRetry(cfg.retry))
 		}
+		if cfg.httpBearerToken != "" {
+			opts = append(opts, WithBearerToken(cfg.httpBearerToken))
+		}
 		return NewHTTPSparseEmbedder(cfg.url, model, cfg.logger, opts...), nil
 	default:
 		return nil, fmt.Errorf("sparse: unknown backend %q (valid: http)", cfg.backend)
