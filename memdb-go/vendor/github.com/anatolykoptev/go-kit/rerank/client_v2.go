@@ -1,6 +1,9 @@
 package rerank
 
-import "context"
+import (
+	"context"
+	"os"
+)
 
 // NewClient is the v2 constructor. Use functional options to configure.
 //
@@ -14,6 +17,15 @@ func NewClient(url string, opts ...Opt) *Client {
 	cfg.url = url
 	for _, opt := range opts {
 		opt(cfg)
+	}
+	// Bearer token: explicit WithAPIKey > env (EMBED_TOKEN). For self-hosted
+	// embed-server. Hosted providers (Cohere, Voyage) should pass WithAPIKey
+	// explicitly; this env fallback is a convenience for the krolik-server
+	// cross-host bearer flow where the env is set per-process.
+	if cfg.apiKey == "" {
+		if tok := os.Getenv("EMBED_TOKEN"); tok != "" {
+			cfg.apiKey = tok
+		}
 	}
 	return newFromInternal(cfg)
 }
