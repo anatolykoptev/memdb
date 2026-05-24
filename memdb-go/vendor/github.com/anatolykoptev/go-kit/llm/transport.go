@@ -76,7 +76,7 @@ func (c *Client) doRequest(ctx context.Context, baseURL, apiKey string, req *Cha
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, newAPIError(resp.StatusCode, string(respBody), isRetryableStatus(resp.StatusCode))
+		return nil, newAPIError(resp.StatusCode, string(respBody), isRetryableStatus(resp.StatusCode), parseRetryAfter(resp.Header.Get("Retry-After")))
 	}
 
 	var chatResp chatResponse
@@ -104,6 +104,9 @@ func (c *Client) executeInner(ctx context.Context, req *ChatRequest) (*ChatRespo
 				epReq.Model = ep.Model
 			}
 			result, err := c.doWithRetry(ctx, ep.URL, ep.Key, &epReq)
+			if c.endpointObserver != nil {
+				c.endpointObserver(ep, err)
+			}
 			if err == nil {
 				return result, nil
 			}

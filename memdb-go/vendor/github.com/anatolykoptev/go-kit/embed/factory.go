@@ -116,6 +116,9 @@ func newFromInternal(cfg *cfgInternal) (Embedder, error) {
 		if cfg.timeout > 0 {
 			opts = append(opts, WithHTTPTimeout(cfg.timeout))
 		}
+		if cfg.httpBearerToken != "" {
+			opts = append(opts, WithBearerToken(cfg.httpBearerToken))
+		}
 		return NewHTTPEmbedder(cfg.url, model, dim, cfg.logger, opts...), nil
 	default:
 		return nil, fmt.Errorf("embed: unknown backend %q (valid: http, ollama, voyage)", cfg.backend)

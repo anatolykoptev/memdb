@@ -211,6 +211,13 @@ func (b *promBridge) observeHistogram(name string, seconds float64) {
 	b.histogramVec(base, keys).WithLabelValues(vals...).Observe(seconds)
 }
 
+func (b *promBridge) bucketsFor(base string) []float64 {
+	if v, ok := b.histogramConfigs.Load(base); ok {
+		return v.(*histogramConfig).buckets //nolint:forcetypeassert // map holds only *histogramConfig
+	}
+	return defaultSecondsBuckets
+}
+
 func (b *promBridge) histogramNoLabels(base string) prometheus.Histogram {
 	if v, ok := b.histogramsNoLabel.Load(base); ok {
 		return v.(prometheus.Histogram) //nolint:forcetypeassert // map holds only prometheus.Histogram
@@ -218,7 +225,7 @@ func (b *promBridge) histogramNoLabels(base string) prometheus.Histogram {
 	h := prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: b.namespace, Name: base,
 		Help:    "auto-registered via go-kit/metrics bridge",
-		Buckets: prometheus.ExponentialBuckets(0.001, 2, 16),
+		Buckets: b.bucketsFor(base),
 	})
 	actual, loaded := b.histogramsNoLabel.LoadOrStore(base, h)
 	if !loaded {
@@ -239,7 +246,7 @@ func (b *promBridge) histogramVec(base string, keys []string) *prometheus.Histog
 	vec := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Namespace: b.namespace, Name: base,
 		Help:    "auto-registered via go-kit/metrics bridge",
-		Buckets: prometheus.ExponentialBuckets(0.001, 2, 16),
+		Buckets: b.bucketsFor(base),
 	}, keys)
 	actual, loaded := b.histogramsVec.LoadOrStore(base, vec)
 	if !loaded {

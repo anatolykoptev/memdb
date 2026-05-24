@@ -4,6 +4,7 @@ import (
 	"math/rand/v2"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Percentile constants used in snapshots.
@@ -153,4 +154,41 @@ func (r *Registry) HistogramSnapshot() map[string]HistogramSnapshot {
 		return true
 	})
 	return m
+}
+
+// ---------------------------------------------------------------------------
+// Observe / ObserveSeconds — histogram write helpers on Registry
+// ---------------------------------------------------------------------------
+
+// Observe records a raw float64 value into the named histogram.
+//
+// Routing:
+//   - Prometheus-backed registry (NewPrometheusRegistry): routes through the
+//     prom bridge — identical to StartTimer.Stop() but without the elapsed-time
+//     measurement. Skips the in-mem Reservoir to avoid a gauge+histogram fqName
+//     collision in prometheus.DefaultRegisterer.
+//   - In-memory registry (NewRegistry): feeds the Reservoir so
+//     HistogramSnapshot() reflects the value.
+//
+// name may be a plain name or a labeled name produced by Label().
+func (r *Registry) Observe(name string, v float64) {
+	if r == nil {
+		return
+	}
+	if r.promBridge != nil {
+		r.promBridge.observeHistogram(name, v)
+		return
+	}
+	r.Histogram(name).Update(v)
+}
+
+// ObserveSeconds records a time.Duration as seconds in the named histogram.
+// Equivalent to r.Observe(name, d.Seconds()) but communicates intent at the
+// call site — use this anywhere you measure latency.
+//
+//	start := time.Now()
+//	resp, err := llm.Complete(ctx, req)
+//	reg.ObserveSeconds(metrics.Label("llm_request_seconds", "outcome", classify(err)), time.Since(start))
+func (r *Registry) ObserveSeconds(name string, d time.Duration) {
+	r.Observe(name, d.Seconds())
 }
