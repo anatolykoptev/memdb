@@ -37,6 +37,15 @@ func NewClient(url string, opts ...Opt) (*Client, error) {
 // E1: finalises the CircuitBreaker wiring (model + observer hook) now that all
 // options have been applied.
 func newClientFromInternal(cfg *cfgInternal) (*Client, error) {
+	// Bearer token: env (EMBED_TOKEN) auto-resolution must happen BEFORE
+	// backend construction so HTTPEmbedder picks it up via the chained
+	// HTTPOption in factory.go newFromInternal. Empty env = no header.
+	if cfg.httpBearerToken == "" {
+		if tok := os.Getenv("EMBED_TOKEN"); tok != "" {
+			cfg.httpBearerToken = tok
+		}
+	}
+
 	inner, err := newFromInternal(cfg)
 	if err != nil {
 		return nil, err
@@ -51,7 +60,7 @@ func newClientFromInternal(cfg *cfgInternal) (*Client, error) {
 		cb = NewCircuitBreaker(cbCfg, model, makeCircuitHook(model, cfg.observer))
 	}
 
-	// E5: resolve chunkSize. Priority: explicit opt > env > default.
+// E5: resolve chunkSize. Priority: explicit opt > env > default.
 	chunkSz := cfg.chunkSize
 	if chunkSz <= 0 {
 		// Try environment override.

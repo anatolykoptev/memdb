@@ -22,16 +22,17 @@ const (
 
 // Client is an OpenAI-compatible LLM client with retry and fallback key support.
 type Client struct {
-	baseURL      string
-	apiKey       string
-	model        string
-	maxTokens    int
-	temperature  *float64 // nil = omit from request (some models reject it)
-	httpClient   *http.Client
-	fallbackKeys []string
-	maxRetries   int
-	endpoints    []Endpoint
-	middleware   []Middleware
+	baseURL          string
+	apiKey           string
+	model            string
+	maxTokens        int
+	temperature      *float64 // nil = omit from request (some models reject it)
+	httpClient       *http.Client
+	fallbackKeys     []string
+	maxRetries       int
+	endpoints        []Endpoint
+	middleware       []Middleware
+	endpointObserver EndpointAttemptObserver
 }
 
 // Option configures the Client.
@@ -76,6 +77,38 @@ type Endpoint struct {
 // in order on retryable errors. Overrides the base URL/key/model when set.
 func WithEndpoints(endpoints []Endpoint) Option {
 	return func(c *Client) { c.endpoints = endpoints }
+}
+
+// EndpointAttemptObserver — callback вызывается per-endpoint attempt:
+// один раз для успешного, один раз для каждого failed endpoint в chain.
+// nil err = success. Endpoint несёт Model — caller bumps per-model metric.
+//
+// Не вызывается для single-endpoint (без WithEndpoints) path — там нет
+// chain-level events наблюдать (key rotation остаётся internal к kit).
+//
+// Observer не должен блокировать (logged async или просто incr counter) —
+// fires внутри executeInner request path. Не должен panic'нуть —
+// если recovery нужен, оборачивай в defer recover() сам.
+type EndpointAttemptObserver func(ep Endpoint, err error)
+
+// WithEndpointAttemptObserver регистрирует observer на per-endpoint
+// chain attempts. Use case: per-model fail counter, per-model latency
+// observation, structured logging of which model in chain succeeded.
+//
+//	obs := func(ep llm.Endpoint, err error) {
+//	    label := ep.Model
+//	    if err != nil {
+//	        promChainFails.WithLabelValues(label).Inc()
+//	    } else {
+//	        promChainSuccess.WithLabelValues(label).Inc()
+//	    }
+//	}
+//	c := llm.NewClient(url, key, model,
+//	    llm.WithEndpoints(eps),
+//	    llm.WithEndpointAttemptObserver(obs),
+//	)
+func WithEndpointAttemptObserver(obs EndpointAttemptObserver) Option {
+	return func(c *Client) { c.endpointObserver = obs }
 }
 
 // Middleware wraps chat completion calls. Use for logging, metrics, caching.
@@ -150,6 +183,7 @@ func isCircuitTrippingError(err error) bool {
 }
 
 // NewClient creates a new LLM client.
+// For callers that want to gracefully disable LLM when apiKey is empty, see NewOptional.
 func NewClient(baseURL, apiKey, model string, opts ...Option) *Client {
 	// Temperature is intentionally nil — see ChatRequest.Temperature comment.
 	// Callers who want non-default sampling pass WithTemperature(t).

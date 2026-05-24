@@ -50,6 +50,9 @@ type cfgInternal struct {
 	// Voyage-specific
 	voyageAPIKey string
 
+	// HTTP-specific
+	httpBearerToken string
+
 	// Caller-supplied embedder (e.g. *onnx.Embedder from embed/onnx, or any
 	// custom implementation). When non-nil, takes precedence over backend
 	// factory dispatch — NewClient returns it directly. This allows ONNX

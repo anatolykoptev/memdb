@@ -7,10 +7,18 @@
 //	import "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 //	srv.Handler = otelhttp.NewHandler(mux, "service-name")
 //
-// This package adds a single feature on top: route-pattern extraction for
-// span names so Tempo/Jaeger UIs group traces by route, not by raw URL path
-// (which has unbounded cardinality with path params). Two extractors are
-// provided: stdlib (Go 1.22+ ServeMux .Pattern) and chi (RouteContext).
+// This package adds two features on top:
+//
+//  1. Route-pattern extraction for span names so Tempo/Jaeger UIs group
+//     traces by route, not by raw URL path (unbounded cardinality with
+//     path params). Two extractors are provided: stdlib (Go 1.22+ ServeMux
+//     .Pattern) and chi (RouteContext).
+//
+//  2. OTEL semantic-convention code.* attributes (code.namespace,
+//     code.function, code.filepath, code.lineno) on each request span,
+//     resolved from a startup-time registry populated via RegisterRoute.
+//     Registration captures handler metadata at startup via runtime
+//     reflection on named functions; closures silently store no attrs.
 //
 // If your service routes through a different framework (gorilla/mux, echo,
 // gin), pass your own extractor via WithSpanNameFormatter — see
@@ -23,23 +31,35 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Handler wraps next with otelhttp instrumentation, naming each span
 // "<method> <pattern>" using the stdlib net/http ServeMux pattern extractor.
 //
-// `service` becomes the otelhttp operation prefix; pass the service name.
+// "service" becomes the otelhttp operation prefix; pass the service name.
 // Falls back to "<method> unmatched" when r.Pattern is empty (no matching
 // route — pre-routing handlers, raw 404s, etc.).
 //
-// When next is a *http.ServeMux, Handler also emits OTEL semantic-convention
-// code.* attributes (code.namespace, code.function, code.filepath,
-// code.lineno) on each request span, resolved from the registered handler
-// via runtime reflection at first-request time. Anonymous closures are
-// silently skipped. Non-ServeMux handlers are wrapped without code.* attrs.
+// code.* attributes are emitted when the route was registered via
+// RegisterRoute before the server started. Unregistered routes are silently
+// served without code.* attrs.
 func Handler(service string, next http.Handler) http.Handler {
-	instrumented := muxCodeAttrsMiddleware(next)
-	return otelhttp.NewHandler(instrumented, service,
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		// r.Pattern is populated by stdlib ServeMux after ServeHTTP returns
+		// (Go 1.22+). Extract method from pattern if already prefixed.
+		pattern := r.Pattern
+		method := r.Method
+		if methodPrefix := method + " "; strings.HasPrefix(pattern, methodPrefix) {
+			pattern = pattern[len(methodPrefix):]
+		}
+		if attrs := LookupRoute(method, pattern); len(attrs) > 0 {
+			span := trace.SpanFromContext(r.Context())
+			span.SetAttributes(attrs...)
+		}
+	})
+	return otelhttp.NewHandler(inner, service,
 		otelhttp.WithSpanNameFormatter(stdlibFormatter),
 	)
 }
