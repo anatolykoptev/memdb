@@ -163,6 +163,7 @@ type chatConfig struct {
 	responseFormat    any
 	temperature       *float64
 	maxTokens         *int
+	model             string
 	timestampMessages bool
 }
 
@@ -182,6 +183,9 @@ func (cfg *chatConfig) apply(req *ChatRequest) {
 	}
 	if cfg.maxTokens != nil {
 		req.MaxTokens = *cfg.maxTokens
+	}
+	if cfg.model != "" {
+		req.Model = cfg.model
 	}
 	if cfg.timestampMessages {
 		applyMessageTimestamps(req.Messages)
@@ -206,6 +210,27 @@ func WithChatTemperature(t float64) ChatOption {
 // WithChatMaxTokens overrides the max tokens for a single call.
 func WithChatMaxTokens(n int) ChatOption {
 	return func(c *chatConfig) { c.maxTokens = &n }
+}
+
+// WithChatModel overrides the model id for a single call. Empty string —
+// no override (client's construction-time model wins).
+//
+// Use cases:
+//   - per-attempt timeout chain loop (go-search): single client, caller
+//     iterate'ит models с per-attempt ctx timeout, передаёт next model
+//     per attempt.
+//   - per-call model pool simplification (go-wowa): один client, передаёт
+//     workflow author's chosen model per call вместо cached per-model clients.
+//   - hedged dual-provider с shared endpoint (dozor): один client, hedge
+//     fast-vs-deep model picks без duplicate Provider abstraction.
+//
+// Interaction с WithEndpoints: per-call WithChatModel overrides Model в
+// request **до** endpoint cycling начинается. Каждый endpoint затем sees
+// этот overridden model в его epReq copy — но если Endpoint.Model != ""
+// сама перезаписывает (endpoint config wins back). Для bypass endpoint
+// cycling — use client без WithEndpoints + per-call model.
+func WithChatModel(model string) ChatOption {
+	return func(c *chatConfig) { c.model = model }
 }
 
 // WithMessageTimestamps prepends a bracketed UTC timestamp to each
@@ -237,6 +262,27 @@ func WithJSONSchema(name string, schema any) ChatOption {
 			},
 		}
 	}
+}
+
+// WithJSONMode sets the response format to plain JSON object mode
+// ({"type":"json_object"}). Use when the caller will json.Unmarshal the
+// content без strict schema enforcement (e.g. dynamic shape, or provider
+// что не поддерживает json_schema like older Gemini Flash).
+//
+// Difference vs WithJSONSchema: no schema validation server-side, no
+// guaranteed shape — model may emit valid JSON in any shape. Caller is
+// responsible для unmarshal + validation.
+func WithJSONMode() ChatOption {
+	return func(c *chatConfig) {
+		c.responseFormat = map[string]any{"type": "json_object"}
+	}
+}
+
+// WithResponseFormat sets the raw response format payload — escape hatch
+// для providers с custom shapes не covered by WithJSONMode / WithJSONSchema.
+// Pass nil to clear an earlier-applied responseFormat в the same chain.
+func WithResponseFormat(format any) ChatOption {
+	return func(c *chatConfig) { c.responseFormat = format }
 }
 
 // Chat sends a chat completion request and returns the full response

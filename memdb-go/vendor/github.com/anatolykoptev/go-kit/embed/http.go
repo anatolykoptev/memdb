@@ -24,11 +24,12 @@ const httpEmbedDefaultTimeout = 30 * time.Second
 // but compatible with any provider that speaks the OpenAI shape (Voyage,
 // Mixedbread, Together, vLLM-served encoders, etc.).
 type HTTPEmbedder struct {
-	baseURL string
-	model   string
-	dim     int
-	client  *http.Client
-	logger  *slog.Logger
+	baseURL     string
+	model       string
+	dim         int
+	client      *http.Client
+	logger      *slog.Logger
+	bearerToken string
 }
 
 // HTTPOption is a functional option for [NewHTTPEmbedder].
@@ -46,6 +47,15 @@ func WithHTTPTimeout(d time.Duration) HTTPOption {
 		if d > 0 {
 			h.client.Timeout = d
 		}
+	}
+}
+
+// WithBearerToken sets a static Authorization: Bearer <token> header on
+// every request. Empty token disables the header (no-op). Use this for
+// self-hosted embed-server protected by a reverse proxy bearer matcher.
+func WithBearerToken(token string) HTTPOption {
+	return func(h *HTTPEmbedder) {
+		h.bearerToken = token
 	}
 }
 
@@ -117,6 +127,9 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 			return nil, 0, fmt.Errorf("http embedder: create request: %w", reqErr)
 		}
 		req.Header.Set("Content-Type", "application/json")
+		if h.bearerToken != "" {
+			req.Header.Set("Authorization", "Bearer "+h.bearerToken)
+		}
 
 		resp, doErr := h.client.Do(req)
 		if doErr != nil {
