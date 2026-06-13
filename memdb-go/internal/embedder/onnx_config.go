@@ -12,6 +12,7 @@ type ONNXModelConfig struct {
 var knownONNXModels = map[string]ONNXModelConfig{
 	"multilingual-e5-large": {Dim: 1024, MaxLen: 512, PadID: 1},
 	"jina-code-v2":          {Dim: 768, MaxLen: 512, PadID: 0, HasTokenTypeID: true},
+	"code-rank-embed":       {Dim: 768, MaxLen: 512, PadID: 0, HasTokenTypeID: false},
 }
 
 // DefaultONNXConfig returns the e5-large config for backward compatibility.

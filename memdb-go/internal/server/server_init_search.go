@@ -50,7 +50,9 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Cl
 	h.SetEmbedder(e)
 
 	// Multi-model registry: HTTP embedder uses sidecar(s) for models;
-	// EmbedURLCode overrides jina URL when set (separate Python sidecar).
+	// EmbedURLCode overrides the default URL when set (separate sidecar).
+	// "code-rank-embed" and "code-rank-embed-query" share the same embedder
+	// instance; prefix asymmetry is handled by applyModelPrefix in the handler.
 	if cfg.EmbedderType == "http" && cfg.EmbedURL != "" {
 		registry := embedder.NewRegistry("multilingual-e5-large")
 		registry.Register("multilingual-e5-large", e)
@@ -59,10 +61,19 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Cl
 		if cfg.EmbedURLCode != "" {
 			codeURL = cfg.EmbedURLCode
 		}
-		codeEmb := embedder.NewHTTPEmbedder(codeURL, "jina-code-v2", 768, logger)
+		codeEmb := embedder.NewHTTPEmbedder(codeURL, "code-rank-embed", 768, logger)
+		registry.Register("code-rank-embed", codeEmb)
+		registry.Register("code-rank-embed-query", codeEmb) // same embedder, prefix handled by applyModelPrefix
+		// Backward-compat alias: route "jina-code-v2" requests to the code-rank-embed
+		// backend during the deprecation window. The jina ONNX sidecar was retired
+		// 2026-04-17; embed.krolik.tools now serves code-rank-embed vectors
+		// regardless of the requested model name. Callers (e.g. go-code MCP before
+		// its cutover PR deploys) continue to receive valid vectors instead of HTTP 400.
+		// Remove once the coordinated go-code cutover is confirmed deployed.
 		registry.Register("jina-code-v2", codeEmb)
+		logger.Warn("jina-code-v2 registered as deprecated alias for code-rank-embed; remove alias after go-code cutover is confirmed deployed")
 		logger.Info("code embedder loaded (http)",
-			slog.String("model", "jina-code-v2"),
+			slog.String("model", "code-rank-embed"),
 			slog.String("url", codeURL),
 			slog.Int("dim", 768),
 		)
@@ -71,7 +82,7 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Cl
 		registry := embedder.NewRegistry("multilingual-e5-large")
 		registry.Register("multilingual-e5-large", e)
 
-		codeCfg, ok := embedder.KnownONNXModels()["jina-code-v2"]
+		codeCfg, ok := embedder.KnownONNXModels()["code-rank-embed"]
 		if !ok {
 			codeCfg = embedder.ONNXModelConfig{Dim: 768, MaxLen: 512, PadID: 0}
 		}
@@ -79,9 +90,16 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Cl
 		if codeErr != nil {
 			logger.Warn("code embedder init failed", slog.Any("error", codeErr))
 		} else {
+			registry.Register("code-rank-embed", codeEmb)
+			registry.Register("code-rank-embed-query", codeEmb) // same embedder, prefix handled by applyModelPrefix
+			// Backward-compat alias for the ONNX path (mirrors the HTTP path above).
+			// code-rank-embed HasTokenTypeID=false: inputs are {input_ids, attention_mask}
+			// only — correct for this model (no token_type_ids, unlike jina-code-v2 which
+			// was BERT-family). Remove once go-code cutover is confirmed deployed.
 			registry.Register("jina-code-v2", codeEmb)
+			logger.Warn("jina-code-v2 registered as deprecated alias for code-rank-embed; remove alias after go-code cutover is confirmed deployed")
 			logger.Info("code embedder loaded",
-				slog.String("model", "jina-code-v2"),
+				slog.String("model", "code-rank-embed"),
 				slog.Int("dim", codeCfg.Dim),
 			)
 		}
