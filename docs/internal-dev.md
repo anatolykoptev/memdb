@@ -8,7 +8,7 @@ Pure-Go stack, all in Docker (Python container removed 2026-04-26, Phase 5 ✅):
 |-----------|------|------|
 | `memdb-go` | Go API gateway: auth, ONNX embedder, search, REST API | 8080 |
 | `memdb-mcp` | Go MCP server (stdio + streamable-http) | 8001 |
-| `embed-server` | Rust ONNX embed sidecar (multilingual-e5-large + jina-code-v2) | 8082 |
+| `embed-server` | Rust ONNX embed sidecar (multilingual-e5-large + code-rank-embed) | 8082 |
 
 Supporting: `postgres+AGE` (5432), `qdrant` (6333), `redis` (6379), `cliproxyapi` (8317), `go-search` (8890). _RabbitMQ removed in Phase 3.3 — Redis Streams used for scheduler queue._
 
@@ -106,7 +106,7 @@ from onnxruntime.transformers.optimizer import optimize_model
 m = optimize_model('model_quantized.onnx', model_type='bert', num_heads=NUM_HEADS, hidden_size=HIDDEN_SIZE)
 m.save_model_to_file('model_optimized.onnx')
 "
-# num_heads/hidden_size: e5-large=16/1024, jina-code-v2=12/768, e5-small=12/384
+# num_heads/hidden_size: e5-large=16/1024, code-rank-embed=12/768, e5-small=12/384
 ```
 
 Without optimization, inference takes ~47s/request instead of ~0.15s on ARM (no AVX).

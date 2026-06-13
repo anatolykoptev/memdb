@@ -501,6 +501,107 @@ func TestOpenAIEmbeddings_Registry_SelectsCorrectModel(t *testing.T) {
 	}
 }
 
+func TestOpenAIEmbeddings_Registry_CodeModel(t *testing.T) {
+	// code-rank-embed (doc path) — raw, no prefix.
+	var capturedTexts []string
+	codeEmb := &mockEmbedder{
+		dim: 768,
+		embedFn: func(_ context.Context, texts []string) ([][]float32, error) {
+			capturedTexts = texts
+			for _, text := range texts {
+				if strings.HasPrefix(text, "passage: ") || strings.HasPrefix(text, "Represent") {
+					t.Errorf("code-rank-embed doc path received unexpected prefix: %q", text)
+				}
+			}
+			result := make([][]float32, len(texts))
+			for i := range texts {
+				result[i] = []float32{0.0, 1.0}
+			}
+			return result, nil
+		},
+	}
+
+	reg := embedder.NewRegistry("multilingual-e5-large")
+	reg.Register("multilingual-e5-large", &mockEmbedder{
+		dim:     1024,
+		embedFn: func(_ context.Context, texts []string) ([][]float32, error) { return [][]float32{{1.0}}, nil },
+	})
+	reg.Register("code-rank-embed", codeEmb)
+
+	h := &Handler{logger: discardLogger(), embedRegistry: reg}
+
+	body := `{"input": "func main()", "model": "code-rank-embed"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.OpenAIEmbeddings(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp openaiEmbeddingResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Model != "code-rank-embed" {
+		t.Errorf("model=%q, want code-rank-embed", resp.Model)
+	}
+	if len(capturedTexts) != 1 || capturedTexts[0] != "func main()" {
+		t.Errorf("expected raw text, got %v", capturedTexts)
+	}
+}
+
+func TestOpenAIEmbeddings_Registry_CodeRankEmbedQuery(t *testing.T) {
+	// code-rank-embed-query (search path) — must receive task instruction prefix.
+	const wantPrefix = "Represent this query for searching relevant code: "
+	var capturedTexts []string
+	codeEmb := &mockEmbedder{
+		dim: 768,
+		embedFn: func(_ context.Context, texts []string) ([][]float32, error) {
+			capturedTexts = texts
+			for _, text := range texts {
+				if !strings.HasPrefix(text, wantPrefix) {
+					t.Errorf("code-rank-embed-query received text without task prefix: %q", text)
+				}
+			}
+			result := make([][]float32, len(texts))
+			for i := range texts {
+				result[i] = []float32{0.0, 1.0}
+			}
+			return result, nil
+		},
+	}
+
+	reg := embedder.NewRegistry("multilingual-e5-large")
+	reg.Register("multilingual-e5-large", &mockEmbedder{
+		dim:     1024,
+		embedFn: func(_ context.Context, texts []string) ([][]float32, error) { return [][]float32{{1.0}}, nil },
+	})
+	reg.Register("code-rank-embed", codeEmb)
+	reg.Register("code-rank-embed-query", codeEmb)
+
+	h := &Handler{logger: discardLogger(), embedRegistry: reg}
+
+	body := `{"input": "find auth functions", "model": "code-rank-embed-query"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.OpenAIEmbeddings(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d; body: %s", w.Code, w.Body.String())
+	}
+	var resp openaiEmbeddingResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Model != "code-rank-embed-query" {
+		t.Errorf("model=%q, want code-rank-embed-query", resp.Model)
+	}
+	want := wantPrefix + "find auth functions"
+	if len(capturedTexts) != 1 || capturedTexts[0] != want {
+		t.Errorf("expected prefixed text %q, got %v", want, capturedTexts)
+	}
+}
+
 func TestOpenAIEmbeddings_Registry_UnknownModel(t *testing.T) {
 	reg := embedder.NewRegistry("multilingual-e5-large")
 	reg.Register("multilingual-e5-large", &mockEmbedder{
@@ -581,6 +682,24 @@ func TestApplyModelPrefix_CodeModel(t *testing.T) {
 	result := applyModelPrefix([]string{"func main()"}, "jina-code-v2")
 	if result[0] != "func main()" {
 		t.Errorf("got %q, want raw text", result[0])
+	}
+}
+
+func TestApplyModelPrefix_CodeRankEmbed_Doc(t *testing.T) {
+	// code-rank-embed (no suffix) = doc ingest path → raw, no prefix.
+	result := applyModelPrefix([]string{"func foo()"}, "code-rank-embed")
+	if result[0] != "func foo()" {
+		t.Errorf("got %q, want raw text (no prefix for doc embedding)", result[0])
+	}
+}
+
+func TestApplyModelPrefix_CodeRankEmbed_Query(t *testing.T) {
+	// code-rank-embed-query = search query path → must prepend task instruction.
+	const wantPrefix = "Represent this query for searching relevant code: "
+	result := applyModelPrefix([]string{"find auth functions"}, "code-rank-embed-query")
+	want := wantPrefix + "find auth functions"
+	if result[0] != want {
+		t.Errorf("got %q, want %q", result[0], want)
 	}
 }
 
