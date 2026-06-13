@@ -47,9 +47,12 @@ type openaiErrorDetail struct {
 }
 
 // modelPrefixes defines per-model text prefixes.
-// e5 models need "passage: " prefix; other models get raw text.
+// e5 models need "passage: " prefix; code-rank-embed-query requires a task
+// instruction prefix; other models (including code-rank-embed for doc ingest)
+// get raw text.
 var modelPrefixes = map[string]string{
 	"multilingual-e5-large": "passage: ",
+	"code-rank-embed-query": "Represent this query for searching relevant code: ",
 }
 
 // OpenAIEmbeddings handles POST /v1/embeddings with OpenAI-compatible request/response format.

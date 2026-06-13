@@ -39,7 +39,7 @@ Clients (Claude Code plugin, vaelor, oxpulse, API consumers)
 | Postgres | | Redis | | embed-server    | | LLM gateway    |
 | 17 +     | | 7     | | (Rust, BoringSSL)| | (CLIProxyAPI   |
 | pgvector | | (cache,| | multilingual-e5  | |  :8317, OpenAI |
-| + AGE +  | |  XADD,| | + jina-code-v2,  | |  Anthropic     |
+| + AGE +  | |  XADD,| | + code-rank-embed,| |  Anthropic     |
 | tsvector | |  WM    | | tokio batcher)   | |  Gemini, …)    |
 +----------+ +-------+ +-----------------+ +----------------+
 ```
@@ -49,7 +49,7 @@ Clients (Claude Code plugin, vaelor, oxpulse, API consumers)
 | Layer | What | Where |
 |---|---|---|
 | HTTP gateway | All ingest/search/chat/admin routes; OpenAPI spec; auth (Bearer + X-Service-Secret); MCP | `memdb-go/internal/handlers` |
-| Embed sidecar | Rust HTTP service, multi-model (`multilingual-e5-large` 1024-dim + `jina-code-v2`); tokio batcher; Prometheus | `embed-server/` (separate repo) |
+| Embed sidecar | Rust HTTP service, multi-model (`multilingual-e5-large` 1024-dim + `code-rank-embed` 768-dim); tokio batcher; Prometheus | `embed-server/` (separate repo) |
 | LLM | All callers go through CLIProxyAPI on `:8317` (Gemini Flash/Pro, Claude Sonnet, OpenAI) — single env (`LLM_API_BASE`) | external |
 | DB | PostgreSQL 17 + Apache AGE (Cypher) + pgvector (cosine) + tsvector full-text + GIN indexes | `memos_graph` schema |
 | Cache | Redis: ingest stream (XADD), Working Memory hot cache (VSET), query rewrite cache, scheduler queue | external |
@@ -186,7 +186,7 @@ Numbers depend heavily on cube size, query complexity, and whether the adaptive 
 | Server | Go 1.26, single binary, multi-stage Docker (debian:trixie-slim runtime) | static linking, low startup, no Python runtime dependencies |
 | API | HTTP REST + MCP (Model Context Protocol) on `:8001` | first-class MCP server for AI-tool integration |
 | DB | Postgres 17 + Apache AGE (Cypher) + pgvector + tsvector | one DB does graph + vector + fulltext — no Neo4j / Qdrant split |
-| Embedder | ONNX `multilingual-e5-large` (1024-dim) + `jina-code-v2`, served by Rust `embed-server` sidecar with BoringSSL | multilingual + code-specific embeddings, tokio batcher |
+| Embedder | ONNX `multilingual-e5-large` (1024-dim) + `code-rank-embed` (768-dim), served by Rust `embed-server` sidecar with BoringSSL | multilingual + code-specific embeddings, tokio batcher |
 | LLM | CLIProxyAPI on `:8317` (Gemini 2.5 Flash/Pro, Claude Sonnet 4.6, OpenAI fallback) | single env (`LLM_API_BASE`) for every caller |
 | Cache | Redis 7 (XADD streams for ingest queue, VSET for WM hot cache, key-value for query rewrite cache, sorted-set for scheduler) | one server, four use-cases |
 | Auth | Bearer `Authorization` header + `X-Service-Secret` (internal callers) | dual-auth — public clients use Bearer, sidecars use service secret |

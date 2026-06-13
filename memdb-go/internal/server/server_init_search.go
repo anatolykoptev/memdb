@@ -50,7 +50,9 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Cl
 	h.SetEmbedder(e)
 
 	// Multi-model registry: HTTP embedder uses sidecar(s) for models;
-	// EmbedURLCode overrides jina URL when set (separate Python sidecar).
+	// EmbedURLCode overrides the default URL when set (separate sidecar).
+	// "code-rank-embed" and "code-rank-embed-query" share the same embedder
+	// instance; prefix asymmetry is handled by applyModelPrefix in the handler.
 	if cfg.EmbedderType == "http" && cfg.EmbedURL != "" {
 		registry := embedder.NewRegistry("multilingual-e5-large")
 		registry.Register("multilingual-e5-large", e)
@@ -59,10 +61,11 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Cl
 		if cfg.EmbedURLCode != "" {
 			codeURL = cfg.EmbedURLCode
 		}
-		codeEmb := embedder.NewHTTPEmbedder(codeURL, "jina-code-v2", 768, logger)
-		registry.Register("jina-code-v2", codeEmb)
+		codeEmb := embedder.NewHTTPEmbedder(codeURL, "code-rank-embed", 768, logger)
+		registry.Register("code-rank-embed", codeEmb)
+		registry.Register("code-rank-embed-query", codeEmb) // same embedder, prefix handled by applyModelPrefix
 		logger.Info("code embedder loaded (http)",
-			slog.String("model", "jina-code-v2"),
+			slog.String("model", "code-rank-embed"),
 			slog.String("url", codeURL),
 			slog.Int("dim", 768),
 		)
@@ -71,7 +74,7 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Cl
 		registry := embedder.NewRegistry("multilingual-e5-large")
 		registry.Register("multilingual-e5-large", e)
 
-		codeCfg, ok := embedder.KnownONNXModels()["jina-code-v2"]
+		codeCfg, ok := embedder.KnownONNXModels()["code-rank-embed"]
 		if !ok {
 			codeCfg = embedder.ONNXModelConfig{Dim: 768, MaxLen: 512, PadID: 0}
 		}
@@ -79,9 +82,10 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Cl
 		if codeErr != nil {
 			logger.Warn("code embedder init failed", slog.Any("error", codeErr))
 		} else {
-			registry.Register("jina-code-v2", codeEmb)
+			registry.Register("code-rank-embed", codeEmb)
+			registry.Register("code-rank-embed-query", codeEmb) // same embedder, prefix handled by applyModelPrefix
 			logger.Info("code embedder loaded",
-				slog.String("model", "jina-code-v2"),
+				slog.String("model", "code-rank-embed"),
 				slog.Int("dim", codeCfg.Dim),
 			)
 		}
