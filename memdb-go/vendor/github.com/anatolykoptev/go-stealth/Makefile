@@ -1,0 +1,19 @@
+.PHONY: build test lint preflight clean
+
+build:
+	GOWORK=off go build ./...
+
+test:
+	GOWORK=off go test -race -count=1 ./...
+
+lint:
+	GOWORK=off golangci-lint run ./...
+
+preflight:
+	@out=$$(GOWORK=off gofmt -l -s .); if [ -n "$$out" ]; then echo "$$out"; echo "gofmt failed"; exit 1; fi
+	GOWORK=off go vet ./...
+	GOWORK=off go build ./...
+	GOWORK=off go test -race -count=1 ./...
+
+clean:
+	go clean -cache -testcache

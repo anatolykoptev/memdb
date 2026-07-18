@@ -29,6 +29,7 @@ type Store interface {
 type memoryStore struct {
 	mu    sync.Mutex
 	state map[string]*storeEntry
+	clock func() time.Time
 }
 
 type storeEntry struct {
@@ -37,9 +38,20 @@ type storeEntry struct {
 	blockedUtil time.Time
 }
 
-// NewMemoryStore creates an in-memory rate limit store.
+// NewMemoryStore creates an in-memory rate limit store backed by the wall clock.
 func NewMemoryStore() Store {
-	return &memoryStore{state: make(map[string]*storeEntry)}
+	return newMemoryStore(time.Now)
+}
+
+// newMemoryStore creates an in-memory store with an injectable clock. The
+// Limiter wires its resolved clock here so window arithmetic in the store and
+// the blocked-until checks in the Limiter share one time source (deterministic
+// under a fake clock in tests).
+func newMemoryStore(clock func() time.Time) *memoryStore {
+	if clock == nil {
+		clock = time.Now
+	}
+	return &memoryStore{state: make(map[string]*storeEntry), clock: clock}
 }
 
 func (m *memoryStore) Increment(key string, window time.Duration) (int, time.Time) {
@@ -47,7 +59,7 @@ func (m *memoryStore) Increment(key string, window time.Duration) (int, time.Tim
 	defer m.mu.Unlock()
 
 	e := m.getOrCreate(key)
-	now := time.Now()
+	now := m.clock()
 
 	if now.Sub(e.windowStart) > window {
 		e.count = 0
@@ -66,7 +78,7 @@ func (m *memoryStore) Count(key string, window time.Duration) (int, time.Time) {
 	if !ok {
 		return 0, time.Time{}
 	}
-	now := time.Now()
+	now := m.clock()
 	if now.Sub(e.windowStart) > window {
 		return 0, time.Time{}
 	}
@@ -93,7 +105,7 @@ func (m *memoryStore) GetBlocked(key string) time.Time {
 func (m *memoryStore) getOrCreate(key string) *storeEntry {
 	e, ok := m.state[key]
 	if !ok {
-		e = &storeEntry{windowStart: time.Now()}
+		e = &storeEntry{windowStart: m.clock()}
 		m.state[key] = e
 	}
 	return e

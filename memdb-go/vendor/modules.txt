@@ -36,9 +36,10 @@ github.com/anatolykoptev/go-kit/tracing/httpmw
 github.com/anatolykoptev/go-kit/tracing/pgxotel
 github.com/anatolykoptev/go-kit/tracing/slogh
 github.com/anatolykoptev/go-kit/uploads
-# github.com/anatolykoptev/go-stealth v1.3.1
+# github.com/anatolykoptev/go-stealth v1.19.1
 ## explicit; go 1.26
 github.com/anatolykoptev/go-stealth
+github.com/anatolykoptev/go-stealth/internal/uri
 github.com/anatolykoptev/go-stealth/proxypool
 github.com/anatolykoptev/go-stealth/ratelimit
 # github.com/anatolykoptev/skillkit v0.2.2
@@ -174,7 +175,7 @@ github.com/jackc/pgx/v5/pgxpool
 ## explicit; go 1.19
 github.com/jackc/puddle/v2
 github.com/jackc/puddle/v2/internal/genstack
-# github.com/klauspost/compress v1.18.2
+# github.com/klauspost/compress v1.18.4
 ## explicit; go 1.23
 github.com/klauspost/compress
 github.com/klauspost/compress/fse
