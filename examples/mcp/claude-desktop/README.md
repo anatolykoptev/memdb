@@ -81,7 +81,7 @@ will see an empty result — that's correct.
 
 **Tools appear but return errors**
 - Check `SERVICE_SECRET` matches the value in your `.env`
-- View MCP server logs: `docker logs deploy-config-memdb-mcp-1 -f`
+- View MCP server logs: `docker logs server-config-memdb-mcp-1 -f`
 
 ## Alternative: direct stdio mode (no proxy)
 

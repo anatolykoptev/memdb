@@ -2,7 +2,7 @@
 # test-migrations-fresh-db.sh — prove RunMigrations bootstraps a blank Postgres+AGE+pgvector.
 #
 # Usage:   bash scripts/test-migrations-fresh-db.sh
-# Requires: krolik-postgres-age:17 image built locally (prod image).
+# Requires: memdb-postgres-age:17 image built locally (prod image).
 #           Set MEMDB_TEST_PORT to override the mapped port (default 55432).
 #           Set MEMDB_TEST_KEEP=1 to keep the container on failure for debugging.
 
@@ -10,7 +10,7 @@ set -euo pipefail
 
 PORT="${MEMDB_TEST_PORT:-55432}"
 CONTAINER="memdb-migration-test-pg"
-IMAGE="krolik-postgres-age:17"
+IMAGE="memdb-postgres-age:17"
 DSN="postgres://memos:test@localhost:${PORT}/memos?sslmode=disable"
 
 cleanup() {

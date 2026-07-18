@@ -162,7 +162,7 @@ Both ingest and search use `ThreadPoolExecutor(max_workers=10)`. Their server ha
 ### 🥈 #2 — `[mention DATE]` tags + temporal-strict prompt
 **Effort**: M
 
-**What**: 
+**What**:
 1. Modify our `add_fine.go` LLM extraction prompt to require `[mention <ISO_DATE>]` tag whenever a fact references time
 2. Add prompt instruction: "use specific ISO dates, never relative dates like 'today'"
 3. Verify retrieved memories carry through to chat prompt
@@ -212,7 +212,7 @@ Both ingest and search use `ThreadPoolExecutor(max_workers=10)`. Their server ha
 
 **Long-term**: D2 multi-hop remains our differentiator. Memobase can't catch us on cat-2 because they don't have graph traversal. Our M8 S3+S10 work in this area is the right bet for a category Memobase explicitly LOST on.
 
-**Strategic positioning**: 
+**Strategic positioning**:
 - We compete with Memobase on **temporal + open-domain** (port their tricks)
 - We BEAT Memobase on **multi-hop reasoning** (our graph layer)
 - We win on **production characteristics** (latency, multi-tenancy, observability)

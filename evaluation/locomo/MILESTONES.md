@@ -1010,7 +1010,7 @@ Final F1 = **0.284** (chat-50 stratified, conv-26, 50 QAs). +**80% relative** vs
 
 **6 PRs merged** (MemDB main): #277 SPLADE hybrid · #278 CE no-retry/FTS/floor · #279 brevity prompt · #280 milestones · #281 atomic demote · #282 eval telemetry. **embed-server PR #21** open (Phase H.1-H.4+H.7).
 
-**Validated architectural findings** (full list in `~/.claude/projects/-home-krolik/memory/project_karpathy_rerank_optimization_2026-05-01.md`):
+**Validated architectural findings** (full list in `~/.claude/projects/-home-user/memory/project_karpathy_rerank_optimization_2026-05-01.md`):
 - `rerank.WithRetry(NoRetry)` from go-search prior art killed 84% degraded fallback → 1%
 - Cross-encoder pairs are independent → batched coalesce does NOT amortize linearly. pool=1+INTRA=4+WAIT=100 measured WORSE → reverted
 - ModernBERT INT8 NOT viable on ARM (90 DynamicQuantizeLinear ops + RMSNorm chains; q4f16 fails on com.microsoft.Gelu fp16 CPU EP)
