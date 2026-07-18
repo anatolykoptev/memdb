@@ -64,6 +64,81 @@ jobs:
           version: latest
           working-directory: memdb-go
 
+  livepg:
+    name: Live Postgres Integration (livepg)
+    runs-on: ubuntu-24.04-arm
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: memos
+          POSTGRES_PASSWORD: memos
+          POSTGRES_DB: memos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U memos -d memos"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      GOWORK: "off"
+      CGO_ENABLED: "0"
+      MEMDB_LIVE_PG_DSN: postgres://memos:memos@127.0.0.1:5432/memos?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: memdb-go/go.mod
+          cache: true
+          cache-dependency-path: memdb-go/go.sum
+
+      - name: Download modules
+        working-directory: memdb-go
+        run: go mod download
+
+      - name: Install AGE extension
+        run: |
+          # Add PGDG repo for postgresql-client-17 + server-dev-17 (not in
+          # ubuntu-24.04-arm default repos). AGE has no official apt package
+          # for PG17/ARM, so we build from source.
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -sSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17 build-essential postgresql-server-dev-17 flex bison
+
+          # Build AGE from source (PG17/1.6.0, ARM-compatible).
+          cd /tmp && git clone --depth 1 --branch release/PG17/1.6.0 https://github.com/apache/age.git
+          cd age && make PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config
+          sudo make PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config install
+
+          # Copy AGE extension files into the Postgres service container
+          # (make install puts them on the host, but Postgres runs in Docker).
+          PG_CID=$(docker ps -q -f name=postgres)
+          docker cp /usr/lib/postgresql/17/lib/age.so "$PG_CID:/usr/lib/postgresql/17/lib/"
+          docker cp /usr/share/postgresql/17/extension/age.control "$PG_CID:/usr/share/postgresql/17/extension/"
+          docker cp /usr/share/postgresql/17/extension/age--1.6.0.sql "$PG_CID:/usr/share/postgresql/17/extension/"
+
+          # Install extensions into the service-container DB.
+          psql "$MEMDB_LIVE_PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS age;"
+          psql "$MEMDB_LIVE_PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          psql "$MEMDB_LIVE_PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+
+      - name: Test (livepg)
+        working-directory: memdb-go
+        run: |
+          # db.NewPostgres calls RunMigrations internally, so each test
+          # that connects via MEMDB_LIVE_PG_DSN auto-applies migrations.
+          # The extensions (age, vector, pg_trgm) must be installed first.
+          go test -tags=livepg -count=1 -v ./internal/handlers/... ./internal/scheduler/... ./internal/search/... ./internal/db/...
+
   gitleaks:
     name: Secret Scan
     runs-on: ubuntu-latest
