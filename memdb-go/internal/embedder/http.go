@@ -196,9 +196,30 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 	return vecs, nil
 }
 
+// queryPrefixes defines per-model query-side prefixes.
+// e5 models need "query: " prefix on the search side (vs "passage: " on ingest).
+// Mirrors handlers.modelPrefixes but for the query path.
+var queryPrefixes = map[string]string{
+	"multilingual-e5-large": "query: ",
+}
+
+// applyQueryPrefix adds the model-specific query prefix if the model requires one.
+func applyQueryPrefix(text, model string) string {
+	prefix, ok := queryPrefixes[model]
+	if !ok && strings.Contains(model, "e5") {
+		prefix = "query: "
+	}
+	if prefix == "" {
+		return text
+	}
+	return prefix + text
+}
+
 // EmbedQuery embeds a single query string by delegating to Embed.
+// Applies the model-specific query prefix (e.g. "query: " for e5 models)
+// to maintain prefix symmetry with the ingest path's "passage: " prefix.
 func (h *HTTPEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
-	return EmbedQueryViaEmbed(ctx, h, text)
+	return EmbedQueryViaEmbed(ctx, h, applyQueryPrefix(text, h.model))
 }
 
 // Dimension returns the configured embedding dimension.

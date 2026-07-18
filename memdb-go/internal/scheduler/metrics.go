@@ -34,6 +34,9 @@ type schedMetricsStruct struct {
 	// PPRDurationMs records wall-clock latency of ComputePersonalizedPR end-to-end
 	// (cache lookup → optional recompute → cache store). Label: outcome.
 	PPRDurationMs metric.Float64Histogram
+	// ReorgErrors counts non-fatal errors swallowed during reorganizer work.
+	// Labels: operation, severity (nonfatal|retryable|fatal).
+	ReorgErrors metric.Int64Counter
 }
 
 // labelPageRankOutcome returns an OTel attribute option for pagerank outcome labels.
@@ -95,6 +98,9 @@ func schedMx() *schedMetricsStruct {
 			metric.WithUnit("ms"),
 			metric.WithExplicitBucketBoundaries(1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500),
 		)
+		reorgErrs, _ := meter.Int64Counter("memdb.scheduler.reorg_errors_total",
+			metric.WithDescription("Non-fatal errors swallowed during reorganizer work (operation, severity)"),
+		)
 		schedMetricsInstruments = &schedMetricsStruct{
 			Messages:               msgs,
 			Duration:               dur,
@@ -109,6 +115,7 @@ func schedMx() *schedMetricsStruct {
 			PPRCacheTotal:          pprCacheTotal,
 			PPRIterCount:           pprIterCount,
 			PPRDurationMs:          pprDuration,
+			ReorgErrors:            reorgErrs,
 		}
 		// Pre-register TreeReorg at zero so Prometheus scrapers see the
 		// series immediately (matches db/metrics.go pattern).

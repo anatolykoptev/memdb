@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
@@ -88,10 +90,19 @@ func (r *Reorganizer) ExtractAndStorePreferences(ctx context.Context, userID, cu
 			"delete_time":      "",
 			"delete_record_id": "",
 		}
-		if observationDate != "" {
+		if validObservationDate(observationDate) {
 			props["observation_date"] = observationDate
 		}
-		propsJSON, _ := json.Marshal(props)
+		propsJSON, err := json.Marshal(props)
+		if err != nil {
+			log.WarnContext(ctx, "pref_add: marshal props failed, skipping node",
+				slog.String("id", id), slog.Any("error", err))
+			schedMx().ReorgErrors.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("operation", "pref_marshal"),
+				attribute.String("severity", "nonfatal"),
+			))
+			continue
+		}
 		nodes = append(nodes, db.MemoryInsertNode{
 			ID:             id,
 			PropertiesJSON: propsJSON,
