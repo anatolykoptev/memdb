@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 )
 
 const redisPingTimeout = 3 * time.Second
@@ -28,8 +31,8 @@ func NewRedis(ctx context.Context, redisURL string, logger *slog.Logger) (*Redis
 	if err != nil {
 		return nil, fmt.Errorf("invalid redis URL: %w", err)
 	}
-	opts.PoolSize = 10
-	opts.MinIdleConns = 2
+	opts.PoolSize = envIntOrDefault("MEMDB_REDIS_POOL_SIZE", 10, 2, 100)
+	opts.MinIdleConns = envIntOrDefault("MEMDB_REDIS_MIN_IDLE", 2, 0, 50)
 	// UnstableResp3 is required for Redis 8 VSET commands (VADD, VSIM, etc.)
 	// go-redis v9 marks VSET API as experimental and requires this flag.
 	opts.UnstableResp3 = true
@@ -65,6 +68,38 @@ func (r *Redis) Ping(ctx context.Context) error {
 // Close closes the Redis connection.
 func (r *Redis) Close() error {
 	return r.client.Close()
+}
+
+// redisPoolMetrics records Redis connection pool stats as Prometheus gauges.
+var (
+	redisPoolOnce   sync.Once
+	poolTotalConns  metric.Int64ObservableGauge
+	poolIdleConns   metric.Int64ObservableGauge
+	poolStaleConns  metric.Int64ObservableGauge
+)
+
+// RegisterRedisPoolMetrics wires go-redis PoolStats to Prometheus gauges.
+// Call once at startup after the Redis client is created.
+func RegisterRedisPoolMetrics(r *Redis) {
+	redisPoolOnce.Do(func() {
+		meter := otel.Meter("memdb-go/redis")
+		poolTotalConns, _ = meter.Int64ObservableGauge("memdb.redis.pool_total_conns",
+			metric.WithDescription("Total connections in the Redis pool (active+idle)"),
+		)
+		poolIdleConns, _ = meter.Int64ObservableGauge("memdb.redis.pool_idle_conns",
+			metric.WithDescription("Idle connections in the Redis pool"),
+		)
+		poolStaleConns, _ = meter.Int64ObservableGauge("memdb.redis.pool_stale_conns",
+			metric.WithDescription("Stale connections removed from the Redis pool"),
+		)
+		meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+			stats := r.client.PoolStats()
+			o.ObserveInt64(poolTotalConns, int64(stats.TotalConns))
+			o.ObserveInt64(poolIdleConns, int64(stats.IdleConns))
+			o.ObserveInt64(poolStaleConns, int64(stats.StaleConns))
+			return nil
+		}, poolTotalConns, poolIdleConns, poolStaleConns)
+	})
 }
 
 // Get retrieves a string value by key. Returns error if key is missing (redis.Nil).

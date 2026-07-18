@@ -41,26 +41,16 @@ func (r *Reorganizer) promoteCluster(ctx context.Context, cubeID string, cluster
 
 	childIDs := make([]string, 0, len(cluster))
 	for _, n := range cluster {
-		if err := r.postgres.CreateMemoryEdge(ctx, n.ID, res.ParentID, "CONSOLIDATED_INTO", now, ""); err != nil {
-			r.logger.WarnContext(ctx, "tree reorg: edge write failed",
-				slog.String("from", n.ID), slog.String("to", res.ParentID),
+		if err := r.postgres.PromoteClusterChild(ctx, n.ID, res.ParentID, "CONSOLIDATED_INTO", childHierarchyLevelFor(targetLevel), now); err != nil {
+			r.logger.WarnContext(ctx, "tree reorg: promote cluster child failed (edge+hierarchy tx)",
+				slog.String("child", n.ID), slog.String("parent", res.ParentID),
 				slog.String("tier", targetLevel),
 				slog.Any("error", err))
 			schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("tier", targetLevel),
-				attribute.String("outcome", "edge_write_error"),
+				attribute.String("outcome", "promote_child_error"),
 			))
 			continue
-		}
-		if err := r.postgres.SetHierarchyLevel(ctx, n.ID, childHierarchyLevelFor(targetLevel), res.ParentID, now); err != nil {
-			r.logger.WarnContext(ctx, "tree reorg: set child hierarchy failed",
-				slog.String("id", n.ID),
-				slog.String("tier", targetLevel),
-				slog.Any("error", err))
-			schedMx().TreeReorg.Add(ctx, 1, metric.WithAttributes(
-				attribute.String("tier", targetLevel),
-				attribute.String("outcome", "hierarchy_write_error"),
-			))
 		}
 		childIDs = append(childIDs, n.ID)
 	}

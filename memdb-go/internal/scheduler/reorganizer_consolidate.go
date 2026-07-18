@@ -14,6 +14,9 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
@@ -42,6 +45,12 @@ const (
 	// (same fact stated differently), so we keep the longest text and skip LLM.
 	// Set to 1.1 to disable auto-merge entirely.
 	autoMergeThreshold = 0.97
+
+	// reorgLLMBudget caps the total wall-clock time spent on LLM consolidation
+	// calls in a single Run/RunTargeted cycle. When the budget is exhausted,
+	// remaining clusters are deferred to the next cycle. Prevents unbounded
+	// sequential LLM calls on cubes with many clusters.
+	reorgLLMBudget = 120 * time.Second
 )
 
 // findNearDuplicates routes to the HNSW or legacy query based on the feature flag.
@@ -82,11 +91,24 @@ func (r *Reorganizer) Run(ctx context.Context, cubeID string) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	merged, skipped := 0, 0
+	deadline := time.Now().Add(reorgLLMBudget)
 
 	for _, cluster := range clusters {
 		for _, sub := range splitLargeCluster(cluster, maxClusterSize) {
 			if len(sub) < 2 {
 				continue
+			}
+			if time.Now().After(deadline) {
+				log.InfoContext(ctx, "reorganizer: LLM budget exhausted, deferring remaining clusters",
+					slog.Int("merged_clusters", merged),
+					slog.Int("skipped_clusters", skipped),
+					slog.Duration("budget", reorgLLMBudget),
+				)
+				schedMx().ReorgErrors.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("operation", "consolidate_budget_exhausted"),
+					attribute.String("severity", "nonfatal"),
+				))
+				goto cycleDone
 			}
 			if err := r.consolidateCluster(ctx, cubeID, sub, now); err != nil {
 				log.WarnContext(ctx, "reorganizer: cluster consolidation failed",
@@ -99,6 +121,7 @@ func (r *Reorganizer) Run(ctx context.Context, cubeID string) {
 		}
 	}
 
+cycleDone:
 	log.InfoContext(ctx, "reorganizer: cycle complete",
 		slog.Int("merged_clusters", merged),
 		slog.Int("skipped_clusters", skipped),
@@ -136,11 +159,24 @@ func (r *Reorganizer) RunTargeted(ctx context.Context, cubeID string, ids []stri
 	clusters := buildClusters(pairs)
 	now := time.Now().UTC().Format(time.RFC3339)
 	merged, skipped := 0, 0
+	deadline := time.Now().Add(reorgLLMBudget)
 
 	for _, cluster := range clusters {
 		for _, sub := range splitLargeCluster(cluster, maxClusterSize) {
 			if len(sub) < 2 {
 				continue
+			}
+			if time.Now().After(deadline) {
+				log.InfoContext(ctx, "reorganizer: targeted LLM budget exhausted, deferring remaining clusters",
+					slog.Int("merged_clusters", merged),
+					slog.Int("skipped_clusters", skipped),
+					slog.Duration("budget", reorgLLMBudget),
+				)
+				schedMx().ReorgErrors.Add(ctx, 1, metric.WithAttributes(
+					attribute.String("operation", "consolidate_budget_exhausted"),
+					attribute.String("severity", "nonfatal"),
+				))
+				goto targetedDone
 			}
 			if err := r.consolidateCluster(ctx, cubeID, sub, now); err != nil {
 				log.WarnContext(ctx, "reorganizer: targeted cluster consolidation failed",
@@ -152,6 +188,8 @@ func (r *Reorganizer) RunTargeted(ctx context.Context, cubeID string, ids []stri
 			}
 		}
 	}
+
+targetedDone:
 	log.InfoContext(ctx, "reorganizer: targeted cycle complete",
 		slog.Int("merged_clusters", merged),
 		slog.Int("skipped_clusters", skipped),

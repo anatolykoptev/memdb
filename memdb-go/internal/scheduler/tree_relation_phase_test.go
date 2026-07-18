@@ -163,23 +163,23 @@ func TestPromoteCluster_EdgeWriteError_LogsWarn(t *testing.T) {
 	if len(stub.events) != 1 {
 		t.Errorf("expected 1 audit event, got %d", len(stub.events))
 	}
-	// Warn-level log present for the failed edge.
+	// Warn-level log present for the failed promote.
 	logs := buf.String()
-	if !bytes.Contains(buf.Bytes(), []byte("edge write failed")) {
-		t.Errorf("expected 'edge write failed' in logs, got: %s", logs)
+	if !bytes.Contains(buf.Bytes(), []byte("promote cluster child failed")) {
+		t.Errorf("expected 'promote cluster child failed' in logs, got: %s", logs)
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("level=WARN")) {
 		t.Errorf("expected WARN-level log, got: %s", logs)
 	}
 	// Sanity: ensure we did not leak Debug on this path (old behaviour).
 	for _, line := range bytes.Split(buf.Bytes(), []byte("\n")) {
-		if bytes.Contains(line, []byte("edge write failed")) && bytes.Contains(line, []byte("level=DEBUG")) {
-			t.Errorf("edge-write failure regressed to DEBUG level: %s", line)
+		if bytes.Contains(line, []byte("promote cluster child failed")) && bytes.Contains(line, []byte("level=DEBUG")) {
+			t.Errorf("promote-child failure regressed to DEBUG level: %s", line)
 		}
 	}
 }
 
-// edgeFailStub fails the first N CreateMemoryEdge calls, then succeeds.
+// edgeFailStub fails the first N PromoteClusterChild calls, then succeeds.
 // Embeds treeStub so all other surface remains identical.
 type edgeFailStub struct {
 	treeStub
@@ -187,10 +187,10 @@ type edgeFailStub struct {
 	calls     int32
 }
 
-func (s *edgeFailStub) CreateMemoryEdge(ctx context.Context, from, to, rel, a, b string) error {
+func (s *edgeFailStub) PromoteClusterChild(ctx context.Context, childID, parentID, relation, childLevel, now string) error {
 	n := atomic.AddInt32(&s.calls, 1)
 	if int(n) <= s.failCount {
-		return fmt.Errorf("synthetic edge-write failure %d", n)
+		return fmt.Errorf("synthetic promote-child failure %d", n)
 	}
-	return s.treeStub.CreateMemoryEdge(ctx, from, to, rel, a, b)
+	return s.treeStub.PromoteClusterChild(ctx, childID, parentID, relation, childLevel, now)
 }

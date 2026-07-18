@@ -81,6 +81,13 @@ func (s *treeStub) SetHierarchyLevel(_ context.Context, id, level, parent, _ str
 	s.setHier = append(s.setHier, treeHier{ID: id, Level: level, ParentID: parent})
 	return nil
 }
+func (s *treeStub) PromoteClusterChild(_ context.Context, childID, parentID, relation, childLevel, _ string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.edges = append(s.edges, treeEdge{From: childID, To: parentID, Relation: relation})
+	s.setHier = append(s.setHier, treeHier{ID: childID, Level: childLevel, ParentID: parentID})
+	return nil
+}
 func (s *treeStub) InsertTreeConsolidationEvent(_ context.Context, ev, cube, parent string, children []string, tier, _, _, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

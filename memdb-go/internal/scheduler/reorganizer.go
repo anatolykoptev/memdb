@@ -65,6 +65,8 @@ type reorgPostgres interface {
 	// D3 — promote a memory into a higher tier (sets hierarchy_level + parent_memory_id
 	// on parent_memory_id for children; sets hierarchy_level on the parent itself).
 	SetHierarchyLevel(ctx context.Context, memoryID, level, parentMemoryID, updatedAt string) error
+	// PF-10 — atomic edge+hierarchy in one PG transaction.
+	PromoteClusterChild(ctx context.Context, childID, parentID, relation, childLevel, now string) error
 
 	// W2 — LLM Wiki auto-update from tree promotions. The reorganizer
 	// upserts a wiki page per cluster summary so the wiki keeps pace

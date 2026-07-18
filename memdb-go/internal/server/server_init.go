@@ -46,6 +46,8 @@ func initDBClients(ctx context.Context, cfg *config.Config, h *handlers.Handler,
 		rd, err = db.NewRedis(ctx, cfg.DBRedisURL, logger)
 		if err != nil {
 			logger.Warn("redis unavailable", slog.Any("error", err))
+		} else {
+			db.RegisterRedisPoolMetrics(rd)
 		}
 	}
 
