@@ -10,11 +10,60 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
+
+// rawBatchSize is the maximum number of items processed per chunk in the raw
+// add pipeline. After each chunk the accumulated nodes are inserted into
+// Postgres, written to the VSET cache, and structural edges are emitted —
+// bounding peak memory to O(rawBatchSize) instead of O(len(items)).
+//
+// A single /product/add with 100K items previously allocated all nodes,
+// response items, and embeddings into memory before any batch insert (M7 OOM
+// root cause). Chunking keeps memory flat regardless of request size.
+const rawBatchSize = 1000
+
+// rawNodeInserter abstracts batch node insertion so the raw-add batch loop
+// can be unit-tested without a live Postgres. Production uses *db.Postgres.
+type rawNodeInserter interface {
+	InsertMemoryNodes(ctx context.Context, nodes []db.MemoryInsertNode) error
+}
+
+// rawItemProcessor processes a single raw item (embed, dedup, build node).
+// Returns (node, item, embedding, skip, err). Extracted as a callback so the
+// batch loop can be tested with a stub processor while still exercising the
+// real chunking/insert/cache/edge code path.
+type rawItemProcessor func(
+	ctx context.Context,
+	it rawTextItem,
+	hash string,
+) (db.MemoryInsertNode, addResponseItem, []float32, bool, error)
+
+// rawBatchMetricsOnce lazily registers the memdb.add.raw_batch_count
+// histogram, recording how many chunks a single /product/add raw request
+// produces. Alert: resource_exhaustion fires when a single request allocates
+// >1GB — a high batch count is the leading indicator.
+var (
+	rawBatchMetricsOnce sync.Once
+	rawBatchCountHist   metric.Float64Histogram
+)
+
+func rawBatchCountMetric() metric.Float64Histogram {
+	rawBatchMetricsOnce.Do(func() {
+		h, _ := otel.Meter("memdb-go/add").Float64Histogram(
+			"memdb.add.raw_batch_count",
+			metric.WithDescription("Number of chunks processed in a single raw-mode /product/add request"),
+		)
+		rawBatchCountHist = h
+	})
+	return rawBatchCountHist
+}
 
 // nativeRawAddForCube processes raw-mode add for a single cube/user.
 // Pipeline:
@@ -47,34 +96,80 @@ func (h *Handler) nativeRawAddForCube(ctx context.Context, req *fullAddRequest, 
 	hashes := hashRawItems(items)
 	existingHashes := h.filterExistingHashes(ctx, hashes, cubeID)
 
-	var nodes []db.MemoryInsertNode
-	var responseItems []addResponseItem
-	var embeddings [][]float32
+	// Chunk the loop into batches of rawBatchSize to bound peak memory to
+	// O(batchSize) instead of O(len(items)). After each chunk: insert nodes,
+	// write VSET cache, emit structural edges — then the per-chunk slices are
+	// garbage-collected before the next chunk allocates. This prevents the M7
+	// OOM where a single 100K-item request allocated all nodes/embeddings
+	// before any batch insert.
+	processItem := func(ctx context.Context, it rawTextItem, hash string) (db.MemoryInsertNode, addResponseItem, []float32, bool, error) {
+		return h.processRawMemory(ctx, it, hash, existingHashes, fac)
+	}
+	return h.processRawBatches(ctx, items, hashes, processItem, h.postgres, fac)
+}
 
-	for i, it := range items {
-		node, item, emb, skip, err := h.processRawMemory(ctx, it, hashes[i], existingHashes, fac)
-		if err != nil {
-			return nil, err
+// processRawBatches chunks items into batches of rawBatchSize, processing
+// each chunk through processItem (embed, dedup, build node), then inserting
+// nodes, writing VSET cache, and emitting structural edges per batch. The
+// per-chunk slices are scoped to the loop body so they're eligible for GC
+// before the next chunk allocates — keeping peak memory flat regardless of
+// total request size.
+//
+// The inserter parameter abstracts InsertMemoryNodes so the batch loop can be
+// unit-tested without a live Postgres (Handler holds *db.Postgres directly,
+// no interface — see add_fast_batched_test.go for the same constraint).
+func (h *Handler) processRawBatches(
+	ctx context.Context,
+	items []rawTextItem,
+	hashes []string,
+	processItem rawItemProcessor,
+	inserter rawNodeInserter,
+	fac fastAddContext,
+) ([]addResponseItem, error) {
+	var allResponseItems []addResponseItem
+	batchCount := 0
+
+	for start := 0; start < len(items); start += rawBatchSize {
+		end := start + rawBatchSize
+		if end > len(items) {
+			end = len(items)
 		}
-		if skip {
+		batchCount++
+
+		// Pre-allocate per-chunk slices with capacity = chunk size, not total.
+		nodes := make([]db.MemoryInsertNode, 0, end-start)
+		responseItems := make([]addResponseItem, 0, end-start)
+		embeddings := make([][]float32, 0, end-start)
+
+		for i, it := range items[start:end] {
+			node, item, emb, skip, err := processItem(ctx, it, hashes[start+i])
+			if err != nil {
+				return nil, err
+			}
+			if skip {
+				continue
+			}
+			nodes = append(nodes, node)
+			responseItems = append(responseItems, item)
+			embeddings = append(embeddings, emb)
+		}
+
+		if len(nodes) == 0 {
 			continue
 		}
-		nodes = append(nodes, node)
-		responseItems = append(responseItems, item)
-		embeddings = append(embeddings, emb)
+		if err := inserter.InsertMemoryNodes(ctx, nodes); err != nil {
+			return nil, fmt.Errorf("insert nodes: %w", err)
+		}
+		h.writeRawCache(ctx, fac.cubeID, nodes, responseItems, embeddings)
+		// M8 Stream 10 — emit structural edges for the LTM rows just inserted.
+		// Raw mode is 1 node per /add item (no WM pair), so refs map 1:1 to nodes.
+		h.emitStructuralEdges(ctx, fac, rawBatchRefs(nodes, embeddings, fac.now))
+
+		allResponseItems = append(allResponseItems, responseItems...)
 	}
 
-	if len(nodes) == 0 {
-		return responseItems, nil
-	}
-	if err := h.postgres.InsertMemoryNodes(ctx, nodes); err != nil {
-		return nil, fmt.Errorf("insert nodes: %w", err)
-	}
-	h.writeRawCache(ctx, cubeID, nodes, responseItems, embeddings)
-	// M8 Stream 10 — emit structural edges for the LTM rows just inserted.
-	// Raw mode is 1 node per /add item (no WM pair), so refs map 1:1 to nodes.
-	h.emitStructuralEdges(ctx, fac, rawBatchRefs(nodes, embeddings, fac.now))
-	return responseItems, nil
+	rawBatchCountMetric().Record(ctx, float64(batchCount))
+	return allResponseItems, nil
 }
 
 // rawBatchRefs zips raw-mode insert nodes with their embeddings into
