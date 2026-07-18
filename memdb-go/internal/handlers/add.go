@@ -50,6 +50,7 @@ type addResponseItem struct {
 	MemoryID   string `json:"memory_id"`
 	MemoryType string `json:"memory_type"`
 	CubeID     string `json:"cube_id"`
+	Degraded   bool   `json:"degraded,omitempty"`
 }
 
 // --- NativeAdd handler ---

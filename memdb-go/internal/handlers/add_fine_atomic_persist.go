@@ -71,23 +71,21 @@ func (h *Handler) linkHandlerPairCounted(ctx context.Context, p entityLinkPair, 
 		entityID, err := h.postgres.UpsertEntityNodeWithEmbedding(ctx, ent.Name, ent.Type, cubeID, now, embByName[ent.Name])
 		if err != nil || entityID == "" {
 			failed++
-			h.logger.Debug("atomic entity link: upsert entity node failed",
+			h.logger.Warn("atomic entity link: upsert entity node failed",
 				slog.String("name", ent.Name), slog.Any("error", err))
 			continue
 		}
 		if edgeErr := h.postgres.CreateMemoryEdge(ctx, p.ltmID, entityID, db.EdgeMentionsEntity, now, p.validAt); edgeErr != nil {
 			// Edge failure still counts the entity as promoted — the node
-			// exists; the join from memory is just missing. Surface via
-			// debug log so post-deploy smoke can correlate any drop in
-			// recall with edge-write churn.
-			h.logger.Debug("atomic entity link: create edge failed",
+			// exists; the join from memory is just missing.
+			h.logger.Warn("atomic entity link: create edge failed",
 				slog.String("ltm_id", p.ltmID), slog.String("entity_id", entityID), slog.Any("error", edgeErr))
 		}
 		success++
 	}
 	if p.invalidAt != "" {
 		if err := h.postgres.InvalidateEdgesByMemoryID(ctx, p.ltmID, p.invalidAt); err != nil {
-			h.logger.Debug("atomic entity link: stamp memory_edges invalid_at failed",
+			h.logger.Warn("atomic entity link: stamp memory_edges invalid_at failed",
 				slog.String("ltm_id", p.ltmID), slog.Any("error", err))
 		}
 	}
