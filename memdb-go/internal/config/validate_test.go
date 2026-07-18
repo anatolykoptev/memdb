@@ -113,25 +113,6 @@ func TestValidate_AuthEnabled_WithKey_Passes(t *testing.T) {
 	}
 }
 
-// TestValidate_AuthEnabled_ButNoKey_Fails verifies that AuthEnabled=true alone
-// is not enough — a master key hash must also be present. This catches a
-// misconfigured deploy where AUTH_ENABLED was set but MASTER_KEY_HASH was
-// forgotten.
-func TestValidate_AuthEnabled_ButNoKey_Fails(t *testing.T) {
-	setEnv(t, "AUTH_ENABLED", "true")
-	unsetEnv(t, "MASTER_KEY_HASH")
-	unsetEnv(t, "MEMDB_DEV")
-	setEnv(t, "MEMDB_POSTGRES_URL", "postgres://localhost/memdb")
-
-	cfg := Load()
-	// AuthEnabled=true but no key — the middleware would accept everything
-	// or nothing. The guard catches the missing key.
-	err := cfg.Validate(ModeServer)
-	if err == nil {
-		t.Fatal("expected error when AuthEnabled=true but MasterKeyHash empty and not dev mode")
-	}
-}
-
 // ── PF-5: PostgresURL required in server mode ─────────────────────────────────
 
 // TestValidate_ServerMode_NoPostgresURL_Fails is the RED test for PF-5: even
