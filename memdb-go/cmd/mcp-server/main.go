@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -24,6 +25,15 @@ import (
 func main() {
 	stdioMode := hasFlag("--stdio")
 	cfg := config.Load()
+
+	// PF-1 / PF-5: fail fast at startup if auth is off without a master key
+	// (security). ModeTool skips the PostgresURL check because the MCP server
+	// can run without a database (search-only mode). Dev mode (MEMDB_DEV=1)
+	// relaxes the auth check for local development.
+	if err := cfg.Validate(config.ModeTool); err != nil {
+		fmt.Fprintf(os.Stderr, "startup validation failed: %v\n", err)
+		os.Exit(1)
+	}
 
 	port := os.Getenv("MEMDB_MCP_PORT")
 	if port == "" {
