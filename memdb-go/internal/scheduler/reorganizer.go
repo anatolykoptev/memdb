@@ -28,6 +28,11 @@ type reorgPostgres interface {
 	SoftDeleteMerged(ctx context.Context, memoryID, mergedIntoID, updatedAt string) error
 	DeleteByPropertyIDs(ctx context.Context, propertyIDs []string, userName string) (int64, error)
 
+	// CE cache invalidation — must be called after UpdateMemoryNodeFull to avoid
+	// stale cross-encoder scores (see #307, #321).
+	ClearCEScoresTopK(ctx context.Context, memoryID string) error
+	ClearCEScoresTopKForNeighbor(ctx context.Context, neighborID string) error
+
 	// Graph edges
 	CreateMemoryEdge(ctx context.Context, fromID, toID, relation, createdAt, validAt string) error
 	InvalidateEdgesByMemoryID(ctx context.Context, memoryID, invalidAt string) error
@@ -121,7 +126,7 @@ const (
 //  5. Soft-delete all remove_ids
 //  6. Evict remove_ids from Redis VSET hot cache
 type Reorganizer struct {
-	postgres         reorgPostgres          // *db.Postgres in production, spy in tests
+	postgres         reorgPostgres // *db.Postgres in production, spy in tests
 	embedder         embedder.Embedder
 	wmCache          *db.WorkingMemoryCache // nil = VSET not configured
 	llmClient        *llm.Client            // shared LLM client with retry + fallback
