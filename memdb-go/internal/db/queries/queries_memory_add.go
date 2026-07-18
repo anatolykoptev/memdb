@@ -35,18 +35,28 @@ VALUES (
 
 // UpdateMemoryNodeFull updates the memory text, embedding, and updated_at for an existing activated node.
 // Used by the fine-mode dedup-merge pipeline when JudgeDedupMerge returns action="update".
+// Uses a CTE that locks the row in deterministic (sorted) property-id order before
+// updating, preventing deadlock with concurrent DeleteByPropertyIDs / IncrRetrievalCount
+// which use the same lock-ordering strategy (#309 SQLSTATE 40P01 prevention).
 // Args: $1 = memory_id (properties->>(('id'::text))), $2 = new memory text, $3 = new embedding (text cast to vector(1024)), $4 = updated_at (text)
 const UpdateMemoryNodeFull = `
-UPDATE %[1]s."Memory"
+WITH locked AS (
+    SELECT id FROM %[1]s."Memory"
+    WHERE properties->>(('id'::text)) = $1
+      AND properties->>(('status'::text)) = 'activated'
+    ORDER BY properties->>(('id'::text))
+    FOR UPDATE
+)
+UPDATE %[1]s."Memory" m
 SET properties = (
-        (properties::text::jsonb || jsonb_build_object(
+        (m.properties::text::jsonb || jsonb_build_object(
             'memory',     $2::text,
             'updated_at', $4::text
         ))::text
     )::agtype,
-    embedding = CASE WHEN $3::text = '' THEN embedding ELSE $3::vector(1024) END
-WHERE properties->>(('id'::text)) = $1
-  AND properties->>(('status'::text)) = 'activated'`
+    embedding = CASE WHEN $3::text = '' THEN m.embedding ELSE $3::vector(1024) END
+FROM locked l
+WHERE m.id = l.id`
 
 // CheckContentHashExists checks whether an activated memory with the given content_hash exists for a user.
 // Args: $1 = content_hash (text), $2 = user_name (text)
