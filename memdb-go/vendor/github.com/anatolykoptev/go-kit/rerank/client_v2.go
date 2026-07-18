@@ -20,7 +20,7 @@ func NewClient(url string, opts ...Opt) *Client {
 	}
 	// Bearer token: explicit WithAPIKey > env (EMBED_TOKEN). For self-hosted
 	// embed-server. Hosted providers (Cohere, Voyage) should pass WithAPIKey
-	// explicitly; this env fallback is a convenience for the deploy-config
+	// explicitly; this env fallback is a convenience for the krolik-server
 	// cross-host bearer flow where the env is set per-process.
 	if cfg.apiKey == "" {
 		if tok := os.Getenv("EMBED_TOKEN"); tok != "" {

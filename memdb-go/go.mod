@@ -7,7 +7,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/anatolykoptev/go-engine v1.3.1
 	github.com/anatolykoptev/go-kit v0.74.0
-	github.com/anatolykoptev/go-stealth v1.3.1
+	github.com/anatolykoptev/go-stealth v1.19.1
 	github.com/anatolykoptev/skillkit v0.2.2
 	github.com/daulet/tokenizers v1.25.0
 	github.com/google/uuid v1.6.0
@@ -15,6 +15,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/oapi-codegen/runtime v1.1.2
 	github.com/prometheus/client_golang v1.23.2
+	github.com/prometheus/client_model v0.6.2
 	github.com/qdrant/go-client v1.16.2
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/yalue/onnxruntime_go v1.25.0
@@ -55,9 +56,8 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/klauspost/compress v1.18.2 // indirect
+	github.com/klauspost/compress v1.18.4 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/otlptranslator v1.0.0 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect

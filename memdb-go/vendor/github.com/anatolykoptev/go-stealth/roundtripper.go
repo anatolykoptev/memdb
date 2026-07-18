@@ -40,10 +40,12 @@ func (bc *BrowserClient) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	// Restore multi-value Set-Cookie if it was joined
-	if cookies, ok := respHeaders["set-cookie"]; ok && strings.Contains(cookies, "; ") {
+	if cookies, ok := respHeaders["set-cookie"]; ok && strings.Contains(cookies, "\n") {
 		resp.Header.Del("Set-Cookie")
-		for _, c := range strings.Split(cookies, "; ") {
-			resp.Header.Add("Set-Cookie", c)
+		for _, c := range strings.Split(cookies, "\n") {
+			if c != "" {
+				resp.Header.Add("Set-Cookie", c)
+			}
 		}
 	}
 

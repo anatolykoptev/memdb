@@ -3,10 +3,11 @@ package ratelimit
 import (
 	"context"
 	"math/rand/v2"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/anatolykoptev/go-stealth/internal/uri"
 )
 
 // DomainConfig defines rate limit rules for a specific domain pattern.
@@ -52,7 +53,7 @@ func NewDomainLimiter(rules ...DomainConfig) *DomainLimiter {
 // Allow checks if a request to the given URL is allowed.
 // Returns true and updates internal state if allowed.
 func (dl *DomainLimiter) Allow(rawURL string) bool {
-	domain := extractDomain(rawURL)
+	domain := uri.ExtractHost(rawURL)
 	rule := dl.matchRule(domain)
 	if rule == nil {
 		return true
@@ -100,7 +101,7 @@ func (dl *DomainLimiter) Wait(ctx context.Context, rawURL string) error {
 
 // MarkRateLimited marks a domain as rate-limited until the given time.
 func (dl *DomainLimiter) MarkRateLimited(rawURL string, until time.Time) {
-	domain := extractDomain(rawURL)
+	domain := uri.ExtractHost(rawURL)
 	rule := dl.matchRule(domain)
 	if rule == nil {
 		return
@@ -142,16 +143,4 @@ func (dl *DomainLimiter) getLimiter(domain string, rule *DomainConfig) *Limiter 
 		dl.limiters[domain] = l
 	}
 	return l
-}
-
-func extractDomain(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL
-	}
-	host := u.Hostname()
-	if host == "" {
-		return rawURL
-	}
-	return strings.ToLower(host)
 }

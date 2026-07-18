@@ -104,32 +104,16 @@ jobs:
 
       - name: Install AGE extension
         run: |
-          # Add PGDG repo for postgresql-client-17 + server-dev-17 (not in
-          # ubuntu-24.04-arm default repos). AGE has no official apt package
-          # for PG17/ARM, so we build from source.
-          sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -sSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
-            https://www.postgresql.org/media/keys/ACCC4CF8.asc
-          sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq postgresql-client-17 build-essential postgresql-server-dev-17 flex bison
+          # Build AGE inside the Postgres service container (not on the host)
+          # to avoid glibc version mismatch between host and container.
+          PG_CID=$(docker ps -q | head -1)
+          docker exec "$PG_CID" sh -c 'apt-get update -qq && apt-get install -y -qq build-essential postgresql-server-dev-17 flex bison git'
+          docker exec "$PG_CID" sh -c 'cd /tmp && git clone --depth 1 --branch release/PG17/1.6.0 https://github.com/apache/age.git && cd age && make PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config install'
 
-          # Build AGE from source (PG17/1.6.0, ARM-compatible).
-          cd /tmp && git clone --depth 1 --branch release/PG17/1.6.0 https://github.com/apache/age.git
-          cd age && make PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config
-          sudo make PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config install
-
-          # Copy AGE extension files into the Postgres service container
-          # (make install puts them on the host, but Postgres runs in Docker).
-          PG_CID=$(docker ps -q -f name=postgres)
-          docker cp /usr/lib/postgresql/17/lib/age.so "$PG_CID:/usr/lib/postgresql/17/lib/"
-          docker cp /usr/share/postgresql/17/extension/age.control "$PG_CID:/usr/share/postgresql/17/extension/"
-          docker cp /usr/share/postgresql/17/extension/age--1.6.0.sql "$PG_CID:/usr/share/postgresql/17/extension/"
-
-          # Install extensions into the service-container DB.
-          psql "$MEMDB_LIVE_PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS age;"
-          psql "$MEMDB_LIVE_PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS vector;"
-          psql "$MEMDB_LIVE_PG_DSN" -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+          # Install extensions via psql inside the container.
+          docker exec "$PG_CID" psql -U memos -d memos -c "CREATE EXTENSION IF NOT EXISTS age;"
+          docker exec "$PG_CID" psql -U memos -d memos -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          docker exec "$PG_CID" psql -U memos -d memos -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
 
       - name: Test (livepg)
         working-directory: memdb-go

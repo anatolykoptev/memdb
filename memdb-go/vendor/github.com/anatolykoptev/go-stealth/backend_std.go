@@ -1,8 +1,10 @@
 package stealth
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -22,6 +24,17 @@ func newStdBackend(cfg BackendConfig) (HTTPDoer, error) {
 	jar, _ := cookiejar.New(nil)
 
 	transport := &http.Transport{}
+	if cfg.InsecureSkipVerify {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+	if cfg.DialControl != nil {
+		// Connect-time SSRF guard on the resolved address (rebind-proof).
+		transport.DialContext = (&net.Dialer{
+			Control:   adaptControl(cfg.DialControl),
+			Timeout:   30 * time.Second, //nolint:mnd // net/http default dial timeout
+			KeepAlive: 30 * time.Second, //nolint:mnd // net/http default keepalive
+		}).DialContext
+	}
 	if cfg.ProxyURL != "" {
 		proxyURL, err := url.Parse(cfg.ProxyURL)
 		if err != nil {
@@ -35,10 +48,15 @@ func newStdBackend(cfg BackendConfig) (HTTPDoer, error) {
 		Transport: transport,
 		Timeout:   time.Duration(cfg.TimeoutSeconds) * time.Second,
 	}
-	if !cfg.FollowRedirects {
+	switch {
+	case !cfg.FollowRedirects:
 		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
+	case cfg.RedirectGuard != nil:
+		// Per-hop SSRF guard. The closure re-owns the redirect hop cap that
+		// overriding CheckRedirect drops from net/http.
+		client.CheckRedirect = cfg.RedirectGuard
 	}
 
 	return &stdDoer{client: client, jar: jar}, nil
@@ -70,7 +88,7 @@ func (s *stdDoer) Do(req *Request) (*Response, error) {
 	for k, v := range resp.Header {
 		lk := strings.ToLower(k)
 		if lk == "set-cookie" {
-			respHeaders["set-cookie"] = strings.Join(v, "; ")
+			respHeaders["set-cookie"] = strings.Join(v, "\n")
 		} else if len(v) > 0 {
 			respHeaders[lk] = v[0]
 		}
