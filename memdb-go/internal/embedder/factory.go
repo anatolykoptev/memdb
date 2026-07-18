@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	gokitembed "github.com/anatolykoptev/go-kit/embed"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/cache"
 )
 
@@ -28,6 +29,12 @@ type Config struct {
 	// inference. nil = caching disabled (legacy behaviour, default for
 	// non-http backends). Wired from cmd/server/main.go after redis.NewClient.
 	HTTPCacheClient *cache.Client
+
+	// HTTPCircuit enables a circuit breaker for type="http". When non-nil,
+	// the embedder short-circuits after N consecutive backend failures
+	// instead of stacking timeouts. Mirrors the rerank CB pattern
+	// (MEMDB_RERANK_CIRCUIT). nil = disabled (legacy behaviour).
+	HTTPCircuit *gokitembed.CircuitConfig
 }
 
 // New constructs the appropriate Embedder from cfg.
@@ -105,11 +112,15 @@ func New(cfg Config, logger *slog.Logger) (Embedder, error) {
 		if cfg.HTTPCacheClient != nil {
 			opts.Cache = NewRedisEmbedCache(cfg.HTTPCacheClient, 0, logger)
 		}
+		if cfg.HTTPCircuit != nil {
+			opts.Circuit = cfg.HTTPCircuit
+		}
 		e := NewHTTPEmbedderWithOpts(cfg.HTTPBaseURL, model, dim, logger, opts)
 		logger.Info("embedder: http",
 			slog.String("url", cfg.HTTPBaseURL),
 			slog.String("model", model),
 			slog.Bool("cache_enabled", opts.Cache != nil),
+			slog.Bool("circuit_enabled", opts.Circuit != nil),
 		)
 		return e, nil
 
