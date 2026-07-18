@@ -22,7 +22,7 @@ memdb-go :8080   ←→   Postgres + Qdrant
 
 1. Docker Compose stack running:
    ```bash
-   cd ~/deploy/krolik-server && docker compose up -d
+   cd ~/deploy/server-config && docker compose up -d
    ```
    This starts `memdb-go` (:8080) and `memdb-mcp` (:8001).
 
@@ -81,7 +81,7 @@ will see an empty result — that's correct.
 
 **Tools appear but return errors**
 - Check `SERVICE_SECRET` matches the value in your `.env`
-- View MCP server logs: `docker logs krolik-server-memdb-mcp-1 -f`
+- View MCP server logs: `docker logs server-config-memdb-mcp-1 -f`
 
 ## Alternative: direct stdio mode (no proxy)
 

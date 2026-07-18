@@ -207,7 +207,7 @@ the legacy single-speaker `text_mem[]` envelope.
 ## Re-verify
 
 ```bash
-SECRET=$(grep '^INTERNAL_SERVICE_SECRET=' ~/deploy/krolik-server/.env | cut -d= -f2)
+SECRET=$(grep '^INTERNAL_SERVICE_SECRET=' ~/deploy/server-config/.env | cut -d= -f2)
 USER1="ds_a_$(date +%s)"; USER2="ds_b_$(date +%s)"
 
 # 1. ingest

@@ -5,12 +5,12 @@
 -- What this does:
 --   1. Creates memos_graph.cubes table with 9 fields + 3 partial indexes
 --   2. Backfills cubes rows from DISTINCT properties->>'user_name' in Memory
---   3. Backfills properties->>'user_id' = 'krolik' on all existing Memory rows
---      (single-user deployment — every memory row's person is 'krolik')
+--   3. Backfills properties->>'user_id' = 'host-a' on all existing Memory rows
+--      (single-user deployment — every memory row's person is 'host-a')
 --   4. Invariant checks: cube row count matches distinct cube count in Memory
 --
 -- Idempotency: all DDL uses IF NOT EXISTS; inserts use ON CONFLICT DO NOTHING;
--- update only touches rows where user_id != 'krolik'. Safe to re-run.
+-- update only touches rows where user_id != 'host-a'. Safe to re-run.
 --
 -- Note on agtype casting: properties is of type agtype (AGE vertex column).
 -- Extracting text fields requires casting via ::text::jsonb->>'key' to avoid
@@ -43,7 +43,7 @@ INSERT INTO memos_graph.cubes (cube_id, cube_name, owner_id, created_at, updated
 SELECT
     (properties::text::jsonb)->>'user_name'                        AS cube_id,
     (properties::text::jsonb)->>'user_name'                        AS cube_name,
-    'krolik'                                                        AS owner_id,
+    'host-a'                                                        AS owner_id,
     MIN(COALESCE(((properties::text::jsonb)->>'created_at')::timestamptz, NOW())) AS created_at,
     MAX(COALESCE(((properties::text::jsonb)->>'created_at')::timestamptz, NOW())) AS updated_at,
     TRUE                                                            AS is_active
@@ -53,13 +53,13 @@ GROUP BY (properties::text::jsonb)->>'user_name'
 ON CONFLICT (cube_id) DO NOTHING;
 
 -- Step 3: Fix user_id JSONB slot on all existing Memory rows
--- Single-user deployment: every row's person becomes 'krolik'
+-- Single-user deployment: every row's person becomes 'host-a'
 -- Use agtype concatenation operator with agtype literal.
 UPDATE memos_graph."Memory"
-SET properties = properties || agtype_build_map('user_id', 'krolik')
+SET properties = properties || agtype_build_map('user_id', 'host-a')
 WHERE (properties::text::jsonb)->>'user_name' IS NOT NULL
   AND ((properties::text::jsonb)->>'user_id' IS NULL
-       OR (properties::text::jsonb)->>'user_id' != 'krolik');
+       OR (properties::text::jsonb)->>'user_id' != 'host-a');
 
 -- Step 4: Invariant checks
 DO $$
@@ -70,12 +70,12 @@ DECLARE
     distinct_cubes INTEGER;
 BEGIN
     SELECT COUNT(*)                                                               INTO mem_total      FROM memos_graph."Memory";
-    SELECT COUNT(*)                                                               INTO mem_person     FROM memos_graph."Memory" WHERE (properties::text::jsonb)->>'user_id' = 'krolik';
+    SELECT COUNT(*)                                                               INTO mem_person     FROM memos_graph."Memory" WHERE (properties::text::jsonb)->>'user_id' = 'host-a';
     SELECT COUNT(*)                                                               INTO cube_rows      FROM memos_graph.cubes;
     SELECT COUNT(DISTINCT (properties::text::jsonb)->>'user_name')               INTO distinct_cubes FROM memos_graph."Memory";
 
     RAISE NOTICE 'migration: total memory rows        = %', mem_total;
-    RAISE NOTICE 'migration: memory rows (krolik)     = %', mem_person;
+    RAISE NOTICE 'migration: memory rows (host-a)     = %', mem_person;
     RAISE NOTICE 'migration: cubes table rows         = %', cube_rows;
     RAISE NOTICE 'migration: distinct cubes in Memory = %', distinct_cubes;
 

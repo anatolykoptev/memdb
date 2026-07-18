@@ -112,11 +112,11 @@ func TestAdminReorg(t *testing.T) {
 		{
 			name:          "targeted reorg",
 			method:        http.MethodPost,
-			body:          map[string]any{"cube_id": "hully", "ids": []string{"a", "b"}},
+			body:          map[string]any{"cube_id": "host-c", "ids": []string{"a", "b"}},
 			reorg:         newMockReorg(),
 			wantStatus:    http.StatusAccepted,
 			wantMode:      "targeted",
-			wantCubeID:    "hully",
+			wantCubeID:    "host-c",
 			wantTargetIDs: []string{"a", "b"},
 		},
 		{

@@ -1,5 +1,5 @@
 # Memobase Deep Dive — How They Hit 75.78% LoCoMo
-> Researched 2026-04-26 via go-code MCP on `/home/krolik/src/compete-research/memobase`. Memobase v0.0.37 published 75.78% LLM Judge overall, the public top — above MemOS 73.31, Mem0 66.88, Zep* 75.14 (self-reported).
+> Researched 2026-04-26 via go-code MCP on `/home/user/src/compete-research/memobase`. Memobase v0.0.37 published 75.78% LLM Judge overall, the public top — above MemOS 73.31, Mem0 66.88, Zep* 75.14 (self-reported).
 >
 > **TL;DR (apples-to-apples honesty first):** Memobase's headline 75.78% uses **LLM Judge** (binary correct/incorrect by GPT-4o), not F1. They also **exclude cat-5 adversarial entirely** (`exclude_category={5}`, `memobase_search.py:147`). MemDB's M7 result of 0.238 F1 on a different metric is **not directly comparable** to 75.78%. Before any port-target conclusions: if we adopt their measurement (LLM Judge + cat-5 excluded), our published numbers will look meaningfully higher with no model change.
 
@@ -162,7 +162,7 @@ Both ingest and search use `ThreadPoolExecutor(max_workers=10)`. Their server ha
 ### 🥈 #2 — `[mention DATE]` tags + temporal-strict prompt
 **Effort**: M
 
-**What**: 
+**What**:
 1. Modify our `add_fine.go` LLM extraction prompt to require `[mention <ISO_DATE>]` tag whenever a fact references time
 2. Add prompt instruction: "use specific ISO dates, never relative dates like 'today'"
 3. Verify retrieved memories carry through to chat prompt
@@ -212,7 +212,7 @@ Both ingest and search use `ThreadPoolExecutor(max_workers=10)`. Their server ha
 
 **Long-term**: D2 multi-hop remains our differentiator. Memobase can't catch us on cat-2 because they don't have graph traversal. Our M8 S3+S10 work in this area is the right bet for a category Memobase explicitly LOST on.
 
-**Strategic positioning**: 
+**Strategic positioning**:
 - We compete with Memobase on **temporal + open-domain** (port their tricks)
 - We BEAT Memobase on **multi-hop reasoning** (our graph layer)
 - We win on **production characteristics** (latency, multi-tenancy, observability)
@@ -221,7 +221,7 @@ That's a credible "best in class" pitch — once the LLM Judge measurement lands
 
 ---
 
-## Code refs (all from `/home/krolik/src/compete-research/memobase`)
+## Code refs (all from `/home/user/src/compete-research/memobase`)
 
 | Concept | File | Line |
 |---------|------|------|

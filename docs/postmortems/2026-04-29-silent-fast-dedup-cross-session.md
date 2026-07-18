@@ -34,7 +34,7 @@ cube — even when `session_id` differed.
   Cosine 0.92 triggers **easily** between 4096-char windows of the
   same speakers chatting on overlapping topics (verified: `conv-26`
   session_1 vs session_2 windows score 0.95-0.99).
-* Existing rows: `Memory.user_name = 'krolik'` has 161 rows with
+* Existing rows: `Memory.user_name = 'host-a'` has 161 rows with
   `mode:raw` tag (claude-code plugin path) and the M7-era fast tests.
   Hard to count the lost rows since ingest itself returned 200 — we
   only have circumstantial evidence (low row counts vs. expected).

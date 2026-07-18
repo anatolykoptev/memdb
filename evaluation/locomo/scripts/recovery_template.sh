@@ -6,7 +6,7 @@
 # M7 Stage 3 (2026-04-25): a recovery script using plain `set -euo pipefail` died silently
 # after Phase 3B because `set -e` terminates on any non-zero exit without printing context.
 # Lost hours diagnosing which phase failed and why.
-# See: ~/.claude/projects/-home-krolik/memory/feedback_set_e_recovery_scripts.md
+# See: ~/.claude/projects/-home-user/memory/feedback_set_e_recovery_scripts.md
 #
 # RULES THIS TEMPLATE ENFORCES
 # -----------------------------

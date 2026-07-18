@@ -2,7 +2,7 @@
 Unit tests for cat-5 exclusion + dual-track reporting (M9 Stream 3).
 
 Run:
-    cd /home/krolik/src/MemDB
+    cd /home/user/src/MemDB
     python3 -m pytest evaluation/locomo/tests/test_cat5_exclusion.py -v
 """
 

@@ -4,7 +4,7 @@
 
 - Phase 2a discovery: go-search MCP was offline; fell back to direct repo clone + Bash grep per banked fallback rule
 - Phase 2b structural analysis: go-code MCP (`explore`) on cloned repos + Bash file reads for key techniques
-- Repos cloned to `/home/krolik/src/compete-research/<name>/` (depth 1)
+- Repos cloned to `/home/user/src/compete-research/<name>/` (depth 1)
 - Bias: ranked by F1 lift potential per engineering effort, not by buzz/stars
 - Benchmark numbers sourced from: Memobase LoCoMo README (`docs/experiments/locomo-benchmark/README.md`), mem0 paper arXiv:2504.19413, docs/competitive/2026-04-search-pipeline-vs-rivals.md
 

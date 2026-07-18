@@ -56,7 +56,7 @@ Closes pre-D follow-ups without changing retrieval behaviour:
 - **F7** — Drop legacy `public.*` duplicate tables via migration 0010 (PR #30).
 - **E1** — memdb-go embedder wraps HTTP calls in `withRetry` — exp backoff on 30s timeout, 429, 503, 502, 504 (PR #32).
 - **E2** — embed-server queue-depth gauge + batch-wait histogram + 429 backpressure at 80% MAX_QUEUE_SIZE (ox-embed-server #14). Closed-loop: E1 retries E2's 429.
-- **E3** — Prometheus alert rules for EmbedQueueSaturation / EmbedRejections / EmbedHighLatency / EmbedBatchWaitHigh (krolik-server #9).
+- **E3** — Prometheus alert rules for EmbedQueueSaturation / EmbedRejections / EmbedHighLatency / EmbedBatchWaitHigh (deploy-config #9).
 
 | Metric | post-P1 | post-follow-ups | Delta |
 |---|---|---|---|
@@ -145,7 +145,7 @@ D3 shipped correctly; measurement is gated on sample size, not implementation.
 
 Env-gated `MEMDB_SEARCH_ENHANCE=true`. LLM distills top-5 memories into a synthetic `EnhancedAnswer` item inserted at rank 0 with source_ids + confidence.
 
-**Blocker fix en route**: discovered `MEMDB_LLM_SEARCH_MODEL` defaulted to `gemini-2.0-flash` (unknown at cliproxyapi → 500) → silent no-op. Added `gemini-2.5-flash-lite` default + compose pass-through (krolik-server#14).
+**Blocker fix en route**: discovered `MEMDB_LLM_SEARCH_MODEL` defaulted to `gemini-2.0-flash` (unknown at cliproxyapi → 500) → silent no-op. Added `gemini-2.5-flash-lite` default + compose pass-through (deploy-config#14).
 
 | Metric | D1-OFF | D10-ON (real) | Delta |
 |---|---|---|---|
@@ -166,7 +166,7 @@ Env-gated `MEMDB_SEARCH_ENHANCE=true`. LLM distills top-5 memories into a synthe
 
 ### 2026-04-24 — D4 + D5 + D10 combined (full Phase D retrieval-side on)
 
-All six Phase D retrieval-side toggles live. LLM_SEARCH_MODEL propagation fixed (krolik-server#14).
+All six Phase D retrieval-side toggles live. LLM_SEARCH_MODEL propagation fixed (deploy-config#14).
 
 | Metric | Baseline (post-P1) | All-D-ON | Delta |
 |---|---|---|---|
@@ -293,7 +293,7 @@ Sample variance on 10 QAs dominates the F1/EM gap. On retrieval recall (hit@20) 
 
 ### 2026-04-24 — M4 tuning grid + combo chat-mode ← **+8× F1 aggregate**
 
-**M4 part 1** (PR #55) — exposed 12 hyperparams as env-readable with bounded validation + silent fallback: `MEMDB_D10_MIN_RELATIVITY`, `MEMDB_D5_SHORTLIST_SIZE`, `MEMDB_D5_MAX_INPUT_SIZE`, `MEMDB_D2_MAX_HOP`, `MEMDB_D2_HOP_DECAY`, `MEMDB_D3_MIN_CLUSTER_RAW`, `MEMDB_D3_MIN_CLUSTER_EPISODIC`, `MEMDB_D3_COS_THRESHOLD_RAW`, `MEMDB_D3_COS_THRESHOLD_EPISODIC`, `MEMDB_D1_BOOST_SEMANTIC`, `MEMDB_D1_BOOST_EPISODIC`, `MEMDB_D1_HALF_LIFE_DAYS`. Compose (krolik-server#18) wires them through to memdb-go container.
+**M4 part 1** (PR #55) — exposed 12 hyperparams as env-readable with bounded validation + silent fallback: `MEMDB_D10_MIN_RELATIVITY`, `MEMDB_D5_SHORTLIST_SIZE`, `MEMDB_D5_MAX_INPUT_SIZE`, `MEMDB_D2_MAX_HOP`, `MEMDB_D2_HOP_DECAY`, `MEMDB_D3_MIN_CLUSTER_RAW`, `MEMDB_D3_MIN_CLUSTER_EPISODIC`, `MEMDB_D3_COS_THRESHOLD_RAW`, `MEMDB_D3_COS_THRESHOLD_EPISODIC`, `MEMDB_D1_BOOST_SEMANTIC`, `MEMDB_D1_BOOST_EPISODIC`, `MEMDB_D1_HALF_LIFE_DAYS`. Compose (deploy-config#18) wires them through to memdb-go container.
 
 **Grid sweep** (skip-chat mode, 50 QAs): all runs within noise (F1 0.0067-0.0069). skip-chat can't resolve D10/D5 contribution because scoring aggregates across 20 items instead of reading rank-0 synthetic.
 
@@ -1010,7 +1010,7 @@ Final F1 = **0.284** (chat-50 stratified, conv-26, 50 QAs). +**80% relative** vs
 
 **6 PRs merged** (MemDB main): #277 SPLADE hybrid · #278 CE no-retry/FTS/floor · #279 brevity prompt · #280 milestones · #281 atomic demote · #282 eval telemetry. **embed-server PR #21** open (Phase H.1-H.4+H.7).
 
-**Validated architectural findings** (full list in `~/.claude/projects/-home-krolik/memory/project_karpathy_rerank_optimization_2026-05-01.md`):
+**Validated architectural findings** (full list in `~/.claude/projects/-home-user/memory/project_karpathy_rerank_optimization_2026-05-01.md`):
 - `rerank.WithRetry(NoRetry)` from go-search prior art killed 84% degraded fallback → 1%
 - Cross-encoder pairs are independent → batched coalesce does NOT amortize linearly. pool=1+INTRA=4+WAIT=100 measured WORSE → reverted
 - ModernBERT INT8 NOT viable on ARM (90 DynamicQuantizeLinear ops + RMSNorm chains; q4f16 fails on com.microsoft.Gelu fp16 CPU EP)

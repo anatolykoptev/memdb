@@ -6,7 +6,7 @@ No external dependencies.
 ## Prerequisites
 
 - Go 1.21+
-- MemDB running: `cd ~/deploy/krolik-server && docker compose up -d`
+- MemDB running: `cd ~/deploy/server-config && docker compose up -d`
 
 ## Run
 

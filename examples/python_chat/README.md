@@ -21,7 +21,7 @@ shared message history) Claude recalls it via the MemDB-backed memory tool.
 - Python 3.10+
 - MemDB running locally (`http://localhost:8080`):
   ```bash
-  cd ~/deploy/krolik-server && docker compose up -d
+  cd ~/deploy/server-config && docker compose up -d
   ```
 - An Anthropic API key.
 

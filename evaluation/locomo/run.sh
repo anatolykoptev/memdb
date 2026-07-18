@@ -57,7 +57,7 @@ CATEGORIES_FLAG="--categories=${LOCOMO_CATEGORIES}"
 echo "==> checking memdb-go at $MEMDB_URL"
 if ! curl -sf --max-time 5 "$MEMDB_URL/health" >/dev/null 2>&1; then
     echo "!! memdb-go not reachable at $MEMDB_URL/health"
-    echo "!! start it first: cd ~/deploy/krolik-server && docker compose up -d memdb-go"
+    echo "!! start it first: cd ~/deploy/server-config && docker compose up -d memdb-go"
     exit 2
 fi
 

@@ -40,7 +40,7 @@ def check_memdb() -> None:
     except Exception as exc:  # noqa: BLE001 — startup probe, surface anything
         print(f"ERROR: MemDB not reachable at {MEMDB_URL}: {exc}", file=sys.stderr)
         print(
-            "Start it with: cd ~/deploy/krolik-server && docker compose up -d",
+            "Start it with: cd ~/deploy/server-config && docker compose up -d",
             file=sys.stderr,
         )
         sys.exit(1)

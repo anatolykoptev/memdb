@@ -41,7 +41,7 @@ src/                ← Python legacy (MemDB package), being phased out
 
 For Claude Code integration, use **stdio proxy** (avoids Postgres dependency on host):
 ```
-/home/krolik/bin/mcp-stdio-proxy --url http://127.0.0.1:8001/mcp
+/home/user/bin/mcp-stdio-proxy --url http://127.0.0.1:8001/mcp
 ```
 
 MCP tools (all native Go after Phase 5):
@@ -59,7 +59,7 @@ cd memdb-go && CGO_ENABLED=0 go build -o mcp-server ./cmd/mcp-server
 cd memdb-go && go build -o memdb-go ./cmd/server
 
 # Build stdio proxy (no CGO)
-cd memdb-go && CGO_ENABLED=0 go build -o /home/krolik/bin/mcp-stdio-proxy ./cmd/mcp-stdio-proxy
+cd memdb-go && CGO_ENABLED=0 go build -o /home/user/bin/mcp-stdio-proxy ./cmd/mcp-stdio-proxy
 
 # Run tests
 cd memdb-go && go test ./internal/...
@@ -77,7 +77,7 @@ Watch dozor logs: `journalctl --user -u dozor -f | grep memdb`.
 
 Manual `docker compose build` is only allowed for: hot-fix without push, build-flag debugging, or when dozor is down. In those cases use:
 ```bash
-cd ~/deploy/krolik-server && docker compose build memdb-go memdb-mcp && \
+cd ~/deploy/server-config && docker compose build memdb-go memdb-mcp && \
   docker compose up -d --no-deps --force-recreate memdb-go memdb-mcp
 ```
 
@@ -96,7 +96,7 @@ cd ~/deploy/krolik-server && docker compose build memdb-go memdb-mcp && \
 
 ## ONNX Model Optimization
 
-Models in `~/deploy/krolik-server/models/` are **graph-optimized** (O3 fusion: SkipLayerNormalization, Gelu). This gave ~300x speedup on ARM Neoverse-N1.
+Models in `~/deploy/server-config/models/` are **graph-optimized** (O3 fusion: SkipLayerNormalization, Gelu). This gave ~300x speedup on ARM Neoverse-N1.
 
 **When adding or updating ONNX models, ALWAYS optimize before deploying:**
 

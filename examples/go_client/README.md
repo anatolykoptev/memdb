@@ -17,7 +17,7 @@ This mirrors the contract documented in [docs/API.md](../../docs/API.md).
 - Go 1.21+
 - MemDB running locally:
   ```bash
-  cd ~/deploy/krolik-server && docker compose up -d
+  cd ~/deploy/server-config && docker compose up -d
   ```
 
 ## Run

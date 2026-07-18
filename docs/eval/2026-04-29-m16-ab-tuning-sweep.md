@@ -146,7 +146,7 @@ It does **not** help cat-3 temporal or cat-5 adversarial — those don't bottlen
 
 ## 7. Decision
 
-**Lock `MEMDB_D10_MIN_RELATIVITY=0.3` permanently in `~/deploy/krolik-server/.env`.** No other tuning knobs from this sweep are worth carrying forward.
+**Lock `MEMDB_D10_MIN_RELATIVITY=0.3` permanently in `~/deploy/server-config/.env`.** No other tuning knobs from this sweep are worth carrying forward.
 
 Do not stack pr_boost or thresh07 — they are statistical artifacts on n=40. The 5× variance reduction of d10_loose vs baseline, combined with consistent +20pp cat-1 across 3 independent runs, is the only signal large enough to survive the variance ceiling.
 

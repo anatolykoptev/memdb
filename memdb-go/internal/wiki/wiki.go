@@ -29,7 +29,7 @@ import (
 
 const (
 	// uploadsService is the canonical service name under $UPLOADS_ROOT
-	// where wiki pages are mirrored. Aligns with the krolik-server
+	// where wiki pages are mirrored. Aligns with the deploy-config
 	// uploads convention documented in CLAUDE.md.
 	uploadsService = "memdb-go"
 	// uploadsBucketPrefix is the per-cube parent under the service

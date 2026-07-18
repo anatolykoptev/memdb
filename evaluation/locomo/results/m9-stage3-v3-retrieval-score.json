@@ -1,7 +1,7 @@
 {
   "meta": {
     "commit_sha": "7a058c794a122aea84dfd5f4995e56a9118c634d",
-    "predictions_file": "/home/krolik/src/MemDB/evaluation/locomo/results/m9-stage3-v3-retrieval.json",
+    "predictions_file": "/home/user/src/MemDB/evaluation/locomo/results/m9-stage3-v3-retrieval.json",
     "retrieval_only": false,
     "semsim_mode": "bow",
     "exclude_categories": [

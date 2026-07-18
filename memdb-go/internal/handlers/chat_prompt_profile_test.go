@@ -323,10 +323,10 @@ func TestProfileCubeIDForRequest_PrecedenceMemCube(t *testing.T) {
 // TestProfileCubeIDForRequest_PrecedenceUserID verifies the legacy single-tenant
 // fallback (cube_id == user_id) when neither readable cubes nor MemCubeID set.
 func TestProfileCubeIDForRequest_PrecedenceUserID(t *testing.T) {
-	user := "krolik"
+	user := "host-a"
 	req := &nativeChatRequest{UserID: &user}
-	if got := profileCubeIDForRequest(req); got != "krolik" {
-		t.Errorf("UserID fallback should win, got %q want krolik", got)
+	if got := profileCubeIDForRequest(req); got != "host-a" {
+		t.Errorf("UserID fallback should win, got %q want host-a", got)
 	}
 }
 

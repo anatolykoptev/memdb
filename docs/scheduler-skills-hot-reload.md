@@ -10,24 +10,24 @@ This is symmetric to the existing `MEMDB_D10_SKILL_PATH` and `MEMDB_ATOMIC_SKILL
 
 ## Activation
 
-1. Add to `~/deploy/krolik-server/.env`:
+1. Add to `~/deploy/server-config/.env`:
 
 ```
 MEMDB_SCHEDULER_SKILLS_DIR=/host-skills/scheduler
 ```
 
-The compose volume `/home/krolik/deploy/krolik-server/skills:/host-skills:ro` is already present; no compose change needed.
+The compose volume `~/deploy/server-config/skills:/host-skills:ro` is already present; no compose change needed.
 
 2. Create a skill override directory:
 
 ```bash
-mkdir -p /home/krolik/deploy/krolik-server/skills/scheduler/memory-consolidator
+mkdir -p ~/deploy/server-config/skills/scheduler/memory-consolidator
 ```
 
 3. Drop a `SKILL.md` with YAML frontmatter at that path:
 
 ```bash
-cat > /home/krolik/deploy/krolik-server/skills/scheduler/memory-consolidator/SKILL.md <<'EOF'
+cat > ~/deploy/server-config/skills/scheduler/memory-consolidator/SKILL.md <<'EOF'
 ---
 name: memory-consolidator
 description: Custom override for memory-consolidator scheduler prompt

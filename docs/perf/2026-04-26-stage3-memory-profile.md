@@ -15,7 +15,7 @@ the next Stage 3 run (M8 Stream 6 / MEASURE) and what to look for.
 
 ```bash
 # 1. Grab heap snapshot during ingest (while conversations are being ingested)
-SERVICE_SECRET="$(grep INTERNAL_SERVICE_SECRET ~/deploy/krolik-server/.env | cut -d= -f2)"
+SERVICE_SECRET="$(grep INTERNAL_SERVICE_SECRET ~/deploy/server-config/.env | cut -d= -f2)"
 curl -s -H "X-Service-Secret: $SERVICE_SECRET" \
      http://127.0.0.1:8080/debug/pprof/heap \
      > /tmp/heap-$(date +%Y%m%d-%H%M%S).pb.gz

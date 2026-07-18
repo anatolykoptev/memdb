@@ -12,7 +12,7 @@ This directory has copy-paste-ready config for the three most common clients.
 MemDB stack running locally:
 
 ```bash
-cd ~/deploy/krolik-server && docker compose up -d
+cd ~/deploy/server-config && docker compose up -d
 curl http://127.0.0.1:8001/health   # {"status":"ok"}
 ```
 

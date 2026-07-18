@@ -265,7 +265,7 @@ change — `^v2` ranges no longer satisfy the latest release.
 
 **Plus** three full pre-D phases (A observability, B integrity, C code quality), production-grade schema migration runner, embed-server resilience stack, and critical write-path unblock that restored retrieval from hit@20=0.000 to 0.700.
 
-**Infrastructure**: 38 PRs merged in memdb, 15 in krolik-server, 1 in ox-embed-server. ~5000 LOC new Go code. 15 versioned migrations. LoCoMo eval baseline: `hit@20=0.700` (above Mem0/MemOS published numbers).
+**Infrastructure**: 38 PRs merged in memdb, 15 in deploy-config, 1 in ox-embed-server. ~5000 LOC new Go code. 15 versioned migrations. LoCoMo eval baseline: `hit@20=0.700` (above Mem0/MemOS published numbers).
 
 ### Added — Phase D LoCoMo intelligence
 

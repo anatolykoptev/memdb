@@ -6,7 +6,7 @@ No SDK — every call is a visible `POST` to the REST API.
 ## Prerequisites
 
 - Python 3.9+
-- MemDB running: `cd ~/deploy/krolik-server && docker compose up -d`
+- MemDB running: `cd ~/deploy/server-config && docker compose up -d`
 
 ## Run
 

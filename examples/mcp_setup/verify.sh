@@ -14,7 +14,7 @@ RPC_URL="${MCP_BASE}/mcp"
 echo "1. Probing ${HEALTH_URL}"
 if ! curl -fsS --max-time 5 "${HEALTH_URL}" >/dev/null; then
     echo "  FAIL — memdb-mcp is not reachable. Start the stack:"
-    echo "    cd ~/deploy/krolik-server && docker compose up -d"
+    echo "    cd ~/deploy/server-config && docker compose up -d"
     exit 1
 fi
 echo "  ok"

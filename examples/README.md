@@ -3,7 +3,7 @@
 All examples assume MemDB is running locally:
 
 ```bash
-cd ~/deploy/krolik-server && docker compose up -d
+cd ~/deploy/server-config && docker compose up -d
 ```
 
 The Go API gateway listens on `http://localhost:8080`.

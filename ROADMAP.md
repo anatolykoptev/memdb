@@ -49,7 +49,7 @@ convention) — up from 70.0% in v0.22.0 (+2.5pp). Position: between MemOS
 | **M11 14-stream sprint** | F7 temporal index, F8 atomic per-fact extraction (mem0 ADDITIVE), F11 bi-temporal edges (Graphiti/Zep), F12 linked_memory_ids resolver, F14 Personalized PageRank (HippoRAG 2), F2 reflection-loop, F9 recall budget tuning, F3 event extraction + 4 followup buckets. Measured 41.5% headline → regression vs M10 chat-50 stratified (72.5%). | 2026-04-28 |
 | **M12 recovery** | M12.1 harness ts-prefix fix, M12.2 chat prompt softening, M12.5 observability metrics, M12.6 staged rerank bge-reranker backend, M12.7 LLM Judge revival (60% top-1 swap rate), M12.11 go-kit/embed extraction, agtype migration cycle (PR #167), bfs_expand 1830× index speedup (PR #169). | 2026-04-29 |
 | **M13 evaluation harness v2 (industrial-grade)** | J1 core judge robustness, J2 programmatic judges per cat (numeric/temporal/multi-fact), J5 statistical rigor (bootstrap CI, McNemar, Cohen's κ), J3-Q multi-query expansion (HyDE-style; replaces J3 ensemble), W1 go-kit/rerank v2 wire-up. Open-source harness + arXiv methodology paper planned. | 2026-04-29 |
-| **M14 MathReranker integration** | A1 Stage-0 pre-CE diversity prefilter (PR #183 — λ=0.5, env-gated), B1 CE precompute background prefilter (PR #182 — env-gated), go-kit v0.29.0 bump (subsumed PR #181). Both env-gated default OFF; opt-in via `~/deploy/krolik-server/.env`. | 2026-04-29 |
+| **M14 MathReranker integration** | A1 Stage-0 pre-CE diversity prefilter (PR #183 — λ=0.5, env-gated), B1 CE precompute background prefilter (PR #182 — env-gated), go-kit v0.29.0 bump (subsumed PR #181). Both env-gated default OFF; opt-in via `~/deploy/server-config/.env`. | 2026-04-29 |
 
 Phase D measured delta on `chat/complete` end-to-end (1 conv, 10 cat-1 QAs):
 F1 0.143 (+14x vs retrieval-only baseline), semsim 0.150 (+3.3x), hit@20 0.700.
@@ -58,11 +58,11 @@ M9 Stage 3 v3 completed the full-corpus run (1986 QA, 10 conversations) — see
 
 ## Post-merge ops checklist (M14)
 
-Track: enable M14 features in production env after PR merge + dozor auto-deploy. **All flags default OFF in code.** Flip in `~/deploy/krolik-server/.env`, then `docker compose restart memdb-go memdb-mcp` (env reload only — no rebuild). Owner: controller.
+Track: enable M14 features in production env after PR merge + dozor auto-deploy. **All flags default OFF in code.** Flip in `~/deploy/server-config/.env`, then `docker compose restart memdb-go memdb-mcp` (env reload only — no rebuild). Owner: controller.
 
 ### B1 — CE precompute background math prefilter (PR #182, safe to enable on merge)
 
-Add to `~/deploy/krolik-server/.env`:
+Add to `~/deploy/server-config/.env`:
 
 ```bash
 # M14 B1 — drop low-cosine pairs before bge-reranker call
@@ -85,7 +85,7 @@ Plan:
 1. Merge #183 with default OFF (no behavior change).
 2. Run A/B: 50 LoCoMo QA each with `MEMDB_RERANK_MATH_PREFILTER=1 MEMDB_RERANK_MATH_LAMBDA=0.5` vs unset.
 3. Compare cat-1 (multi-fact aggregation) headline. Hypothesis: +2-3pp.
-4. If positive, add to `~/deploy/krolik-server/.env`:
+4. If positive, add to `~/deploy/server-config/.env`:
 
 ```bash
 # M14 A1 — Stage-0 cosine+MMR diversity-aware pre-CE prefilter

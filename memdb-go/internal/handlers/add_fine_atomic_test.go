@@ -209,7 +209,7 @@ func TestLiftAtomicDiscriminators_NoOpOnNonAtomic(t *testing.T) {
 // TestAtomicAndLegacyCoexistInProperties simulates the F8 acceptance #5
 // requirement at the JSONB level: a row with kind=atomic_fact and a row
 // without it produce distinct values for the generated `kind` column. We
-// don't run a livepg test here (requires the krolik-postgres-age image);
+// don't run a livepg test here (requires the memdb-postgres-age image);
 // instead we verify the property builder hands distinct shapes to the DB
 // layer, which the migration's COALESCE expression resolves to the right
 // kind values at query time.

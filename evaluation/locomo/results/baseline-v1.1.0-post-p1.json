@@ -1,7 +1,7 @@
 {
   "meta": {
     "commit_sha": "74659311d60347a19c44a5baf713d8fed764449a",
-    "predictions_file": "/home/krolik/src/MemDB/evaluation/locomo/results/predictions-post-p1-write-fix-74659311.json",
+    "predictions_file": "/home/user/src/MemDB/evaluation/locomo/results/predictions-post-p1-write-fix-74659311.json",
     "retrieval_only": true,
     "semsim_mode": "bow",
     "memdb_url": "http://localhost:8080",

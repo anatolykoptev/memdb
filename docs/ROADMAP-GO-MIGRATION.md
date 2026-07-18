@@ -1,14 +1,14 @@
 # MemDB Go Migration Roadmap — ✅ COMPLETE 2026-04-26
 
-> Перевод memdb-api (Python) → memdb-go. **Migration finished**: Python container shut down 2026-04-26 после M9 Stream 8 (PR memdb#93 + krolik-server#21). Стек pure-Go: postgres + redis + qdrant + embed-server + memdb-go + memdb-mcp.
+> Перевод memdb-api (Python) → memdb-go. **Migration finished**: Python container shut down 2026-04-26 после M9 Stream 8 (PR memdb#93 + deploy-config#21). Стек pure-Go: postgres + redis + qdrant + embed-server + memdb-go + memdb-mcp.
 >
 > _Составлен: февраль 2026. Обновлён: 2026-04-26 (Phase 5 complete, post-shutdown verification)._
 >
-> **Финальный empirical state**: `docker ps` больше не показывает `memdb-api`. Контейнер остановлен `docker stop memdb-api && docker rm memdb-api` после merge krolik-server#21 (compose: memdb-api block commented, depends_on cleaned). Перед shutdown: 2 days uptime, 0 non-/health requests — Python был idle. После shutdown: ноль регрессий, memdb-go продолжает обслуживать прод.
+> **Финальный empirical state**: `docker ps` больше не показывает `memdb-api`. Контейнер остановлен `docker stop memdb-api && docker rm memdb-api` после merge deploy-config#21 (compose: memdb-api block commented, depends_on cleaned). Перед shutdown: 2 days uptime, 0 non-/health requests — Python был idle. После shutdown: ноль регрессий, memdb-go продолжает обслуживать прод.
 >
 > **Что произошло сегодня (M9 Phase 5)**:
 > 1. **memdb#93** (`chore: phase 5 python shutdown`) — конвертировал 43 proxy-call sites (24 `proxyWithBody` + 19 `ProxyToProduct`) → HTTP 503 (safety-net) или 422 (3 complex-filter edge cases). Удалены оба метода `proxyWithBody` и `ProxyToProduct`. `phase5_shutdown_test.go` — 10 unit тестов через httptest.
-> 2. **krolik-server#21** (`chore(memdb): shutdown memdb-api python container`) — закомментировал `memdb-api` блок в `compose/memdb.yml`, убрал из `depends_on` у memdb-go и memdb-mcp. Persist'нул M8 mem bumps (GOMEMLIMIT 4915MiB, mem_limit 6144M, mem_swappiness 0).
+> 2. **deploy-config#21** (`chore(memdb): shutdown memdb-api python container`) — закомментировал `memdb-api` блок в `compose/memdb.yml`, убрал из `depends_on` у memdb-go и memdb-mcp. Persist'нул M8 mem bumps (GOMEMLIMIT 4915MiB, mem_limit 6144M, mem_swappiness 0).
 > 3. **Manual cleanup**: `docker stop memdb-api && docker rm memdb-api` (compose CLI больше не знал service после уборки из YAML).
 >
 > **Связанные roadmap (продолжают развиваться, не migration)**:
@@ -121,10 +121,10 @@
 
 | Фича | PR / Commit |
 |------|-------------|
-| **A1** Memory-write heartbeat counter `memdb.memory.added_total{type,cube_id}` + Prometheus alert `SilentMemoryStall` | memdb#12, krolik-server#7 |
+| **A1** Memory-write heartbeat counter `memdb.memory.added_total{type,cube_id}` + Prometheus alert `SilentMemoryStall` | memdb#12, deploy-config#7 |
 | **A2** Buffer-flush error counter `memdb.buffer.flush_errors_total{reason}` + alert `BufferFlushBurst` | memdb#13 |
 | **A3** Drift counter pre-registration на startup (`dbMx()` touched в `RunMigrations`) | memdb#14, memdb#16 |
-| **A4** Prometheus scrape target `memdb-go:8080`; `/metrics` exempt from auth | memdb#15, krolik-server#8 |
+| **A4** Prometheus scrape target `memdb-go:8080`; `/metrics` exempt from auth | memdb#15, deploy-config#8 |
 | **A5** Reset 0001 SHA baseline на прод после F3 edit (one-time expected drift) | op-task |
 
 ### Phase B — Integrity (апрель 2026) ✅
@@ -177,7 +177,7 @@
 |---|------|----|
 | **E1** memdb-go embedder: `withRetry` wrapper на 30s timeout + 429/503/502/504 exp backoff | memdb#32 |
 | **E2** embed-server: `embed_queue_depth_current` gauge + `embed_queue_full_rejected_total` counter + `embed_batch_wait_ms` histogram + 429 backpressure gate at 80% capacity | ox-embed-server#14 |
-| **E3** Prometheus alert rules: `EmbedQueueSaturation`, `EmbedRejections`, `EmbedHighLatency`, `EmbedBatchWaitHigh` | krolik-server#9 |
+| **E3** Prometheus alert rules: `EmbedQueueSaturation`, `EmbedRejections`, `EmbedHighLatency`, `EmbedBatchWaitHigh` | deploy-config#9 |
 
 ### LoCoMo evaluation baseline (апрель 2026) ✅
 

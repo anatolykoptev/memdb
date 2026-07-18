@@ -93,7 +93,7 @@ Full run (all 10 convs) → `LOCOMO_FULL=1 make eval-locomo`. Expect
 ### Prerequisites
 
 1. **memdb-go running** at `http://localhost:8080` (or set `MEMDB_URL`).
-   Easiest: `cd ~/deploy/krolik-server && docker compose up -d memdb-go`.
+   Easiest: `cd ~/deploy/server-config && docker compose up -d memdb-go`.
 2. **Auth.** memdb-go requires `Authorization: Bearer` or `X-Service-Secret`.
    Set either:
    - `MEMDB_API_KEY=<plain-master-key>` — Bearer token (matches
@@ -107,7 +107,7 @@ Full run (all 10 convs) → `LOCOMO_FULL=1 make eval-locomo`. Expect
 ### Quick run (sample)
 
 ```bash
-cd /home/krolik/src/MemDB
+cd /home/user/src/MemDB
 make eval-locomo
 ```
 
@@ -157,7 +157,7 @@ python3 evaluation/locomo/score.py \
 
 `evaluation/locomo/run.sh` orchestrates the full flow. It assumes
 memdb-go + postgres + embed-server + redis are **already up** (docker
-compose stack in `~/deploy/krolik-server`). Spinning up a fully
+compose stack in `~/deploy/server-config`). Spinning up a fully
 ephemeral stack with all four services is deferred — see TODO below.
 
 ## How to compare baselines
