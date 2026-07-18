@@ -39,7 +39,13 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 		h.logger.Warn("fine add: atomic extractor failed, falling back to fast",
 			slog.String("cube_id", cubeID),
 			slog.Any("error", err))
-		return h.nativeFastAddForCube(ctx, req, cubeID)
+		items, fbErr := h.nativeFastAddForCube(ctx, req, cubeID)
+		if fbErr == nil {
+			for i := range items {
+				items[i].Degraded = true
+			}
+		}
+		return items, fbErr
 	}
 	if len(req.Messages) == 0 {
 		return nil, nil
@@ -70,7 +76,13 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 			h.logger.Warn("fine add: legacy extractor failed, falling back to fast",
 				slog.String("cube_id", cubeID),
 				slog.Any("error", err))
-			return h.nativeFastAddForCube(ctx, req, cubeID)
+			items, fbErr := h.nativeFastAddForCube(ctx, req, cubeID)
+			if fbErr == nil {
+				for i := range items {
+					items[i].Degraded = true
+				}
+			}
+			return items, fbErr
 		}
 		return nil, err
 	}
