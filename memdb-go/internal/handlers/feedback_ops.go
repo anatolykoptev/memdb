@@ -49,6 +49,14 @@ func (h *Handler) processKeywordReplace(ctx context.Context, cubeID string, resu
 			h.logger.Debug("keyword replace: update failed", slog.String("id", id), slog.Any("error", err))
 			continue
 		}
+		// PF-4 (#321): invalidate CE cache after text change — stale ce_score_topk
+		// causes incorrect rerank. Best-effort, Error log (stale cache is a correctness bug).
+		if err := h.postgres.ClearCEScoresTopK(ctx, id); err != nil {
+			h.logger.Error("keyword replace: ClearCEScoresTopK failed (best-effort)", slog.String("id", id), slog.Any("error", err))
+		}
+		if err := h.postgres.ClearCEScoresTopKForNeighbor(ctx, id); err != nil {
+			h.logger.Error("keyword replace: ClearCEScoresTopKForNeighbor failed (best-effort)", slog.String("id", id), slog.Any("error", err))
+		}
 		updated++
 	}
 
@@ -256,6 +264,14 @@ func (h *Handler) executeMemoryOps(ctx context.Context, cubeID, userID string, o
 			if err := h.postgres.UpdateMemoryNodeFull(ctx, op.ID, op.Text, embVec, now); err != nil {
 				h.logger.Debug("feedback: update memory failed", slog.String("id", op.ID), slog.Any("error", err))
 			} else {
+				// PF-4 (#321): invalidate CE cache after text change — stale ce_score_topk
+				// causes incorrect rerank. Best-effort, Error log (stale cache is a correctness bug).
+				if err := h.postgres.ClearCEScoresTopK(ctx, op.ID); err != nil {
+					h.logger.Error("feedback: ClearCEScoresTopK failed (best-effort)", slog.String("id", op.ID), slog.Any("error", err))
+				}
+				if err := h.postgres.ClearCEScoresTopKForNeighbor(ctx, op.ID); err != nil {
+					h.logger.Error("feedback: ClearCEScoresTopKForNeighbor failed (best-effort)", slog.String("id", op.ID), slog.Any("error", err))
+				}
 				h.logger.Debug("feedback: updated memory", slog.String("id", op.ID))
 			}
 		}

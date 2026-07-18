@@ -18,10 +18,10 @@ import (
 )
 
 const (
-	consolidateLogPreviewLen = 80  // chars of merged text to log as preview
-	consolidateLLMMaxTokens      = 512 // max_tokens for consolidation LLM call
-	consolidateLLMMaxTokensPair  = 192 // max_tokens for 2-node cluster (short JSON response)
-	consolidateErrTruncLen   = 200 // max chars of error LLM output to include in error message
+	consolidateLogPreviewLen    = 80  // chars of merged text to log as preview
+	consolidateLLMMaxTokens     = 512 // max_tokens for consolidation LLM call
+	consolidateLLMMaxTokensPair = 192 // max_tokens for 2-node cluster (short JSON response)
+	consolidateErrTruncLen      = 200 // max chars of error LLM output to include in error message
 
 	// maxClusterSize caps how many memories are sent to the LLM in one
 	// consolidation call. Larger clusters are split into chunks of this size
@@ -203,6 +203,16 @@ func (r *Reorganizer) consolidateCluster(ctx context.Context, cubeID string, clu
 
 	if err := r.postgres.UpdateMemoryNodeFull(ctx, keepID, result.MergedText, embVec, now); err != nil {
 		return fmt.Errorf("update keep node %s: %w", keepID, err)
+	}
+	// PF-4 (#321): invalidate CE cache after text change — stale ce_score_topk
+	// causes incorrect rerank. Best-effort, Error log (stale cache is a correctness bug).
+	if err := r.postgres.ClearCEScoresTopK(ctx, keepID); err != nil {
+		r.logger.ErrorContext(ctx, "consolidate: ClearCEScoresTopK failed (best-effort)",
+			slog.String("id", keepID), slog.Any("error", err))
+	}
+	if err := r.postgres.ClearCEScoresTopKForNeighbor(ctx, keepID); err != nil {
+		r.logger.ErrorContext(ctx, "consolidate: ClearCEScoresTopKForNeighbor failed (best-effort)",
+			slog.String("id", keepID), slog.Any("error", err))
 	}
 	r.logger.DebugContext(ctx, "reorganizer: updated keep node",
 		slog.String("id", keepID),
