@@ -113,6 +113,12 @@ const (
 
 	// llmTruncateLen is the max characters of raw LLM output shown in error messages.
 	llmTruncateLen = 200
+
+	// reorgMaxBackgroundGoroutines caps the number of concurrent fire-and-forget
+	// goroutines (episodic summary, entity linking) spawned by the reorganizer.
+	// Without a cap, a burst of 1000 mem_read tasks spawns 1000 goroutines each
+	// holding an LLM/embed HTTP connection for 15-45s → goroutine pileup.
+	reorgMaxBackgroundGoroutines = 8
 )
 
 // Reorganizer detects near-duplicate LongTermMemory/UserMemory nodes for a
@@ -136,6 +142,7 @@ type Reorganizer struct {
 	cacheInvalidator CacheInvalidator  // nil = cache invalidation disabled
 	useHNSW          bool              // route FindNearDuplicates through HNSW index
 	rerankClient     *rerank.Client    // M10 Stream 6: nil = CE precompute pass disabled
+	bgSem            chan struct{}     // bounded goroutine semaphore for fire-and-forget background work
 }
 
 // SetLLMExtractor injects the LLM extractor for fine-level mem_read processing.
@@ -165,12 +172,36 @@ func NewReorganizer(
 		wmCache:   wmCache,
 		llmClient: llmClient,
 		logger:    logger,
+		bgSem:     make(chan struct{}, reorgMaxBackgroundGoroutines),
 	}
 }
 
 // SetUseHNSW enables the HNSW-indexed FindNearDuplicates path.
 // Default false (legacy O(N²) self-join). Set via cfg.ReorgUseHNSW.
 func (r *Reorganizer) SetUseHNSW(v bool) { r.useHNSW = v }
+
+// goBounded launches a fire-and-forget goroutine through the reorganizer's
+// bounded semaphore. Non-blocking: if the semaphore is full, the goroutine
+// blocks on acquire until a slot frees up. The caller is never blocked.
+func (r *Reorganizer) goBounded(fn func()) {
+	go func() {
+		r.bgSem <- struct{}{}
+		defer func() { <-r.bgSem }()
+		fn()
+	}()
+}
+
+// validObservationDate checks that s is a real date in YYYY-MM-DD format.
+// Returns false for empty, malformed, or impossible dates (e.g. "2026-13-45").
+func validObservationDate(s string) bool {
+	if s == "" {
+		return false
+	}
+	if _, err := time.Parse("2006-01-02", s); err != nil {
+		return false
+	}
+	return true
+}
 
 // SetRerankClient injects the cross-encoder rerank client used by the
 // M10 Stream 6 CE precompute pass. nil = pass disabled (no-op).

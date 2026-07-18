@@ -33,7 +33,7 @@ import (
 // atomic resolver never fires and linked_memory_ids is always empty.
 // Running the GIN-index query on every search costs ~5ms × 123 calls = pure
 // overhead with zero benefit until the atomic ingest path is live.
-// Set MEMDB_F12_LINKED_EXPAND=1 to enable.
+// Set MEMDB_F12_LINKED_EXPAND=0 to disable (default ON).
 const linkedExpandEnvVar = "MEMDB_F12_LINKED_EXPAND"
 
 // linkedExpandFactor caps the post-expansion pool relative to the original
@@ -60,14 +60,13 @@ const linkedExpandLimit = 100
 // keeps ranking semantics consistent.
 const linkedExpandDecay = 0.85
 
-// linkedExpandEnabled reads MEMDB_F12_LINKED_EXPAND. Default OFF: only
-// "1" enables. Mirrors linkedResolverEnabled but lives in the search package
-// (the package boundary forbids cross-import to handlers).
-// Default OFF rationale: production ingest uses Python mode=raw, so the
-// atomic resolver never populates linked_memory_ids. Running the DB query on
-// every search yields zero results at ~5ms cost per call (M14.Y1 audit).
+// linkedExpandEnabled reads MEMDB_F12_LINKED_EXPAND. Default ON (aligned
+// with linkedResolverEnabled default ON): the expand query is cheap (~5ms,
+// GIN-indexed) and only fires when linked_memory_ids is non-empty, so it's
+// a no-op for Python mode=raw rows. Set MEMDB_F12_LINKED_EXPAND=0 to disable.
 func linkedExpandEnabled() bool {
-	return os.Getenv(linkedExpandEnvVar) == "1"
+	v := os.Getenv(linkedExpandEnvVar)
+	return v != "0" // default ON
 }
 
 // expandViaLinkedIDs is the F12 search-side 1-hop expansion. For each of

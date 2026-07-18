@@ -41,6 +41,12 @@ type addMetricsStruct struct {
 	// request still succeeds — caller gets fast-mode rows (no atomic /
 	// linked / event_dates metadata).
 	FineFallback metric.Int64Counter
+	// PF-6: hash dedup degraded — PG error on FilterExistingContentHashes.
+	HashDedupDegraded metric.Int64Counter
+	// PF-14: vector dedup error — PG error on VectorSearch in isDuplicate.
+	VectorDedupError metric.Int64Counter
+	// PF-23: WM cache VAdd failure — Redis write error.
+	WMCacheWriteFailed metric.Int64Counter
 }
 
 func addMx() *addMetricsStruct {
@@ -75,11 +81,22 @@ func addMx() *addMetricsStruct {
 		fineFb, _ := meter.Int64Counter("memdb.add.fine_fallback_total",
 			metric.WithDescription("Fine→fast resilience fallback when LLM extraction unavailable (reason=llm_timeout|circuit_open|canceled|llm_error|unknown)"),
 		)
+		hashDedup, _ := meter.Int64Counter("memdb.add.hash_dedup_degraded_total",
+			metric.WithDescription("Hash dedup degraded due to PG error on FilterExistingContentHashes (best-effort, request still succeeds)"),
+		)
+		vecDedup, _ := meter.Int64Counter("memdb.add.dedup_vector_error_total",
+			metric.WithDescription("Vector dedup error on VectorSearch in isDuplicate (best-effort fail-open, request still succeeds)"),
+		)
+		wmCache, _ := meter.Int64Counter("memdb.add.wm_cache_write_failed_total",
+			metric.WithDescription("WM cache VAdd failure (Redis write error, best-effort)"),
+		)
 		addInstruments = &addMetricsStruct{
 			Requests: reqs, Duration: dur, Memories: mems, EmbedBatchSize: batch,
 			StructuralEdges: structEdges, SameSessionCapped: capCounter,
 			StageDuration: stageDur, DuplicateDrop: dupDrop,
 			FineFallback: fineFb,
+			HashDedupDegraded: hashDedup, VectorDedupError: vecDedup,
+			WMCacheWriteFailed: wmCache,
 		}
 		// Pre-register zero observations so the time series exists before the
 		// first real request lands. Keeps Grafana panels alive on a cold start.

@@ -33,8 +33,9 @@ func computeHashes(memories []extractedMemory) []string {
 func (h *Handler) filterExistingHashes(ctx context.Context, hashes []string, cubeID string) map[string]bool {
 	existing, err := h.postgres.FilterExistingContentHashes(ctx, hashes, cubeID)
 	if err != nil {
-		h.logger.Debug("fast add: batch hash check failed (continuing without hash dedup)",
+		h.logger.Warn("fast add: batch hash check failed (continuing without hash dedup)",
 			slog.Any("error", err))
+		addMx().HashDedupDegraded.Add(ctx, 1)
 		return nil
 	}
 	return existing
@@ -83,7 +84,8 @@ func (h *Handler) isDuplicate(ctx context.Context, embedding []float32, cubeID, 
 	// still consider the next-best candidate within the same session.
 	results, err := h.postgres.VectorSearch(ctx, embedding, cubeID, cubeID, searchTypes, agentID, 3)
 	if err != nil {
-		h.logger.Debug("dedup vector search failed", slog.Any("error", err))
+		h.logger.Warn("dedup vector search failed", slog.Any("error", err))
+		addMx().VectorDedupError.Add(ctx, 1)
 		return false
 	}
 	sessionAware := sessionID != "" && fastDedupSessionAware()
@@ -173,7 +175,8 @@ func (h *Handler) writeWMCache(ctx context.Context, cubeID string, allNodes []db
 		}
 		if itemIdx < len(wmEmbeddings) && len(wmEmbeddings[itemIdx]) > 0 {
 			if err := h.wmCache.VAdd(ctx, cubeID, wm.ID, items[itemIdx].Memory, wmEmbeddings[itemIdx], ts); err != nil {
-				h.logger.Debug("fast add: vset write failed", slog.String("id", wm.ID), slog.Any("error", err))
+				h.logger.Warn("fast add: vset write failed", slog.String("id", wm.ID), slog.Any("error", err))
+				addMx().WMCacheWriteFailed.Add(ctx, 1)
 			}
 		}
 	}

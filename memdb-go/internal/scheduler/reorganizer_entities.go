@@ -43,7 +43,7 @@ func (r *Reorganizer) linkEntities(embedded []embeddedMemReadFact, cubeID, now s
 		return
 	}
 
-	go func() {
+	r.goBounded(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), entityLinkTimeout)
 		defer cancel()
 
@@ -53,7 +53,7 @@ func (r *Reorganizer) linkEntities(embedded []embeddedMemReadFact, cubeID, now s
 		}
 		r.logger.DebugContext(ctx, "mem_read entity link: complete",
 			slog.String("cube_id", cubeID), slog.Int("pairs", len(pairs)))
-	}()
+	})
 }
 
 // collectEntityPairs builds entityPair slice from embedded facts with entities.

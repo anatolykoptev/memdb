@@ -55,7 +55,13 @@ func (r *Reorganizer) createTierParent(ctx context.Context, cubeID string, clust
 	for i, n := range cluster {
 		items[i] = inputItem{ID: n.ID, Text: n.Text}
 	}
-	payload, _ := json.Marshal(items)
+	payload, err := json.Marshal(items)
+	if err != nil {
+		// inputItem is always marshalable; this is a defensive guard.
+		r.logger.WarnContext(ctx, "tree_summariser: marshal input items failed",
+			slog.Any("error", err))
+		return tierParentResult{}, fmt.Errorf("marshal cluster items: %w", err)
+	}
 	userMsg := "Memory cluster to summarise:\n" + string(payload)
 
 	promptSHA := sha256Hex(systemPrompt + "\n---\n" + userMsg)

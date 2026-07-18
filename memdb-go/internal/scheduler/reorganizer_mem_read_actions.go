@@ -135,7 +135,7 @@ func buildLTMNode(ef *embeddedMemReadFact, userID, cubeID, agentID, sessionID, n
 		"confidence": f.Confidence, "type": "fact", "info": factInfo,
 		"graph_id": uuid.New().String(), "importance_score": 1.0, "retrieval_count": 0,
 	}
-	if observationDate != "" {
+	if validObservationDate(observationDate) {
 		props["observation_date"] = observationDate
 	}
 	propsJSON, err := json.Marshal(props)

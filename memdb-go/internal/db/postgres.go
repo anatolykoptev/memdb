@@ -14,6 +14,8 @@ import (
 "errors"
 "fmt"
 "log/slog"
+"os"
+"strconv"
 "time"
 
 "github.com/anatolykoptev/go-kit/retry"
@@ -45,8 +47,8 @@ cfg, err := pgxpool.ParseConfig(connStr)
 if err != nil {
 return nil, fmt.Errorf("invalid postgres config: %w", err)
 }
-cfg.MaxConns = 8
-cfg.MinConns = 2
+cfg.MaxConns = int32(envIntOrDefault("MEMDB_PG_MAX_CONNS", 8, 4, 100))
+cfg.MinConns = int32(envIntOrDefault("MEMDB_PG_MIN_CONNS", 2, 1, 50))
 cfg.MaxConnLifetime = 30 * time.Minute
 cfg.MaxConnLifetimeJitter = 5 * time.Minute // spread connection recycling to avoid thundering herd
 cfg.MaxConnIdleTime = 5 * time.Minute
@@ -152,4 +154,18 @@ return p.pool.Ping(ctx)
 // Close closes the connection pool.
 func (p *Postgres) Close() {
 p.pool.Close()
+}
+
+// envIntOrDefault reads an env var as int with bounds clamping.
+// Returns def if unset, invalid, or out of [lo,hi] range.
+func envIntOrDefault(name string, def, lo, hi int) int {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < lo || v > hi {
+		return def
+	}
+	return v
 }

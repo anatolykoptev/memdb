@@ -51,7 +51,7 @@ func (r *Reorganizer) generateEpisodicSummary(userID, cubeID, sessionID, convers
 		return
 	}
 
-	go func() {
+	r.goBounded(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), episodicSummaryTimeout)
 		defer cancel()
 
@@ -128,5 +128,5 @@ func (r *Reorganizer) generateEpisodicSummary(userID, cubeID, sessionID, convers
 			slog.String("session_id", sessionID),
 			slog.Int("summary_len", len(summary)),
 		)
-	}()
+	})
 }

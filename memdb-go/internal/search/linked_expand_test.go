@@ -43,18 +43,15 @@ func mkSeedsLinked(n int) []MergedResult {
 }
 
 func TestLinkedExpandEnabled_Default(t *testing.T) {
-	// M14.Y1: default is OFF — production ingest does not populate linked_memory_ids.
+	// CP-8: default is ON — aligned with linkedResolverEnabled default ON.
+	// The expand query is cheap (GIN-indexed, no-op for empty linked_memory_ids).
 	t.Setenv("MEMDB_F12_LINKED_EXPAND", "")
-	if linkedExpandEnabled() {
-		t.Fatal("default should be OFF when env is empty")
+	if !linkedExpandEnabled() {
+		t.Fatal("default should be ON when env is empty")
 	}
 	t.Setenv("MEMDB_F12_LINKED_EXPAND", "0")
 	if linkedExpandEnabled() {
 		t.Fatal("should be OFF when env=0")
-	}
-	t.Setenv("MEMDB_F12_LINKED_EXPAND", "false")
-	if linkedExpandEnabled() {
-		t.Fatal("should be OFF when env=false (non-'1' value)")
 	}
 	t.Setenv("MEMDB_F12_LINKED_EXPAND", "1")
 	if !linkedExpandEnabled() {
@@ -63,9 +60,9 @@ func TestLinkedExpandEnabled_Default(t *testing.T) {
 }
 
 // TestLinkedExpand_DisabledByEnv_NoDBQuery verifies that when MEMDB_F12_LINKED_EXPAND
-// is unset (default OFF), the DB is never called and linkedExpandRecord emits "disabled".
+// is "0" (explicitly disabled), the DB is never called and linkedExpandRecord emits "disabled".
 func TestLinkedExpand_DisabledByEnv_NoDBQuery(t *testing.T) {
-	t.Setenv("MEMDB_F12_LINKED_EXPAND", "")
+	t.Setenv("MEMDB_F12_LINKED_EXPAND", "0")
 	pg := &mockLinkedPG{}
 	seeds := mkSeedsLinked(3)
 	// expandViaLinkedIDs itself does not check the env-gate; the gate lives in
@@ -74,7 +71,7 @@ func TestLinkedExpand_DisabledByEnv_NoDBQuery(t *testing.T) {
 	// What we verify here: linkedExpandEnabled() returns false, meaning any
 	// caller that respects the gate will skip the DB.
 	if linkedExpandEnabled() {
-		t.Fatal("env unset: linkedExpandEnabled must return false")
+		t.Fatal("env=0: linkedExpandEnabled must return false")
 	}
 	// Sanity: pg was never called (expandViaLinkedIDs would call it)
 	_ = seeds
