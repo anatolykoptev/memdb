@@ -50,7 +50,7 @@ const (
 // taskMeta is the JSON payload stored per task in the Redis Hash.
 type taskMeta struct {
 	Status      string `json:"status"`
-	TaskType    string `json:"task_type,omitempty"`   // = label (mem_update, mem_organize, …)
+	TaskType    string `json:"task_type,omitempty"` // = label (mem_update, mem_organize, …)
 	MemCubeID   string `json:"mem_cube_id,omitempty"`
 	UserID      string `json:"user_id,omitempty"`
 	ItemID      string `json:"item_id,omitempty"`
@@ -200,4 +200,102 @@ func (t *TaskStatusTracker) hset(ctx context.Context, userID, taskID string, met
 
 func nowISO() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
+}
+
+// --- watchdog (PF-9 / #327) -------------------------------------------------
+//
+// Tasks in "in_progress" that never transition to "completed" or "failed"
+// (worker crash, panic, OOM kill) stay stuck forever. CountActiveTasks counts
+// them as active, IsIdle returns false, and /product/scheduler/wait hangs.
+//
+// ReclaimStaleTasks scans a user's tasks and transitions any "in_progress"
+// task older than maxAge to "failed" with a watchdog error message. Returns
+// the number of tasks reclaimed.
+
+// defaultStaleTaskTimeout is the maximum age of an "in_progress" task before
+// the watchdog reclaims it. Env-tunable via MEMDB_TASK_STALE_TIMEOUT_M.
+const defaultStaleTaskTimeout = 30 * time.Minute
+
+// ReclaimStaleTasks transitions "in_progress" tasks older than maxAge to
+// "failed". Returns the count of reclaimed tasks. Best-effort: errors are
+// logged and skipped, not returned.
+func (t *TaskStatusTracker) ReclaimStaleTasks(ctx context.Context, userID string, maxAge time.Duration) int {
+	if t == nil || t.rdb == nil {
+		return 0
+	}
+	tasks := t.GetAllTasksForUser(ctx, userID)
+	if len(tasks) == 0 {
+		return 0
+	}
+	now := time.Now().UTC()
+	reclaimed := 0
+	for taskID, m := range tasks {
+		if m.Status != taskStatusInProgress {
+			continue
+		}
+		startedAt, err := time.Parse(time.RFC3339Nano, m.StartedAt)
+		if err != nil {
+			// Unparseable timestamp → can't determine age, skip.
+			continue
+		}
+		if now.Sub(startedAt) < maxAge {
+			continue
+		}
+		// Stale: transition to failed.
+		m.Status = taskStatusFailed
+		m.Error = "watchdog: task timed out (stuck in in_progress)"
+		m.FailedAt = nowISO()
+		m.UpdatedAt = nowISO()
+		t.hset(ctx, userID, taskID, m)
+		t.rdb.Expire(ctx, t.metaKey(userID), taskMetaTTL)
+		reclaimed++
+	}
+	return reclaimed
+}
+
+// RunWatchdog periodically scans all users for stale tasks and reclaims them.
+// Blocks until ctx is cancelled. Call as a goroutine:
+//
+//	go tracker.RunWatchdog(ctx, 5*time.Minute, defaultStaleTaskTimeout)
+//
+// The scan interval should be shorter than the stale timeout to catch stuck
+// tasks promptly. Uses SCAN to enumerate user keys (no KEYS blocking).
+func (t *TaskStatusTracker) RunWatchdog(ctx context.Context, scanInterval, maxAge time.Duration) {
+	if t == nil || t.rdb == nil {
+		return
+	}
+	ticker := time.NewTicker(scanInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			t.scanAndReclaim(ctx, maxAge)
+		}
+	}
+}
+
+// scanAndReclaim enumerates all task_meta keys via SCAN and reclaims stale
+// tasks per user. Best-effort: errors are silently skipped.
+func (t *TaskStatusTracker) scanAndReclaim(ctx context.Context, maxAge time.Duration) {
+	var cursor uint64
+	for {
+		keys, next, err := t.rdb.Scan(ctx, cursor, taskMetaPrefix+"*", 100).Result()
+		if err != nil {
+			return
+		}
+		for _, key := range keys {
+			// Extract userID from key: "memos:task_meta:{user_id}"
+			userID := key[len(taskMetaPrefix):]
+			if userID == "" {
+				continue
+			}
+			t.ReclaimStaleTasks(ctx, userID, maxAge)
+		}
+		if next == 0 {
+			break
+		}
+		cursor = next
+	}
 }
