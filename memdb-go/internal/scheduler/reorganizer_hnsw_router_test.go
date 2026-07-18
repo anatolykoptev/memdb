@@ -85,7 +85,9 @@ func (s *spyPostgres) CreateMemoryEdgeWithConfidence(_ context.Context, _, _, _,
 func (s *spyPostgres) InsertTreeConsolidationEvent(_ context.Context, _, _, _ string, _ []string, _, _, _, _ string) error {
 	return nil
 }
-func (s *spyPostgres) SetHierarchyLevel(_ context.Context, _, _, _, _ string) error { return nil }
+func (s *spyPostgres) SetHierarchyLevel(_ context.Context, _, _, _, _ string) error   { return nil }
+func (s *spyPostgres) ClearCEScoresTopK(_ context.Context, _ string) error            { return nil }
+func (s *spyPostgres) ClearCEScoresTopKForNeighbor(_ context.Context, _ string) error { return nil }
 func (s *spyPostgres) UpsertWikiPage(_ context.Context, _ db.UpsertWikiPageParams) (db.WikiPage, error) {
 	return db.WikiPage{}, nil
 }

@@ -152,6 +152,8 @@ func (s *treeStub) DecayAndArchiveImportance(_ context.Context, _ string, _, _ f
 func (s *treeStub) UpsertWikiPage(_ context.Context, _ db.UpsertWikiPageParams) (db.WikiPage, error) {
 	return db.WikiPage{}, nil
 }
+func (s *treeStub) ClearCEScoresTopK(_ context.Context, _ string) error            { return nil }
+func (s *treeStub) ClearCEScoresTopKForNeighbor(_ context.Context, _ string) error { return nil }
 
 // compile-time interface check.
 var _ reorgPostgres = (*treeStub)(nil)

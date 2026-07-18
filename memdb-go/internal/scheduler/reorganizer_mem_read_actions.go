@@ -86,6 +86,14 @@ func (r *Reorganizer) applyMemUpdate(ctx context.Context, ef *embeddedMemReadFac
 		log.Debug("mem_read: update node failed", slog.String("id", f.TargetID), slog.Any("error", err))
 		return false
 	}
+	// PF-4 (#321): invalidate CE cache after text change — stale ce_score_topk
+	// causes incorrect rerank. Best-effort, Error log (stale cache is a correctness bug).
+	if err := r.postgres.ClearCEScoresTopK(ctx, f.TargetID); err != nil {
+		log.Error("mem_read: ClearCEScoresTopK failed (best-effort)", slog.String("id", f.TargetID), slog.Any("error", err))
+	}
+	if err := r.postgres.ClearCEScoresTopKForNeighbor(ctx, f.TargetID); err != nil {
+		log.Error("mem_read: ClearCEScoresTopKForNeighbor failed (best-effort)", slog.String("id", f.TargetID), slog.Any("error", err))
+	}
 	ef.ltmID = f.TargetID
 	return true
 }
