@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // Config holds all configuration for the Go API server.
@@ -22,6 +25,11 @@ type Config struct {
 	AuthEnabled           bool   `json:"auth_enabled"`
 	MasterKeyHash         string `json:"master_key_hash"`         // SHA-256 hex digest
 	InternalServiceSecret string `json:"internal_service_secret"` // service-to-service bypass
+
+	// DevMode (env: MEMDB_DEV=1) relaxes startup safety checks for local
+	// development. Production deployments must NOT set this — Validate()
+	// refuses to start without auth config when DevMode is false.
+	DevMode bool `json:"dev_mode"`
 
 	// Logging
 	LogLevel  string `json:"log_level"`
@@ -113,9 +121,9 @@ type Config struct {
 	// D11 CoT decomposer (multi-hop / temporal query decomposition).
 	// Default OFF for zero regression. Sibling of MEMDB_SEARCH_COT (D7) —
 	// they can be enabled independently for ablation.
-	CoTDecompose      bool `json:"cot_decompose"`       // env: MEMDB_COT_DECOMPOSE
-	CoTMaxSubqueries  int  `json:"cot_max_subqueries"`  // env: MEMDB_COT_MAX_SUBQUERIES, default 3, clamp [1,5]
-	CoTTimeoutMS      int  `json:"cot_timeout_ms"`      // env: MEMDB_COT_TIMEOUT_MS, default 2000, clamp [500,10000]
+	CoTDecompose     bool `json:"cot_decompose"`      // env: MEMDB_COT_DECOMPOSE
+	CoTMaxSubqueries int  `json:"cot_max_subqueries"` // env: MEMDB_COT_MAX_SUBQUERIES, default 3, clamp [1,5]
+	CoTTimeoutMS     int  `json:"cot_timeout_ms"`     // env: MEMDB_COT_TIMEOUT_MS, default 2000, clamp [500,10000]
 }
 
 const (
@@ -180,6 +188,7 @@ func Load() *Config {
 		AuthEnabled:           envBool("AUTH_ENABLED", false),
 		MasterKeyHash:         envStr("MASTER_KEY_HASH", ""),
 		InternalServiceSecret: envStr("INTERNAL_SERVICE_SECRET", ""),
+		DevMode:               envBool("MEMDB_DEV", false),
 
 		LogLevel:  envStr("MEMDB_LOG_LEVEL", "info"),
 		LogFormat: envStr("MEMDB_LOG_FORMAT", "json"),
@@ -260,4 +269,74 @@ func (c *Config) String() string {
 // PortStr returns the port as a string.
 func (c *Config) PortStr() string {
 	return strconv.Itoa(c.Port)
+}
+
+// ── Startup validation (PF-1, PF-5) ───────────────────────────────────────────
+
+// ValidationMode controls which checks Validate performs. Tools that don't
+// need a database (e.g. cmd/mcp-server) use ModeTool; the API server uses
+// ModeServer which additionally requires PostgresURL.
+type ValidationMode int
+
+const (
+	// ModeServer validates auth configuration and requires a non-empty
+	// PostgresURL. Used by cmd/server/main.go at startup.
+	ModeServer ValidationMode = iota
+	// ModeTool validates auth configuration only. Used by cmd/mcp-server and
+	// other binaries that don't open a Postgres connection.
+	ModeTool
+)
+
+// authDisabledGauge is a Prometheus gauge that reads 1 when authentication is
+// off (AuthEnabled=false) and 0 when on. Operators alert on config_drift when
+// this stays at 1 for >5 min in production. Registered on the default registry
+// so it is scraped at /metrics alongside other memdb_* series.
+var authDisabledGauge = promauto.NewGauge(prometheus.GaugeOpts{
+	Name: "memdb_config_auth_disabled",
+	Help: "1 when AuthEnabled is false (auth off), 0 when auth is on. " +
+		"Alert: config_drift when gauge=1 for >5min in prod.",
+})
+
+// Validate checks the config for unsafe or incomplete settings and returns an
+// error describing the first problem found. It is called at startup so the
+// process fails fast with an actionable message instead of silently running
+// with zero auth or a missing database URL.
+//
+// Auth check (PF-1): when AuthEnabled is false AND MasterKeyHash is empty AND
+// DevMode is false, the server refuses to start — a fresh deploy with no env
+// vars must not expose all endpoints without credentials. Dev mode
+// (MEMDB_DEV=1) is allowed for local development.
+//
+// PostgresURL check (PF-5): in ModeServer an empty PostgresURL is rejected so
+// the failure surfaces at startup rather than on the first DB call. ModeTool
+// skips this check for binaries that don't use Postgres.
+//
+// The auth-disabled gauge is updated as a side effect so observability alerts
+// fire regardless of whether validation passes (dev mode) or not.
+func (c *Config) Validate(mode ValidationMode) error {
+	// Update the auth-disabled observability gauge regardless of outcome.
+	if c.AuthEnabled {
+		authDisabledGauge.Set(0)
+	} else {
+		authDisabledGauge.Set(1)
+	}
+
+	// PF-1: auth must be configured unless dev mode is explicitly enabled.
+	if !c.AuthEnabled && c.MasterKeyHash == "" && !c.DevMode {
+		return fmt.Errorf(
+			"security: auth is disabled (AUTH_ENABLED=false) and no MASTER_KEY_HASH is set — " +
+				"set AUTH_ENABLED=true and MASTER_KEY_HASH, or set MEMDB_DEV=1 for local development",
+		)
+	}
+
+	// PF-5: server mode requires a Postgres URL so db.NewPostgres doesn't
+	// fail late on the first request that touches the database.
+	if mode == ModeServer && c.PostgresURL == "" {
+		return fmt.Errorf(
+			"config: MEMDB_POSTGRES_URL is required for server startup — " +
+				"set MEMDB_POSTGRES_URL to a valid Postgres DSN",
+		)
+	}
+
+	return nil
 }

@@ -36,6 +36,14 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
+	// PF-1 / PF-5: fail fast at startup if auth is off without a master key
+	// (security) or PostgresURL is missing (late DB failure). Dev mode
+	// (MEMDB_DEV=1) relaxes the auth check for local development.
+	if err := cfg.Validate(config.ModeServer); err != nil {
+		fmt.Fprintf(os.Stderr, "startup validation failed: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Set up structured logging with slog
 	var logHandler slog.Handler
 	opts := &slog.HandlerOptions{
