@@ -116,6 +116,9 @@ func (s *treeStub) FindNearDuplicatesHNSW(_ context.Context, _ string, _ float64
 func (s *treeStub) FindNearDuplicatesHNSWByIDs(_ context.Context, _ string, _ []string, _ float64, _, _ int) ([]db.DuplicatePair, error) {
 	return nil, nil
 }
+func (s *treeStub) CountMemoriesByUserAndTypes(_ context.Context, _ string, _ []string) (int64, error) {
+	return 0, nil
+}
 func (s *treeStub) UpdateMemoryNodeFull(_ context.Context, _, _, _, _ string) error { return nil }
 func (s *treeStub) SoftDeleteMerged(_ context.Context, _, _, _ string) error        { return nil }
 func (s *treeStub) DeleteByPropertyIDs(_ context.Context, _ []string, _ string) (int64, error) {

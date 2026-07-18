@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -88,7 +89,15 @@ type Config struct {
 	LLMExtractModel   string   `json:"llm_extract_model"`   // model for fine-mode extraction (default: gemini-2.0-flash-lite)
 	LLMReorgModel     string   `json:"llm_reorg_model"`     // model for memory reorganizer consolidation (default: gemini-2.5-flash-lite)
 	LLMFallbackModels []string `json:"llm_fallback_models"` // fallback models tried on quota errors (comma-separated env)
-	ReorgUseHNSW      bool     `json:"reorg_use_hnsw"`      // use HNSW index for FindNearDuplicates (env: MEMDB_REORG_USE_HNSW, default false)
+	ReorgUseHNSW      bool     `json:"reorg_use_hnsw"`      // use HNSW index for FindNearDuplicates (env: MEMDB_REORG_USE_HNSW, default false) — deprecated, prefer ReorgDupStrategy
+	// ReorgDupStrategy selects the near-duplicate detection path: "auto",
+	// "legacy", or "hnsw". Env: MEMDB_REORG_DUP_STRATEGY. When set it wins
+	// over the deprecated MEMDB_REORG_USE_HNSW boolean. Empty + USE_HNSW=true
+	// → "hnsw"; empty + USE_HNSW=false → "auto".
+	ReorgDupStrategy string `json:"reorg_dup_strategy"`
+	// ReorgDupCrossover is the memory count at which the auto router switches
+	// from legacy to HNSW. Env: MEMDB_REORG_DUP_CROSSOVER, default 1000.
+	ReorgDupCrossover int `json:"reorg_dup_crossover"`
 
 	// Buffer zone (batch add before LLM extraction)
 	BufferEnabled bool          `json:"buffer_enabled"`
@@ -151,6 +160,9 @@ const (
 	cotMaxSubqueriesMax     = 5
 	cotTimeoutMSMin         = 500
 	cotTimeoutMSMax         = 10000
+
+	// Reorganizer dup-strategy defaults.
+	defaultReorgDupCrossover = 1000
 )
 
 // clampCoTMaxSubqueries enforces [cotMaxSubqueriesMin, cotMaxSubqueriesMax].
@@ -232,6 +244,8 @@ func Load() *Config {
 		LLMReorgModel:     envStr("MEMDB_REORG_LLM_MODEL", "gemini-2.5-flash-lite"),
 		LLMFallbackModels: envCSV("MEMDB_LLM_FALLBACK_MODELS", nil),
 		ReorgUseHNSW:      envBool("MEMDB_REORG_USE_HNSW", false),
+		ReorgDupStrategy:  envStr("MEMDB_REORG_DUP_STRATEGY", ""),
+		ReorgDupCrossover: envInt("MEMDB_REORG_DUP_CROSSOVER", defaultReorgDupCrossover),
 
 		BufferEnabled: envBool("MEMDB_BUFFER_ENABLED", false),
 		BufferSize:    envInt("MEMDB_BUFFER_SIZE", defaultBufferSize),
@@ -264,6 +278,40 @@ func (c *Config) String() string {
 		c.Port, c.PythonBackendURL, c.LogLevel, c.LogFormat,
 		c.OTelEnabled, c.EnableChatAPI,
 	)
+}
+
+// ResolveReorgDupStrategy resolves the effective reorganizer dup strategy
+// from ReorgDupStrategy and the deprecated ReorgUseHNSW flag.
+//
+// Priority:
+//  1. If ReorgDupStrategy is set (non-empty) it wins. When USE_HNSW is also
+//     true, a conflict warning is logged (DUP_STRATEGY takes precedence).
+//  2. Else if ReorgUseHNSW is true → "hnsw".
+//  3. Else → "auto".
+//
+// The returned string is one of "auto", "legacy", "hnsw". An unrecognized
+// ReorgDupStrategy value logs a warning and falls back to "auto".
+func (c *Config) ResolveReorgDupStrategy() string {
+	switch {
+	case c.ReorgDupStrategy != "":
+		if c.ReorgUseHNSW {
+			slog.Warn("config: both MEMDB_REORG_DUP_STRATEGY and MEMDB_REORG_USE_HNSW set; DUP_STRATEGY wins",
+				slog.String("dup_strategy", c.ReorgDupStrategy),
+				slog.Bool("use_hnsw", c.ReorgUseHNSW))
+		}
+		switch c.ReorgDupStrategy {
+		case "auto", "legacy", "hnsw":
+			return c.ReorgDupStrategy
+		default:
+			slog.Warn("config: unrecognized MEMDB_REORG_DUP_STRATEGY value, falling back to auto",
+				slog.String("dup_strategy", c.ReorgDupStrategy))
+			return "auto"
+		}
+	case c.ReorgUseHNSW:
+		return "hnsw"
+	default:
+		return "auto"
+	}
 }
 
 // PortStr returns the port as a string.
