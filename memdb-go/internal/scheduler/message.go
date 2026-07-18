@@ -96,18 +96,18 @@ const (
 
 // ScheduleMessage is a task delivered via a Redis Stream entry.
 type ScheduleMessage struct {
-	ItemID     string
-	UserID     string
-	CubeID     string // stored as user_name in Memory properties
-	Label      string
-	Content    string
-	Timestamp  time.Time
-	UserName   string
-	TaskID     string
-	MsgID      string // Redis stream entry ID — required for XACK
-	StreamKey  string
-	RetryCount int // number of attempts already made (0 = first attempt)
-	MaxRetries int // max retries before DLQ (0 = use defaultMaxRetries)
+	ItemID       string
+	UserID       string
+	CubeID       string // stored as user_name in Memory properties
+	Label        string
+	Content      string
+	Timestamp    time.Time
+	UserName     string
+	TaskID       string
+	MsgID        string // Redis stream entry ID — required for XACK
+	StreamKey    string
+	RetryCount   int  // number of attempts already made (0 = first attempt)
+	MaxRetries   int  // max retries before DLQ (0 = use defaultMaxRetries)
 	HighPriority bool // true → routed to highMsgCh, processed before low-priority tasks
 }
 

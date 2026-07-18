@@ -3,14 +3,14 @@
 //
 // Wiring:
 //
-//   1. spawnTextSearches schedules a sparse-leg goroutine alongside the dense
-//      vector + fulltext searches when SearchService.SparseEmbedder != nil
-//      and MEMDB_HYBRID_SPARSE != "0" (default ON when embedder wired).
-//   2. After the parallel errgroup returns, runParallelSearches calls
-//      fuseSparseIntoTextVec which RRF-fuses dense + sparse into a single
-//      ranked list and writes it back to psr.textVec.
-//   3. Downstream merge (vec ⊕ ft) runs unchanged — the existing two-input
-//      RRF/fusion sees the already-fused dense+sparse list as its "vec" leg.
+//  1. spawnTextSearches schedules a sparse-leg goroutine alongside the dense
+//     vector + fulltext searches when SearchService.SparseEmbedder != nil
+//     and MEMDB_HYBRID_SPARSE != "0" (default ON when embedder wired).
+//  2. After the parallel errgroup returns, runParallelSearches calls
+//     fuseSparseIntoTextVec which RRF-fuses dense + sparse into a single
+//     ranked list and writes it back to psr.textVec.
+//  3. Downstream merge (vec ⊕ ft) runs unchanged — the existing two-input
+//     RRF/fusion sees the already-fused dense+sparse list as its "vec" leg.
 //
 // Why fuse sparse into textVec instead of threading a third input through
 // merge_rrf.go: gokit/rerank.RRF is variadic so 3-input fusion is trivial,

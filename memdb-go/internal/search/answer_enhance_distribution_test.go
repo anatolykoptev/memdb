@@ -25,9 +25,9 @@ func TestPercentRound_Boundaries(t *testing.T) {
 	}{
 		{-0.5, 0},
 		{0, 0},
-		{0.004, 0},   // rounds down
-		{0.005, 1},   // half-up
-		{0.499, 50},  // 49.9 rounds to 50
+		{0.004, 0},  // rounds down
+		{0.005, 1},  // half-up
+		{0.499, 50}, // 49.9 rounds to 50
 		{0.5, 50},
 		{0.999, 100}, // 99.9 rounds to 100
 		{1, 100},

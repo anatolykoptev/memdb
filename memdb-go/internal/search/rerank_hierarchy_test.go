@@ -52,8 +52,8 @@ func TestApplyDecayToItem_D1_HierarchyBoostApplied(t *testing.T) {
 			"relativity":      0.5,
 			"created_at":      createdAt,
 			"memory_type":     "EpisodicMemory",
-			"access_count":    float64(0),    // multiplier 1.0
-			"hierarchy_level": "semantic",    // boost 1.15
+			"access_count":    float64(0), // multiplier 1.0
+			"hierarchy_level": "semantic", // boost 1.15
 		}},
 	}
 	result := ApplyTemporalDecay(items, now, DefaultDecayAlpha)

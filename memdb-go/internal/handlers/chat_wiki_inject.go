@@ -225,4 +225,3 @@ func truncateMarkdown(body string, maxTokens int) string {
 	}
 	return cut + "…"
 }
-

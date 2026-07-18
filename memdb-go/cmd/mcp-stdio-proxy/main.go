@@ -21,9 +21,9 @@ import (
 )
 
 const (
-	clientTimeout    = 120 * time.Second
-	scannerBufInit   = 1024 * 1024  // 1MB initial buffer
-	scannerBufMax    = 10 * 1024 * 1024 // 10MB max line
+	clientTimeout  = 120 * time.Second
+	scannerBufInit = 1024 * 1024      // 1MB initial buffer
+	scannerBufMax  = 10 * 1024 * 1024 // 10MB max line
 )
 
 func main() {

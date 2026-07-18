@@ -106,8 +106,8 @@ func TestInsertExtractExample_ValidationErrors(t *testing.T) {
 	p := NewStubPostgres()
 
 	cases := []InsertExtractExampleParams{
-		{InputText: "x", GoldOutput: []byte(`{}`)},          // missing PromptKind
-		{PromptKind: "profile_extract", InputText: "x"},     // missing GoldOutput
+		{InputText: "x", GoldOutput: []byte(`{}`)},      // missing PromptKind
+		{PromptKind: "profile_extract", InputText: "x"}, // missing GoldOutput
 	}
 	for _, params := range cases {
 		_, err := p.InsertExtractExample(nil, params) //nolint:staticcheck // nil ctx triggers validation-only path

@@ -277,8 +277,8 @@ const defaultCat2Threshold = 0.05
 // ---- F2 — reflection-loop deep search --------------------------------------
 
 const (
-	defaultReflectionEnabled        = false
-	defaultReflectionOnComplexOnly  = true
+	defaultReflectionEnabled       = false
+	defaultReflectionOnComplexOnly = true
 )
 
 // reflectionEnabled reports whether the F2 reflection-loop stage should run

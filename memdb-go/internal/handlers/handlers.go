@@ -32,22 +32,22 @@ type BufferConfig struct {
 
 // Handler holds shared dependencies for all HTTP handlers.
 type Handler struct {
-	python        *rpc.PythonClient
-	logger        *slog.Logger
-	cfg           *config.Config               // nil = no config-driven defaults
-	postgres      *db.Postgres                 // nil = not initialized, fall back to proxy
-	qdrant        *db.Qdrant                   // nil = not initialized
-	redis         *db.Redis                    // nil = not initialized
-	wmCache       workingMemoryCacher          // nil = VSET disabled, use postgres for candidates
-	embedder      embedder.Embedder            // nil = native search disabled
-	embedRegistry *embedder.Registry           // nil = single-model mode (uses embedder field)
-	searchService *search.SearchService        // nil = search falls back to proxy
-	llmExtractor  *llm.LLMExtractor            // nil = mode=fine falls back to proxy
-	llmChat       *llm.Client                  // nil = chat falls back to proxy
-	profiler      *scheduler.Profiler          // nil = profile summaries disabled
-	tracker       *scheduler.TaskStatusTracker // nil = fall back to stream-based status
-	reorg           reorgRunner                 // nil = reorganizer not configured
-	bufferCfg       BufferConfig                // buffer zone config (zero value = disabled)
+	python          *rpc.PythonClient
+	logger          *slog.Logger
+	cfg             *config.Config               // nil = no config-driven defaults
+	postgres        *db.Postgres                 // nil = not initialized, fall back to proxy
+	qdrant          *db.Qdrant                   // nil = not initialized
+	redis           *db.Redis                    // nil = not initialized
+	wmCache         workingMemoryCacher          // nil = VSET disabled, use postgres for candidates
+	embedder        embedder.Embedder            // nil = native search disabled
+	embedRegistry   *embedder.Registry           // nil = single-model mode (uses embedder field)
+	searchService   *search.SearchService        // nil = search falls back to proxy
+	llmExtractor    *llm.LLMExtractor            // nil = mode=fine falls back to proxy
+	llmChat         *llm.Client                  // nil = chat falls back to proxy
+	profiler        *scheduler.Profiler          // nil = profile summaries disabled
+	tracker         *scheduler.TaskStatusTracker // nil = fall back to stream-based status
+	reorg           reorgRunner                  // nil = reorganizer not configured
+	bufferCfg       BufferConfig                 // buffer zone config (zero value = disabled)
 	addSem          *semaphore.Weighted          // nil = no limit on concurrent adds
 	addQueueMax     int64                        // max waiters before 503
 	addWaiters      atomic.Int64                 // current goroutines waiting for semaphore

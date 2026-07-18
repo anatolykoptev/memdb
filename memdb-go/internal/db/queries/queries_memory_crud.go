@@ -113,7 +113,8 @@ LIMIT 1`
 // memory text. Ordered by key ASC for deterministic pagination.
 //
 // Args: $1 = cube_id (text), $2 = user_id (text), $3 = prefix LIKE pattern
-//       (caller appends '%'), $4 = limit (int), $5 = offset (int)
+//
+//	(caller appends '%'), $4 = limit (int), $5 = offset (int)
 const ListMemoriesByKeyPrefix = `
 SELECT properties->>(('id'::text))                       AS memory_id,
        properties->>(('key'::text))                      AS key,
@@ -200,9 +201,10 @@ WHERE properties->>(('id'::text)) = ANY($1)`
 // delete-then-add race window.
 //
 // Args: $1 = memory_id (text, UUID = properties->>(('id'::text))),
-//       $2 = user_name (cube id),
-//       $3 = properties JSON (bytes),
-//       $4 = embedding vector literal (text)
+//
+//	$2 = user_name (cube id),
+//	$3 = properties JSON (bytes),
+//	$4 = embedding vector literal (text)
 const UpdateMemoryPropsAndEmbedding = `
 UPDATE %[1]s."Memory"
 SET properties = $3::text::agtype,
@@ -220,7 +222,8 @@ RETURNING properties->>(('id'::text))`
 // round-trip to a single statement and avoid a schema migration.
 //
 // Args: $1 = memory_id (text, UUID), $2 = user_name (cube id),
-//       $3 = ce_score_topk JSON array as text
+//
+//	$3 = ce_score_topk JSON array as text
 const SetCEScoresTopK = `
 UPDATE %[1]s."Memory"
 SET properties = (jsonb_set(properties::text::jsonb, '{ce_score_topk}', $3::jsonb)::text)::agtype
@@ -261,8 +264,9 @@ WHERE properties::text::jsonb -> 'ce_score_topk' @> jsonb_build_array(jsonb_buil
 // liftAtomicDiscriminators behaviour.
 //
 // Args: $1 = memory_id (text, UUID = properties->>(('id'::text))),
-//       $2 = user_name (cube id),
-//       $3 = linked_memory_ids JSON array as text (e.g. '["uuid-1","uuid-2"]')
+//
+//	$2 = user_name (cube id),
+//	$3 = linked_memory_ids JSON array as text (e.g. '["uuid-1","uuid-2"]')
 const SetLinkedMemoryIDs = `
 UPDATE %[1]s."Memory"
 SET properties = (
@@ -288,10 +292,11 @@ WHERE properties->>(('id'::text)) = $1
 // the array stores strings (which it does — see liftAtomicDiscriminators).
 //
 // Args: $1 = link_ids (text[]) — UUIDs to match,
-//       $2 = user_name (cube id, text),
-//       $3 = user_id (text),
-//       $4 = agent_id (text, '' for any),
-//       $5 = limit (int)
+//
+//	$2 = user_name (cube id, text),
+//	$3 = user_id (text),
+//	$4 = agent_id (text, '' for any),
+//	$5 = limit (int)
 //
 // Returns: id, properties (with sources stripped to keep payload small),
 // embedding (text). Mirrors VectorSearch's projection so the search-side

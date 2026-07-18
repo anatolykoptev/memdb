@@ -408,9 +408,9 @@ func TestSliceConversationLines_NegativeStart(t *testing.T) {
 
 func TestParseIndexRange(t *testing.T) {
 	tests := []struct {
-		input      []int
-		wantStart  int
-		wantEnd    int
+		input     []int
+		wantStart int
+		wantEnd   int
 	}{
 		{[]int{0, 5}, 0, 5},
 		{[]int{3}, 3, 3},

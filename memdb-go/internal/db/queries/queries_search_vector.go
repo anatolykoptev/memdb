@@ -98,9 +98,10 @@ LIMIT $5`
 // matching the dense `1 - <=>` shape.
 //
 // Args mirror VectorSearch:
-//   $1 = sparse vector literal "{idx:val,...}/30522" cast to sparsevec
-//   $2 = user_name, $3 = user_id, $4 = memory_types[],
-//   $5 = limit, $6 = agent_id ('' for any)
+//
+//	$1 = sparse vector literal "{idx:val,...}/30522" cast to sparsevec
+//	$2 = user_name, $3 = user_id, $4 = memory_types[],
+//	$5 = limit, $6 = agent_id ('' for any)
 //
 // WHERE includes `sparse_embedding IS NOT NULL` so legacy rows pre-backfill
 // transparently fall out of the sparse leg without hurting recall — they

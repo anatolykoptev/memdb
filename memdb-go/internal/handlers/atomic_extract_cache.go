@@ -26,9 +26,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"strconv"
 	"errors"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -218,4 +218,3 @@ func recordAtomicCacheOutcome(ctx context.Context, outcome string) {
 	}
 	atomicExtractCounter.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", outcome)))
 }
-

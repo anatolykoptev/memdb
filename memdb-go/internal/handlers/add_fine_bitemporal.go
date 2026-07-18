@@ -109,9 +109,9 @@ const (
 var (
 	edgeJudgeMxOnce sync.Once
 	edgeJudgeMx     struct {
-		Invalidated metric.Int64Counter   // table label: memory|entity
+		Invalidated metric.Int64Counter // table label: memory|entity
 		Confidence  metric.Float64Histogram
-		JudgeTotal  metric.Int64Counter   // outcome label
+		JudgeTotal  metric.Int64Counter // outcome label
 	}
 )
 

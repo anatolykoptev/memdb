@@ -38,6 +38,7 @@ LIMIT $5`
 //	$4 = tags (text[]) — candidate tags to check overlap,
 //	$5 = limit (int),
 //	$6 = agent_id (text, '' for any)
+//
 // Returns the stable property UUID (properties->>'id'), NOT the AGE graphid.
 const GraphRecallByTags = `
 SELECT properties->>(('id'::text)) AS memory_id,

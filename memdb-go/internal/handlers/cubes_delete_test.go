@@ -15,8 +15,8 @@ import (
 // fakeWMCache is a minimal workingMemoryCacher implementation for testing.
 // It records VDrop call arguments and can optionally return an error.
 type fakeWMCache struct {
-	dropCalls  []string // cubeIDs passed to VDrop
-	dropErr    error    // non-nil → VDrop returns this error
+	dropCalls []string // cubeIDs passed to VDrop
+	dropErr   error    // non-nil → VDrop returns this error
 }
 
 func (f *fakeWMCache) VDrop(_ context.Context, cubeID string) error {

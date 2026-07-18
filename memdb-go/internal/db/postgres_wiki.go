@@ -23,16 +23,16 @@ import (
 // when the row was inserted without one (rare — only allowed for
 // stub pages awaiting an embed pass).
 type WikiPage struct {
-	ID             string
-	CubeID         string
-	Slug           string
-	Title          string
-	Body           string
-	ParentSources  []string
-	Embedding      []float32
-	Version        int
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID            string
+	CubeID        string
+	Slug          string
+	Title         string
+	Body          string
+	ParentSources []string
+	Embedding     []float32
+	Version       int
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // UpsertWikiPageParams is the input for UpsertWikiPage. Embedding is

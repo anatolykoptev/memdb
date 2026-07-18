@@ -29,9 +29,9 @@ const (
 	// M8 Stream 10 — structural edges emitted at ingest, no LLM required.
 	// Intent is to give D2 multi-hop retrieval enough connectivity to traverse
 	// without waiting for the (slow, expensive) D3 reorganizer to fire.
-	EdgeSameSession        = "SAME_SESSION"         // both memories share session_id
-	EdgeTimelineNext       = "TIMELINE_NEXT"        // immediate predecessor by chat_time within session
-	EdgeSimilarCosineHigh  = "SIMILAR_COSINE_HIGH"  // cosine similarity in (0.85, dedupThreshold)
+	EdgeSameSession       = "SAME_SESSION"        // both memories share session_id
+	EdgeTimelineNext      = "TIMELINE_NEXT"       // immediate predecessor by chat_time within session
+	EdgeSimilarCosineHigh = "SIMILAR_COSINE_HIGH" // cosine similarity in (0.85, dedupThreshold)
 )
 
 // EnsureEntityEdgesTableSQL is the reference DDL for entity_edges.

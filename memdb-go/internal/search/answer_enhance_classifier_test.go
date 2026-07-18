@@ -99,8 +99,8 @@ func anchorLang(s string) string {
 // vectors and any other input to a near-copy of one of the anchor vectors
 // — used to drive ClassifyTopN into a known top-1 outcome.
 type pinnedFakeEmbedder struct {
-	dim     int
-	exact   map[string][]float32 // text → vector
+	dim      int
+	exact    map[string][]float32 // text → vector
 	fallback []float32            // returned for any unknown text
 }
 

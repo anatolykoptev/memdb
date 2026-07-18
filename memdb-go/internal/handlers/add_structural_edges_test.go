@@ -150,12 +150,12 @@ func TestBuildTimelineNextEdges_NoNew(t *testing.T) {
 
 func TestBuildSimilarCosineEdges_HalfOpenInterval(t *testing.T) {
 	results := []db.VectorSearchResult{
-		{ID: "self", Score: 0.99},  // skipped (== newID)
-		{ID: "exact", Score: 0.95}, // skipped (>= hi)
-		{ID: "high", Score: 0.93},  // accepted
-		{ID: "mid", Score: 0.88},   // accepted
+		{ID: "self", Score: 0.99},    // skipped (== newID)
+		{ID: "exact", Score: 0.95},   // skipped (>= hi)
+		{ID: "high", Score: 0.93},    // accepted
+		{ID: "mid", Score: 0.88},     // accepted
 		{ID: "lowedge", Score: 0.85}, // skipped (<= lo)
-		{ID: "low", Score: 0.50},   // skipped
+		{ID: "low", Score: 0.50},     // skipped
 	}
 	edges := buildSimilarCosineEdgesFromResults("self", results, 0.85, 0.95, 5)
 	if len(edges) != 2 {
@@ -218,10 +218,10 @@ func TestExcludeNewMemoryIDs(t *testing.T) {
 
 func TestTimelineDeltaSeconds(t *testing.T) {
 	cases := []struct {
-		name   string
-		prev   string
-		cur    string
-		want   int64
+		name string
+		prev string
+		cur  string
+		want int64
 	}{
 		{"microsec_format", "2026-04-26T10:00:00.000000", "2026-04-26T10:00:42.000000", 42},
 		{"second_format", "2026-04-26T10:00:00", "2026-04-26T10:01:30", 90},

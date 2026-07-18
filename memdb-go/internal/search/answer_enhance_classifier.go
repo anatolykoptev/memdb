@@ -44,11 +44,11 @@ import (
 type QueryCategory string
 
 const (
-	QueryCategorySingleHop    QueryCategory = "single_hop"
-	QueryCategoryMultiHop     QueryCategory = "multi_hop"
-	QueryCategoryTemporal     QueryCategory = "temporal"
-	QueryCategoryOpenDomain   QueryCategory = "open_domain"
-	QueryCategoryAdversarial  QueryCategory = "adversarial"
+	QueryCategorySingleHop   QueryCategory = "single_hop"
+	QueryCategoryMultiHop    QueryCategory = "multi_hop"
+	QueryCategoryTemporal    QueryCategory = "temporal"
+	QueryCategoryOpenDomain  QueryCategory = "open_domain"
+	QueryCategoryAdversarial QueryCategory = "adversarial"
 )
 
 // CategoryConfidence is one (category, score) pair — the score is the cosine

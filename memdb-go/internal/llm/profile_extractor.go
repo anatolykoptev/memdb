@@ -205,7 +205,7 @@ func (e *ProfileExtractor) ExtractProfile(ctx context.Context, conversation, use
 
 // profileLineRE matches a single Memobase TSV line:
 //
-//	- TOPIC<TAB>SUB_TOPIC<TAB>MEMO
+//   - TOPIC<TAB>SUB_TOPIC<TAB>MEMO
 //
 // The leading "- " is required. TOPIC / SUB_TOPIC may not contain TABs;
 // MEMO is everything after the second TAB up to end-of-line.

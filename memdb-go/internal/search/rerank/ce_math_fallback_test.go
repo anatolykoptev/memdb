@@ -39,7 +39,7 @@ func fakeRerankServerWithScores(scores []float64, counter *int32) *httptest.Serv
 	}))
 }
 
-func itoa(i int) string  { return string(rune('0' + i)) }
+func itoa(i int) string { return string(rune('0' + i)) }
 func ftoa(f float64) string {
 	if f == 0 {
 		return "0"

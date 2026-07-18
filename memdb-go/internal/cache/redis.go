@@ -85,30 +85,30 @@ func (c *Client) Ping(ctx context.Context) error {
 // Extending this struct (rather than changing the function signature) is
 // the safe way to add new dimensions — callers are compile-time checked.
 type searchKeyFields struct {
-	UserID    string // user_id from request
-	Query     string // raw query string
-	TopK      any    // top_k (int or nil → 0)
-	Dedup     string // dedup value
-	Level     string // level tier ("", "l1", "l2", "l3")
-	AgentID   string // agent_id ("" = cross-agent)
-	PrefTopK  int    // pref_top_k (0 = default)
+	UserID   string // user_id from request
+	Query    string // raw query string
+	TopK     any    // top_k (int or nil → 0)
+	Dedup    string // dedup value
+	Level    string // level tier ("", "l1", "l2", "l3")
+	AgentID  string // agent_id ("" = cross-agent)
+	PrefTopK int    // pref_top_k (0 = default)
 
 	// v3 additions — these all change the response payload but were missing
 	// from v1/v2 keys, leading to silent cache collisions across requests
 	// that should have returned different data.
-	Mode             string // "", "fast", "fine" — different code paths
-	NumStages        int    // 0/2/3 — iterative-expansion changes result set
-	LLMRerank        bool   // affects ranking
-	IncludeEmbedding bool   // changes response payload format (vector returned or not)
-	Profile          string // search profile selector
+	Mode             string  // "", "fast", "fine" — different code paths
+	NumStages        int     // 0/2/3 — iterative-expansion changes result set
+	LLMRerank        bool    // affects ranking
+	IncludeEmbedding bool    // changes response payload format (vector returned or not)
+	Profile          string  // search profile selector
 	Relativity       float64 // min relativity threshold filters output
-	ToolMemTopK      int    // tool memory bucket size
-	SkillMemTopK     int    // skill memory bucket size
-	IncludeSkillMem  bool   // type filter
-	IncludePref      bool   // type filter
-	SearchToolMem    bool   // type filter
-	AttributedTo     string // speaker-attribution single-user filter
-	ReadableCubes    string // sorted+joined ReadableCubeIDs (csv)
+	ToolMemTopK      int     // tool memory bucket size
+	SkillMemTopK     int     // skill memory bucket size
+	IncludeSkillMem  bool    // type filter
+	IncludePref      bool    // type filter
+	SearchToolMem    bool    // type filter
+	AttributedTo     string  // speaker-attribution single-user filter
+	ReadableCubes    string  // sorted+joined ReadableCubeIDs (csv)
 }
 
 // SearchCacheKey generates a cache key for POST /product/search.
@@ -164,9 +164,24 @@ func ParseSearchCacheKey(body []byte) (searchKeyFields, error) {
 	if err := json.Unmarshal(body, &m); err != nil {
 		return searchKeyFields{}, err
 	}
-	deref := func(p *int) int { if p != nil { return *p }; return 0 }
-	derefF := func(p *float64) float64 { if p != nil { return *p }; return 0 }
-	derefB := func(p *bool) bool { if p != nil { return *p }; return false }
+	deref := func(p *int) int {
+		if p != nil {
+			return *p
+		}
+		return 0
+	}
+	derefF := func(p *float64) float64 {
+		if p != nil {
+			return *p
+		}
+		return 0
+	}
+	derefB := func(p *bool) bool {
+		if p != nil {
+			return *p
+		}
+		return false
+	}
 	// Sort+join readable_cube_ids for stable keying regardless of input order.
 	cubes := append([]string(nil), m.ReadableCubeIDs...)
 	sort.Strings(cubes)

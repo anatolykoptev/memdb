@@ -463,9 +463,9 @@ func TestStagedBackendName_EnvParsing(t *testing.T) {
 		{"ce", "ce"},
 		{"llm", "llm"},
 		{"hybrid", "hybrid"},
-		{"CE", ""},     // case-sensitive
-		{"junk", ""},   // unknown
-		{" ce", ""},    // no trim
+		{"CE", ""},   // case-sensitive
+		{"junk", ""}, // unknown
+		{" ce", ""},  // no trim
 	}
 	for _, c := range cases {
 		t.Setenv("MEMDB_STAGED_BACKEND", c.env)

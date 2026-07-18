@@ -1,4 +1,4 @@
-.PHONY: help build test lint vet eval-locomo eval-locomo-full test-migrations-fresh-db clean
+.PHONY: help build test lint vet preflight eval-locomo eval-locomo-full test-migrations-fresh-db clean
 
 GO := GOWORK=off go
 MEMDB_GO := memdb-go
@@ -9,6 +9,7 @@ help:
 	@echo "  test                        — go test ./... in memdb-go"
 	@echo "  lint                        — golangci-lint run in memdb-go"
 	@echo "  vet                         — go vet ./... in memdb-go"
+	@echo "  preflight                   — gofmt+vet+build+test (CI gate)"
 	@echo "  test-migrations-fresh-db    — fresh-DB integration test"
 	@echo "  eval-locomo                 — LoCoMo retrieval benchmark (sample)"
 	@echo "  eval-locomo-full            — LoCoMo retrieval benchmark (full)"
@@ -25,6 +26,11 @@ lint:
 
 vet:
 	cd $(MEMDB_GO) && $(GO) vet ./...
+
+preflight: vet build test
+	@echo "preflight: gofmt check"
+	@cd $(MEMDB_GO) && test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './vendor/*' -not -path './gen/*'))" || (echo "gofmt issues:" && gofmt -l $$(find . -name '*.go' -not -path './vendor/*' -not -path './gen/*') && exit 1)
+	@echo "preflight: PASS"
 
 test-migrations-fresh-db:
 	bash $(MEMDB_GO)/scripts/test-migrations-fresh-db.sh

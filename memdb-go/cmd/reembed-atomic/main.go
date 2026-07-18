@@ -217,10 +217,10 @@ func main() {
 				// and idx_memory_attributed_to is a partial index on
 				// (properties->>'attributed_to'). Nesting them under `info`
 				// makes every atomic row degrade to kind='paragraph_legacy'.
-				"kind":    "atomic_fact",
-				"tags":    []string{"mode:fine", "atomic_fact"},
-				"sources": []string{},
-				"info":    map[string]any{"superseded_legacy_id": r.ID, "attributed_to": f.AttributedTo, "linked_memory_ids": f.LinkedMemoryIDs},
+				"kind":       "atomic_fact",
+				"tags":       []string{"mode:fine", "atomic_fact"},
+				"sources":    []string{},
+				"info":       map[string]any{"superseded_legacy_id": r.ID, "attributed_to": f.AttributedTo, "linked_memory_ids": f.LinkedMemoryIDs},
 				"confidence": 0.9,
 				"type":       "fact",
 				"raw_text":   f.Text,

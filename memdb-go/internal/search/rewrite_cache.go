@@ -42,10 +42,10 @@ const (
 // Safe for concurrent use. A zero-value rewriteCache behaves as "disabled":
 // every Get returns ("", false) and every Set is a no-op.
 type rewriteCache struct {
-	mu       sync.RWMutex
-	cap      int
-	ttl      time.Duration // 0 = no expiry
-	entries  map[string]*rewriteCacheEntry
+	mu        sync.RWMutex
+	cap       int
+	ttl       time.Duration // 0 = no expiry
+	entries   map[string]*rewriteCacheEntry
 	evictRing []string // insertion-order ring for eviction; len == cap
 	ringHead  int
 }

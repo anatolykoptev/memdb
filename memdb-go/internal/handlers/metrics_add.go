@@ -94,7 +94,7 @@ func addMx() *addMetricsStruct {
 			Requests: reqs, Duration: dur, Memories: mems, EmbedBatchSize: batch,
 			StructuralEdges: structEdges, SameSessionCapped: capCounter,
 			StageDuration: stageDur, DuplicateDrop: dupDrop,
-			FineFallback: fineFb,
+			FineFallback:      fineFb,
 			HashDedupDegraded: hashDedup, VectorDedupError: vecDedup,
 			WMCacheWriteFailed: wmCache,
 		}

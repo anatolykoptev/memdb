@@ -19,11 +19,11 @@ type KeywordReplaceResult struct {
 
 // FeedbackJudgement is a single judgement item from the feedback analysis.
 type FeedbackJudgement struct {
-	Validity     string   `json:"validity"`      // "true" or "false"
-	UserAttitude string   `json:"user_attitude"`  // "dissatisfied", "satisfied", "irrelevant"
-	CorrectedInfo string  `json:"corrected_info"`
-	Key          string   `json:"key"`
-	Tags         []string `json:"tags"`
+	Validity      string   `json:"validity"`      // "true" or "false"
+	UserAttitude  string   `json:"user_attitude"` // "dissatisfied", "satisfied", "irrelevant"
+	CorrectedInfo string   `json:"corrected_info"`
+	Key           string   `json:"key"`
+	Tags          []string `json:"tags"`
 }
 
 // MemoryOperation describes an ADD/UPDATE/NONE operation on a memory.
@@ -44,7 +44,7 @@ type UpdateJudgement struct {
 	ID        string `json:"id"`
 	Text      string `json:"text"`
 	OldMemory string `json:"old_memory"`
-	Judgement  string `json:"judgement"` // UPDATE_APPROVED, INVALID, NONE
+	Judgement string `json:"judgement"` // UPDATE_APPROVED, INVALID, NONE
 }
 
 // updateJudgementResponse wraps the JSON response for update judgements.

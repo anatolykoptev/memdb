@@ -112,7 +112,6 @@ func (r *RedisRerankCache) Set(ctx context.Context, key string, score float32) {
 	recordRerankCacheOutcome(ctx, "set")
 }
 
-
 // recordRerankCacheOutcome bumps memdb.rerank.cache_total{outcome=…}.
 // Outcome label values: hit | miss | set | get_error | set_error |
 // decode_error.

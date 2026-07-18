@@ -1,30 +1,31 @@
 // Package db provides database clients for Phase 2 native handlers.
 //
 // File layout:
-//   postgres.go        — core: Postgres struct, NewPostgres, Pool/Ping/Close
-//   postgres_memory.go — memory node CRUD: Get/List/Insert/Update/Delete/Cleanup
-//   postgres_search.go — vector & fulltext search, FormatVector, importance decay
-//   postgres_graph.go  — graph recall (key/tags/BFS/edge), memory_edges table
-//   postgres_entity.go — entity_nodes table, entity upsert & lookup
-//   postgres_config.go — user_configs table, GetUserConfig/UpdateUserConfig
+//
+//	postgres.go        — core: Postgres struct, NewPostgres, Pool/Ping/Close
+//	postgres_memory.go — memory node CRUD: Get/List/Insert/Update/Delete/Cleanup
+//	postgres_search.go — vector & fulltext search, FormatVector, importance decay
+//	postgres_graph.go  — graph recall (key/tags/BFS/edge), memory_edges table
+//	postgres_entity.go — entity_nodes table, entity upsert & lookup
+//	postgres_config.go — user_configs table, GetUserConfig/UpdateUserConfig
 package db
 
 import (
-"context"
-"errors"
-"fmt"
-"log/slog"
-"os"
-"strconv"
-"time"
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"strconv"
+	"time"
 
-"github.com/anatolykoptev/go-kit/retry"
-"github.com/anatolykoptev/go-kit/tracing/pgxotel"
-"github.com/jackc/pgx/v5"
-"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/anatolykoptev/go-kit/retry"
+	"github.com/anatolykoptev/go-kit/tracing/pgxotel"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
-"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
-"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db/queries"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
 )
 
 // graphName is the fixed PolarDB graph name. All queries use this constant.
@@ -32,128 +33,128 @@ const graphName = queries.DefaultGraphName
 
 // Postgres wraps a pgx connection pool for PolarDB (PostgreSQL + Apache AGE).
 type Postgres struct {
-pool   *pgxpool.Pool
-logger *slog.Logger
+	pool   *pgxpool.Pool
+	logger *slog.Logger
 }
 
 // NewPostgres creates a new PostgreSQL connection pool.
 // The connStr should be a standard PostgreSQL connection string.
 func NewPostgres(ctx context.Context, connStr string, logger *slog.Logger) (*Postgres, error) {
-if connStr == "" {
-return nil, errors.New("postgres connection string is empty")
-}
+	if connStr == "" {
+		return nil, errors.New("postgres connection string is empty")
+	}
 
-cfg, err := pgxpool.ParseConfig(connStr)
-if err != nil {
-return nil, fmt.Errorf("invalid postgres config: %w", err)
-}
-cfg.MaxConns = int32(envIntOrDefault("MEMDB_PG_MAX_CONNS", 8, 4, 100))
-cfg.MinConns = int32(envIntOrDefault("MEMDB_PG_MIN_CONNS", 2, 1, 50))
-cfg.MaxConnLifetime = 30 * time.Minute
-cfg.MaxConnLifetimeJitter = 5 * time.Minute // spread connection recycling to avoid thundering herd
-cfg.MaxConnIdleTime = 5 * time.Minute
+	cfg, err := pgxpool.ParseConfig(connStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid postgres config: %w", err)
+	}
+	cfg.MaxConns = int32(envIntOrDefault("MEMDB_PG_MAX_CONNS", 8, 4, 100))
+	cfg.MinConns = int32(envIntOrDefault("MEMDB_PG_MIN_CONNS", 2, 1, 50))
+	cfg.MaxConnLifetime = 30 * time.Minute
+	cfg.MaxConnLifetimeJitter = 5 * time.Minute // spread connection recycling to avoid thundering herd
+	cfg.MaxConnIdleTime = 5 * time.Minute
 
-// pgxotel — span per Query/Exec/SendBatch, attaches db.statement /
-// db.system / db.operation. Pool waits surface as events. Combined
-// with otelhttp on the server side, every request shows the full
-// HTTP → handler → DB chain in Jaeger. Query parameters omitted by
-// default to avoid leaking secrets via embedded strings.
-pgxotel.AttachTracer(cfg)
+	// pgxotel — span per Query/Exec/SendBatch, attaches db.statement /
+	// db.system / db.operation. Pool waits surface as events. Combined
+	// with otelhttp on the server side, every request shows the full
+	// HTTP → handler → DB chain in Jaeger. Query parameters omitted by
+	// default to avoid leaking secrets via embedded strings.
+	pgxotel.AttachTracer(cfg)
 
-// Run LOAD 'age' and SET search_path on every new connection in the pool.
-cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-_, err := conn.Exec(ctx, "LOAD 'age'")
-if err != nil {
-logger.WarnContext(ctx, "AGE extension load failed on connection", slog.Any("error", err))
-}
-_, err = conn.Exec(ctx, "SET search_path = ag_catalog, memos_graph, public")
-if err != nil {
-logger.WarnContext(ctx, "failed to set search_path on connection", slog.Any("error", err))
-}
-// pgvector 0.8.x: iterative HNSW scan keeps scanning past the WHERE filter
-// until ef_search candidates are found — critical for filtered queries.
-_, err = conn.Exec(ctx, "SET hnsw.iterative_scan = relaxed_order; SET hnsw.ef_search = 100")
-if err != nil {
-logger.WarnContext(ctx, "failed to set hnsw session params", slog.Any("error", err))
-}
-return nil // non-fatal — queries use fully-qualified table names
-}
+	// Run LOAD 'age' and SET search_path on every new connection in the pool.
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, "LOAD 'age'")
+		if err != nil {
+			logger.WarnContext(ctx, "AGE extension load failed on connection", slog.Any("error", err))
+		}
+		_, err = conn.Exec(ctx, "SET search_path = ag_catalog, memos_graph, public")
+		if err != nil {
+			logger.WarnContext(ctx, "failed to set search_path on connection", slog.Any("error", err))
+		}
+		// pgvector 0.8.x: iterative HNSW scan keeps scanning past the WHERE filter
+		// until ef_search candidates are found — critical for filtered queries.
+		_, err = conn.Exec(ctx, "SET hnsw.iterative_scan = relaxed_order; SET hnsw.ef_search = 100")
+		if err != nil {
+			logger.WarnContext(ctx, "failed to set hnsw session params", slog.Any("error", err))
+		}
+		return nil // non-fatal — queries use fully-qualified table names
+	}
 
-pool, err := retry.Do(ctx, retry.Options{
-MaxAttempts:  10,
-InitialDelay: time.Second,
-MaxDelay:     30 * time.Second,
-Jitter:       true,
-OnRetry: func(attempt int, err error) {
-	logger.Warn("postgres not ready, retrying", slog.Int("attempt", attempt), slog.Any("error", err))
-},
-}, func() (*pgxpool.Pool, error) {
-p, retryErr := pgxpool.NewWithConfig(ctx, cfg)
-if retryErr != nil {
-	return nil, retryErr
-}
-if retryErr = p.Ping(ctx); retryErr != nil {
-	p.Close()
-	return nil, retryErr
-}
-return p, nil
-})
-if err != nil {
-return nil, fmt.Errorf("postgres connect: %w", err)
-}
+	pool, err := retry.Do(ctx, retry.Options{
+		MaxAttempts:  10,
+		InitialDelay: time.Second,
+		MaxDelay:     30 * time.Second,
+		Jitter:       true,
+		OnRetry: func(attempt int, err error) {
+			logger.Warn("postgres not ready, retrying", slog.Int("attempt", attempt), slog.Any("error", err))
+		},
+	}, func() (*pgxpool.Pool, error) {
+		p, retryErr := pgxpool.NewWithConfig(ctx, cfg)
+		if retryErr != nil {
+			return nil, retryErr
+		}
+		if retryErr = p.Ping(ctx); retryErr != nil {
+			p.Close()
+			return nil, retryErr
+		}
+		return p, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("postgres connect: %w", err)
+	}
 
-pg := &Postgres{pool: pool, logger: logger}
+	pg := &Postgres{pool: pool, logger: logger}
 
-// M12.5: register the async pgxpool busy-conns gauge. Wires
-// memdb_db_pgxpool_busy_conns to a callback that scrapes
-// pool.Stat().AcquiredConns() on every Prometheus collection. Failure to
-// register is non-fatal — log and continue (the pool itself is fine).
-if _, gerr := observability.RegisterPoolGauge(pool); gerr != nil {
-	logger.WarnContext(ctx, "pgxpool gauge registration failed", slog.Any("error", gerr))
-}
+	// M12.5: register the async pgxpool busy-conns gauge. Wires
+	// memdb_db_pgxpool_busy_conns to a callback that scrapes
+	// pool.Stat().AcquiredConns() on every Prometheus collection. Failure to
+	// register is non-fatal — log and continue (the pool itself is fine).
+	if _, gerr := observability.RegisterPoolGauge(pool); gerr != nil {
+		logger.WarnContext(ctx, "pgxpool gauge registration failed", slog.Any("error", gerr))
+	}
 
-// Versioned SQL migrations — single source of truth for schema.
-// Covers extensions + AGE graph bootstrap (0003), memos_graph."Memory"
-// columns (0001/0002/0004), and the formerly-Ensure* tables
-// memory_edges (0005), entity_nodes (0006), entity_edges (0007),
-// user_configs (0008). Fail-fast: schema drift must crash startup
-// so dozor flags it.
-if err := pg.RunMigrations(ctx); err != nil {
-pool.Close()
-return nil, fmt.Errorf("run migrations: %w", err)
-}
+	// Versioned SQL migrations — single source of truth for schema.
+	// Covers extensions + AGE graph bootstrap (0003), memos_graph."Memory"
+	// columns (0001/0002/0004), and the formerly-Ensure* tables
+	// memory_edges (0005), entity_nodes (0006), entity_edges (0007),
+	// user_configs (0008). Fail-fast: schema drift must crash startup
+	// so dozor flags it.
+	if err := pg.RunMigrations(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("run migrations: %w", err)
+	}
 
-logger.InfoContext(ctx, "postgres connected", slog.Int("max_conns", int(cfg.MaxConns)))
-return pg, nil
+	logger.InfoContext(ctx, "postgres connected", slog.Int("max_conns", int(cfg.MaxConns)))
+	return pg, nil
 }
 
 // NewStubPostgres creates a Postgres stub with no connection pool.
 // For testing only: the nil-check (postgres != nil) will pass, but any
 // actual DB query will panic. Use this to test validation paths.
 func NewStubPostgres() *Postgres {
-return &Postgres{}
+	return &Postgres{}
 }
 
 // NewTestPostgres wraps an externally-constructed pgxpool.Pool and logger
 // for integration testing. Unlike NewPostgres, it skips retry/ping/init
 // side effects so tests can fully control startup.
 func NewTestPostgres(pool *pgxpool.Pool, logger *slog.Logger) *Postgres {
-return &Postgres{pool: pool, logger: logger}
+	return &Postgres{pool: pool, logger: logger}
 }
 
 // Pool returns the underlying pgx pool for direct query access.
 func (p *Postgres) Pool() *pgxpool.Pool {
-return p.pool
+	return p.pool
 }
 
 // Ping checks the database connection.
 func (p *Postgres) Ping(ctx context.Context) error {
-return p.pool.Ping(ctx)
+	return p.pool.Ping(ctx)
 }
 
 // Close closes the connection pool.
 func (p *Postgres) Close() {
-p.pool.Close()
+	p.pool.Close()
 }
 
 // envIntOrDefault reads an env var as int with bounds clamping.

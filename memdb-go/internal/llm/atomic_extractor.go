@@ -171,7 +171,6 @@ type atomicFactsResponse struct {
 	Memory []AtomicFact `json:"memory"`
 }
 
-
 // AtomicExtractor is the F8 atomic-fact extractor. It wraps the existing
 // LLM Client, calls ChatStructured under the "atomic_facts" prompt id (so
 // the structured-call metrics show up under that label), and returns

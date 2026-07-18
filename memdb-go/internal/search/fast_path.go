@@ -12,9 +12,9 @@
 //   - Uses a compile-time regex (no per-call alloc). Single goroutine-safe
 //     compiled var at package init via regexp.MustCompile.
 //   - Returns one of three metric outcomes:
-//       enabled        — fast-path engaged (simple query + env ON)
-//       disabled       — env unset/off (normal pipeline every time)
-//       complex_query  — env ON but query failed simplicity gate
+//     enabled        — fast-path engaged (simple query + env ON)
+//     disabled       — env unset/off (normal pipeline every time)
+//     complex_query  — env ON but query failed simplicity gate
 //   - DEFAULT OFF: operators enable via MEMDB_SEARCH_FAST_PATH=1 in .env.
 //     A/B before widening: quality regression possible on edge queries that
 //     look simple but benefit from rewriting (e.g. "last meeting" w/o date).

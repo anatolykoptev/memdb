@@ -178,12 +178,12 @@ func (r *responseRecorder) Flush() {
 
 // shouldBypassSearchCache returns true for /product/search requests that must
 // NEVER be served from cache. Two cases:
-//   1. internet_search=true — content is fetched from external APIs, results
-//      change between calls, caching would freeze stale fetched docs.
-//   2. len(speakers)>=2 — handler takes the dual-speaker fan-out branch
-//      (handleDualSpeakerSearch). Different code path produces a
-//      request-shaped merged response that the v3 cache key only partially
-//      covers; safer to bypass entirely.
+//  1. internet_search=true — content is fetched from external APIs, results
+//     change between calls, caching would freeze stale fetched docs.
+//  2. len(speakers)>=2 — handler takes the dual-speaker fan-out branch
+//     (handleDualSpeakerSearch). Different code path produces a
+//     request-shaped merged response that the v3 cache key only partially
+//     covers; safer to bypass entirely.
 //
 // Implementation note: we do a minimal JSON unmarshal here rather than
 // reusing ParseSearchCacheKey because that function does not (yet) parse

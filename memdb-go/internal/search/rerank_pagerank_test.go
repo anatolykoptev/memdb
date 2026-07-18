@@ -72,7 +72,8 @@ func TestPageRankMultiplier_GateOff(t *testing.T) {
 // MEMDB_PAGERANK_ENABLED are true.
 //
 // Setup: cosine=0.8, recency≈1.0 (recent memory), access_count=0 (imp=1.0),
-//        no hierarchy, pagerank=0.5 → multiplier=1.05.
+//
+//	no hierarchy, pagerank=0.5 → multiplier=1.05.
 //
 // Expected: relativity = 0.8 * ≈1.0 * 1.0 * 1.0 * 1.05 ≈ 0.84, capped at 1.0.
 func TestApplyDecayToItem_D1WithPageRankBoost(t *testing.T) {

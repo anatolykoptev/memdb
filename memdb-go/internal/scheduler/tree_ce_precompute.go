@@ -76,9 +76,9 @@ func cePrecomputeCosineThreshold() float64 {
 
 // ceMathPrefilterMetrics holds OTel counters for the math prefilter pass.
 var (
-	ceMathOnce     sync.Once
-	ceMathSkipped  metric.Int64Counter
-	ceMathKept     metric.Int64Counter
+	ceMathOnce    sync.Once
+	ceMathSkipped metric.Int64Counter
+	ceMathKept    metric.Int64Counter
 )
 
 // ceMathMx lazily initialises the math-prefilter OTel counters.

@@ -3,8 +3,9 @@
 // and the MMR/sim dedup from searcher.py.
 //
 // File layout:
-//   dedup.go      — SearchItem type, DedupSim, DedupMMR
-//   similarity.go — CosineSimilarity, CosineSimilarityMatrix, text similarity primitives
+//
+//	dedup.go      — SearchItem type, DedupSim, DedupMMR
+//	similarity.go — CosineSimilarity, CosineSimilarityMatrix, text similarity primitives
 package search
 
 import (

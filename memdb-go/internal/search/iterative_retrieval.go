@@ -31,7 +31,7 @@ import (
 
 const (
 	iterativeRespBodyLimit  = 16 * 1024 // 16 KB max LLM response body for iterative retrieval
-	iterativeMemContextTopK = 5          // number of top memories used to build context for expansion LLM prompt
+	iterativeMemContextTopK = 5         // number of top memories used to build context for expansion LLM prompt
 )
 
 // IterativeConfig configures multi-stage iterative retrieval.

@@ -5,9 +5,10 @@
 // Usage: memdb-reembed
 //
 // Environment variables:
-//   MEMDB_POSTGRES_URL  — PostgreSQL connection string
-//   MEMDB_QDRANT_ADDR   — Qdrant host:port
-//   MEMDB_ONNX_MODEL_DIR — path to ONNX model files
+//
+//	MEMDB_POSTGRES_URL  — PostgreSQL connection string
+//	MEMDB_QDRANT_ADDR   — Qdrant host:port
+//	MEMDB_ONNX_MODEL_DIR — path to ONNX model files
 package main
 
 import (

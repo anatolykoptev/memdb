@@ -42,7 +42,7 @@ func TestBuildSystemPrompt_ExternalMemories_NoRulesBlock(t *testing.T) {
 		basePrompt,
 		"factual",
 		"",
-		0, // maxContextTokens
+		0,  // maxContextTokens
 		20, // externalMemoryCount > 0 → harness signal
 	)
 	// Variant should be upgraded to High (Fix #3).

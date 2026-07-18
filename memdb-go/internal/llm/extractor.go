@@ -156,14 +156,14 @@ var PreferenceCategories = map[string]bool{
 	"product":       true,
 	"service":       true,
 	// Implicit (inferred from behaviour)
-	"frequency":        true,
-	"confidence_level": true,
-	"risk_tolerance":   true,
+	"frequency":         true,
+	"confidence_level":  true,
+	"risk_tolerance":    true,
 	"detail_preference": true,
-	"proactivity":      true,
-	"humour":           true,
-	"formality":        true,
-	"consistency":      true,
+	"proactivity":       true,
+	"humour":            true,
+	"formality":         true,
+	"consistency":       true,
 }
 
 // EntityMention is a named entity extracted from a memory fact.

@@ -21,10 +21,11 @@ DELETE FROM %[1]s."Memory" WHERE properties->>(('id'::text)) = $1`
 // Used as the second half of an upsert (DELETE then INSERT).
 //
 // Args:
-//   $1 = properties (jsonb cast through agtype)
-//   $2 = embedding dense (text, cast to vector(1024))
-//   $3 = sparse_embedding (text, cast to sparsevec(30522)). Pass empty string
-//        for NULL — NULLIF($3, '')::sparsevec short-circuits cleanly.
+//
+//	$1 = properties (jsonb cast through agtype)
+//	$2 = embedding dense (text, cast to vector(1024))
+//	$3 = sparse_embedding (text, cast to sparsevec(30522)). Pass empty string
+//	     for NULL — NULLIF($3, '')::sparsevec short-circuits cleanly.
 const InsertMemoryNode = `
 INSERT INTO %[1]s."Memory"(properties, embedding, sparse_embedding)
 VALUES (

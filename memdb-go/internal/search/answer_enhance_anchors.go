@@ -215,4 +215,3 @@ var anchorQuestions = map[QueryCategory][]string{
 		"旅行真的被取消了吗？",
 	},
 }
-

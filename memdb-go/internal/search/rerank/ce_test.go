@@ -273,7 +273,7 @@ func TestRerankPrecomputed_FullHit_Parity(t *testing.T) {
 
 	var outcomes []string
 	ce := CrossEncoder{
-		Client: client,
+		Client:       client,
 		OnPrecompute: func(_ context.Context, oc string) { outcomes = append(outcomes, oc) },
 	}
 

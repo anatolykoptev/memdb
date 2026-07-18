@@ -30,10 +30,10 @@ import (
 )
 
 const (
-	demoteBareAtomsEnvVar       = "MEMDB_DEMOTE_BARE_ATOMS"
-	bareAtomMaxTokensEnvVar     = "MEMDB_BARE_ATOM_MAX_TOKENS"
-	bareAtomMinLongEnvVar       = "MEMDB_BARE_ATOM_MIN_LONG"
-	bareAtomScoreMarginEnvVar   = "MEMDB_BARE_ATOM_SCORE_MARGIN"
+	demoteBareAtomsEnvVar     = "MEMDB_DEMOTE_BARE_ATOMS"
+	bareAtomMaxTokensEnvVar   = "MEMDB_BARE_ATOM_MAX_TOKENS"
+	bareAtomMinLongEnvVar     = "MEMDB_BARE_ATOM_MIN_LONG"
+	bareAtomScoreMarginEnvVar = "MEMDB_BARE_ATOM_SCORE_MARGIN"
 
 	defaultBareAtomMaxTokens   = 2
 	defaultBareAtomMinLong     = 6

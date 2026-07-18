@@ -21,8 +21,8 @@ func truncateForLog(s string, n int) string {
 type salvageCase struct {
 	name     string
 	raw      string
-	wantN    int    // number of facts recovered (post empty-Text filter)
-	wantTier int   // expected tier (salvageTierOne|Two|None) — use 0 to skip
+	wantN    int                                    // number of facts recovered (post empty-Text filter)
+	wantTier int                                    // expected tier (salvageTierOne|Two|None) — use 0 to skip
 	verify   func(t *testing.T, facts []AtomicFact) // optional deep assertions
 }
 

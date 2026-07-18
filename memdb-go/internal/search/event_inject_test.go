@@ -63,10 +63,10 @@ func makeEvent(text string) db.EventEntry {
 func TestLookupEvents_DateWindowWins(t *testing.T) {
 	stub := &stubEventsPG{dateRows: []db.EventEntry{makeEvent("a")}}
 	st := &pipelineState{
-		Params:     SearchParams{CubeID: "c1", UserName: "u1", Tags: []string{"x"}},
-		HasCutoff:  true,
-		CutoffISO:  "2024-05-01T00:00:00+00:00",
-		QueryVec:   []float32{0.1, 0.2},
+		Params:    SearchParams{CubeID: "c1", UserName: "u1", Tags: []string{"x"}},
+		HasCutoff: true,
+		CutoffISO: "2024-05-01T00:00:00+00:00",
+		QueryVec:  []float32{0.1, 0.2},
 	}
 	svc := &SearchService{logger: slog.New(slog.NewTextHandler(os.Stderr, nil))}
 	events, tp := svc.lookupEvents(context.Background(), stub, st)

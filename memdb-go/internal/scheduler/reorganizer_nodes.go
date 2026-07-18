@@ -62,7 +62,7 @@ func (r *Reorganizer) invalidateCaches(ctx context.Context, cubeID, memoryID str
 	}
 	r.cacheInvalidator.Invalidate(ctx,
 		"memdb:db:search:*:"+cubeID+":*", // vector/fulltext search results for this cube
-		"memdb:db:memory:"+memoryID,       // per-ID direct get cache
+		"memdb:db:memory:"+memoryID,      // per-ID direct get cache
 	)
 }
 

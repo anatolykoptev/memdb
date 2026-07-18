@@ -105,6 +105,7 @@ LIMIT $3`
 // Args: $1 = seed_ids (text[]), $2 = relation (text), $3 = user_name (text),
 //
 //	$4 = user_id (text), $5 = limit (int)
+//
 // Returned id is the stable property UUID (properties->>'id'), matching
 // memory_edges.from_id / to_id which also store property UUIDs.
 const GraphRecallByEdge = `
