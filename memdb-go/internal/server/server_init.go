@@ -64,6 +64,16 @@ func initDBClients(ctx context.Context, cfg *config.Config, h *handlers.Handler,
 	var wmCache *db.WorkingMemoryCache
 	if rd != nil {
 		wmCache = db.NewWorkingMemoryCache(rd)
+		// Wire per-cube eviction policy so one hot cube cannot starve cold
+		// cubes (Redis allkeys-lru is global). Eviction is oldest-first by
+		// SETATTR ts; failure is non-fatal to VAdd.
+		if cfg.ReorgVsetPerCubeCap > 0 {
+			wmCache.SetEvictionPolicy(db.NewVSetEvictionPolicy(
+				cfg.ReorgVsetPerCubeCap, 1024, wmCache, logger,
+			))
+			logger.Info("working memory vset eviction policy initialized",
+				slog.Int("per_cube_cap", cfg.ReorgVsetPerCubeCap))
+		}
 		h.SetWorkingMemoryCache(wmCache)
 		logger.Info("working memory vset cache initialized")
 
