@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/cache"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/rpc"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
 // New creates a fully configured HTTP server and returns a cleanup function
@@ -118,7 +120,14 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 		if reorg != nil {
 			h.SetReorganizer(reorg)
 		}
-		h.SetTaskTracker(scheduler.NewTaskStatusTracker(rd.Client()))
+		tracker := scheduler.NewTaskStatusTracker(rd.Client())
+		h.SetTaskTracker(tracker)
+		// PF-9 (#327): start task FSM watchdog to reclaim stuck tasks.
+		staleTimeout := time.Duration(envcfg.IntRange("MEMDB_TASK_STALE_TIMEOUT_M", 30, 1, 1<<30)) * time.Minute
+		go tracker.RunWatchdog(ctx, 5*time.Minute, staleTimeout)
+		logger.Info("task watchdog started",
+			slog.Duration("stale_timeout", staleTimeout),
+			slog.Duration("scan_interval", 5*time.Minute))
 		logger.Info("scheduler worker started")
 		// Surface any MEMDB_D3_* / search tuning overrides that were picked
 		// up from .env — invisible otherwise and a common source of "why is
