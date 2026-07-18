@@ -19,6 +19,8 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +34,12 @@ const (
 	initialDelay  = 2 * time.Second
 	maxDelay      = 30 * time.Second
 	jitterDivisor = 4 // jitter = rand(0, delay/jitterDivisor) for retry backoff
+
+	// authRetryDelay is the sleep before retrying after a 401/403. Token-rotation
+	// proxies (CLIProxyAPI) return 401 during key rotation windows (~30s); retrying
+	// with a delay gives the proxy time to refresh. Env-tunable via
+	// MEMDB_LLM_AUTH_RETRY_DELAY_S.
+	authRetryDelayDefault = 10 * time.Second
 
 	passthroughInitBuf = 64 * 1024  // 64 KB initial SSE scanner buffer
 	passthroughMaxBuf  = 512 * 1024 // 512 KB max SSE scanner buffer
@@ -258,6 +266,23 @@ func (c *Client) chatModelLoop(ctx context.Context, model string, models []strin
 // (logging, backoff sleep). Returns the retry decision.
 func (c *Client) classifyAttemptError(ctx context.Context, apiErr *APIError, model string, attempt int, hasNext bool) retryDecision {
 	if apiErr.IsAuth() {
+		// PF-7 (#325): 401/403 during key rotation → retry with delay instead of
+		// immediate stop. Token-rotation proxies (CLIProxyAPI) return 401 during
+		// ~30s rotation windows; retrying gives the proxy time to refresh.
+		if attempt < maxRetries-1 {
+			delay := authRetryDelay()
+			c.logger.WarnContext(ctx, "llm auth error, retrying after delay (key may be rotating)",
+				slog.String("model", model), slog.Int("status", apiErr.StatusCode),
+				slog.Int("attempt", attempt+1), slog.Duration("delay", delay))
+			llmMetrics().Requests.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("model", model),
+				attribute.String("outcome", "auth_retry"),
+			))
+			_ = sleepCtx(ctx, delay)
+			return retryContinue
+		}
+		c.logger.ErrorContext(ctx, "llm auth error, retries exhausted",
+			slog.String("model", model), slog.Int("status", apiErr.StatusCode))
 		return retryStop
 	}
 	if apiErr.isQuotaError() && hasNext {
@@ -429,4 +454,17 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	case <-t.C:
 		return nil
 	}
+}
+
+// authRetryDelay returns the delay before retrying after a 401/403 auth error.
+// Env-tunable via MEMDB_LLM_AUTH_RETRY_DELAY_S (seconds, default 10). A value
+// of 0 disables the delay (immediate retry). Falls back to authRetryDelayDefault
+// on parse error or empty env.
+func authRetryDelay() time.Duration {
+	if v := os.Getenv("MEMDB_LLM_AUTH_RETRY_DELAY_S"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return authRetryDelayDefault
 }
