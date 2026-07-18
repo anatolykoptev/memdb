@@ -126,9 +126,13 @@ postgres:
 redis:
   image:
     repository: redis
-    tag: "7-alpine"
+    tag: "8-alpine"
     pullPolicy: IfNotPresent
   port: 6379
+  # -- Max memory Redis may use (operator-gated for VSET workload sizing).
+  maxmemory: "400mb"
+  # -- Eviction policy when maxmemory is reached. allkeys-lru keeps hot vectors.
+  maxmemoryPolicy: "allkeys-lru"
   resources:
     requests:
       cpu: "100m"
