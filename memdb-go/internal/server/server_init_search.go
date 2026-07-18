@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
+	gokitembed "github.com/anatolykoptev/go-kit/embed"
 	"github.com/anatolykoptev/go-kit/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/cache"
-	localrerank "github.com/anatolykoptev/memdb/memdb-go/internal/search/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
@@ -18,6 +18,7 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
+	localrerank "github.com/anatolykoptev/memdb/memdb-go/internal/search/rerank"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/util/envcfg"
 )
 
@@ -41,6 +42,20 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Cl
 		OllamaQuery:     cfg.OllamaQuery,
 		HTTPBaseURL:     cfg.EmbedURL,
 		HTTPCacheClient: cacheClient,
+	}
+	if embedCircuitEnabled() {
+		embCfg.HTTPCircuit = &gokitembed.CircuitConfig{
+			FailThreshold:  envcfg.IntRange("MEMDB_EMBED_CIRCUIT_FAIL_THRESHOLD", 5, 1, 1<<30),
+			OpenDuration:   time.Duration(envcfg.IntRange("MEMDB_EMBED_CIRCUIT_OPEN_DURATION_S", 30, 1, 1<<30)) * time.Second,
+			HalfOpenProbes: envcfg.IntRange("MEMDB_EMBED_CIRCUIT_HALF_OPEN_PROBES", 1, 1, 1<<30),
+			FailRateWindow: time.Duration(envcfg.IntRange("MEMDB_EMBED_CIRCUIT_FAIL_WINDOW_S", 60, 1, 1<<30)) * time.Second,
+		}
+		logger.Info("embedder circuit breaker enabled",
+			slog.Int("fail_threshold", embCfg.HTTPCircuit.FailThreshold),
+			slog.Duration("open_duration", embCfg.HTTPCircuit.OpenDuration),
+			slog.Int("half_open_probes", embCfg.HTTPCircuit.HalfOpenProbes),
+			slog.Duration("fail_rate_window", embCfg.HTTPCircuit.FailRateWindow),
+		)
 	}
 	e, err := embedder.New(embCfg, logger)
 	if err != nil {
@@ -302,6 +317,13 @@ func initSearchService(
 // Controlled by MEMDB_RERANK_CIRCUIT=1; default OFF.
 func circuitEnabled() bool {
 	return os.Getenv("MEMDB_RERANK_CIRCUIT") == "1"
+}
+
+// embedCircuitEnabled gates the embedder circuit breaker (mirrors rerank CB).
+// Enable via MEMDB_EMBED_CIRCUIT=1. When open, embed calls fail fast instead
+// of stacking 5s timeouts behind every request (PF-8 / #326).
+func embedCircuitEnabled() bool {
+	return os.Getenv("MEMDB_EMBED_CIRCUIT") == "1"
 }
 
 // initLLMExtractor creates the LLM extractor for fine-mode native add (non-fatal if URL not set).
