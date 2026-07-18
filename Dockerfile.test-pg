@@ -1,0 +1,27 @@
+# Composite test-pg image: pgvector + AGE 1.6.0 prebuilt.
+#
+# Used by the livepg integration job in .github/workflows/ci.yml to avoid the
+# ~10 min in-container AGE build on every run. Build and push manually (or via
+# a separate workflow) before the livepg job can reference it:
+#
+#   docker buildx build --platform linux/arm64,linux/amd64 \
+#     -t ghcr.io/anatolykoptev/memdb-test-pg:pg17-age1.6.0 \
+#     -f Dockerfile.test-pg --push .
+#
+# NOTE: The GHCR namespace (anatolykoptev) is the repo owner; operators can
+# retarget this image by updating the `image:` field in ci.yml.
+
+FROM pgvector/pgvector:pg17
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        postgresql-server-dev-17 \
+        flex \
+        bison \
+        git && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN git clone --branch release/PG17/1.6.0 --depth 1 https://github.com/apache/age.git /tmp/age && \
+    cd /tmp/age && make install && \
+    rm -rf /tmp/age

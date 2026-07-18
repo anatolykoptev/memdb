@@ -1,7 +1,7 @@
 //go:build livepg
 
 // Package search — multihop_livepg_test.go: end-to-end test for the M8 D2
-// fix against a live Postgres + AGE 1.7 + pgvector. Verifies that
+// fix against a live Postgres + AGE 1.6.0 + pgvector. Verifies that
 // expandViaGraph walks memory_edges and pulls in a 2-hop neighbour with a
 // score that beats a cold seed when the neighbour's embedding aligns with
 // the query — the exact regression the M7 cat-2 0.091 measurement
