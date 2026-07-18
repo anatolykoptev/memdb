@@ -28,10 +28,10 @@ type MemoryEdgeRow struct {
 // (cube, session). Returned by GetSessionMemoryNeighbors and consumed by the
 // SAME_SESSION / TIMELINE_NEXT / SIMILAR_COSINE_HIGH emitters.
 type SessionMemoryNeighbor struct {
-	ID            string
-	CreatedAt     string
-	EmbeddingStr  string    // raw pgvector text "[...]" — empty if NULL
-	Embedding     []float32 // parsed lazily by callers that need it
+	ID           string
+	CreatedAt    string
+	EmbeddingStr string    // raw pgvector text "[...]" — empty if NULL
+	Embedding    []float32 // parsed lazily by callers that need it
 }
 
 // BulkInsertMemoryEdges performs a single multi-row INSERT of structural

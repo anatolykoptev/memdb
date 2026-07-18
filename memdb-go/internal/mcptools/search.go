@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	mcpDefaultTopK      = 6
+	mcpDefaultTopK       = 6
 	mcpDefaultRelativity = 0.85
-	mcpDefaultDedup     = "mmr"
+	mcpDefaultDedup      = "mmr"
 )
 
 // buildProxySearchInput constructs the proxy payload from MCP search input.

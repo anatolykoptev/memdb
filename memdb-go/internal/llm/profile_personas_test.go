@@ -67,15 +67,15 @@ func TestTaxonomyForPersona_AllFive(t *testing.T) {
 //
 // The expected counts come from the verbatim ports above:
 //   - default:   8 (basic_info, contact_info, education, demographics, work,
-//                interest, psychological, life_event)
+//     interest, psychological, life_event)
 //   - locomo:    5 (basic_info, personal_narrative, life_circumstances,
-//                personal_growth, plans)
+//     personal_growth, plans)
 //   - assistant: 6 (basic_info, schedule_prefs, task_management,
-//                productivity_settings, lifestyle_prefs, communication_style)
+//     productivity_settings, lifestyle_prefs, communication_style)
 //   - companion: 4 (basic_info, companion_preferences, interaction_history,
-//                personalization)
+//     personalization)
 //   - education: 5 (basic_info, academic_profile, learning_preferences,
-//                progress_tracking, engagement_metrics)
+//     progress_tracking, engagement_metrics)
 func TestCountTopics(t *testing.T) {
 	cases := []struct {
 		persona string
@@ -135,4 +135,3 @@ func TestBuildProfileFactRetrievalPromptWith_InjectsGuidelines(t *testing.T) {
 		}
 	}
 }
-

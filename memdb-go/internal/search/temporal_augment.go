@@ -4,14 +4,14 @@
 // Atomic facts (F8) carry an `event_dates` JSON array on properties; F7
 // indexes that field (migrations/0024_event_dates.sql) and surfaces it here:
 //
-//   1. Detect a date hint in the query — explicit year ("in 2024"), explicit
-//      ISO date ("on 2024-03-15"), or a relative phrase ("last month",
-//      "yesterday"). Hint resolves to a [start, end] inclusive ISO range.
-//   2. If found, query Postgres for memories whose event_dates intersect the
-//      range (db.SearchMemoriesByDateRange) and boost the matching IDs in
-//      st.TextMerged by temporalBoost (default 0.15, env-tunable).
-//   3. If no hint, the stage is a no-op (skipped) — zero extra DB work, the
-//      latency budget is respected.
+//  1. Detect a date hint in the query — explicit year ("in 2024"), explicit
+//     ISO date ("on 2024-03-15"), or a relative phrase ("last month",
+//     "yesterday"). Hint resolves to a [start, end] inclusive ISO range.
+//  2. If found, query Postgres for memories whose event_dates intersect the
+//     range (db.SearchMemoriesByDateRange) and boost the matching IDs in
+//     st.TextMerged by temporalBoost (default 0.15, env-tunable).
+//  3. If no hint, the stage is a no-op (skipped) — zero extra DB work, the
+//     latency budget is respected.
 //
 // Targeted at LoCoMo cat-2 ("When did X happen") and cat-4 ("How long ago X")
 // query buckets. cat-4 detection lives in tuning.go (isCat4Query).

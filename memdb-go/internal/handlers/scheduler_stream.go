@@ -68,17 +68,17 @@ const (
 // schedulerUpdatePayload matches Python's SSE payload exactly.
 // Python fields: user_name, active_tasks, elapsed_seconds, status, timed_out, instance_id.
 type schedulerUpdatePayload struct {
-	UserName       string  `json:"user_name"`        // matches Python field name
+	UserName       string  `json:"user_name"` // matches Python field name
 	ActiveTasks    int     `json:"active_tasks"`
 	ElapsedSeconds float64 `json:"elapsed_seconds"`
-	Status         string  `json:"status"`           // "running" | "idle" | "timeout" | "error"
+	Status         string  `json:"status"` // "running" | "idle" | "timeout" | "error"
 	TimedOut       bool    `json:"timed_out,omitempty"`
 	InstanceID     string  `json:"instance_id,omitempty"`
 	// Extended fields (Go-only, ignored by Python clients).
-	WaitingTasks   int     `json:"waiting_tasks,omitempty"`
-	InProgressTasks int    `json:"in_progress_tasks,omitempty"`
-	CompletedTasks int     `json:"completed_tasks,omitempty"`
-	FailedTasks    int     `json:"failed_tasks,omitempty"`
+	WaitingTasks    int `json:"waiting_tasks,omitempty"`
+	InProgressTasks int `json:"in_progress_tasks,omitempty"`
+	CompletedTasks  int `json:"completed_tasks,omitempty"`
+	FailedTasks     int `json:"failed_tasks,omitempty"`
 }
 
 // NativeSchedulerWait handles POST /product/scheduler/wait
@@ -139,10 +139,10 @@ func (h *Handler) NativeSchedulerWait(w http.ResponseWriter, r *http.Request) {
 				h.writeJSON(w, http.StatusOK, map[string]any{
 					"message": "timeout",
 					"data": map[string]any{
-						"running_tasks":   h.countActiveTasks(ctx, req.UserName),
-						"waited_seconds":  elapsed.Seconds(),
-						"timed_out":       true,
-						"user_name":       req.UserName,
+						"running_tasks":  h.countActiveTasks(ctx, req.UserName),
+						"waited_seconds": elapsed.Seconds(),
+						"timed_out":      true,
+						"user_name":      req.UserName,
 					},
 				})
 				return
@@ -151,10 +151,10 @@ func (h *Handler) NativeSchedulerWait(w http.ResponseWriter, r *http.Request) {
 				h.writeJSON(w, http.StatusOK, map[string]any{
 					"message": "idle",
 					"data": map[string]any{
-						"running_tasks":   0,
-						"waited_seconds":  elapsed.Seconds(),
-						"timed_out":       false,
-						"user_name":       req.UserName,
+						"running_tasks":  0,
+						"waited_seconds": elapsed.Seconds(),
+						"timed_out":      false,
+						"user_name":      req.UserName,
 					},
 				})
 				return

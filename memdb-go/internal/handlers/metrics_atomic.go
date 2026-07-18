@@ -46,10 +46,10 @@ var (
 )
 
 type atomicMetricsStruct struct {
-	Extracted         metric.Int64Counter     // labels: outcome
-	FactsPerChunk     metric.Float64Histogram // unlabeled
-	FactWordCount     metric.Float64Histogram // unlabeled
-	EntitiesPromoted  metric.Int64Counter     // labels: outcome (success|failed)
+	Extracted        metric.Int64Counter     // labels: outcome
+	FactsPerChunk    metric.Float64Histogram // unlabeled
+	FactWordCount    metric.Float64Histogram // unlabeled
+	EntitiesPromoted metric.Int64Counter     // labels: outcome (success|failed)
 }
 
 // promoteOutcomes covers all label values for atomic_entities_promoted_total

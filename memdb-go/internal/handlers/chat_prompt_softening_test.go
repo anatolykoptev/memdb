@@ -277,10 +277,10 @@ func TestBuildSystemPrompt_FactualCustomBaseRulesPerVariant(t *testing.T) {
 			memories:    []map[string]any{memWithScore("Caroline supports LGBTQ rights", 0.92)},
 			wantVariant: factualVariantHigh,
 			mustContain: []string{
-				factualHighConfidenceMarker,           // "Commit to an answer based on the retrieved evidence"
-				"actively search for confirming",      // rule 5
-				"count ALL distinct mentions",         // rule 8
-				"Synthesize from evidence",            // rule 9
+				factualHighConfidenceMarker,      // "Commit to an answer based on the retrieved evidence"
+				"actively search for confirming", // rule 5
+				"count ALL distinct mentions",    // rule 8
+				"Synthesize from evidence",       // rule 9
 				"Reply \"no answer\" only if every memory is unambiguously off-topic",
 			},
 			mustAbsent: []string{factualLowConfidenceMarker},

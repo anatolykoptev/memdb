@@ -5,7 +5,7 @@
 //   - memdb.chat.wiki_inject_total{outcome}  — counter, fires once per chat
 //     turn that passes the embedder/postgres handle check. outcome ∈
 //     {gate_off, no_handles, no_query, embed_error, search_error,
-//      no_results, injected}.
+//     no_results, injected}.
 //   - memdb.chat.wiki_inject_pages             — histogram of pages returned
 //     by SearchWikiByCosine on the success path. buckets: 1, 2, 3, 5, 10.
 //   - memdb.chat.wiki_inject_body_chars        — histogram of total chars

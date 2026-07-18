@@ -181,7 +181,7 @@ func TestCEPrecomputeMathPrefilter_MissingNeighborEmbed_KeepNeighbor(t *testing.
 		makeNeighbour("low1", unitVec(0.05, 0.99, 0)), // cos ≈ 0.05 → drop
 		makeNeighbour("low2", unitVec(0.1, 0.99, 0)),  // cos ≈ 0.10 → drop
 		makeNeighbour("low3", unitVec(0.2, 0.97, 0)),  // cos ≈ 0.20 → drop
-		{ID: "no-emb", Text: "no embed"},               // no embedding → keep
+		{ID: "no-emb", Text: "no embed"},              // no embedding → keep
 		makeNeighbour("high1", unitVec(0.9, 0.43, 0)), // cos ≈ 0.90 → keep
 	}
 

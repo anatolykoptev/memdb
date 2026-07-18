@@ -12,11 +12,11 @@
 //
 //   - LLMBackend  — original behaviour (preserved exactly).
 //   - CEBackend   — both stages via embed-server cross-encoder (currently
-//                     gte-multi-rerank; model is wired via CROSS_ENCODER_MODEL
-//                     env on embed-server — no code change needed to swap).
+//     gte-multi-rerank; model is wired via CROSS_ENCODER_MODEL
+//     env on embed-server — no code change needed to swap).
 //   - HybridBackend — stage 2 via CE (cheap top-K), stage 3 via LLM
-//                     (keeps the structured judgement path for cases
-//                     where a CE threshold is too coarse).
+//     (keeps the structured judgement path for cases
+//     where a CE threshold is too coarse).
 //
 // Backend selection is gated by MEMDB_STAGED_BACKEND ∈ {ce, llm, hybrid}.
 // Unset / empty / unknown → ce (default), but only when a *rerank.Client
@@ -244,7 +244,6 @@ func stagedBackendName() string {
 	}
 	return ""
 }
-
 
 // stagedCEThreshold parses MEMDB_STAGED_CE_THRESHOLD. Default 0.0 — a
 // conservative above-neutral cutoff. Tune by inspecting the score

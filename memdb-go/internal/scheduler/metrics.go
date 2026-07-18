@@ -16,10 +16,10 @@ var (
 )
 
 type schedMetricsStruct struct {
-	Messages        metric.Int64Counter     // labels: label, outcome
-	Duration        metric.Float64Histogram // labels: label
-	DLQ             metric.Int64Counter     // labels: label
-	TreeReorg       metric.Int64Counter     // labels: tier, outcome
+	Messages               metric.Int64Counter     // labels: label, outcome
+	Duration               metric.Float64Histogram // labels: label
+	DLQ                    metric.Int64Counter     // labels: label
+	TreeReorg              metric.Int64Counter     // labels: tier, outcome
 	PageRankRuns           metric.Int64Counter     // labels: outcome (success|empty|db_error|compute_error|skipped_other_leader)
 	PageRankLastRun        metric.Float64Gauge     // seconds since epoch of last completed run
 	PageRankDistinctScores metric.Int64Gauge       // distinct PageRank score values written per cycle (distribution health)

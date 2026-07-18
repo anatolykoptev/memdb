@@ -54,11 +54,11 @@ type extractorTriggerInput struct {
 //  3. generateToolTrajectory     — tool-call traces
 //  4. profiler.TriggerRefresh    — legacy unstructured profile summary
 //  5. triggerProfileExtract      — structured user profile (M10 S2,
-//                                  bounded by profileExtractSemaphore)
+//     bounded by profileExtractSemaphore)
 //  6. triggerEdgeInvalidationJudge — M11 F11 bi-temporal edge invalidator
-//                                  (bounded by edgeJudgeSemaphore)
+//     (bounded by edgeJudgeSemaphore)
 //  7. triggerEventExtract        — M11 F3 Memobase event extractor
-//                                  (bounded by eventExtractSemaphore)
+//     (bounded by eventExtractSemaphore)
 func (h *Handler) triggerBackgroundExtractors(in extractorTriggerInput) {
 	if h == nil {
 		return

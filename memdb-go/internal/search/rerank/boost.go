@@ -7,7 +7,7 @@
 //   - user_id match → +BoostWeights.UserID    (default 0.5)
 //   - session_id match → +BoostWeights.SessionID (default 0.3)
 //   - tags overlap → +TagsEach per matched tag, capped at TagsCap
-//                    (defaults 0.2 / 0.6)
+//     (defaults 0.2 / 0.6)
 //
 // Zero-weight and empty-string query keys are explicit no-ops —
 // no boost is applied when the query carries no user/session context.

@@ -106,14 +106,14 @@ func TestFastDedupSessionAware_UnknownValueDefaultsOn(t *testing.T) {
 // triggered isDuplicate=true and 5/6 LoCoMo sessions never reached the
 // DB. The fix is layered:
 //
-//   1. fastDedupThreshold reads MEMDB_FAST_DEDUP_THRESHOLD so operators
-//      can raise the bar without recompiling (covered above).
-//   2. fastDedupSessionAware enables a session_id filter on candidate
-//      matches so cross-session high-cosine pairs are NOT treated as
-//      duplicates by default (covered above).
-//   3. extractSessionID parses session_id out of the candidate's raw
-//      props blob and is defensive against malformed JSON (covered
-//      above).
+//  1. fastDedupThreshold reads MEMDB_FAST_DEDUP_THRESHOLD so operators
+//     can raise the bar without recompiling (covered above).
+//  2. fastDedupSessionAware enables a session_id filter on candidate
+//     matches so cross-session high-cosine pairs are NOT treated as
+//     duplicates by default (covered above).
+//  3. extractSessionID parses session_id out of the candidate's raw
+//     props blob and is defensive against malformed JSON (covered
+//     above).
 //
 // A live-postgres E2E lives in add_fast_batched_livepg_test.go and is
 // the place to assert "ingest 3 distinct sessions → 6 rows survive".

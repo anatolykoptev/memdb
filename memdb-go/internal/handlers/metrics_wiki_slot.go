@@ -61,8 +61,8 @@ var (
 )
 
 type wikiSlotMetricsStruct struct {
-	Total        metric.Int64Counter     // labels: outcome
-	PagesMerged  metric.Float64Histogram // unlabeled, success-only
+	Total       metric.Int64Counter     // labels: outcome
+	PagesMerged metric.Float64Histogram // unlabeled, success-only
 }
 
 func wikiSlotMx() *wikiSlotMetricsStruct {

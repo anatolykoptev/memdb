@@ -3,8 +3,9 @@
 //
 // Evidence: 5/26 chat-50 fails were WRONG_ANSWER_NO_RECALL counting queries.
 // Examples:
-//   "How many children does Melanie have?" → truth=3, pred="two younger" (1 missing in top-K)
-//   "How many beach trips in 2023?"        → truth=2, pred="once or twice" (couldn't aggregate)
+//
+//	"How many children does Melanie have?" → truth=3, pred="two younger" (1 missing in top-K)
+//	"How many beach trips in 2023?"        → truth=2, pred="once or twice" (couldn't aggregate)
 //
 // Root cause: a counting question requires ALL mentions of the counted entity to
 // reach the LLM so it can aggregate them.  With the default top-K of 10–20

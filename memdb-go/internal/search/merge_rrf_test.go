@@ -131,8 +131,8 @@ func TestMergeWithRRF_EnvKOverride(t *testing.T) {
 	got := mergeVectorAndFulltextDispatch(vec, ft)
 
 	k := 30
-	wantX := 1.0 / float64(k+1)                           // x: rank 1 in vec only
-	wantY := 1.0/float64(k+2) + 1.0/float64(k+1)          // y: rank 2 in vec + rank 1 in ft
+	wantX := 1.0 / float64(k+1)                  // x: rank 1 in vec only
+	wantY := 1.0/float64(k+2) + 1.0/float64(k+1) // y: rank 2 in vec + rank 1 in ft
 
 	scores := make(map[string]float64, len(got))
 	for _, r := range got {

@@ -50,7 +50,6 @@ const (
 // Default 300s (was 30s) — 10× cache hit rate uplift for repeated identical searches.
 var CacheTTL = envcfg.PositiveDuration("MEMDB_SEARCH_CACHE_TTL_S", 300, time.Second)
 
-
 // Default limits for graph recall and working memory.
 const (
 	GraphRecallLimit    = 50   // max candidates from graph recall (before merge)

@@ -43,7 +43,6 @@ const (
 // Default 60m (was 10m) — 6× reduction in profiler LLM volume.
 var profileRefreshCooldown = envcfg.PositiveDuration("MEMDB_PROFILE_REFRESH_COOLDOWN_M", 60, time.Minute)
 
-
 // Profiler generates and caches user profile summaries in Redis.
 type Profiler struct {
 	postgres    *db.Postgres

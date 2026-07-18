@@ -42,10 +42,10 @@ var dualSpeakerSurfaces = []string{"search", "chat"}
 
 // dualSpeakerInstruments holds the M9 server-side dual-speaker counters.
 type dualSpeakerInstruments struct {
-	Engaged          metric.Int64Counter
-	SpeakersFanned   metric.Float64Histogram
-	MergedTotal      metric.Int64Counter
-	FanOutLatencyMs  metric.Float64Histogram
+	Engaged         metric.Int64Counter
+	SpeakersFanned  metric.Float64Histogram
+	MergedTotal     metric.Int64Counter
+	FanOutLatencyMs metric.Float64Histogram
 }
 
 var (

@@ -115,9 +115,9 @@ func TestExtractAtomicFacts_EmptyOnNoFacts(t *testing.T) {
 // fact_word_count metric and the proper-noun warning log.
 func TestCountWords(t *testing.T) {
 	cases := map[string]int{
-		"":                                       0,
-		"   ":                                    0,
-		"one two three":                          3,
+		"":                                      0,
+		"   ":                                   0,
+		"one two three":                         3,
 		"User Marcus moved to Toronto in 2025.": 7,
 	}
 	for in, want := range cases {

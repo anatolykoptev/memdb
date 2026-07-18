@@ -122,7 +122,6 @@ func (c *PythonClient) ProxyRequest(ctx context.Context, w http.ResponseWriter, 
 	_, _ = io.Copy(w, resp.Body)
 }
 
-
 func (c *PythonClient) writeError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

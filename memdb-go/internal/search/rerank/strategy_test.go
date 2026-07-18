@@ -22,10 +22,10 @@ type stubItem struct {
 	meta  map[string]any
 }
 
-func (s *stubItem) ID() string                  { return s.id }
-func (s *stubItem) Score() float64              { return s.score }
-func (s *stubItem) SetScore(v float64)          { s.score = v }
-func (s *stubItem) SetMeta(key string, v any)   { s.meta[key] = v }
+func (s *stubItem) ID() string                { return s.id }
+func (s *stubItem) Score() float64            { return s.score }
+func (s *stubItem) SetScore(v float64)        { s.score = v }
+func (s *stubItem) SetMeta(key string, v any) { s.meta[key] = v }
 func (s *stubItem) GetMeta(key string) (any, bool) {
 	v, ok := s.meta[key]
 	return v, ok

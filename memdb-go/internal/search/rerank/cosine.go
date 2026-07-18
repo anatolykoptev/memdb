@@ -22,8 +22,8 @@ import (
 // EmbeddingsByID keep their existing score (matches legacy behaviour —
 // see internal/search/rerank.go::ReRankByCosine).
 type Cosine struct {
-	QueryVec        []float32
-	EmbeddingsByID  map[string][]float32
+	QueryVec       []float32
+	EmbeddingsByID map[string][]float32
 }
 
 // Name implements Reranker.

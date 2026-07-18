@@ -32,11 +32,11 @@ import (
 )
 
 const (
-	cotTimeout              = 8 * time.Second
-	cotMaxTokens            = 200
-	cotMaxSubqueries        = 3
-	cotMinQueryWords        = 8 // don't decompose short atomic queries
-	cotRespBodyLimit  int64 = 8 * 1024
+	cotTimeout             = 8 * time.Second
+	cotMaxTokens           = 200
+	cotMaxSubqueries       = 3
+	cotMinQueryWords       = 8 // don't decompose short atomic queries
+	cotRespBodyLimit int64 = 8 * 1024
 )
 
 var cotSystemPrompt = `You are a retrieval-query decomposer. Given a user's question, split it into atomic retrieval-questions if it contains multiple independent facts to look up.

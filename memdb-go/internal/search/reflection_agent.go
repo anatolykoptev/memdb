@@ -7,9 +7,9 @@
 //
 //   - decision == "sufficient"     → no extra work; return as-is.
 //   - decision == "needs_raw"      → caller fetches top-K raw memories
-//                                    (vector recall) WITHOUT rerank trim.
+//     (vector recall) WITHOUT rerank trim.
 //   - decision == "missing_info"   → caller embeds each `missing_aspects`
-//                                    phrase and merges the results.
+//     phrase and merges the results.
 //
 // The agent itself is pure — it makes ONE LLM call and returns the parsed
 // Decision. Loop control (max_iter=2) and any DB / embed work live in the

@@ -23,7 +23,7 @@ import (
 //
 //   - success — VDrop called and Redis confirmed the key was deleted
 //   - miss    — VDrop called but the VSET key did not exist (already evicted
-//               by TTL or never warmed); not an error
+//     by TTL or never warmed); not an error
 //   - error   — VDrop returned a non-nil error (Redis unreachable, etc.)
 var vsetInvalidateOutcomes = []string{"success", "miss", "error"}
 

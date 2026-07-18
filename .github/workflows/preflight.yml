@@ -1,0 +1,37 @@
+name: Preflight
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOWORK: "off"
+  CGO_ENABLED: "0"
+
+jobs:
+  preflight:
+    name: make preflight
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: memdb-go/go.mod
+          cache: true
+          cache-dependency-path: memdb-go/go.sum
+
+      - name: Download modules
+        working-directory: memdb-go
+        run: go mod download
+
+      - name: Run preflight (gofmt + vet + build + test)
+        run: make preflight

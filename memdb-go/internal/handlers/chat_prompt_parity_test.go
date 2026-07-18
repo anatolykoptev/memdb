@@ -26,9 +26,9 @@ var updateGolden = flag.Bool("update", false, "overwrite golden files with curre
 
 func TestFactualPromptParity(t *testing.T) {
 	cases := []struct {
-		name    string
-		got     string
-		golden  string
+		name   string
+		got    string
+		golden string
 	}{
 		{
 			name:   "high_confidence_EN",

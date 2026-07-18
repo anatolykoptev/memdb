@@ -22,8 +22,8 @@ import (
 
 var (
 	envOverrideLogOnce sync.Once
-	envOverrideMu     sync.Mutex
-	envOverrides      = map[string]string{}
+	envOverrideMu      sync.Mutex
+	envOverrides       = map[string]string{}
 )
 
 func recordOverride(name, value string) {

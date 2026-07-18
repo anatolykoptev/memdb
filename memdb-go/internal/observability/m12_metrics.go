@@ -111,10 +111,10 @@ type m12Instruments struct {
 	SearchJudgeChangedTop1     metric.Int64Counter
 
 	// DB observability (Category C).
-	DBQueryDurationMs    metric.Float64Histogram
-	DBPgxpoolAcquireMs   metric.Float64Histogram
-	DBPgxpoolBusyConns   metric.Int64ObservableGauge
-	DBRowsScanned        metric.Int64Counter
+	DBQueryDurationMs  metric.Float64Histogram
+	DBPgxpoolAcquireMs metric.Float64Histogram
+	DBPgxpoolBusyConns metric.Int64ObservableGauge
+	DBRowsScanned      metric.Int64Counter
 }
 
 var (

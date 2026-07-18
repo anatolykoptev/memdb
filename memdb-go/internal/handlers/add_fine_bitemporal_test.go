@@ -42,7 +42,7 @@ func TestEdgeJudgeEnabled_ParsesEnv(t *testing.T) {
 		val  string
 		want bool
 	}{
-		{"", true},      // default ON
+		{"", true}, // default ON
 		{"true", true},
 		{"TRUE", true},
 		{"1", true},

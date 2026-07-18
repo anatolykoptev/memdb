@@ -13,10 +13,10 @@
 //
 // File map (single-responsibility split, 2026-04-30):
 //
-//   ce.go                  — type CrossEncoder + Rerank/rerank dispatcher
-//   ce_live.go             — runLive / runLiveSubset (HTTP transport)
-//   ce_math_fallback.go    — degraded / low-quality CE → MathReranker
-//   ce_precompute.go       — fireOnPrecompute, cache extraction helpers
+//	ce.go                  — type CrossEncoder + Rerank/rerank dispatcher
+//	ce_live.go             — runLive / runLiveSubset (HTTP transport)
+//	ce_math_fallback.go    — degraded / low-quality CE → MathReranker
+//	ce_precompute.go       — fireOnPrecompute, cache extraction helpers
 //
 // Metric hooks (OnLiveCall, OnPrecompute, OnMathFallback) let the parent
 // search pkg attach memdb.search.* counters without leaking otel imports
@@ -149,8 +149,8 @@ func (ce CrossEncoder) rerank(ctx context.Context, query string, items []Item) (
 		fromLive bool // true = score came from live CE call
 	}
 	rest := make([]indexed, 0, len(items)-1)
-	var uncachedItems []Item    // items with no cache entry → need live CE
-	var uncachedRestIdx []int   // parallel index into rest[] for uncachedItems
+	var uncachedItems []Item  // items with no cache entry → need live CE
+	var uncachedRestIdx []int // parallel index into rest[] for uncachedItems
 
 	for i := 1; i < len(items); i++ {
 		id := items[i].ID()

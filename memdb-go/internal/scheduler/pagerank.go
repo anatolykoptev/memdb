@@ -233,7 +233,10 @@ func computePageRank(edges []db.PageRankEdge) map[string]float64 {
 
 	// Compute normalized out-weights per node.
 	// outWeight[u][v] = w(u→v) / sum_w(u)
-	type edge struct{ dst, src int; w float64 }
+	type edge struct {
+		dst, src int
+		w        float64
+	}
 	var edgeList []edge
 	for u, dsts := range outEdges {
 		uid := idx[u]

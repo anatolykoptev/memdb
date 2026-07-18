@@ -133,4 +133,3 @@ func NewMathPrefilterFromEnv(embByID map[string][]float32, queryVec []float32) (
 		Lambda:         float32(lambda),
 	}, true
 }
-

@@ -72,10 +72,10 @@ func (r *Redis) Close() error {
 
 // redisPoolMetrics records Redis connection pool stats as Prometheus gauges.
 var (
-	redisPoolOnce   sync.Once
-	poolTotalConns  metric.Int64ObservableGauge
-	poolIdleConns   metric.Int64ObservableGauge
-	poolStaleConns  metric.Int64ObservableGauge
+	redisPoolOnce  sync.Once
+	poolTotalConns metric.Int64ObservableGauge
+	poolIdleConns  metric.Int64ObservableGauge
+	poolStaleConns metric.Int64ObservableGauge
 )
 
 // RegisterRedisPoolMetrics wires go-redis PoolStats to Prometheus gauges.

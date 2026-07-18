@@ -15,7 +15,6 @@ import (
 	"github.com/daulet/tokenizers"
 	ort "github.com/yalue/onnxruntime_go"
 
-
 	"go.opentelemetry.io/otel/attribute"
 
 	"go.opentelemetry.io/otel/metric"

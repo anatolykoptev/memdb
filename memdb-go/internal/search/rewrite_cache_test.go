@@ -165,7 +165,6 @@ func TestRewriteCache_DifferentModelsDifferentKeys(t *testing.T) {
 	}
 }
 
-
 // TestRewriteCacheKey_DiffersByDay ensures that two D4 calls on different
 // UTC days produce distinct cache keys, since the prompt interpolates
 // nowISO ("Now: %s\n\n..."). Without day-granularity in the key, a

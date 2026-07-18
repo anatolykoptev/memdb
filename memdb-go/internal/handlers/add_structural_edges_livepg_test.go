@@ -215,9 +215,9 @@ func TestLivePG_StructuralEdges_CapFires(t *testing.T) {
 		t.Fatal("pg pool nil")
 	}
 
-	lastID := memoryIDs[totalTurns-1]    // memory-26
-	prevID := memoryIDs[totalTurns-2]    // memory-25 — expected TIMELINE_NEXT target
-	firstID := memoryIDs[0]              // memory-1  — must NOT be the TIMELINE_NEXT target
+	lastID := memoryIDs[totalTurns-1] // memory-26
+	prevID := memoryIDs[totalTurns-2] // memory-25 — expected TIMELINE_NEXT target
+	firstID := memoryIDs[0]           // memory-1  — must NOT be the TIMELINE_NEXT target
 
 	// Assert 1: SAME_SESSION cap fires for memory-26.
 	// It should have exactly sameSessionMaxPartners = 20 outbound edges, not 25.
@@ -259,4 +259,3 @@ func TestLivePG_StructuralEdges_CapFires(t *testing.T) {
 		}
 	}
 }
-

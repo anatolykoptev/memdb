@@ -37,11 +37,11 @@ Include ALL input memories in the output. Keep original memory IDs.
 If a memory needs no changes, return it as-is with its original text.`
 
 const (
-	enhanceMaxTokens    = 2048
-	enhanceRespLimit    = 32 * 1024 // 32 KB
-	enhanceMinMemories  = 3         // skip enhancement for trivial result sets
-	enhanceMaxMemories  = 15        // cap to avoid prompt overflow
-	enhanceCacheTTL     = 3 * time.Minute
+	enhanceMaxTokens   = 2048
+	enhanceRespLimit   = 32 * 1024 // 32 KB
+	enhanceMinMemories = 3         // skip enhancement for trivial result sets
+	enhanceMaxMemories = 15        // cap to avoid prompt overflow
+	enhanceCacheTTL    = 3 * time.Minute
 )
 
 // enhanceCache is an in-process TTL cache for EnhanceMemories results.
@@ -52,8 +52,8 @@ type enhanceCacheStore struct {
 }
 
 type enhanceCacheEntry struct {
-	expires  time.Time
-	result   []map[string]any
+	expires time.Time
+	result  []map[string]any
 }
 
 func (c *enhanceCacheStore) get(key string) ([]map[string]any, bool) {

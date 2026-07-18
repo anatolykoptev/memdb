@@ -18,8 +18,8 @@
 package rerank
 
 import (
-	"os"
 	"context"
+	"os"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric"

@@ -7,12 +7,13 @@
 // Full-text search uses `properties_tsvector_zh` tsvector column with a GIN index.
 //
 // File layout:
-//   queries.go         — DefaultGraphName constant
-//   queries_memory.go  — memory CRUD: user/instance, get-all, delete, update, insert, cleanup
-//   queries_graph.go   — memory_edges table, graph recall, importance decay
-//   queries_entity.go  — entity_nodes table
-//   queries_config.go  — user_configs table
-//   search_queries.go  — vector + fulltext search queries (existing)
+//
+//	queries.go         — DefaultGraphName constant
+//	queries_memory.go  — memory CRUD: user/instance, get-all, delete, update, insert, cleanup
+//	queries_graph.go   — memory_edges table, graph recall, importance decay
+//	queries_entity.go  — entity_nodes table
+//	queries_config.go  — user_configs table
+//	search_queries.go  — vector + fulltext search queries (existing)
 package queries
 
 // DefaultGraphName is the default Apache AGE graph and schema name.

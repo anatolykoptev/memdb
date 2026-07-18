@@ -146,12 +146,12 @@ func d10Mx() *d10MetricsInstruments {
 //
 // All histograms are in [0, 1] except Entropy (in nats, [0, ln(5) ≈ 1.609]).
 type d10RoutingTrace struct {
-	Mode        D10RoutingMode
-	Top1Cat     QueryCategory // QueryCategoryOpenDomain when mode=base from open_domain skip; "" when mode=base from nil emb / disabled / no signal
-	Top1Conf    float64
-	Top2Conf    float64
-	Entropy     float64
-	HasSignal   bool // false when classifier returned no-signal sentinel — Top1Cat is meaningless
+	Mode      D10RoutingMode
+	Top1Cat   QueryCategory // QueryCategoryOpenDomain when mode=base from open_domain skip; "" when mode=base from nil emb / disabled / no signal
+	Top1Conf  float64
+	Top2Conf  float64
+	Entropy   float64
+	HasSignal bool // false when classifier returned no-signal sentinel — Top1Cat is meaningless
 }
 
 // top1Label converts the trace's Top1Cat to the metric label string.

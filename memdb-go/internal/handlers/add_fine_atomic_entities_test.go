@@ -115,13 +115,13 @@ func TestAtomicToExtracted_QuotedTitleClassifiedAsWORK(t *testing.T) {
 // false positives ("I", initials) outweigh the rare 1-char ORG.
 func TestInferEntityType_AllUpperIsORG(t *testing.T) {
 	cases := map[string]string{
-		"NASA":           "ORG",
-		"IBM":            "ORG",
-		"F-35":           "ORG", // letters are upper; digits/punct ignored
-		"Shopify":        "PERSON",
-		"becoming":       "ENTITY",
-		"hello world":    "ENTITY",
-		"Marcus":         "PERSON",
+		"NASA":             "ORG",
+		"IBM":              "ORG",
+		"F-35":             "ORG", // letters are upper; digits/punct ignored
+		"Shopify":          "PERSON",
+		"becoming":         "ENTITY",
+		"hello world":      "ENTITY",
+		"Marcus":           "PERSON",
 		`"Hidden Figures"`: "WORK",
 	}
 	for in, want := range cases {

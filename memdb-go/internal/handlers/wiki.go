@@ -311,4 +311,3 @@ func wrapData(data any, message string) map[string]any {
 		"data":    data,
 	}
 }
-

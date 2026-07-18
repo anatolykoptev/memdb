@@ -70,4 +70,3 @@ func TestValidateKey(t *testing.T) {
 		})
 	}
 }
-

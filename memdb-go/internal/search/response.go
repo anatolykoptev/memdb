@@ -35,7 +35,7 @@ type SearchResult struct {
 	PrefString string         `json:"pref_string"`
 	// ProfileMem is a Memobase-style always-on user profile summary.
 	// Populated from Redis cache (key: profile:{cube_id}). Empty string when unavailable.
-	ProfileMem string         `json:"profile_mem,omitempty"`
+	ProfileMem string `json:"profile_mem,omitempty"`
 }
 
 // NewEmptySearchResult creates a SearchResult with all empty slices (not nil).

@@ -8,11 +8,11 @@ import "testing"
 
 func TestExtractedFact_EdgeValidity(t *testing.T) {
 	cases := []struct {
-		name              string
-		eventDates        []string
-		fallback          string
-		wantValidAt       string
-		wantInvalidAt     string
+		name          string
+		eventDates    []string
+		fallback      string
+		wantValidAt   string
+		wantInvalidAt string
 	}{
 		{
 			name:          "empty event_dates falls back to ValidAt",

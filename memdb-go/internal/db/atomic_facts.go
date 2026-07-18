@@ -30,12 +30,12 @@ import (
 // section. Only the fields the renderer needs are scanned:
 //   - Memory:        the fact text body (properties->>'memory').
 //   - AttributedTo:  optional speaker attribution (properties->>'attributed_to'),
-//                    e.g. "Caroline" / "Melanie" — load-bearing in dual-speaker
-//                    chats so the LLM can cross-reference the right person.
+//     e.g. "Caroline" / "Melanie" — load-bearing in dual-speaker
+//     chats so the LLM can cross-reference the right person.
 //   - EventDates:    optional ISO-8601 calendar anchors
-//                    (properties->'event_dates'::jsonb array). The renderer
-//                    surfaces only the first element to keep the prompt tight;
-//                    callers needing the full set can read the column directly.
+//     (properties->'event_dates'::jsonb array). The renderer
+//     surfaces only the first element to keep the prompt tight;
+//     callers needing the full set can read the column directly.
 //   - Score:         cosine similarity in [0, 1] (1 - <=> distance), ordered DESC.
 type AtomicFactRow struct {
 	Memory       string

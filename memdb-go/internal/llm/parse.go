@@ -73,13 +73,13 @@ type Message struct {
 // chatStructuredOpts holds resolved options. All fields are private; callers
 // configure via the ChatOpt constructors below.
 type chatStructuredOpts struct {
-	maxRetries           int
-	maxTokens            int
-	temperature          float64
-	timeout              time.Duration
-	respBodyMax          int64
-	useJSONResponseMode  bool   // sets response_format={type:"json_object"}
-	parseRetryReminder   string // appended to the last user message on parse-error retry
+	maxRetries          int
+	maxTokens           int
+	temperature         float64
+	timeout             time.Duration
+	respBodyMax         int64
+	useJSONResponseMode bool   // sets response_format={type:"json_object"}
+	parseRetryReminder  string // appended to the last user message on parse-error retry
 }
 
 // ChatOpt configures ChatStructured / ChatText. All options are optional;

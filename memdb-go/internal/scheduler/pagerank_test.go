@@ -200,9 +200,10 @@ func TestErrComputePageRank_SentinelIsDistinct(t *testing.T) {
 //
 // On a well-connected 100-node synthetic graph the algorithm MUST produce
 // at least 50 distinct float64 scores. Fewer than 50 indicates either:
-//   (a) the power-method converged to a degenerate uniform distribution
-//       (edges not traversed / all edge weights equal → all nodes identical), or
-//   (b) a future serialization regression collapsed scores to low precision.
+//
+//	(a) the power-method converged to a degenerate uniform distribution
+//	    (edges not traversed / all edge weights equal → all nodes identical), or
+//	(b) a future serialization regression collapsed scores to low precision.
 //
 // Graph topology: each node i links to 5 targets with weights derived from
 // (i*7 + j*3) mod 17 + 1. The asymmetric weights break all node symmetry,

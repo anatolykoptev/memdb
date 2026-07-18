@@ -91,7 +91,6 @@ func (h *Handler) getAtomicExtractor() *llm.AtomicExtractor {
 	return atomicExtractorCache.wrapper
 }
 
-
 // atomicToExtracted converts a mem0 AtomicFact into the ExtractedFact shape
 // the rest of the add pipeline already understands. The only F8-specific
 // fields (kind, attributed_to, linked_memory_ids, event_dates) ride along

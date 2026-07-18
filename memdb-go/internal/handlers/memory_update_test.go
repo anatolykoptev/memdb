@@ -23,8 +23,10 @@ func (s *stubMemoryUpdater) UpdateMemoryByID(_ context.Context, _, _ string, _ [
 	return s.err
 }
 
-func (s *stubMemoryUpdater) ClearCEScoresTopK(_ context.Context, _ string) error          { return nil }
-func (s *stubMemoryUpdater) ClearCEScoresTopKForNeighbor(_ context.Context, _ string) error { return nil }
+func (s *stubMemoryUpdater) ClearCEScoresTopK(_ context.Context, _ string) error { return nil }
+func (s *stubMemoryUpdater) ClearCEScoresTopKForNeighbor(_ context.Context, _ string) error {
+	return nil
+}
 
 func TestNativeUpdateMemory_NotFound_Returns404(t *testing.T) {
 	h := testValidateHandler()

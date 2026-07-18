@@ -65,7 +65,6 @@ const (
 // Default 24h (was 6h) — 4× reduction in periodic-reorg LLM volume.
 var periodicReorgInterval = envcfg.PositiveDuration("MEMDB_REORG_INTERVAL_H", 24, time.Hour)
 
-
 // streamMsg bundles a parsed message with its origin stream key.
 type streamMsg struct {
 	msg ScheduleMessage

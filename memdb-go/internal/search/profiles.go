@@ -119,7 +119,7 @@ func ApplyProfile(base SearchParams, prof ProfileOverrides) SearchParams {
 	return base
 }
 
-func intPtr(v int) *int          { return &v }
+func intPtr(v int) *int             { return &v }
 func float64Ptr(v float64) *float64 { return &v }
-func boolPtr(v bool) *bool       { return &v }
-func stringPtr(v string) *string { return &v }
+func boolPtr(v bool) *bool          { return &v }
+func stringPtr(v string) *string    { return &v }

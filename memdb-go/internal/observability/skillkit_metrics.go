@@ -9,7 +9,7 @@
 //
 // Bounded label cardinality:
 //   - "name"    — small known enum (~10 values: d10-extractor, atomic-extractor,
-//                 memory-consolidator, feedback-memory-curator, etc.)
+//     memory-consolidator, feedback-memory-curator, etc.)
 //   - "source"  — {"embedded","env","cache_hit","last_known_good"}  — skillkit enum
 //   - "reason"  — {"unreadable","too_large","empty_body"}           — skillkit enum
 //   - "outcome" — {"hit","miss"}                                    — skillkit enum
