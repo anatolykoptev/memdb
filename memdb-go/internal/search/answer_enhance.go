@@ -25,7 +25,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/anatolykoptev/memdb/memdb-go/internal/lang"
+	"github.com/anatolykoptev/go-kit/langdetect"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
@@ -41,6 +41,13 @@ const (
 	// signal; the same memory ships in full inside the user message.
 	topAnchorMaxLen = 240
 )
+
+// answerEnhanceLangOpts restricts locale detection to the languages we
+// have D10 skill prompts for. Expand the whitelist when new locale-specific
+// skill prompts are added.
+var answerEnhanceLangOpts = langdetect.Options{
+	Whitelist: []string{"en", "ru", "zh"},
+}
 
 // answerEnhanceMinRelativity is the min relativity threshold — moved to
 // tuning.go as an env-readable accessor (MEMDB_D10_MIN_RELATIVITY).
@@ -182,8 +189,15 @@ func EnhanceRetrievalAnswer(
 // downstream (see recordD10Routing in d10_metrics.go).
 func buildAnswerEnhanceSystemPrompt(ctx context.Context, query string, emb classifierEmbedder, locale string) (string, bool, d10RoutingTrace) {
 	// Resolve the request locale: explicit from cfg → auto-detect from query text.
+	// Restricted to en/ru/zh — the languages we have D10 skill prompts for.
+	// Expand the whitelist when new locale-specific skill prompts are added.
 	if locale == "" {
-		locale = lang.Detect(query)
+		info := langdetect.DetectWith(query, answerEnhanceLangOpts)
+		if info.Lang == langdetect.LangUnknown {
+			locale = "en"
+		} else {
+			locale = string(info.Lang)
+		}
 	}
 	// Resolve the base prompt ONCE per call: env override → bundled
 	// default → repo default → const fallback. mtime-cached so an

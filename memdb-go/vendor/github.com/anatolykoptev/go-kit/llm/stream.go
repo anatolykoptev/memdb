@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -89,6 +90,20 @@ func (s *StreamResponse) Close() error { return s.body.Close() }
 func (s *StreamResponse) Usage() *Usage { return s.usage }
 
 // Stream starts a streaming chat completion. The caller must call Close() when done.
+//
+// Stream returns a *StreamResponse, not a *ChatResponse, so it carries no
+// ServedBy attribution — but the per-endpoint EndpointAttemptObserver still fires
+// here (line below), so a ChainMetrics.EndpointObserver wired on a streaming
+// client still records llm_chain_attempt_total{model,outcome} and, on the first
+// success, llm_chain_served_total{model,position}. Only the per-response
+// ServedBy field is absent on the stream path (mirrors the cooldown Stream
+// exclusion documented on WithModelCooldown).
+//
+// The cooldown gauge (llm_model_cooldown_active) is NOT driven on the stream
+// path: this loop deliberately neither reads cooling() nor records cooldown
+// outcomes (the stream path is not wired into cooldown, same as WithModelCooldown
+// documents), so no stream attempt ever enters or clears a model's cooldown and
+// the gauge reflects only non-stream (Complete/CompleteRaw) traffic.
 func (c *Client) Stream(ctx context.Context, messages []Message, opts ...ChatOption) (*StreamResponse, error) {
 	var cfg chatConfig
 	for _, opt := range opts {
@@ -101,15 +116,41 @@ func (c *Client) Stream(ctx context.Context, messages []Message, opts ...ChatOpt
 	if len(c.endpoints) > 0 {
 		var lastErr error
 		for _, ep := range c.endpoints {
-			epReq := *req
-			if ep.Model != "" {
-				epReq.Model = ep.Model
+			epReq := c.prepareEndpointRequest(ep, req)
+
+			// Per-attempt timeout (mirrors attemptEndpoint in transport.go):
+			// derive a child ctx bounded by d. The outer ctx remains the
+			// absolute ceiling.
+			attemptCtx := ctx
+			var cancelAttempt context.CancelFunc
+			if c.perAttemptTimeout > 0 {
+				attemptCtx, cancelAttempt = context.WithTimeout(ctx, c.perAttemptTimeout)
 			}
-			sr, err := c.doStreamRequest(ctx, ep.URL, ep.Key, &epReq)
+
+			sr, err := c.doStreamRequest(attemptCtx, ep.URL, ep.Key, &epReq)
+
+			if cancelAttempt != nil {
+				cancelAttempt()
+			}
+
+			if c.endpointObserver != nil {
+				c.endpointObserver(ep, err)
+			}
 			if err == nil {
 				return sr, nil
 			}
 			lastErr = err
+			// A per-attempt DeadlineExceeded where the outer ctx is still
+			// alive means this endpoint was slow — advance to the next.
+			if c.perAttemptTimeout > 0 && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+				continue
+			}
+			// "Request too large for this model" (413 / context_length_exceeded) is
+			// non-retryable on THIS endpoint but the next model may fit — advance
+			// instead of aborting the chain (mirrors executeInner in transport.go).
+			if asFailover(err) {
+				continue
+			}
 			if !asRetryable(err) {
 				return nil, err
 			}
@@ -162,8 +203,10 @@ func (c *Client) doStreamRequest(ctx context.Context, baseURL, apiKey string, re
 		return nil, newAPIError(resp.StatusCode, string(respBody), isRetryableStatus(resp.StatusCode), parseRetryAfter(resp.Header.Get("Retry-After")))
 	}
 
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20) // up to 1 MiB per SSE line
 	return &StreamResponse{
 		body:    resp.Body,
-		scanner: bufio.NewScanner(resp.Body),
+		scanner: sc,
 	}, nil
 }

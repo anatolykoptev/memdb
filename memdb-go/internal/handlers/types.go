@@ -79,7 +79,8 @@ type searchRequest struct {
 
 	// Locale — explicit BCP-47 language tag for D10 prompt selection.
 	// When nil or empty, the server auto-detects from query text via
-	// internal/lang.Detect. Supported values: "en", "ru", "zh".
+	// go-kit/langdetect. Supported values: "en", "ru", "zh", "es", "ja",
+	// and other whatlanggo languages.
 	// Omit for legacy behaviour (auto-detect, backward compat).
 	Locale *string `json:"locale,omitempty"`
 }

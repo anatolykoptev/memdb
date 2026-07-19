@@ -1,11 +1,26 @@
 package handlers
 
-import "github.com/anatolykoptev/memdb/memdb-go/internal/lang"
+import "github.com/anatolykoptev/go-kit/langdetect"
 
-// detectLang is preserved as a package-private wrapper for existing
-// callers in chat_prompt.go and similar. The actual implementation
-// lives in internal/lang.Detect to allow internal/search to use it
-// without a circular import on internal/handlers.
+// chatLangOpts restricts detection to the languages we have skill prompts
+// for. This improves accuracy on short texts (e.g. "Привет мир" → "ru"
+// not "uk") and eliminates false matches against the other 81 languages.
+// Expand the whitelist when new locale-specific skill prompts are added.
+var chatLangOpts = langdetect.Options{
+	Whitelist: []string{"en", "ru", "zh"},
+}
+
+// detectLang classifies text into a language code ("en", "ru", or "zh")
+// using trigram-based language detection. Used by chat prompt selection
+// to pick the locale-appropriate system prompt.
+//
+// Returns "en" for empty or undetectable text. To add support for more
+// languages, add skill prompts to d10SkillsByLocale and expand the
+// whitelist in chatLangOpts.
 func detectLang(text string) string {
-	return lang.Detect(text)
+	info := langdetect.DetectWith(text, chatLangOpts)
+	if info.Lang == langdetect.LangUnknown {
+		return "en"
+	}
+	return string(info.Lang)
 }

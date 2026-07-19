@@ -35,14 +35,14 @@ type Options struct {
 	MaxAttempts    int
 	InitialDelay   time.Duration
 	MaxDelay       time.Duration
-	MaxElapsedTime time.Duration // total wall-clock budget; 0 = no limit
-	Jitter         bool          // add ±25% random jitter to delay
-	Timer          Timer         // custom timer for tests; nil = real time.After
-	Backoff        Backoff       // backoff strategy (default: exponential)
-	AbortOn        []error       // never retry these errors (checked via errors.Is)
-	RetryableOnly  bool          // if true, only retry errors implementing Retryable
+	MaxElapsedTime time.Duration                // total wall-clock budget; 0 = no limit
+	Jitter         bool                         // add ±25% random jitter to delay
+	Timer          Timer                        // custom timer for tests; nil = real time.After
+	Backoff        Backoff                      // backoff strategy (default: exponential)
+	AbortOn        []error                      // never retry these errors (checked via errors.Is)
+	RetryableOnly  bool                         // if true, only retry errors implementing Retryable
 	OnRetry        func(attempt int, err error) // called after each failed attempt
-	RetryIf        func(error) bool // custom predicate; overrides AbortOn + RetryableOnly
+	RetryIf        func(error) bool             // custom predicate; overrides AbortOn + RetryableOnly
 }
 
 func (o *Options) applyDefaults() {

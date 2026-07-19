@@ -49,6 +49,56 @@ func isSafeModelName(s string) bool {
 	return true
 }
 
+// ProxySpec defines one proxy endpoint (URL + API key) for multi-proxy rotation.
+// Used by BuildMultiProxyEndpoints to build a cross-product of proxies × models.
+type ProxySpec struct {
+	URL string
+	Key string
+}
+
+// BuildMultiProxyEndpoints generates []Endpoint for WithEndpoints across
+// multiple proxy URLs. For each proxy, it builds the full model chain
+// (primary first, then fallbacks, deduped). Proxies are tried in order:
+// proxy1:primary, proxy1:model2, ..., proxy2:primary, proxy2:model2, ...
+//
+// Use case: local cliproxyapi (localhost:8317) + remote cliproxyapi
+// (10.9.0.2:8317 over WireGuard). Local is tried first for every model;
+// if the local proxy is down (connection refused / timeout), the chain
+// advances to the remote proxy for the same model, then continues.
+//
+// This gives proxy-level redundancy on top of the existing model-level
+// fallback: a single proxy outage no longer takes down the entire chain.
+//
+// If proxies has 1 entry, the result is identical to BuildModelChainEndpoints
+// (same URL, same key, same model order).
+func BuildMultiProxyEndpoints(proxies []ProxySpec, primary string, chain []string) []Endpoint {
+	if len(proxies) == 0 {
+		return nil
+	}
+	if len(proxies) == 1 {
+		return BuildModelChainEndpoints(proxies[0].URL, proxies[0].Key, primary, chain)
+	}
+	out := make([]Endpoint, 0, len(proxies)*(1+len(chain)))
+	for _, p := range proxies {
+		seen := make(map[string]struct{}, 1+len(chain))
+		if primary != "" {
+			out = append(out, Endpoint{URL: p.URL, Key: p.Key, Model: primary})
+			seen[primary] = struct{}{}
+		}
+		for _, m := range chain {
+			if m == "" {
+				continue
+			}
+			if _, dup := seen[m]; dup {
+				continue
+			}
+			seen[m] = struct{}{}
+			out = append(out, Endpoint{URL: p.URL, Key: p.Key, Model: m})
+		}
+	}
+	return out
+}
+
 // BuildModelChainEndpoints генерирует []Endpoint для WithEndpoints, где
 // все endpoints используют один baseURL+apiKey но разные Model. Primary
 // model идёт первой; модели из chain совпадающие с primary отбрасываются

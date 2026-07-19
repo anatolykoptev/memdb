@@ -51,6 +51,11 @@ func applyMessageTimestamps(messages []Message) {
 		if ct == "" {
 			continue
 		}
+		// chat_time is not a standard OpenAI message field — strict gateways
+		// reject it (HTTP 400 "wrong_api_format"). Strip it from the wire and
+		// materialize it into the content prefix below where possible. Safe to
+		// mutate: newRequest clones the caller's slice before this runs.
+		messages[i].ChatTime = ""
 		text, ok := messages[i].Content.(string)
 		if !ok {
 			continue

@@ -116,8 +116,8 @@ type SearchParams struct {
 	AttributedTo string
 	// Locale is the BCP-47-style language tag for the request, used for
 	// D10 system-prompt selection. Empty string triggers auto-detect from
-	// the query text via internal/lang.Detect. Currently supported set:
-	// "en", "ru", "zh".
+	// the query text via go-kit/langdetect. Currently supported set:
+	// "en", "ru", "zh", "es", "ja", and other whatlanggo languages.
 	Locale string
 }
 

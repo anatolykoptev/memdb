@@ -50,7 +50,7 @@ func (s *ExtractStream) Next() bool {
 
 // finalParse does the definitive unmarshal + optional validation.
 func (s *ExtractStream) finalParse() {
-	text := strings.TrimSpace(s.buf.String())
+	text, _ := splitReasoning(s.buf.String(), "")
 	if text == "" {
 		s.err = fmt.Errorf("streamextract: empty response")
 		return
@@ -71,7 +71,9 @@ func (s *ExtractStream) finalParse() {
 	}
 }
 
-// Text returns the accumulated raw text so far.
+// Text returns the accumulated raw text so far. NOTE: pre-strip - a
+// reasoning model leading <think> block is still present here; the final
+// unmarshal in finalParse strips it. Use for debugging, not parsing.
 func (s *ExtractStream) Text() string { return s.buf.String() }
 
 // Err returns any error from streaming or parsing.

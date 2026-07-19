@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/anatolykoptev/go-kit/strutil"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -58,7 +59,7 @@ func proxyCall(ctx context.Context, pythonURL string, endpoint string, serviceSe
 	}
 
 	if resp.StatusCode >= proxyErrStatusThreshold {
-		return TextResult{}, fmt.Errorf("%s returned HTTP %d: %s", toolName, resp.StatusCode, truncate(string(respBody), proxyErrBodyTruncLen))
+		return TextResult{}, fmt.Errorf("%s returned HTTP %d: %s", toolName, resp.StatusCode, strutil.Truncate(string(respBody), proxyErrBodyTruncLen))
 	}
 
 	var result any
@@ -130,11 +131,4 @@ func RegisterNativeGoProxyTools(server *mcp.Server, memdbGoURL string, serviceSe
 		result, err := proxyCall(ctx, memdbGoURL, "/product/chat/complete", serviceSecret, "clear_chat_history", input, logger)
 		return nil, result, err
 	})
-}
-
-func truncate(s string, maxLen int) string {
-	if len(s) > maxLen {
-		return s[:maxLen] + "..."
-	}
-	return s
 }
