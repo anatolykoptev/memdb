@@ -26,7 +26,7 @@ github.com/anatolykoptev/go-engine/metrics
 github.com/anatolykoptev/go-engine/search
 github.com/anatolykoptev/go-engine/sources
 github.com/anatolykoptev/go-engine/text
-# github.com/anatolykoptev/go-kit v0.74.0 => /home/krolik/.claude-worktrees/gokit-langdetect
+# github.com/anatolykoptev/go-kit v0.97.2
 ## explicit; go 1.26
 github.com/anatolykoptev/go-kit/embed
 github.com/anatolykoptev/go-kit/langdetect
@@ -554,4 +554,3 @@ google.golang.org/protobuf/types/known/fieldmaskpb
 google.golang.org/protobuf/types/known/structpb
 google.golang.org/protobuf/types/known/timestamppb
 google.golang.org/protobuf/types/known/wrapperspb
-# github.com/anatolykoptev/go-kit => /home/krolik/.claude-worktrees/gokit-langdetect

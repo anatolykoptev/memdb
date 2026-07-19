@@ -9,6 +9,8 @@ github.com/alicebob/miniredis/v2 v2.38.0 h1:nZAzCR+Lj+Vxk4ZXzm2NuKq2O33RXj1XxJ2e
 github.com/alicebob/miniredis/v2 v2.38.0/go.mod h1:TcL7YfarKPGDAthEtl5NBeHZfeUQj6OXMm/+iu5cLMM=
 github.com/anatolykoptev/go-engine v1.3.1 h1:B/deUA0pRpX9+hYOOTE7XPPuh69idlX4PVuxHcRVCJ8=
 github.com/anatolykoptev/go-engine v1.3.1/go.mod h1:ZcJMqmoy+GP9HJRrj5G0y7reyIM8NbMX6IMyHYmwoEQ=
+github.com/anatolykoptev/go-kit v0.97.2 h1:cGiJfo//4lIrlPgwVaV2WJp6EE7PfJRmmFYSvH7bhAM=
+github.com/anatolykoptev/go-kit v0.97.2/go.mod h1:SPI0pKPIG9pI86ctWhh0RIVS3A4sdXx9l8jYmt0i6S4=
 github.com/anatolykoptev/go-stealth v1.19.1 h1:7w25zGDUMy0kz4cP2p/J9zjCgfUA6U1akBTDMh/M7G4=
 github.com/anatolykoptev/go-stealth v1.19.1/go.mod h1:1Fevj8WfJDJ9h/t4Bl8MtHbuQ92ZPjIm8SR6/vnwJsQ=
 github.com/anatolykoptev/skillkit v0.2.2 h1:VWh9rhG/2zZi/L2LRhGxZXVA3zhqxVy73YnoF5H8BoE=

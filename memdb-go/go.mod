@@ -6,7 +6,7 @@ require (
 	connectrpc.com/connect v1.19.1
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/anatolykoptev/go-engine v1.3.1
-	github.com/anatolykoptev/go-kit v0.74.0
+	github.com/anatolykoptev/go-kit v0.97.2
 	github.com/anatolykoptev/go-stealth v1.19.1
 	github.com/anatolykoptev/skillkit v0.2.2
 	github.com/daulet/tokenizers v1.25.0
@@ -83,5 +83,3 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
 )
-
-replace github.com/anatolykoptev/go-kit => /home/krolik/.claude-worktrees/gokit-langdetect
