@@ -1,0 +1,52 @@
+name: Goreleaser
+
+# Triggered by tag push from release-please (memdb-go/vX.Y.Z).
+# Tags created with the GitHub App token (not GITHUB_TOKEN) DO trigger
+# downstream workflows — that's why release-please.yml uses the App.
+on:
+  push:
+    tags:
+      - "memdb-go/v*"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: memdb-go/go.mod
+          cache: true
+          cache-dependency-path: memdb-go/go.sum
+
+      - name: Download modules
+        working-directory: memdb-go
+        run: go mod download
+
+      # Free goreleaser can't parse prefixed tags (monorepo = Pro-only).
+      # Run in --snapshot mode to skip tag validation, build binaries,
+      # then upload artifacts to the release-please-created GitHub Release.
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --snapshot --clean
+          workdir: memdb-go
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+
+      - name: Upload artifacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd memdb-go/dist
+          gh release upload "$TAG" *.tar.gz checksums.txt --repo "$GITHUB_REPOSITORY" --clobber

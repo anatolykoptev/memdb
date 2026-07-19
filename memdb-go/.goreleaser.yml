@@ -2,11 +2,17 @@ version: 2
 
 project_name: memdb
 
+# release-please creates the GitHub Release; goreleaser only builds artifacts.
+# We run in --snapshot mode (free goreleaser can't parse prefixed tags like
+# memdb-go/vX.Y.Z — monorepo tag stripping is Pro-only), then upload
+# artifacts to the existing release-please release via gh release upload.
+release:
+  disable: true
+
 builds:
   - id: mcp-server
     main: ./cmd/mcp-server
     binary: memdb-mcp
-    dir: memdb-go
     env:
       - CGO_ENABLED=0
     goos:
@@ -23,7 +29,6 @@ builds:
   - id: mcp-stdio-proxy
     main: ./cmd/mcp-stdio-proxy
     binary: mcp-stdio-proxy
-    dir: memdb-go
     env:
       - CGO_ENABLED=0
     goos:
@@ -40,13 +45,14 @@ archives:
     formats:
       - tar.gz
     name_template: >-
-      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+      {{ .ProjectName }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}
 
 checksum:
   name_template: checksums.txt
 
 changelog:
   sort: asc
+  use: git
   filters:
     exclude:
       - "^docs:"
