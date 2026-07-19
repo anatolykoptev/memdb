@@ -31,6 +31,10 @@ spec:
             - "yes"
             - --dir
             - /data
+            - --maxmemory
+            - {{ .Values.redis.maxmemory | default "400mb" | quote }}
+            - --maxmemory-policy
+            - {{ .Values.redis.maxmemoryPolicy | default "allkeys-lru" | quote }}
           volumeMounts:
             - name: redis-data
               mountPath: /data
