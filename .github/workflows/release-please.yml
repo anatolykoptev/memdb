@@ -26,7 +26,25 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-          path: memdb-go
+          include-component-in-tag: true
+
+      # release-please creates tags as memdb-go-vX.Y.Z (component-vX.Y.Z format).
+      # Go proxy for subdir modules expects memdb-go/vX.Y.Z (slash, not dash).
+      # Rename the tag post-release so `go get` can find it.
+      - name: Rename tag for Go proxy (dash → slash)
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OLD_TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          NEW_TAG="${OLD_TAG/-v//}"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" tmp
+          cd tmp
+          git tag "$NEW_TAG" "$OLD_TAG"
+          git push origin "$NEW_TAG"
+          git push origin --delete "$OLD_TAG"
+          cd ..
+          rm -rf tmp
 
   # goreleaser builds prebuilt binaries + archives for the GitHub Release.
   # Gated on release-please having created a release (tag + GitHub Release exist).
@@ -40,7 +58,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ needs.release-please.outputs.tag_name }}
 
       - uses: actions/setup-go@v5
         with:
