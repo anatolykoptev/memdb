@@ -14,12 +14,12 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      # Mint a short-lived installation token from the memdb-release-bot
+      # Mint a short-lived installation token from the krolik-release-bot
       # GitHub App so the release PRs and tags are created by the App,
       # not the default GITHUB_TOKEN. Tags created with GITHUB_TOKEN do
       # NOT trigger downstream workflows (GitHub Actions limitation).
       # The App token DOES trigger tag-push workflows → goreleaser runs.
-      - uses: actions/create-github-app-token@v1
+      - uses: actions/create-github-app-token@v2
         id: app-token
         with:
           app-id: ${{ secrets.RELEASE_BOT_APP_ID }}

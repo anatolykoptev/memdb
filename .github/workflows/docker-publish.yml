@@ -2,8 +2,15 @@ name: Publish Docker Image
 
 on:
   push:
+    # This workflow builds ./memdb-go/Dockerfile — the Go service image — so
+    # it triggers on the GO component's release tags (release-please cuts
+    # memdb-go/vX.Y.Z; the dash form covers any legacy scheme). Root-component
+    # tags (bare vX.Y.Z) must NOT build this image: on 2026-07-19 the root
+    # v0.25.1 tag published the Go image mislabeled 0.25.1 while memdb-go was
+    # actually 0.23.1.
     tags:
-      - 'v*'
+      - 'memdb-go/v*'
+      - 'memdb-go-v*'
   workflow_dispatch:
 
 permissions:
@@ -35,9 +42,11 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            # type=semver cannot parse the component-prefixed tag
+            # (memdb-go/v0.23.1) — extract the version by match instead.
+            type=match,pattern=v(\d+\.\d+\.\d+)$,group=1
+            type=match,pattern=v(\d+\.\d+)\.\d+$,group=1
+            type=match,pattern=v(\d+)\.\d+\.\d+$,group=1
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
             org.opencontainers.image.title=MemDB
