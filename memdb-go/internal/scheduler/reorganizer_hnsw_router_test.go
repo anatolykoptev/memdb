@@ -1,7 +1,7 @@
 package scheduler
 
 // reorganizer_hnsw_router_test.go — verifies that findNearDuplicates/findNearDuplicatesByIDs
-// route to HNSW or legacy methods based on the useHNSW flag.
+// route to HNSW or legacy methods based on the dup strategy (auto|legacy|hnsw).
 
 import (
 	"context"
@@ -11,10 +11,13 @@ import (
 )
 
 // spyPostgres satisfies reorgPostgres and records which FindNearDuplicates variant was called.
-// All other methods are no-ops.
+// All other methods are no-ops. dupCount controls the value returned by
+// CountMemoriesByUserAndTypes (used by the auto router).
 type spyPostgres struct {
 	legacyCalls int
 	hnswCalls   int
+	dupCount    int64 // value returned by CountMemoriesByUserAndTypes (default 0)
+	countCalls  int
 }
 
 func (s *spyPostgres) FindNearDuplicates(_ context.Context, _ string, _ float64, _ int) ([]db.DuplicatePair, error) {
@@ -32,6 +35,10 @@ func (s *spyPostgres) FindNearDuplicatesHNSW(_ context.Context, _ string, _ floa
 func (s *spyPostgres) FindNearDuplicatesHNSWByIDs(_ context.Context, _ string, _ []string, _ float64, _, _ int) ([]db.DuplicatePair, error) {
 	s.hnswCalls++
 	return nil, nil
+}
+func (s *spyPostgres) CountMemoriesByUserAndTypes(_ context.Context, _ string, _ []string) (int64, error) {
+	s.countCalls++
+	return s.dupCount, nil
 }
 
 // no-op stubs for remaining interface methods
@@ -95,30 +102,110 @@ func (s *spyPostgres) UpsertWikiPage(_ context.Context, _ db.UpsertWikiPageParam
 
 func TestReorganizer_Router_LegacyByDefault(t *testing.T) {
 	spy := &spyPostgres{}
-	r := &Reorganizer{postgres: spy, useHNSW: false}
+	r := &Reorganizer{postgres: spy, dupStrategy: DupLegacy, dupCrossover: defaultDupCrossover}
 
 	_, _ = r.findNearDuplicates(context.Background(), "cube-x")
 	_, _ = r.findNearDuplicatesByIDs(context.Background(), "cube-x", []string{"a"})
 
 	if spy.hnswCalls != 0 {
-		t.Errorf("useHNSW=false but hnswCalls=%d", spy.hnswCalls)
+		t.Errorf("dupStrategy=legacy but hnswCalls=%d", spy.hnswCalls)
 	}
 	if spy.legacyCalls != 2 {
 		t.Errorf("expected 2 legacy calls, got %d", spy.legacyCalls)
+	}
+	if spy.countCalls != 0 {
+		t.Errorf("explicit legacy should not count, got countCalls=%d", spy.countCalls)
 	}
 }
 
 func TestReorganizer_Router_HNSWWhenEnabled(t *testing.T) {
 	spy := &spyPostgres{}
-	r := &Reorganizer{postgres: spy, useHNSW: true}
+	r := &Reorganizer{postgres: spy, dupStrategy: DupHNSW, dupCrossover: defaultDupCrossover}
 
 	_, _ = r.findNearDuplicates(context.Background(), "cube-x")
 	_, _ = r.findNearDuplicatesByIDs(context.Background(), "cube-x", []string{"a"})
 
 	if spy.legacyCalls != 0 {
-		t.Errorf("useHNSW=true but legacyCalls=%d", spy.legacyCalls)
+		t.Errorf("dupStrategy=hnsw but legacyCalls=%d", spy.legacyCalls)
 	}
 	if spy.hnswCalls != 2 {
 		t.Errorf("expected 2 hnsw calls, got %d", spy.hnswCalls)
+	}
+	if spy.countCalls != 0 {
+		t.Errorf("explicit hnsw should not count, got countCalls=%d", spy.countCalls)
+	}
+}
+
+// TestReorganizer_Router_AutoRouting verifies the auto strategy counts
+// candidate memories and picks legacy below the crossover, HNSW at/above it.
+// The crossover comparison is centralized in resolveDupStrategy.
+func TestReorganizer_Router_AutoRouting(t *testing.T) {
+	t.Run("below crossover → legacy", func(t *testing.T) {
+		spy := &spyPostgres{dupCount: 999}
+		r := &Reorganizer{postgres: spy, dupStrategy: DupAuto, dupCrossover: 1000}
+
+		_, _ = r.findNearDuplicates(context.Background(), "cube-x")
+		_, _ = r.findNearDuplicatesByIDs(context.Background(), "cube-x", []string{"a"})
+
+		if spy.countCalls != 2 {
+			t.Errorf("auto should count once per call, got countCalls=%d", spy.countCalls)
+		}
+		if spy.hnswCalls != 0 {
+			t.Errorf("count 999 < crossover 1000 but hnswCalls=%d", spy.hnswCalls)
+		}
+		if spy.legacyCalls != 2 {
+			t.Errorf("expected 2 legacy calls, got %d", spy.legacyCalls)
+		}
+	})
+
+	t.Run("at crossover → hnsw", func(t *testing.T) {
+		spy := &spyPostgres{dupCount: 1000}
+		r := &Reorganizer{postgres: spy, dupStrategy: DupAuto, dupCrossover: 1000}
+
+		_, _ = r.findNearDuplicates(context.Background(), "cube-x")
+		_, _ = r.findNearDuplicatesByIDs(context.Background(), "cube-x", []string{"a"})
+
+		if spy.countCalls != 2 {
+			t.Errorf("auto should count once per call, got countCalls=%d", spy.countCalls)
+		}
+		if spy.legacyCalls != 0 {
+			t.Errorf("count 1000 >= crossover 1000 but legacyCalls=%d", spy.legacyCalls)
+		}
+		if spy.hnswCalls != 2 {
+			t.Errorf("expected 2 hnsw calls, got %d", spy.hnswCalls)
+		}
+	})
+
+	t.Run("above crossover → hnsw", func(t *testing.T) {
+		spy := &spyPostgres{dupCount: 5000}
+		r := &Reorganizer{postgres: spy, dupStrategy: DupAuto, dupCrossover: 1000}
+
+		_, _ = r.findNearDuplicates(context.Background(), "cube-x")
+
+		if spy.legacyCalls != 0 {
+			t.Errorf("count 5000 > crossover 1000 but legacyCalls=%d", spy.legacyCalls)
+		}
+		if spy.hnswCalls != 1 {
+			t.Errorf("expected 1 hnsw call, got %d", spy.hnswCalls)
+		}
+	})
+}
+
+// TestReorganizer_Router_AutoCountTypes verifies the auto router counts the
+// expected memory types (LongTermMemory + UserMemory + EpisodicMemory).
+func TestReorganizer_Router_AutoCountTypes(t *testing.T) {
+	spy := &spyPostgres{dupCount: 0}
+	r := &Reorganizer{postgres: spy, dupStrategy: DupAuto, dupCrossover: 1000}
+
+	_, _ = r.findNearDuplicates(context.Background(), "cube-x")
+
+	want := []string{"LongTermMemory", "UserMemory", "EpisodicMemory"}
+	if len(dupRouterTypes) != len(want) {
+		t.Fatalf("dupRouterTypes len = %d, want %d", len(dupRouterTypes), len(want))
+	}
+	for i, v := range dupRouterTypes {
+		if v != want[i] {
+			t.Errorf("dupRouterTypes[%d] = %q, want %q", i, v, want[i])
+		}
 	}
 }

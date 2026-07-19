@@ -105,10 +105,17 @@ func initReorganizer(
 	if rd != nil {
 		reorg.SetCacheInvalidator(scheduler.NewRedisCacheInvalidator(rd.Client(), logger))
 	}
-	if cfg.ReorgUseHNSW {
-		reorg.SetUseHNSW(true)
-		logger.Info("scheduler reorganizer: HNSW near-duplicate path enabled")
-	}
+	// rf-1: resolve the 3-state dup strategy (auto|legacy|hnsw) from config.
+	// MEMDB_REORG_DUP_STRATEGY wins over the deprecated MEMDB_REORG_USE_HNSW
+	// boolean; the resolved strategy is applied via SetDupStrategy. The
+	// deprecated SetUseHNSW path is covered by the resolver (USE_HNSW=true
+	// with DUP_STRATEGY unset → "hnsw").
+	resolvedStrategy := scheduler.DupStrategy(cfg.ResolveReorgDupStrategy())
+	reorg.SetDupStrategy(resolvedStrategy)
+	reorg.SetDupCrossover(cfg.ReorgDupCrossover)
+	logger.Info("scheduler reorganizer: dup strategy resolved",
+		slog.String("strategy", string(resolvedStrategy)),
+		slog.Int("crossover", cfg.ReorgDupCrossover))
 	// M10 Stream 6: wire the same cross-encoder client used by the search service
 	// so the CE precompute pass (runCEPrecomputePass) can populate ce_score_topk.
 	// Gate on non-empty URL — if the encoder is not configured the pass stays

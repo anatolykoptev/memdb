@@ -53,9 +53,49 @@ const (
 	reorgLLMBudget = 120 * time.Second
 )
 
-// findNearDuplicates routes to the HNSW or legacy query based on the feature flag.
+// dupRouterTypes are the memory_type values the auto router counts when
+// deciding legacy vs HNSW. Mirrors the types scanned by FindNearDuplicates
+// (LongTermMemory + UserMemory + EpisodicMemory) so the crossover reflects
+// the actual candidate set size.
+var dupRouterTypes = []string{"LongTermMemory", "UserMemory", "EpisodicMemory"}
+
+// resolveDupStrategy returns the concrete strategy to use for a cycle. When
+// dupStrategy is DupAuto it counts candidate memories via
+// CountMemoriesByUserAndTypes and picks legacy below the crossover threshold,
+// HNSW at/above it. Explicit DupLegacy/DupHNSW short-circuit without a count
+// call. On count error it falls back to legacy (safe default) and logs.
+func (r *Reorganizer) resolveDupStrategy(ctx context.Context, cubeID string) DupStrategy {
+	switch r.dupStrategy {
+	case DupLegacy, DupHNSW:
+		return r.dupStrategy
+	case DupAuto, "":
+		// fall through to count-based decision
+	default:
+		// Unknown strategy string → treat as auto.
+	}
+
+	crossover := r.dupCrossover
+	if crossover <= 0 {
+		crossover = defaultDupCrossover
+	}
+	count, err := r.postgres.CountMemoriesByUserAndTypes(ctx, cubeID, dupRouterTypes)
+	if err != nil {
+		r.logger.WarnContext(ctx, "reorganizer: auto dup count failed, falling back to legacy",
+			slog.String("cube_id", cubeID), slog.Any("error", err))
+		return DupLegacy
+	}
+	if count >= int64(crossover) {
+		return DupHNSW
+	}
+	return DupLegacy
+}
+
+// findNearDuplicates routes to the HNSW or legacy query based on the resolved
+// dup strategy. The crossover comparison for DupAuto is centralized here via
+// resolveDupStrategy.
 func (r *Reorganizer) findNearDuplicates(ctx context.Context, cubeID string) ([]db.DuplicatePair, error) {
-	if r.useHNSW {
+	strategy := r.resolveDupStrategy(ctx, cubeID)
+	if strategy == DupHNSW {
 		return r.postgres.FindNearDuplicatesHNSW(ctx, cubeID, dupThreshold, dupScanLimit, dupHNSWTopK)
 	}
 	return r.postgres.FindNearDuplicates(ctx, cubeID, dupThreshold, dupScanLimit)
@@ -63,7 +103,8 @@ func (r *Reorganizer) findNearDuplicates(ctx context.Context, cubeID string) ([]
 
 // findNearDuplicatesByIDs routes the targeted path the same way.
 func (r *Reorganizer) findNearDuplicatesByIDs(ctx context.Context, cubeID string, ids []string) ([]db.DuplicatePair, error) {
-	if r.useHNSW {
+	strategy := r.resolveDupStrategy(ctx, cubeID)
+	if strategy == DupHNSW {
 		return r.postgres.FindNearDuplicatesHNSWByIDs(ctx, cubeID, ids, dupThreshold, dupScanLimit, dupHNSWTopK)
 	}
 	return r.postgres.FindNearDuplicatesByIDs(ctx, cubeID, ids, dupThreshold, dupScanLimit)

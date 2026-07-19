@@ -12,6 +12,28 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 )
 
+// DupStrategy selects the near-duplicate detection path used by the
+// reorganizer. It replaces the former binary useHNSW flag with a 3-state
+// enum so operators can force a path or let the router pick based on cube
+// size.
+//
+//   - DupAuto:   router counts candidate memories and picks legacy below the
+//     crossover threshold, HNSW at/above it (default).
+//   - DupLegacy: always use the legacy O(N²) self-join.
+//   - DupHNSW:   always use the HNSW-indexed path.
+type DupStrategy string
+
+const (
+	DupAuto   DupStrategy = "auto"
+	DupLegacy DupStrategy = "legacy"
+	DupHNSW   DupStrategy = "hnsw"
+)
+
+// defaultDupCrossover is the memory count at which the auto router switches
+// from the legacy O(N²) self-join to the HNSW-indexed path. Overridden at
+// config load time via MEMDB_REORG_DUP_CROSSOVER.
+const defaultDupCrossover = 1000
+
 // reorgPostgres is the narrow Postgres surface used by the Reorganizer.
 // Using an interface (rather than *db.Postgres directly) makes the Reorganizer
 // testable with spy/stub implementations without a live database.
@@ -21,6 +43,12 @@ type reorgPostgres interface {
 	FindNearDuplicatesByIDs(ctx context.Context, userName string, ids []string, threshold float64, limit int) ([]db.DuplicatePair, error)
 	FindNearDuplicatesHNSW(ctx context.Context, userName string, threshold float64, limit, topK int) ([]db.DuplicatePair, error)
 	FindNearDuplicatesHNSWByIDs(ctx context.Context, userName string, ids []string, threshold float64, limit, topK int) ([]db.DuplicatePair, error)
+
+	// CountMemoriesByUserAndTypes returns the number of activated memories for
+	// a user across the given memory_type values. Used by the auto dup router
+	// to decide legacy vs HNSW based on cube size. Thin wrapper over the
+	// existing CountByUserAndTypes query (no new SQL).
+	CountMemoriesByUserAndTypes(ctx context.Context, userName string, types []string) (int64, error)
 
 	// Memory node lifecycle
 	InsertMemoryNodes(ctx context.Context, nodes []db.MemoryInsertNode) error
@@ -142,7 +170,8 @@ type Reorganizer struct {
 	llmExtractor     *llm.LLMExtractor // for ExtractAndDedup (fine-level mem_read)
 	profiler         *Profiler         // for TriggerRefresh after mem_read
 	cacheInvalidator CacheInvalidator  // nil = cache invalidation disabled
-	useHNSW          bool              // route FindNearDuplicates through HNSW index
+	dupStrategy      DupStrategy       // auto|legacy|hnsw — routes FindNearDuplicates (default auto)
+	dupCrossover     int               // memory count at which auto switches legacy→hnsw (default 1000)
 	rerankClient     *rerank.Client    // M10 Stream 6: nil = CE precompute pass disabled
 	bgSem            chan struct{}     // bounded goroutine semaphore for fire-and-forget background work
 }
@@ -169,18 +198,42 @@ func NewReorganizer(
 	logger *slog.Logger,
 ) *Reorganizer {
 	return &Reorganizer{
-		postgres:  postgres,
-		embedder:  emb,
-		wmCache:   wmCache,
-		llmClient: llmClient,
-		logger:    logger,
-		bgSem:     make(chan struct{}, reorgMaxBackgroundGoroutines),
+		postgres:     postgres,
+		embedder:     emb,
+		wmCache:      wmCache,
+		llmClient:    llmClient,
+		logger:       logger,
+		dupStrategy:  DupAuto,
+		dupCrossover: defaultDupCrossover,
+		bgSem:        make(chan struct{}, reorgMaxBackgroundGoroutines),
 	}
 }
 
-// SetUseHNSW enables the HNSW-indexed FindNearDuplicates path.
-// Default false (legacy O(N²) self-join). Set via cfg.ReorgUseHNSW.
-func (r *Reorganizer) SetUseHNSW(v bool) { r.useHNSW = v }
+// SetDupStrategy selects the near-duplicate detection path: auto, legacy, or
+// hnsw. Default is auto (router picks based on cube size). Set via
+// cfg.ReorgDupStrategy (resolved from MEMDB_REORG_DUP_STRATEGY with
+// MEMDB_REORG_USE_HNSW backward-compat).
+func (r *Reorganizer) SetDupStrategy(s DupStrategy) { r.dupStrategy = s }
+
+// SetDupCrossover sets the memory-count threshold at which the auto router
+// switches from legacy to HNSW. Default 1000. Set via
+// cfg.ReorgDupCrossover (MEMDB_REORG_DUP_CROSSOVER).
+func (r *Reorganizer) SetDupCrossover(n int) {
+	if n > 0 {
+		r.dupCrossover = n
+	}
+}
+
+// SetUseHNSW is a deprecated backward-compat wrapper. true → DupHNSW,
+// false → DupLegacy. Prefer SetDupStrategy. Kept so older callers and
+// config wiring that only know the boolean flag keep working.
+func (r *Reorganizer) SetUseHNSW(v bool) {
+	if v {
+		r.dupStrategy = DupHNSW
+	} else {
+		r.dupStrategy = DupLegacy
+	}
+}
 
 // goBounded launches a fire-and-forget goroutine through the reorganizer's
 // bounded semaphore. Non-blocking: if the semaphore is full, the goroutine

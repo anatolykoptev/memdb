@@ -153,6 +153,18 @@ func (p *Postgres) GetAllMemoriesByTypes(ctx context.Context, userName string, m
 	return results, total, err
 }
 
+// CountMemoriesByUserAndTypes returns the number of activated memories for a
+// user across the given memory_type values. It is a thin wrapper over the
+// existing CountByUserAndTypes query (no new SQL) used by the reorganizer's
+// auto dup-strategy router to decide legacy vs HNSW based on cube size.
+func (p *Postgres) CountMemoriesByUserAndTypes(ctx context.Context, userName string, types []string) (int64, error) {
+	var count int64
+	if err := p.pool.QueryRow(ctx, fmt.Sprintf(queries.CountByUserAndTypes, graphName), userName, types).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // GetAllMemories returns paginated memories for a user filtered by memory_type.
 func (p *Postgres) GetAllMemories(ctx context.Context, userName, memoryType string, page, pageSize int) ([]map[string]any, int, error) {
 	offset := page * pageSize
