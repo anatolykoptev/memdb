@@ -27,6 +27,8 @@ jobs:
           release-type: go
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          path: memdb-go
+          tag-prefix: memdb-go/
 
   # goreleaser builds prebuilt binaries + archives for the GitHub Release.
   # Gated on release-please having created a release (tag + GitHub Release exist).
