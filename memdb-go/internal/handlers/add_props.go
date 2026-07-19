@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/jsonutil"
 )
 
 // Extraction state values written to every Memory row (migration 0028). The
@@ -311,11 +312,5 @@ func serializeSources(sources []map[string]any) []string {
 // extractIDAndMemory parses a properties JSON blob to extract the id and memory fields.
 // Used when building LLM candidate lists from vector search results.
 func extractIDAndMemory(propertiesJSON string) (id, memory string) {
-	var props map[string]any
-	if err := json.Unmarshal([]byte(propertiesJSON), &props); err != nil {
-		return "", ""
-	}
-	id, _ = props["id"].(string)
-	memory, _ = props["memory"].(string)
-	return id, memory
+	return jsonutil.ExtractIDAndMemory(propertiesJSON)
 }

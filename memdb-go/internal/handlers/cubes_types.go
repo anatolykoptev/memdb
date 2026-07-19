@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"time"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
@@ -58,21 +57,4 @@ type getUserCubesRequest struct {
 }
 
 // cubeToMap serializes a db.Cube to a JSON-compatible map.
-func cubeToMap(c db.Cube) map[string]any {
-	m := map[string]any{
-		"cube_id":    c.CubeID,
-		"cube_name":  c.CubeName,
-		"owner_id":   c.OwnerID,
-		"is_active":  c.IsActive,
-		"created_at": c.CreatedAt.Format(time.RFC3339),
-		"updated_at": c.UpdatedAt.Format(time.RFC3339),
-		"settings":   c.Settings,
-	}
-	if c.Description != nil {
-		m["description"] = *c.Description
-	}
-	if c.CubePath != nil {
-		m["cube_path"] = *c.CubePath
-	}
-	return m
-}
+func cubeToMap(c db.Cube) map[string]any { return db.CubeToMap(c) }

@@ -8,6 +8,8 @@ package scheduler
 
 import (
 	"context"
+
+	"github.com/anatolykoptev/go-kit/strutil"
 )
 
 // callLLM sends a chat completions request via the shared LLM client and
@@ -18,10 +20,4 @@ func (r *Reorganizer) callLLM(ctx context.Context, msgs []map[string]string, max
 }
 
 // truncate shortens s to maxLen runes for safe log output.
-func truncate(s string, maxLen int) string {
-	runes := []rune(s)
-	if len(runes) <= maxLen {
-		return s
-	}
-	return string(runes[:maxLen]) + "..."
-}
+func truncate(s string, maxLen int) string { return strutil.Truncate(s, maxLen) }

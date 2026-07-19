@@ -22,6 +22,7 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/scheduler"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/server"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/loglevel"
 
 	gokit_tracing "github.com/anatolykoptev/go-kit/tracing"
 	"github.com/anatolykoptev/go-kit/tracing/slogh"
@@ -47,7 +48,7 @@ func main() {
 	// Set up structured logging with slog
 	var logHandler slog.Handler
 	opts := &slog.HandlerOptions{
-		Level: parseLogLevel(cfg.LogLevel),
+		Level: loglevel.Parse(cfg.LogLevel),
 	}
 	if cfg.LogFormat == "json" {
 		logHandler = slog.NewJSONHandler(os.Stdout, opts)
@@ -177,17 +178,4 @@ func initOTel(cfg *config.Config) (func(context.Context) error, error) {
 		return mp.Shutdown(ctx)
 	}
 	return shutdown, nil
-}
-
-func parseLogLevel(level string) slog.Level {
-	switch level {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
 }

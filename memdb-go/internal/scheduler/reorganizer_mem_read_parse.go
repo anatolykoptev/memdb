@@ -6,6 +6,8 @@ package scheduler
 
 import (
 	"encoding/json"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/jsonutil"
 )
 
 // extractWMInfo extracts texts, sessionID, agentID, property IDs and the
@@ -68,11 +70,5 @@ func pickWMDate(props map[string]any, keys ...string) string {
 
 // extractIDAndMemory parses a properties JSON blob to extract the id and memory fields.
 func extractIDAndMemory(propertiesJSON string) (id, memory string) {
-	var props map[string]any
-	if err := json.Unmarshal([]byte(propertiesJSON), &props); err != nil {
-		return "", ""
-	}
-	id, _ = props["id"].(string)
-	memory, _ = props["memory"].(string)
-	return id, memory
+	return jsonutil.ExtractIDAndMemory(propertiesJSON)
 }

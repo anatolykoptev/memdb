@@ -19,6 +19,7 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/config"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/mcptools"
+	"github.com/anatolykoptev/memdb/memdb-go/internal/util/loglevel"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -47,7 +48,7 @@ func main() {
 	}
 
 	var logHandler slog.Handler
-	opts := &slog.HandlerOptions{Level: parseLogLevel(cfg.LogLevel)}
+	opts := &slog.HandlerOptions{Level: loglevel.Parse(cfg.LogLevel)}
 	if cfg.LogFormat == "json" {
 		logHandler = slog.NewJSONHandler(logDst, opts)
 	} else {
