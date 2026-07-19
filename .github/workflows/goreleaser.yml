@@ -32,8 +32,12 @@ jobs:
         run: go mod download
 
       # Free goreleaser can't parse prefixed tags (monorepo = Pro-only).
-      # Run in --snapshot mode to skip tag validation, build binaries,
-      # then upload artifacts to the release-please-created GitHub Release.
+      # Strip the memdb-go/ prefix from the tag so goreleaser sees v0.23.1.
+      # Snapshot mode skips tag validation; we upload to the existing release.
+      - name: Strip tag prefix for goreleaser
+        id: tag
+        run: echo "version=${GITHUB_REF_NAME#memdb-go/}" >> "$GITHUB_OUTPUT"
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
@@ -41,7 +45,7 @@ jobs:
           workdir: memdb-go
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+          GORELEASER_CURRENT_TAG: ${{ steps.tag.outputs.version }}
 
       - name: Upload artifacts to GitHub Release
         env:
