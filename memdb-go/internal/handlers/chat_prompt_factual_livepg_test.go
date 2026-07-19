@@ -52,10 +52,10 @@ import (
 	"github.com/anatolykoptev/memdb/memdb-go/internal/search"
 )
 
-// (Reuses the package-level stubEmbedder defined in add_test.go: 1024-dim zero
-// vectors. Against an empty DB the search returns no memories, which is the
-// expected path for this prompt-template test — we only assert the prompt
-// branch routing, not retrieval recall.)
+// (Uses livepgEmbedder — deterministic unit-norm vectors so cosine similarity
+// is well-defined. Against an empty DB the search returns no memories, which
+// is the expected path for this prompt-template test — we only assert the
+// prompt branch routing, not retrieval recall.)
 
 // capturedLLMRequest holds the system message captured from the stub LLM server.
 type capturedLLMRequest struct {
@@ -140,7 +140,7 @@ func TestLivePG_ChatComplete_FactualPrompt(t *testing.T) {
 	pg := openLivePGForChat(ctx, t, logger)
 	defer pg.Close()
 
-	emb := &stubEmbedder{}
+	emb := &livepgEmbedder{}
 	svc := search.NewSearchService(pg, nil, emb, logger)
 	if !svc.CanSearch() {
 		t.Fatalf("search service: CanSearch() = false; embedder=%v postgres=%v", emb, pg)

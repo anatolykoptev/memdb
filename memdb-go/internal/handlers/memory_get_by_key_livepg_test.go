@@ -43,7 +43,7 @@ func TestLivePG_GetMemoryByKey(t *testing.T) {
 	cube := fmt.Sprintf("livepg-getbykey-%d", time.Now().UnixNano())
 	defer cleanupWindowCharsCube(ctx, t, pg, cube)
 
-	h := &Handler{logger: logger, postgres: pg, embedder: &stubEmbedder{}}
+	h := &Handler{logger: logger, postgres: pg, embedder: &livepgEmbedder{}}
 
 	// Insert three raw memories with distinct keys.
 	keys := []string{

@@ -62,7 +62,7 @@ func TestLivePG_StructuralEdges_RawSession(t *testing.T) {
 	h := &Handler{
 		logger:   logger,
 		postgres: pg,
-		embedder: &stubEmbedder{},
+		embedder: &livepgEmbedder{},
 	}
 
 	turns := []string{
@@ -176,7 +176,7 @@ func TestLivePG_StructuralEdges_CapFires(t *testing.T) {
 	h := &Handler{
 		logger:   logger,
 		postgres: pg,
-		embedder: &stubEmbedder{},
+		embedder: &livepgEmbedder{},
 	}
 
 	const totalTurns = 26

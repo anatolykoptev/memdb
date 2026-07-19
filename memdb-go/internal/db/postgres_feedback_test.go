@@ -48,18 +48,6 @@ func TestValidateFeedbackEventParams_MissingQuery(t *testing.T) {
 	}
 }
 
-func TestValidateFeedbackEventParams_MissingPrediction(t *testing.T) {
-	err := validateFeedbackEventParams(InsertFeedbackEventParams{
-		UserID: "u", Query: "q", Label: "positive",
-	})
-	if err == nil {
-		t.Fatal("expected error for empty prediction")
-	}
-	if !strings.Contains(err.Error(), "prediction") {
-		t.Errorf("error should mention prediction, got: %v", err)
-	}
-}
-
 func TestValidateFeedbackEventParams_InvalidLabel(t *testing.T) {
 	err := validateFeedbackEventParams(InsertFeedbackEventParams{
 		UserID: "u", Query: "q", Prediction: "p", Label: "unknown",
@@ -80,7 +68,6 @@ func TestInsertFeedbackEvent_ValidationErrors(t *testing.T) {
 	cases := []InsertFeedbackEventParams{
 		{Query: "q", Prediction: "p", Label: "positive"},               // missing UserID
 		{UserID: "u", Prediction: "p", Label: "positive"},              // missing Query
-		{UserID: "u", Query: "q", Label: "positive"},                   // missing Prediction
 		{UserID: "u", Query: "q", Prediction: "p", Label: "bad_label"}, // invalid Label
 	}
 	for _, params := range cases {

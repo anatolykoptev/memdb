@@ -83,7 +83,7 @@ func TestLivePG_FeedbackPersistence(t *testing.T) {
 	h := &Handler{
 		logger:   logger,
 		postgres: pg,
-		embedder: &stubEmbedder{},
+		embedder: &livepgEmbedder{},
 		llmChat:  llm.NewClient(stubLLM.URL, "test-key", "stub-model", nil, logger),
 	}
 

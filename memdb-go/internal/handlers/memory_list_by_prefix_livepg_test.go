@@ -36,7 +36,7 @@ func TestLivePG_ListMemoriesByPrefix(t *testing.T) {
 	cube := fmt.Sprintf("livepg-listprefix-%d", time.Now().UnixNano())
 	defer cleanupWindowCharsCube(ctx, t, pg, cube)
 
-	h := &Handler{logger: logger, postgres: pg, embedder: &stubEmbedder{}}
+	h := &Handler{logger: logger, postgres: pg, embedder: &livepgEmbedder{}}
 
 	keys := []string{
 		"/memories/a.txt",

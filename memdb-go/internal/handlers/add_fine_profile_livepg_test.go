@@ -137,7 +137,7 @@ func runProfileExtractScenario(t *testing.T, cubePrefix, profileBody string, mes
 	h := &Handler{
 		logger:       logger,
 		postgres:     pg,
-		embedder:     &stubEmbedder{},
+		embedder:     &livepgEmbedder{},
 		llmExtractor: llm.NewLLMExtractor(stub.URL, "test-key", "stub-model", nil, logger),
 	}
 

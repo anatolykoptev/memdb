@@ -159,9 +159,6 @@ func validateFeedbackEventParams(p InsertFeedbackEventParams) error {
 	if p.Query == "" {
 		return errors.New("InsertFeedbackEvent: query required")
 	}
-	if p.Prediction == "" {
-		return errors.New("InsertFeedbackEvent: prediction required")
-	}
 	switch p.Label {
 	case "positive", "negative", "neutral", "correction":
 	default:

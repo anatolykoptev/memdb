@@ -67,18 +67,28 @@ func TestLivePG_ExpandViaGraph_TwoHop(t *testing.T) {
 	t.Cleanup(cleanup)
 	defer cleanup()
 
-	// Fixture: 3 nodes, 3 orthogonal embeddings. Edges A → B → C form a
-	// 2-hop chain. Query embedding aligns with C (the 2-hop target).
+	// Fixture: 4 nodes, 3 orthogonal embeddings for the A→B→C chain plus
+	// a 4th seed D (no edges) to bump the expansion budget. Edges A → B → C
+	// form a 2-hop chain. Query embedding aligns with C (the 2-hop target).
 	// pgvector column is fixed at 1024 dims (multilingual-e5-large).
+	//
+	// D is needed because expandViaGraph caps expansions to
+	// (origSize * multihopExpandFactor - origSize) = origSize. With only 1
+	// seed the budget is 1, so only the highest-scoring expansion survives
+	// (C, which is query-aligned) and B gets cut — even though the walk
+	// reached it. Adding D as a second seed gives budget=2 so both B and C
+	// survive the cap.
 	dim := 1024
 	embA := unitVecD2(0, dim) // axis-0
 	embB := unitVecD2(1, dim) // axis-1
 	embC := unitVecD2(2, dim) // axis-2
+	embD := unitVecD2(3, dim) // axis-3 — isolated seed, no edges
 	queryVec := unitVecD2(2, dim)
 
 	idA := uuid.New().String()
 	idB := uuid.New().String()
 	idC := uuid.New().String()
+	idD := uuid.New().String()
 	if err := insertD2Node(ctx, pg, cubeID, idA, "A: hub", embA); err != nil {
 		t.Fatalf("insert A: %v", err)
 	}
@@ -88,6 +98,9 @@ func TestLivePG_ExpandViaGraph_TwoHop(t *testing.T) {
 	if err := insertD2Node(ctx, pg, cubeID, idC, "C: target", embC); err != nil {
 		t.Fatalf("insert C: %v", err)
 	}
+	if err := insertD2Node(ctx, pg, cubeID, idD, "D: isolated seed", embD); err != nil {
+		t.Fatalf("insert D: %v", err)
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if err := pg.CreateMemoryEdge(ctx, idA, idB, db.EdgeRelated, now, now); err != nil {
 		t.Fatalf("edge A→B: %v", err)
@@ -96,8 +109,14 @@ func TestLivePG_ExpandViaGraph_TwoHop(t *testing.T) {
 		t.Fatalf("edge B→C: %v", err)
 	}
 
-	// Seed = A only. 2-hop walk must reach B (hop 1) and C (hop 2).
-	seeds := []MergedResult{{ID: idA, Score: 0.01}}
+	// Seeds = A (hub) + D (isolated). 2-hop walk from A must reach B
+	// (hop 1) and C (hop 2). D has no edges so it contributes nothing to
+	// the walk but bumps the expansion budget to 2.
+	seeds := []MergedResult{
+		{ID: idA, Score: 0.01},
+		{ID: idD, Score: 0.01},
+	}
+
 	got := expandViaGraph(ctx, pg, logger, seeds, queryVec, cubeID, cubeID, "")
 
 	var b, c *MergedResult

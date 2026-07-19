@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
@@ -114,7 +115,7 @@ func TestCEPrecomputeNeighbours_FloorMetricEmitted(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	otel.SetMeterProvider(mp)
-	t.Cleanup(func() { otel.SetMeterProvider(nil) })
+	t.Cleanup(func() { otel.SetMeterProvider(noop.NewMeterProvider()) })
 
 	// Default threshold (0.3) — no env override.
 	t.Setenv("MEMDB_CE_PRECOMPUTE_COSINE_THRESHOLD", "")

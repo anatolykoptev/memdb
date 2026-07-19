@@ -95,6 +95,10 @@ func buildSyntheticMessages(numMessages int) []chatMessage {
 }
 
 func TestLivePG_WindowChars_FastAdd(t *testing.T) {
+	// WindowChars only takes effect in windowed mode; the default granularity
+	// is per-message which ignores WindowChars entirely.
+	t.Setenv("MEMDB_FAST_GRANULARITY", "window")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -112,7 +116,7 @@ func TestLivePG_WindowChars_FastAdd(t *testing.T) {
 	h := &Handler{
 		logger:   logger,
 		postgres: pg,
-		embedder: &stubEmbedder{},
+		embedder: &livepgEmbedder{},
 	}
 
 	msgs := buildSyntheticMessages(60)

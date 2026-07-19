@@ -136,7 +136,7 @@ func runDateAwareLivepgScenario(t *testing.T, cubePrefix, factText string, messa
 	h := &Handler{
 		logger:       logger,
 		postgres:     pg,
-		embedder:     &stubEmbedder{},
+		embedder:     &livepgEmbedder{},
 		llmExtractor: llm.NewLLMExtractor(stub.URL, "test-key", "stub-model", nil, logger),
 	}
 
