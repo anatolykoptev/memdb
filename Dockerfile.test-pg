@@ -19,7 +19,8 @@ RUN apt-get update && \
         postgresql-server-dev-17 \
         flex \
         bison \
-        git && \
+        git \
+        ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 RUN git clone --branch release/PG17/1.6.0 --depth 1 https://github.com/apache/age.git /tmp/age && \
