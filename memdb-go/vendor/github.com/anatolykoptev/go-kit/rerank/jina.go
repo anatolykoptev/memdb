@@ -31,9 +31,9 @@ const (
 	// misbehaving upstream. Rerank responses are small JSON.
 	jinaRespBodyLimit = 1 << 20 // 1 MiB
 
-	jinaMaxAttempts    = 3
-	jinaBaseBackoff    = 200 * time.Millisecond
-	jinaBackoffFactor  = 2.0
+	jinaMaxAttempts   = 3
+	jinaBaseBackoff   = 200 * time.Millisecond
+	jinaBackoffFactor = 2.0
 )
 
 // JinaRerankClient is an HTTP client for the Jina AI rerank API.
@@ -79,8 +79,8 @@ type jinaRequest struct {
 
 // jinaResponse is the relevant subset of the Jina rerank response body.
 type jinaResponse struct {
-	Model   string `json:"model"`
-	Usage   struct {
+	Model string `json:"model"`
+	Usage struct {
 		TotalTokens int `json:"total_tokens"`
 	} `json:"usage"`
 	Results []jinaResult `json:"results"`

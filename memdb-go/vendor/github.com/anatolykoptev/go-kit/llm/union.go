@@ -42,7 +42,7 @@ func unionSchema(variants []VariantDef) map[string]any {
 		"properties": map[string]any{
 			"result": map[string]any{"anyOf": anyOf},
 		},
-		"required":            []string{"result"},
+		"required":             []string{"result"},
 		"additionalProperties": false,
 	}
 }

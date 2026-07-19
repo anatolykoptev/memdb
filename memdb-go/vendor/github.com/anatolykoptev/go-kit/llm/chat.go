@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -59,13 +60,30 @@ type ContentPart struct {
 
 // ImageURL holds an image reference for vision requests.
 type ImageURL struct {
-	URL string `json:"url"`
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // ImagePart is a convenience type for passing images to CompleteMultimodal.
 type ImagePart struct {
 	URL      string
 	MIMEType string // optional
+	// Base64 is already base64-encoded image data. When non-empty, the request
+	// uses a data-URI instead of URL. MIMEType defaults to "image/png".
+	Base64 string
+	// Detail controls the vision resolution hint ("low", "high", "auto").
+	// Empty = omit (provider default).
+	Detail string
+}
+
+// DataURI constructs a base64 data-URI suitable for vision image_url.
+// Use this when you have raw bytes; pass the result as ImagePart.URL or directly
+// as an image_url.url value.
+func DataURI(mimeType string, data []byte) string {
+	if mimeType == "" {
+		mimeType = "image/png"
+	}
+	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
 // ChatRequest is a chat completion request. Exported for use with Middleware.
@@ -85,6 +103,13 @@ type ChatRequest struct {
 	Tools          []Tool    `json:"tools,omitempty"`
 	ToolChoice     any       `json:"tool_choice,omitempty"`
 	ResponseFormat any       `json:"response_format,omitempty"`
+	// ReasoningEffort controls chain-of-thought computation.
+	// "none" disables reasoning on supported models (cerebras-glm-4.7),
+	// freeing the token budget for content instead of thinking tokens.
+	// Other values: "low", "medium", "high". Empty = not sent (provider default).
+	// WARNING: send only to models that support it; unsupported models return 400.
+	// Use model-prefix guards at the call site.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // Usage holds token usage from the API response.
@@ -152,6 +177,17 @@ type ChatResponse struct {
 	ToolCalls    []ToolCall
 	FinishReason string
 	Usage        *Usage
+	// Reasoning is the model chain-of-thought, separated from Content by
+	// splitReasoning. Populated for reasoning models (inline <think> or a
+	// reasoning_content field). Empty for normal models. Content is always
+	// the clean answer with any leading <think> block removed.
+	Reasoning string
+	// ServedBy is the model id of the chain endpoint that actually returned the
+	// 200 — the answer to "which model served this call?" without grepping logs.
+	// Set on the WithEndpoints chain path (including the never-fail-closed
+	// last-resort attempt). Empty ("") on the single-endpoint (no WithEndpoints)
+	// path, where there is no chain to attribute, and on Stream (see Stream doc).
+	ServedBy string
 }
 
 // ChatOption configures a per-request Chat option.
@@ -165,6 +201,7 @@ type chatConfig struct {
 	maxTokens         *int
 	model             string
 	timestampMessages bool
+	reasoningEffort   string
 }
 
 func (cfg *chatConfig) apply(req *ChatRequest) {
@@ -190,6 +227,9 @@ func (cfg *chatConfig) apply(req *ChatRequest) {
 	if cfg.timestampMessages {
 		applyMessageTimestamps(req.Messages)
 	}
+	if cfg.reasoningEffort != "" {
+		req.ReasoningEffort = cfg.reasoningEffort
+	}
 }
 
 // WithTools sets the available tools for the request.
@@ -210,6 +250,18 @@ func WithChatTemperature(t float64) ChatOption {
 // WithChatMaxTokens overrides the max tokens for a single call.
 func WithChatMaxTokens(n int) ChatOption {
 	return func(c *chatConfig) { c.maxTokens = &n }
+}
+
+// WithReasoningEffort sets the reasoning_effort for a single call.
+// Valid values: "none", "low", "medium", "high".
+// "none" disables chain-of-thought on supported models (cerebras-glm-4.7),
+// freeing the full token budget for content output.
+//
+// WARNING: not all models support this parameter. Sending it to groq,
+// some OpenRouter endpoints, or DeepSeek (zen-*) providers returns HTTP 400.
+// Guard at the call site with a model-prefix check before using.
+func WithReasoningEffort(effort string) ChatOption {
+	return func(c *chatConfig) { c.reasoningEffort = effort }
 }
 
 // WithChatModel overrides the model id for a single call. Empty string —

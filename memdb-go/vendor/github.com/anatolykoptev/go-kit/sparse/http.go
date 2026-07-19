@@ -48,15 +48,15 @@ const httpSparseRespBodyLimit = 8 * 1024 * 1024
 // Concurrent-safe: no mutable state beyond the http.Client which is itself
 // safe for concurrent use.
 type HTTPSparseEmbedder struct {
-	baseURL   string
-	model     string
-	vocabSize int
-	topK      int     // 0 = omit field; server default applies
-	minWeight float32 // 0 = omit field; server default applies
-	client    *http.Client
-	logger    *slog.Logger
-	observer  Observer    // noopObserver{} when not set
-	retry     RetryConfig // initialised to defaultRetry; overridable via WithHTTPRetry
+	baseURL     string
+	model       string
+	vocabSize   int
+	topK        int     // 0 = omit field; server default applies
+	minWeight   float32 // 0 = omit field; server default applies
+	client      *http.Client
+	logger      *slog.Logger
+	observer    Observer    // noopObserver{} when not set
+	retry       RetryConfig // initialised to defaultRetry; overridable via WithHTTPRetry
 	bearerToken string
 }
 

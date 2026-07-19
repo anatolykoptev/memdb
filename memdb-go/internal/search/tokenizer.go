@@ -5,8 +5,9 @@ package search
 import (
 	"regexp"
 	"strings"
-	"unicode"
 	"unicode/utf8"
+
+	"github.com/anatolykoptev/go-kit/langdetect"
 )
 
 // tokenRegexp extracts word tokens: ASCII letters, Cyrillic letters, and digits.
@@ -16,15 +17,13 @@ var tokenRegexp = regexp.MustCompile(`[a-zA-ZА-Яа-яёЁ0-9]+`)
 // numericRegexp matches tokens that are purely numeric.
 var numericRegexp = regexp.MustCompile(`^[0-9]+$`)
 
-const (
-	// cyrillicLangThreshold is the minimum ratio of Cyrillic characters required
-	// to classify text as Russian (ru).
-	cyrillicLangThreshold = 0.20
-
-	// cjkLangThreshold is the minimum ratio of CJK characters required
-	// to classify text as Chinese (zh).
-	cjkLangThreshold = 0.30
-)
+// tokenizerLangOpts restricts detection to the three languages we have
+// stopword lists for. This improves accuracy on short search queries by
+// eliminating false matches against the other 81 languages whatlanggo
+// supports.
+var tokenizerLangOpts = langdetect.Options{
+	Whitelist: []string{"en", "ru", "zh"},
+}
 
 // TokenizeMixed is the main entry point. It detects the language of the input text,
 // extracts tokens using a shared regex, lowercases them, and filters stopwords
@@ -81,54 +80,16 @@ func BuildTSQuery(tokens []string) string {
 	return strings.Join(tokens, " | ")
 }
 
-// isCyrillic returns true if the rune is in the Cyrillic Unicode block (U+0400-U+04FF).
-func isCyrillic(r rune) bool {
-	return r >= 0x0400 && r <= 0x04FF
-}
-
-// isCJK returns true if the rune is in the CJK Unified Ideographs block (U+4E00-U+9FFF).
-func isCJK(r rune) bool {
-	return r >= 0x4E00 && r <= 0x9FFF
-}
-
-// detectLang analyzes the text and returns a language code:
-//   - "ru" if >20% of characters are Cyrillic
-//   - "zh" if >30% of characters are CJK
-//   - "en" otherwise
+// detectLang classifies text into "en", "ru", or "zh" using trigram-based
+// language detection (go-kit/langdetect, backed by whatlanggo). Detection
+// is restricted to these three languages via whitelist because we only have
+// stopword lists for them. Returns "en" for empty or undetectable text.
 func detectLang(text string) string {
-	var total, cyrillic, cjk int
-
-	for _, r := range text {
-		if unicode.IsSpace(r) || unicode.IsPunct(r) {
-			continue
-		}
-		total++
-		if isCyrillic(r) {
-			cyrillic++
-		}
-		if isCJK(r) {
-			cjk++
-		}
-	}
-
-	if total == 0 {
+	info := langdetect.DetectWith(text, tokenizerLangOpts)
+	if info.Lang == langdetect.LangUnknown {
 		return "en"
 	}
-
-	cyrillicRatio := float64(cyrillic) / float64(total)
-	cjkRatio := float64(cjk) / float64(total)
-
-	// Check Cyrillic first (>cyrillicLangThreshold).
-	if cyrillicRatio > cyrillicLangThreshold {
-		return "ru"
-	}
-
-	// Check CJK (>cjkLangThreshold).
-	if cjkRatio > cjkLangThreshold {
-		return "zh"
-	}
-
-	return "en"
+	return string(info.Lang)
 }
 
 // englishStopwords contains ~100 common English stopwords.

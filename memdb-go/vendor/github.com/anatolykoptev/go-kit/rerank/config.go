@@ -17,8 +17,8 @@ type cfgInternal struct {
 	observer       Observer
 	hc             *http.Client
 	// G1 fields
-	retry    RetryPolicy
-	circuit  *CircuitBreaker
+	retry        RetryPolicy
+	circuit      *CircuitBreaker
 	fallback     Reranker // *Client OR any Reranker (Voyage/Jina/...)
 	fallbackName string   // metric label for non-*Client secondaries
 	// G2-client fields
@@ -40,11 +40,11 @@ type Opt func(*cfgInternal)
 // New(cfg, logger) inherit this; opt out via WithRetry(rerank.NoRetry).
 func defaultCfg() *cfgInternal {
 	return &cfgInternal{
-		maxDocs:  defaultMaxDocs,
-		observer: noopObserver{},
-		hc:       &http.Client{},
-		retry:    defaultRetryPolicy(),
-		circuit:  nil, // off by default; opt-in via WithCircuit
+		maxDocs:      defaultMaxDocs,
+		observer:     noopObserver{},
+		hc:           &http.Client{},
+		retry:        defaultRetryPolicy(),
+		circuit:      nil, // off by default; opt-in via WithCircuit
 		fallback:     nil, // off by default; opt-in via WithFallback
 		fallbackName: "",
 	}

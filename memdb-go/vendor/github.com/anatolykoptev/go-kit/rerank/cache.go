@@ -54,7 +54,9 @@ func WithCache(c Cache) Opt {
 // cacheKey computes the deterministic key for a (model, query, doc.Text) triple
 // plus all server-side knobs that change the returned score.
 // Format: sha256(version NUL model NUL serverNormalize NUL queryInstr NUL docInstr
-//                NUL query NUL docText NUL maxCharsPerDoc NUL maxTokensPerDoc).
+//
+//	NUL query NUL docText NUL maxCharsPerDoc NUL maxTokensPerDoc).
+//
 // All inputs that change the upstream rerank response MUST be in the key —
 // otherwise a cached score from one config gets returned under another, silently.
 //

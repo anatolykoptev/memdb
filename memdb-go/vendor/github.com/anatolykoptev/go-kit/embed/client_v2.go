@@ -60,7 +60,7 @@ func newClientFromInternal(cfg *cfgInternal) (*Client, error) {
 		cb = NewCircuitBreaker(cbCfg, model, makeCircuitHook(model, cfg.observer))
 	}
 
-// E5: resolve chunkSize. Priority: explicit opt > env > default.
+	// E5: resolve chunkSize. Priority: explicit opt > env > default.
 	chunkSz := cfg.chunkSize
 	if chunkSz <= 0 {
 		// Try environment override.
