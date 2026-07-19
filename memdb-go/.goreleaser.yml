@@ -45,7 +45,7 @@ archives:
     formats:
       - tar.gz
     name_template: >-
-      {{ .ProjectName }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
 
 checksum:
   name_template: checksums.txt
