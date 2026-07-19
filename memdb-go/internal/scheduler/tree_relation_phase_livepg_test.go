@@ -1,7 +1,7 @@
 //go:build livepg
 
 // Package scheduler — tree_relation_phase_livepg_test.go: end-to-end test for
-// the D3 relation-detection phase against a live Postgres + AGE 1.7 + pgvector.
+// the D3 relation-detection phase against a live Postgres + AGE 1.6.0 + pgvector.
 //
 // Motivation: PR #58 shipped runRelationPhase with stub-based unit tests, but
 // empirical smoke-testing could not reproduce parents_collected ≥ 2 because

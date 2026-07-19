@@ -68,9 +68,14 @@ jobs:
     name: Live Postgres Integration (livepg)
     runs-on: ubuntu-24.04-arm
 
+    # NOTE: The composite test-pg image (pgvector + AGE 1.6.0 prebuilt) must be
+    # built and pushed manually (or via a separate workflow) before this job can
+    # use it. See Dockerfile.test-pg at the repo root for the build recipe. The
+    # GHCR namespace (anatolykoptev) is the repo owner; operators can retarget
+    # by updating the `image:` field below.
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: ghcr.io/anatolykoptev/memdb-test-pg:pg17-age1.6.0
         env:
           POSTGRES_USER: memos
           POSTGRES_PASSWORD: memos
@@ -102,15 +107,11 @@ jobs:
         working-directory: memdb-go
         run: go mod download
 
-      - name: Install AGE extension
+      - name: Install extensions
         run: |
-          # Build AGE inside the Postgres service container (not on the host)
-          # to avoid glibc version mismatch between host and container.
+          # AGE is prebuilt into the composite test-pg image; only the CREATE
+          # EXTENSION statements remain (run inside the service container).
           PG_CID=$(docker ps -q | head -1)
-          docker exec "$PG_CID" sh -c 'apt-get update -qq && apt-get install -y -qq build-essential postgresql-server-dev-17 flex bison git'
-          docker exec "$PG_CID" sh -c 'cd /tmp && git clone --depth 1 --branch release/PG17/1.6.0 https://github.com/apache/age.git && cd age && make PG_CONFIG=/usr/lib/postgresql/17/bin/pg_config install'
-
-          # Install extensions via psql inside the container.
           docker exec "$PG_CID" psql -U memos -d memos -c "CREATE EXTENSION IF NOT EXISTS age;"
           docker exec "$PG_CID" psql -U memos -d memos -c "CREATE EXTENSION IF NOT EXISTS vector;"
           docker exec "$PG_CID" psql -U memos -d memos -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
