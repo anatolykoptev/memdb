@@ -3,6 +3,8 @@ name: Release Please
 on:
   push:
     branches: [main]
+    tags:
+      - "memdb-go-v*"
   workflow_dispatch:
 
 permissions: {}
@@ -28,16 +30,23 @@ jobs:
           manifest-file: .release-please-manifest.json
           include-component-in-tag: true
 
-      # release-please creates tags as memdb-go-vX.Y.Z (component-vX.Y.Z format).
-      # Go proxy for subdir modules expects memdb-go/vX.Y.Z (slash, not dash).
-      # Rename the tag post-release so `go get` can find it.
-      - name: Rename tag for Go proxy (dash → slash)
-        if: ${{ steps.release.outputs.release_created }}
+  # release-please creates tags as memdb-go-vX.Y.Z (component-vX.Y.Z format).
+  # Go proxy for subdir modules expects memdb-go/vX.Y.Z (slash, not dash).
+  # This job renames the tag post-release so `go get` can find it.
+  # Triggers on tag push (when release-please merges the release PR → tag created).
+  rename-tag:
+    if: startsWith(github.ref, 'refs/tags/memdb-go-v')
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    steps:
+      - name: Rename tag (dash → slash)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OLD_TAG: ${{ steps.release.outputs.tag_name }}
+          OLD_TAG: ${{ github.ref_name }}
         run: |
           NEW_TAG="${OLD_TAG/-v//}"
+          echo "Renaming $OLD_TAG → $NEW_TAG"
           git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}" tmp
           cd tmp
           git tag "$NEW_TAG" "$OLD_TAG"
