@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/util/jsonutil"
+	"github.com/google/uuid"
 )
 
 // Extraction state values written to every Memory row (migration 0028). The
