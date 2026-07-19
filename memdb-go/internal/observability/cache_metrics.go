@@ -27,8 +27,18 @@ import (
 //   - error   — VDrop returned a non-nil error (Redis unreachable, etc.)
 var vsetInvalidateOutcomes = []string{"success", "miss", "error"}
 
+// vsetEvictOutcomes are the canonical outcome labels for the per-cube
+// eviction counter. Pre-registered at zero so the series appears from first
+// scrape.
+//
+//   - success — VRemBatch evicted oldest entries to bring the cube under cap
+//   - miss    — VCard was at or below cap; no eviction needed
+//   - error   — VCard, VSim, or VRemBatch returned a non-nil error
+var vsetEvictOutcomes = []string{"success", "miss", "error"}
+
 type cacheInstruments struct {
 	VsetInvalidateTotal metric.Int64Counter
+	VsetEvictTotal      metric.Int64Counter
 }
 
 var (
@@ -52,6 +62,15 @@ func Cache() *cacheInstruments {
 			),
 		)
 
+		cacheInst.VsetEvictTotal, _ = meter.Int64Counter(
+			"memdb.cache.vset_evict_total",
+			metric.WithDescription(
+				"Counts per-cube VSET eviction attempts when VCard exceeds MEMDB_VSET_PER_CUBE_CAP. "+
+					"outcome in {success,miss,error}; op labels the call site (e.g. per_cube_cap). "+
+					"error outcome should alert — stale dedup candidates may cause wrong LLM consolidation merges.",
+			),
+		)
+
 		// Pre-register all outcome × op combinations at zero so Grafana panels
 		// and alert rules have a stable series from container start.
 		ctx := context.Background()
@@ -60,6 +79,14 @@ func Cache() *cacheInstruments {
 				metric.WithAttributes(
 					attribute.String("outcome", oc),
 					attribute.String("op", "delete_cube"),
+				),
+			)
+		}
+		for _, oc := range vsetEvictOutcomes {
+			cacheInst.VsetEvictTotal.Add(ctx, 0,
+				metric.WithAttributes(
+					attribute.String("outcome", oc),
+					attribute.String("op", "per_cube_cap"),
 				),
 			)
 		}
@@ -72,6 +99,18 @@ func Cache() *cacheInstruments {
 // add additional op values as new callers are introduced.
 func RecordVsetInvalidate(ctx context.Context, op, outcome string) {
 	Cache().VsetInvalidateTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("outcome", outcome),
+			attribute.String("op", op),
+		),
+	)
+}
+
+// RecordVsetEvict bumps the VSET per-cube eviction counter for the given op
+// label and outcome. op should be "per_cube_cap" for the VAdd eviction hook;
+// add additional op values as new callers are introduced.
+func RecordVsetEvict(ctx context.Context, op, outcome string) {
+	Cache().VsetEvictTotal.Add(ctx, 1,
 		metric.WithAttributes(
 			attribute.String("outcome", outcome),
 			attribute.String("op", op),

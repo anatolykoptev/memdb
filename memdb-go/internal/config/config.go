@@ -99,6 +99,14 @@ type Config struct {
 	// from legacy to HNSW. Env: MEMDB_REORG_DUP_CROSSOVER, default 1000.
 	ReorgDupCrossover int `json:"reorg_dup_crossover"`
 
+	// ReorgVsetPerCubeCap is the maximum number of WorkingMemory nodes kept
+	// in the Redis VSET hot cache per cube. When VCard exceeds this cap the
+	// VSetEvictionPolicy evicts oldest-first entries so dedup candidates stay
+	// fresh. A per-cube cap is required because Redis allkeys-lru is global —
+	// one hot cube would starve cold cubes without it.
+	// Env: MEMDB_VSET_PER_CUBE_CAP, default 500.
+	ReorgVsetPerCubeCap int `json:"reorg_vset_per_cube_cap"`
+
 	// Buffer zone (batch add before LLM extraction)
 	BufferEnabled bool          `json:"buffer_enabled"`
 	BufferSize    int           `json:"buffer_size"`
@@ -163,6 +171,9 @@ const (
 
 	// Reorganizer dup-strategy defaults.
 	defaultReorgDupCrossover = 1000
+
+	// VSET per-cube eviction cap default.
+	defaultReorgVsetPerCubeCap = 500
 )
 
 // clampCoTMaxSubqueries enforces [cotMaxSubqueriesMin, cotMaxSubqueriesMax].
@@ -236,16 +247,17 @@ func Load() *Config {
 		DefaultAnswerStyle: validatedAnswerStyle(envStr("MEMDB_DEFAULT_ANSWER_STYLE", "")),
 		FactualCanaryPct:   clampCanaryPct(envInt("MEMDB_FACTUAL_CANARY_PCT", 0)),
 
-		LLMProxyURL:       envStr("MEMDB_LLM_PROXY_URL", "https://api.openai.com/v1"),
-		LLMProxyAPIKey:    envStr("CLI_PROXY_API_KEY", ""),
-		LLMDefaultModel:   envStr("MEMDB_LLM_MODEL", "gemini-2.5-flash"),
-		LLMSearchModel:    envStr("MEMDB_LLM_SEARCH_MODEL", "gemini-2.0-flash"),
-		LLMExtractModel:   envStr("MEMDB_LLM_EXTRACT_MODEL", "gemini-2.0-flash-lite"),
-		LLMReorgModel:     envStr("MEMDB_REORG_LLM_MODEL", "gemini-2.5-flash-lite"),
-		LLMFallbackModels: envCSV("MEMDB_LLM_FALLBACK_MODELS", nil),
-		ReorgUseHNSW:      envBool("MEMDB_REORG_USE_HNSW", false),
-		ReorgDupStrategy:  envStr("MEMDB_REORG_DUP_STRATEGY", ""),
-		ReorgDupCrossover: envInt("MEMDB_REORG_DUP_CROSSOVER", defaultReorgDupCrossover),
+		LLMProxyURL:         envStr("MEMDB_LLM_PROXY_URL", "https://api.openai.com/v1"),
+		LLMProxyAPIKey:      envStr("CLI_PROXY_API_KEY", ""),
+		LLMDefaultModel:     envStr("MEMDB_LLM_MODEL", "gemini-2.5-flash"),
+		LLMSearchModel:      envStr("MEMDB_LLM_SEARCH_MODEL", "gemini-2.0-flash"),
+		LLMExtractModel:     envStr("MEMDB_LLM_EXTRACT_MODEL", "gemini-2.0-flash-lite"),
+		LLMReorgModel:       envStr("MEMDB_REORG_LLM_MODEL", "gemini-2.5-flash-lite"),
+		LLMFallbackModels:   envCSV("MEMDB_LLM_FALLBACK_MODELS", nil),
+		ReorgUseHNSW:        envBool("MEMDB_REORG_USE_HNSW", false),
+		ReorgDupStrategy:    envStr("MEMDB_REORG_DUP_STRATEGY", ""),
+		ReorgDupCrossover:   envInt("MEMDB_REORG_DUP_CROSSOVER", defaultReorgDupCrossover),
+		ReorgVsetPerCubeCap: envInt("MEMDB_VSET_PER_CUBE_CAP", defaultReorgVsetPerCubeCap),
 
 		BufferEnabled: envBool("MEMDB_BUFFER_ENABLED", false),
 		BufferSize:    envInt("MEMDB_BUFFER_SIZE", defaultBufferSize),

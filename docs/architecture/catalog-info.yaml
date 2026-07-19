@@ -1,0 +1,52 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: memdb
+  title: MemDB
+  description: |
+    Self-hosted long-term memory database for AI agents. One docker-compose, pure Go.
+    LoCoMo LLM-Judge 72.5%. Production: api.memdb.ai. Storage: PostgreSQL + pgvector + Apache AGE,
+    Qdrant, Redis. Embedders: multilingual-e5-large (text 1024d) + jina-code-v2 (code 768d).
+  annotations:
+    github.com/project-slug: anatolykoptev/memdb
+    backstage.io/techdocs-ref: dir:docs
+    likec4.dev/diagrams: /c4/MemDB/
+    krolik.run/dozor: memdb-go,memdb-api,memdb-mcp,embed-server
+  links:
+    - url: https://m.krolik.run/c4/MemDB/
+      title: Architecture diagrams (LikeC4)
+      icon: dashboard
+    - url: https://api.memdb.ai/docs/
+      title: REST API (Scalar)
+      icon: web
+    - url: https://github.com/anatolykoptev/memdb
+      title: GitHub repo
+      icon: github
+    - url: https://memdb.ai/
+      title: Marketing site
+      icon: web
+    - url: https://discord.gg/8vhbTZgf
+      title: Discord community
+  tags:
+    - memory
+    - ai-agents
+    - go
+    - rust
+    - postgresql
+    - pgvector
+    - vector-search
+    - graph
+    - mcp
+spec:
+  type: service
+  lifecycle: production
+  owner: memdb-team
+  system: memdb
+  providesApis:
+    - memdb-rest-api
+    - memdb-mcp-api
+  dependsOn:
+    - resource:postgresql
+    - resource:redis
+    - resource:qdrant
+  tier: 1

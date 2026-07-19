@@ -1,0 +1,262 @@
+specification {
+  element person { style { shape: person } }
+  element system
+  element container
+  element component
+  element store
+  
+  deploymentNode vm { style { color: amber } }
+  deploymentNode container_node { style { color: indigo } }
+  
+  tag api { color #4CAF50 }
+  tag mcp { color #00C896 }
+  tag store { color #FFA500 }
+  tag embedder { color #3F51B5 }
+  tag inference
+  tag deprecated { color #9E9E9E }
+}
+
+global {
+  styleGroup theme {
+    style element.tag = #deprecated { color gray; opacity 30% }
+  }
+}
+
+model {
+  agent = person "AI agent" {
+    description '''
+      LLM-driven agent (Claude / GPT / local LLM). Запоминает factы про юзера,
+      потом вытаскивает релевантные при следующем разговоре.
+    '''
+  }
+  
+  developer = person "Developer / SDK user" {
+    description "Python / Go / TypeScript SDK consumer. Прямые вызовы memdb-api."
+  }
+
+  memdb = system "MemDB" {
+    description '''
+      Self-hosted long-term memory database for AI agents.
+      
+      ## Ключевые свойства
+      - **One docker-compose** — postgres + pgvector + AGE + qdrant + redis + 4 микросервиса
+      - **Pure Go** для основного функционала, Rust sidecar для embedders
+      - **LoCoMo LLM-Judge 72.5%** — top-tier accuracy на memory benchmark
+      - **MCP-native** — встроенная поддержка Model Context Protocol
+      
+      ## Use cases
+      - Agent persistent memory (учится из разговоров)
+      - User context / preferences storage
+      - Knowledge graph queries (через Apache AGE)
+      - Vector similarity search (pgvector + Qdrant)
+    '''
+    
+    memdb_go = container "memdb-go" {
+      description '''
+        Главный Go service. Бизнес-логика memory operations.
+        
+        ## Endpoints
+        - `POST /memories` — add memory
+        - `GET /memories/search?q=...` — semantic search
+        - `GET /memories/:id` — fetch by ID
+        - Graph queries через Apache AGE
+        
+        ## Technology
+        - Go 1.26+
+        - HTTP/2 server
+        - Direct connections к Postgres, Redis, Qdrant
+        
+        ## Port
+        `:8080`
+      '''
+      technology "Go 1.26+"
+      icon tech:go
+      
+      api_handler = component "API handlers" {
+        #api
+        description "REST endpoints для memory CRUD + search. Class-based SearchHandler."
+      }
+      graph_engine = component "Graph engine" {
+        description "Apache AGE queries — knowledge graph traversal, relationship extraction."
+      }
+      vector_engine = component "Vector engine" {
+        description "pgvector + Qdrant dual-store. Hybrid search (sparse + dense)."
+      }
+      embedder_client = component "Embedder client" {
+        #embedder
+        description "Cache + retry layer над embed-server. Batch requests, dedup."
+      }
+    }
+    
+    memdb_api = container "memdb-api" {
+      description '''
+        REST API gateway. OpenAPI 3.1 spec на `/docs/`.
+        Обёртка над memdb-go с auth, rate-limiting, request validation.
+        
+        Port `:8000`. Production — `api.memdb.ai`.
+      '''
+      technology "Go HTTP gateway"
+      icon tech:go
+    }
+    
+    memdb_mcp = container "memdb-mcp" {
+      description '''
+        Model Context Protocol server. Подключается к Claude Desktop / Cursor / любым MCP клиентам.
+        
+        ## MCP tools exposed
+        - `memdb_add` — store memory
+        - `memdb_search` — semantic search
+        - `memdb_graph` — knowledge graph query
+        
+        Port `:8001`.
+      '''
+      technology "Go MCP server"
+      icon tech:go
+    }
+    
+    embed_server = container "embed-server" {
+      #embedder
+      description '''
+        Rust sidecar для embeddings. Multi-model config через `EMBED_MODELS`.
+        
+        ## Models loaded
+        - `multilingual-e5-large` — 1024d, text (~2GB RAM)
+        - `jina-code-v2` — 768d, code (~1.5GB RAM)
+        - `gte-multilingual-rerank-base` — reranker
+        - `splade-cocondenser-ensembledistil` — sparse vectors
+        
+        ## Why Rust
+        Python `embed-jina` retired 2026-04-17 — slow startup, high RAM. Rust sidecar
+        ONNX runtime: 4 models warmup в ~46s на 4-core ARM. Стабильнее.
+      '''
+      technology "Rust + ONNX runtime"
+      icon tech:rust
+    }
+    
+    postgres = container "PostgreSQL 17" {
+      #store
+      description '''
+        Primary store. **PostgreSQL 17** + 2 extensions:
+        
+        - **pgvector 0.8.0** — vector similarity (cosine, L2, inner product)
+        - **Apache AGE 1.6.0** — graph queries (Cypher dialect)
+        
+        ## Patches
+        PolarDB `properties::text::agtype` (104 fixes) + Unicode sanitization.
+      '''
+      technology "PostgreSQL 17 + pgvector + AGE"
+      icon tech:postgresql
+    }
+    
+    qdrant = container "Qdrant" {
+      #store
+      description "Secondary vector store. Для hybrid search и больших workload'ов где pgvector упирается."
+      technology "Qdrant"
+    }
+    
+    redis = container "Redis" {
+      #store
+      description "Cache layer. Hot embeddings, frequent search results, rate-limit counters."
+      technology "Redis"
+      icon tech:redis
+    }
+  }
+
+  agent -> memdb.memdb_mcp "MCP protocol (Claude Desktop, Cursor, etc.)"
+  developer -> memdb.memdb_api "REST API"
+  
+  memdb.memdb_api -> memdb.memdb_go "internal HTTP"
+  memdb.memdb_mcp -> memdb.memdb_go "internal HTTP"
+  
+  memdb.memdb_go.api_handler -> memdb.memdb_go.vector_engine "search request"
+  memdb.memdb_go.api_handler -> memdb.memdb_go.graph_engine "graph query"
+  memdb.memdb_go.api_handler -> memdb.memdb_go.embedder_client "embed text"
+  
+  memdb.memdb_go.embedder_client -> memdb.embed_server "POST /embed"
+  memdb.memdb_go.vector_engine -> memdb.postgres "pgvector query"
+  memdb.memdb_go.vector_engine -> memdb.qdrant "secondary search"
+  memdb.memdb_go.graph_engine -> memdb.postgres "AGE Cypher"
+  memdb.memdb_go -> memdb.redis "cache hot embeddings"
+}
+
+deployment {
+  oracle = vm "Oracle ARM VM (krolik-box)" {
+    description "Главный сервер. Docker compose stack, 4 vCPU ARM."
+    
+    pg_node = instanceOf memdb.postgres
+    redis_node = instanceOf memdb.redis
+    qdrant_node = instanceOf memdb.qdrant
+    embed_node = instanceOf memdb.embed_server
+    go_node = instanceOf memdb.memdb_go
+    api_node = instanceOf memdb.memdb_api
+    mcp_node = instanceOf memdb.memdb_mcp
+  }
+}
+
+views {
+  global style theme
+
+  view index {
+    title "Top level — actors → MemDB"
+    include agent, developer, memdb, memdb.memdb_api, memdb.memdb_mcp, memdb.memdb_go, memdb.embed_server, memdb.postgres, memdb.qdrant, memdb.redis
+    autoLayout LeftRight
+  }
+  
+  view memdb_internals of memdb.memdb_go {
+    title "memdb-go — внутренние компоненты"
+    include *, memdb.embed_server, memdb.postgres, memdb.qdrant, memdb.redis
+    autoLayout TopBottom
+  }
+  
+  view stores {
+    title "Storage layer (#store)"
+    include memdb.** where tag is #store
+    autoLayout LeftRight
+  }
+  
+  view embedders {
+    title "Embedder pipeline (#embedder)"
+    include memdb.** where tag is #embedder
+    autoLayout TopBottom
+  }
+  
+  dynamic view add_memory_flow {
+    title "Add memory — пошагово"
+    description "Что происходит при POST /memories"
+    
+    developer -> memdb.memdb_api "POST /memories {text, user_id, tags}"
+    memdb.memdb_api -> memdb.memdb_go "internal POST"
+    memdb.memdb_go.api_handler -> memdb.memdb_go.embedder_client "embed text"
+    memdb.memdb_go.embedder_client -> memdb.embed_server "POST /embed"
+    memdb.embed_server -> memdb.memdb_go.embedder_client "1024d vector"
+    memdb.memdb_go.api_handler -> memdb.postgres "INSERT с vector + agtype"
+    memdb.memdb_go.api_handler -> memdb.redis "invalidate cache"
+    
+    autoLayout TopBottom
+  }
+  
+  dynamic view search_flow {
+    title "Search memory — пошагово"
+    description "POST /memories/search через MCP или REST"
+    
+    agent -> memdb.memdb_mcp "memdb_search(query)"
+    memdb.memdb_mcp -> memdb.memdb_go "internal search"
+    memdb.memdb_go.api_handler -> memdb.redis "check cache hit"
+    memdb.memdb_go.api_handler -> memdb.memdb_go.embedder_client "embed query"
+    memdb.memdb_go.embedder_client -> memdb.embed_server "POST /embed"
+    memdb.memdb_go.api_handler -> memdb.memdb_go.vector_engine "hybrid search"
+    memdb.memdb_go.vector_engine -> memdb.postgres "pgvector ANN"
+    memdb.memdb_go.vector_engine -> memdb.qdrant "secondary ANN"
+    memdb.memdb_go.api_handler -> memdb.memdb_go.graph_engine "expand via graph"
+    memdb.memdb_go.graph_engine -> memdb.postgres "AGE Cypher MATCH"
+    memdb.memdb_go.api_handler -> agent "ranked memories"
+    
+    autoLayout TopBottom
+  }
+  
+  deployment view physical {
+    title "Физическое развёртывание"
+    include *
+    autoLayout LeftRight
+  }
+}

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -63,8 +64,9 @@ const (
 
 // WorkingMemoryCache wraps Redis VSET operations for WorkingMemory hot cache.
 type WorkingMemoryCache struct {
-	client *redis.Client
-	logger *slog.Logger
+	client         *redis.Client
+	logger         *slog.Logger
+	evictionPolicy *VSetEvictionPolicy
 }
 
 // NewWorkingMemoryCache creates a new WorkingMemoryCache.
@@ -73,6 +75,13 @@ func NewWorkingMemoryCache(r *Redis) *WorkingMemoryCache {
 		client: r.client,
 		logger: r.logger,
 	}
+}
+
+// SetEvictionPolicy wires a per-cube eviction policy. When non-nil, VAdd
+// calls policy.CheckAndEvict after every successful insert. Eviction failure
+// is non-fatal — it is logged but does not fail VAdd.
+func (c *WorkingMemoryCache) SetEvictionPolicy(p *VSetEvictionPolicy) {
+	c.evictionPolicy = p
 }
 
 // vsetKey returns the Redis key for a cube's WorkingMemory VSET.
@@ -85,6 +94,7 @@ type VSetCandidate struct {
 	ID     string  // memory node UUID
 	Memory string  // memory text (from SETATTR)
 	Score  float64 // cosine similarity 0.0–1.0
+	TS     int64   // unix timestamp from SETATTR (used for oldest-first eviction)
 }
 
 // VAdd inserts or updates a WorkingMemory node in the VSET.
@@ -135,6 +145,16 @@ func (c *WorkingMemoryCache) VAdd(ctx context.Context, cubeID, nodeID, memoryTex
 	if err := c.client.Expire(ctx, key, vsetTTL).Err(); err != nil {
 		c.logger.DebugContext(ctx, "vset expire failed (non-fatal)",
 			slog.String("cube_id", cubeID), slog.Any("error", err))
+	}
+
+	// Per-cube eviction: if VCard exceeds the configured cap, evict oldest
+	// entries so dedup candidates stay fresh. Non-fatal — eviction failure is
+	// logged but does not fail VAdd (the new node is already inserted).
+	if c.evictionPolicy != nil {
+		if err := c.evictionPolicy.CheckAndEvict(ctx, cubeID); err != nil {
+			c.logger.DebugContext(ctx, "vset eviction failed (non-fatal)",
+				slog.String("cube_id", cubeID), slog.Any("error", err))
+		}
 	}
 	return nil
 }
@@ -214,6 +234,7 @@ func (c *WorkingMemoryCache) VSimFiltered(ctx context.Context, cubeID string, qu
 			ID:     r.Name,
 			Memory: memText,
 			Score:  r.Score,
+			TS:     extractTSFromAttr(attrJSON),
 		})
 	}
 	return candidates, nil
@@ -347,4 +368,25 @@ func extractMemFromAttr(attrJSON string) string {
 		return ""
 	}
 	return attrJSON[start:end]
+}
+
+// extractTSFromAttr parses {"m":"...","ts":<unix>} and returns the "ts" field
+// as an int64. Returns 0 if the field is absent or unparseable. Used by the
+// VSetEvictionPolicy to sort candidates oldest-first.
+func extractTSFromAttr(attrJSON string) int64 {
+	const marker = `"ts":`
+	idx := strings.Index(attrJSON, marker)
+	if idx < 0 {
+		return 0
+	}
+	rest := attrJSON[idx+len(marker):]
+	// Skip optional whitespace between ':' and the number.
+	for len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
+		rest = rest[1:]
+	}
+	var ts int64
+	if n, err := fmt.Sscanf(rest, "%d", &ts); n == 1 && err == nil {
+		return ts
+	}
+	return 0
 }
