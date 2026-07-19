@@ -7,6 +7,7 @@
     "memdb-go": {
       "release-type": "go",
       "component": "memdb-go",
+      "tag-prefix": "memdb-go/",
       "changelog-sections": [
         { "type": "feat", "section": "Features" },
         { "type": "fix", "section": "Bug Fixes" },
