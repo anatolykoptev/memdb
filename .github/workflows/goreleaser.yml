@@ -48,5 +48,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
+          echo "=== PWD: $(pwd) ==="
+          echo "=== dist contents ==="
+          find memdb-go/dist -name '*.tar.gz' -o -name 'checksums.txt' | head -20
+          echo "=== uploading ==="
           cd memdb-go/dist
           gh release upload "$TAG" *.tar.gz checksums.txt --repo "$GITHUB_REPOSITORY" --clobber
