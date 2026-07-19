@@ -184,6 +184,10 @@ venv.bak/
 # but do not ignore docs/openapi.json
 !docs/openapi.json
 
+# release-please config (must be tracked)
+!release-please-config.json
+!.release-please-manifest.json
+
 
 # mypy
 .mypy_cache/
