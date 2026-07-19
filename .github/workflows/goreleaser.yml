@@ -47,6 +47,21 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ steps.tag.outputs.version }}
 
+      - name: Rename archives (strip -SNAPSHOT-<sha> suffix)
+        working-directory: memdb-go/dist
+        run: |
+          # goreleaser --snapshot appends -SNAPSHOT-<sha> to filenames.
+          # memdb_0.23.1-SNAPSHOT-abc123_linux_amd64.tar.gz
+          # → memdb_0.23.1_linux_amd64.tar.gz
+          for f in *-SNAPSHOT-*_*.tar.gz; do
+            base="${f%%-SNAPSHOT-*}"
+            rest="${f#*_}"
+            os_arch="${rest#*_}"
+            new="${base}_${os_arch}"
+            echo "  $f → $new"
+            mv "$f" "$new"
+          done
+
       - name: Upload artifacts to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
