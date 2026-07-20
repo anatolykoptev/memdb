@@ -202,8 +202,14 @@ func (h *Handler) runFinePipeline(ctx context.Context, conversation, cubeID stri
 	// Prepend date-aware hint when MEMDB_DATE_AWARE_EXTRACT is enabled (default true)
 	// so the LLM emits `[mention YYYY-MM-DD]` tags on time-anchored facts — same as
 	// the sync fine path in add_fine.go:nativeFineAddForCube.
+	// Uses bufferExtractor when configured (MEMDB_BUFFER_LLM_MODEL), else falls
+	// back to llmExtractor (same model as fine mode).
+	extractor := h.bufferExtractor
+	if extractor == nil {
+		extractor = h.llmExtractor
+	}
 	hints := append(dateAwareExtractHints(), sig.Hints...)
-	facts, err := h.llmExtractor.ExtractAndDedup(ctx, conversation, candidates, hints...)
+	facts, err := extractor.ExtractAndDedup(ctx, conversation, candidates, hints...)
 	if err != nil {
 		recordDateAwareExtractOutcome(ctx, dateAwareExtractOutcomeError)
 		return nil, fmt.Errorf("buffer flush: extract and dedup: %w", err)
@@ -215,7 +221,7 @@ func (h *Handler) runFinePipeline(ctx context.Context, conversation, cubeID stri
 	}
 	h.logger.Debug("buffer flush: extracted facts",
 		slog.Int("count", len(facts)),
-		slog.String("model", h.llmExtractor.Model()),
+		slog.String("model", extractor.Model()),
 	)
 
 	// Step 3: filter exact duplicates by content-hash
