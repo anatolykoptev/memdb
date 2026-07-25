@@ -50,6 +50,11 @@ import (
 // fallback engages and the caller's memory is persisted instead of dropped
 // (BUG A — data_loss on 429 ladder exhaustion).
 //
+// It is a lean internal type local to the fetchChatContent seam, distinct from
+// the richer go-kit llm.APIError (which carries body/retryable/retry-after):
+// fetchChatContent does its own retry/backoff and only needs the status code
+// plus the 429-retry count to signal the ladder-exhaustion case upward.
+//
 // Code is the HTTP status code from the final attempt. Retries is the number
 // of 429-triggered retries attempted before this error (0 for non-429 errors).
 type StatusError struct {

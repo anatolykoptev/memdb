@@ -12,6 +12,7 @@ package handlers
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -49,18 +50,11 @@ func scrapeMetrics(t *testing.T, fire func(ctx context.Context)) string {
 		t.Fatalf("scrape: %v", err)
 	}
 	defer resp.Body.Close()
-	buf := make([]byte, 1<<20)
-	n, _ := resp.Body.Read(buf)
-	body := string(buf[:n])
-	for {
-		more := make([]byte, 1<<20)
-		n2, _ := resp.Body.Read(more)
-		if n2 == 0 {
-			break
-		}
-		body += string(more[:n2])
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("scrape: read body: %v", err)
 	}
-	return body
+	return string(body)
 }
 
 // TestMetricContract_FineFallback verifies that memdb_add_fine_fallback_total
@@ -97,9 +91,12 @@ func TestMetricContract_AddFailures(t *testing.T) {
 	t.Errorf("metric contract: no line matching %s in /metrics output (failures_total with reason=llm_exhausted)", re.String())
 }
 
-// TestMetricContract_LLMRequestStatus verifies that memdb_llm_requests_total
-// is exposed with a status label (BUG B — pre-fix it had only model+outcome,
-// so 429/502 rates were invisible).
+// TestMetricContract_LLMRequestStatus verifies that
+// memdb_llm_structured_call_total is exposed with a status label (BUG B —
+// pre-fix the atomic path's metric had only model+outcome, so 429/502 rates
+// were invisible). The structured_call_total metric is the correct seam for
+// the production atomic add path; memdb_llm_requests_total is the legacy
+// Client.Chat() counter and carries no status label (see internal/llm/client.go).
 func TestMetricContract_LLMRequestStatus(t *testing.T) {
 	body := scrapeMetrics(t, func(ctx context.Context) {
 		// Pre-warm the llm package's structured-call metric singleton so
