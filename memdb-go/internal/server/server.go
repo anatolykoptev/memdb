@@ -31,6 +31,7 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*http.Se
 	handlers.PrewarmMetrics()
 	search.PrewarmMetrics()
 	observability.PrewarmMetrics()
+	llm.PrewarmMetrics()
 
 	// Initialize cache client (non-fatal if unavailable)
 	var cacheClient *cache.Client

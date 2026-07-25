@@ -41,7 +41,7 @@ func buildLivepgInsertNodes(cubeID string, rawMems []livepgRawMemory) ([]db.Memo
 			"parent_memory_id": nil,
 			"source":           "livepg-test",
 			"tags":             []string{"livepg-test"},
-			"observation_date":  "2026-04-25",
+			"observation_date": "2026-04-25",
 		}
 		raw, err := json.Marshal(props)
 		if err != nil {

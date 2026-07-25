@@ -14,6 +14,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -156,20 +157,37 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 
 		items, err := h.nativeAddForCube(ctx, &req, cubeID)
 		if err != nil {
-			h.logger.Error("native add failed",
-				slog.String("cube_id", cubeID),
-				slog.Any("error", err),
-			)
+			outcome := addErrorOutcome(err)
+			if outcome == "canceled" {
+				h.logger.Info("native add canceled",
+					slog.String("cube_id", cubeID),
+					slog.Any("error", err),
+				)
+			} else {
+				h.logger.Error("native add failed",
+					slog.String("cube_id", cubeID),
+					slog.Any("error", err),
+				)
+			}
+			recordAddFailure(ctx, outcome)
 			addMx().Requests.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("mode", mode),
-				attribute.String("outcome", "error"),
+				attribute.String("outcome", outcome),
 			))
 			addMx().Duration.Record(ctx, float64(time.Since(start).Milliseconds()), modeAttr)
-			h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-				"code":    503,
-				"message": "service degraded: postgres unavailable",
-				"data":    nil,
-			})
+			if outcome == "canceled" {
+				h.writeJSON(w, 499, map[string]any{
+					"code":    499,
+					"message": "client closed request",
+					"data":    nil,
+				})
+			} else {
+				h.writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+					"code":    503,
+					"message": "service degraded: postgres unavailable",
+					"data":    nil,
+				})
+			}
 			return
 		}
 		allItems = append(allItems, items...)
@@ -201,6 +219,43 @@ func (h *Handler) NativeAdd(w http.ResponseWriter, r *http.Request) {
 		slog.String("user_id", userID),
 		slog.Int("memories_added", len(allItems)),
 	)
+}
+
+// addErrorOutcome classifies an add-pipeline error into a bounded outcome
+// label for memdb_add_requests_total{outcome} and memdb_add_failures_total
+// {reason}. BUG D: context.Canceled is classified distinctly as "canceled"
+// (Info-level log, 499 response) instead of being lumped into "error"
+// (ERROR-level log, 503 response). context.DeadlineExceeded is "timeout".
+// Everything else is "error".
+//
+// Bounded enum: success, canceled, timeout, error, 503. Callers MUST use
+// this function instead of hardcoding "error" so the cancel/timeout
+// classification stays consistent.
+func addErrorOutcome(err error) string {
+	if err == nil {
+		return "success"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
+	return "error"
+}
+
+// recordAddFailure bumps memdb_add_failures_total{reason}. BUG B: pre-fix
+// there was no dedicated failure counter — the only signal was
+// memdb_add_requests_total{outcome="error"}, which conflated cancellations,
+// timeouts, and real errors into one bucket. The reason label is the same
+// bounded enum as addErrorOutcome plus "llm_exhausted" for the fine→fast
+// fallback path.
+func recordAddFailure(ctx context.Context, reason string) {
+	mx := addMx()
+	if mx == nil || mx.AddFailures == nil {
+		return
+	}
+	mx.AddFailures.Add(ctx, 1, metric.WithAttributes(attribute.String("reason", reason)))
 }
 
 // addMode returns a stable mode label for metrics given the add request flags.

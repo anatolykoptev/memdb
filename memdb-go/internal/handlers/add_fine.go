@@ -10,9 +10,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
+	"github.com/anatolykoptev/memdb/memdb-go/internal/llm"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -36,6 +38,7 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 			return items, err
 		}
 		recordFineFallback(ctx, fineFallbackReason(err))
+		recordAddFailure(ctx, "llm_exhausted")
 		h.logger.Warn("fine add: atomic extractor failed, falling back to fast",
 			slog.String("cube_id", cubeID),
 			slog.Any("error", err))
@@ -73,6 +76,7 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 	if err != nil {
 		if shouldFallbackToFast(err) {
 			recordFineFallback(ctx, fineFallbackReason(err))
+			recordAddFailure(ctx, "llm_exhausted")
 			h.logger.Warn("fine add: legacy extractor failed, falling back to fast",
 				slog.String("cube_id", cubeID),
 				slog.Any("error", err))
@@ -137,14 +141,28 @@ func (h *Handler) nativeFineAddForCube(ctx context.Context, req *fullAddRequest,
 //     drivers wrap before bubbling up; std errors.Is may miss those
 //  4. wrapped error containing "circuit breaker open" — go-kit CircuitBreaker
 //     trip on cascading LLM failures
+//  5. *llm.StatusError or *llm.APIError with 429/5xx — typed LLM HTTP errors
+//     from the atomic extractor's ladder exhaustion (BUG A: pre-fix these
+//     were invisible to the fallback gate, causing silent data loss on 429).
 //
-// Anything else (parse error, dim mismatch, sql constraint) → no fallback.
+// Anything else (parse error, dim mismatch, sql constraint, 4xx client error)
+// → no fallback.
 func shouldFallbackToFast(err error) bool {
 	if err == nil {
 		return false
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return true
+	}
+	// BUG A: detect typed LLM HTTP status errors via errors.As so the
+	// fine→fast degraded fallback engages on 429/5xx ladder exhaustion.
+	var se *llm.StatusError
+	if errors.As(err, &se) {
+		return se.Code == http.StatusTooManyRequests || se.Code >= 500
+	}
+	var ae *llm.APIError
+	if errors.As(err, &ae) {
+		return ae.StatusCode == http.StatusTooManyRequests || ae.StatusCode >= 500
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
@@ -159,7 +177,7 @@ func shouldFallbackToFast(err error) bool {
 }
 
 // fineFallbackReason maps the trigger error onto a short metric label.
-// Keep label cardinality bounded — three reasons cover every fallback path.
+// Keep label cardinality bounded — four reasons cover every fallback path.
 func fineFallbackReason(err error) string {
 	if err == nil {
 		return "unknown"
@@ -169,6 +187,16 @@ func fineFallbackReason(err error) string {
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "llm_timeout"
+	}
+	// BUG A: typed LLM status errors map to "llm_error" (the bucket that
+	// was never incrementing pre-fix because the gate never fired).
+	var se *llm.StatusError
+	if errors.As(err, &se) {
+		return "llm_error"
+	}
+	var ae *llm.APIError
+	if errors.As(err, &ae) {
+		return "llm_error"
 	}
 	msg := strings.ToLower(err.Error())
 	switch {

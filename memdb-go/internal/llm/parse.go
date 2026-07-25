@@ -37,11 +37,37 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
+
+// StatusError is a typed LLM HTTP status error. It lets shouldFallbackToFast
+// (handlers/add_fine.go) detect exhausted-ladder / rate-limited errors via
+// errors.As instead of fragile string matching, so the fine→fast degraded
+// fallback engages and the caller's memory is persisted instead of dropped
+// (BUG A — data_loss on 429 ladder exhaustion).
+//
+// It is a lean internal type local to the fetchChatContent seam, distinct from
+// the richer go-kit llm.APIError (which carries body/retryable/retry-after):
+// fetchChatContent does its own retry/backoff and only needs the status code
+// plus the 429-retry count to signal the ladder-exhaustion case upward.
+//
+// Code is the HTTP status code from the final attempt. Retries is the number
+// of 429-triggered retries attempted before this error (0 for non-429 errors).
+type StatusError struct {
+	Code    int
+	Retries int
+}
+
+func (e *StatusError) Error() string {
+	if e.Retries > 0 {
+		return fmt.Sprintf("llm: status %d after %d retry (429 backoff)", e.Code, e.Retries)
+	}
+	return fmt.Sprintf("llm: status %d", e.Code)
+}
 
 // Default tunables for ChatStructured. Picked to match the median of the
 // 10 migrated callsites — individual callsites override via opts.
@@ -212,11 +238,13 @@ func ChatStructured[T any](
 	current := append([]Message(nil), msgs...)
 	var lastErr error
 	for attempt := 0; attempt <= o.maxRetries; attempt++ {
-		content, retried429, httpErr := fetchChatContent(ctx, c, current, o)
+		content, retried429, httpStatus, httpErr := fetchChatContent(ctx, c, current, o)
+		statusLabel := strconv.Itoa(httpStatus)
 		if retried429 {
 			mx.Calls.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("prompt_id", promptID),
 				attribute.String("outcome", outcomeRetried),
+				attribute.String("status", statusLabel),
 			))
 		}
 		if httpErr != nil {
@@ -227,6 +255,7 @@ func ChatStructured[T any](
 			mx.Calls.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("prompt_id", promptID),
 				attribute.String("outcome", outcome),
+				attribute.String("status", statusLabel),
 			))
 			return httpErr
 		}
@@ -239,6 +268,7 @@ func ChatStructured[T any](
 				mx.Calls.Add(ctx, 1, metric.WithAttributes(
 					attribute.String("prompt_id", promptID),
 					attribute.String("outcome", outcomeRetried),
+					attribute.String("status", statusLabel),
 				))
 				current = appendReminder(current, o.parseRetryReminder)
 				continue
@@ -246,12 +276,14 @@ func ChatStructured[T any](
 			mx.Calls.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("prompt_id", promptID),
 				attribute.String("outcome", outcomeParseError),
+				attribute.String("status", statusLabel),
 			))
 			return lastErr
 		}
 		mx.Calls.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("prompt_id", promptID),
 			attribute.String("outcome", outcomeSuccess),
+			attribute.String("status", statusLabel),
 		))
 		return nil
 	}
@@ -297,11 +329,13 @@ func ChatStructuredWithRaw[T any](
 	var lastRaw string
 	var lastErr error
 	for attempt := 0; attempt <= o.maxRetries; attempt++ {
-		content, retried429, httpErr := fetchChatContent(ctx, c, current, o)
+		content, retried429, httpStatus, httpErr := fetchChatContent(ctx, c, current, o)
+		statusLabel := strconv.Itoa(httpStatus)
 		if retried429 {
 			mx.Calls.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("prompt_id", promptID),
 				attribute.String("outcome", outcomeRetried),
+				attribute.String("status", statusLabel),
 			))
 		}
 		if httpErr != nil {
@@ -312,6 +346,7 @@ func ChatStructuredWithRaw[T any](
 			mx.Calls.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("prompt_id", promptID),
 				attribute.String("outcome", outcome),
+				attribute.String("status", statusLabel),
 			))
 			return "", httpErr
 		}
@@ -323,6 +358,7 @@ func ChatStructuredWithRaw[T any](
 				mx.Calls.Add(ctx, 1, metric.WithAttributes(
 					attribute.String("prompt_id", promptID),
 					attribute.String("outcome", outcomeRetried),
+					attribute.String("status", statusLabel),
 				))
 				current = appendReminder(current, o.parseRetryReminder)
 				continue
@@ -330,12 +366,14 @@ func ChatStructuredWithRaw[T any](
 			mx.Calls.Add(ctx, 1, metric.WithAttributes(
 				attribute.String("prompt_id", promptID),
 				attribute.String("outcome", outcomeParseError),
+				attribute.String("status", statusLabel),
 			))
 			return lastRaw, lastErr
 		}
 		mx.Calls.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("prompt_id", promptID),
 			attribute.String("outcome", outcomeSuccess),
+			attribute.String("status", statusLabel),
 		))
 		return "", nil
 	}
@@ -369,11 +407,13 @@ func ChatText(
 			metric.WithAttributes(attribute.String("prompt_id", promptID)))
 	}()
 
-	content, retried429, httpErr := fetchChatContent(ctx, c, msgs, o)
+	content, retried429, httpStatus, httpErr := fetchChatContent(ctx, c, msgs, o)
+	statusLabel := strconv.Itoa(httpStatus)
 	if retried429 {
 		mx.Calls.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("prompt_id", promptID),
 			attribute.String("outcome", outcomeRetried),
+			attribute.String("status", statusLabel),
 		))
 	}
 	if httpErr != nil {
@@ -384,49 +424,57 @@ func ChatText(
 		mx.Calls.Add(ctx, 1, metric.WithAttributes(
 			attribute.String("prompt_id", promptID),
 			attribute.String("outcome", outcome),
+			attribute.String("status", statusLabel),
 		))
 		return "", httpErr
 	}
 	mx.Calls.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("prompt_id", promptID),
 		attribute.String("outcome", outcomeSuccess),
+		attribute.String("status", statusLabel),
 	))
 	return content, nil
 }
 
 // fetchChatContent does up to two HTTP round trips: one normal call, plus a
 // single retry if the first attempt returns 429. Returns (content, retried429,
-// err). On err, content is "".
+// httpStatus, err). On err, content is "". httpStatus is the last status code
+// seen (0 on transport error before any HTTP response, 200 on success).
+//
+// BUG C fix: the 429-retry-exhaustion error now renders the actual retry count
+// (1) via *StatusError, not the status code (429) in the retry-count position.
+// BUG A fix: returns a typed *StatusError so shouldFallbackToFast can detect
+// it via errors.As and engage the fine→fast degraded fallback.
 func fetchChatContent(
 	ctx context.Context,
 	c *Client,
 	msgs []Message,
 	o chatStructuredOpts,
-) (string, bool, error) {
+) (string, bool, int, error) {
 	content, status, err := chatRoundTrip(ctx, c, msgs, o)
 	if err == nil && status == http.StatusOK {
-		return content, false, nil
+		return content, false, status, nil
 	}
 	if status == http.StatusTooManyRequests {
 		// brief backoff then a single retry
 		select {
 		case <-ctx.Done():
-			return "", false, ctx.Err()
+			return "", false, status, ctx.Err()
 		case <-time.After(time.Duration(defaultStructured429BackoffMS) * time.Millisecond):
 		}
 		content2, status2, err2 := chatRoundTrip(ctx, c, msgs, o)
 		if err2 == nil && status2 == http.StatusOK {
-			return content2, true, nil
+			return content2, true, status2, nil
 		}
 		if err2 != nil {
-			return "", true, err2
+			return "", true, status2, err2
 		}
-		return "", true, fmt.Errorf("llm: status %d after 429 retry", status2)
+		return "", true, status2, &StatusError{Code: status2, Retries: 1}
 	}
 	if err != nil {
-		return "", false, err
+		return "", false, status, err
 	}
-	return "", false, fmt.Errorf("llm: status %d", status)
+	return "", false, status, &StatusError{Code: status}
 }
 
 // chatRoundTrip performs exactly one HTTP POST. Returns content (when status==200)

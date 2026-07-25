@@ -85,6 +85,25 @@ var preregisteredStructuredOutcomes = []string{
 	"retried",
 }
 
+// preregisteredStructuredStatuses are the bounded HTTP status label values
+// pre-registered at zero so the status= series is visible from cold start.
+// BUG B: the status label makes 429/502 rates visible in dashboards/alerts.
+// Bounded to the small enum of statuses the LLM path actually emits — the
+// chat-completions endpoint returns 200 on success, 429 on rate limit, and
+// 5xx on upstream failures; 4xx (400/401/403) on caller errors. "0" covers
+// transport errors where no HTTP response was received.
+var preregisteredStructuredStatuses = []string{
+	"0",
+	"200",
+	"400",
+	"401",
+	"403",
+	"429",
+	"500",
+	"502",
+	"503",
+}
+
 // llmStructuredMetrics returns the singleton structured-call instruments,
 // lazy-initialised. Pre-registers all prompt_id × outcome combinations at
 // zero on first call.
@@ -104,15 +123,19 @@ func llmStructuredMetrics() *llmStructuredMetricsStruct {
 			Duration: dur,
 		}
 
-		// Pre-register every (prompt_id, outcome) cell at zero. Same pattern
-		// as internal/search/metrics.go (M1).
+		// Pre-register every (prompt_id, outcome, status) cell at zero. Same
+		// pattern as internal/search/metrics.go (M1). BUG B: the status label
+		// makes 429/502 rates visible in dashboards/alerts from cold start.
 		ctx := context.Background()
 		for _, pid := range preregisteredStructuredPromptIDs {
 			for _, oc := range preregisteredStructuredOutcomes {
-				calls.Add(ctx, 0, metric.WithAttributes(
-					attribute.String("prompt_id", pid),
-					attribute.String("outcome", oc),
-				))
+				for _, st := range preregisteredStructuredStatuses {
+					calls.Add(ctx, 0, metric.WithAttributes(
+						attribute.String("prompt_id", pid),
+						attribute.String("outcome", oc),
+						attribute.String("status", st),
+					))
+				}
 			}
 			// Histogram has no zero-add idiom; recording 0 once would skew
 			// data. Leaving duration unseeded — it appears on first real call.

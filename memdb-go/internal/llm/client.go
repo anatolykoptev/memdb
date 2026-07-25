@@ -177,6 +177,12 @@ func (c *Client) Model() string { return c.model }
 //	        if transient && more attempts: backoff + retry
 //	    if quota error && more models: continue
 //	    return error
+//
+// Observability note: this legacy path increments memdb_llm_requests_total
+// with only model+outcome labels — NO status label — so 429/502 rates are
+// invisible on it. The production atomic add path uses ChatStructured, whose
+// memdb_llm_structured_call_total counter carries a status= label and is the
+// correct seam for 429/502 observability (see metric_contract_test.go).
 func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxTokens int) (string, error) {
 	start := time.Now()
 	mx := llmMetrics()
