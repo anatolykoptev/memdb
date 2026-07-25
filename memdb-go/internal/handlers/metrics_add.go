@@ -47,6 +47,11 @@ type addMetricsStruct struct {
 	VectorDedupError metric.Int64Counter
 	// PF-23: WM cache VAdd failure — Redis write error.
 	WMCacheWriteFailed metric.Int64Counter
+	// BUG B: dedicated failure counter with a bounded reason label. Pre-fix
+	// the only signal was memdb_add_requests_total{outcome="error"}, which
+	// conflated cancellations, timeouts, and real errors. reason ∈
+	// {canceled, timeout, error, llm_exhausted}.
+	AddFailures metric.Int64Counter
 }
 
 func addMx() *addMetricsStruct {
@@ -90,6 +95,9 @@ func addMx() *addMetricsStruct {
 		wmCache, _ := meter.Int64Counter("memdb.add.wm_cache_write_failed_total",
 			metric.WithDescription("WM cache VAdd failure (Redis write error, best-effort)"),
 		)
+		addFailures, _ := meter.Int64Counter("memdb.add.failures_total",
+			metric.WithDescription("Add-pipeline failures by reason (canceled|timeout|error|llm_exhausted) — BUG B: separates cancel/timeout from real errors"),
+		)
 		addInstruments = &addMetricsStruct{
 			Requests: reqs, Duration: dur, Memories: mems, EmbedBatchSize: batch,
 			StructuralEdges: structEdges, SameSessionCapped: capCounter,
@@ -97,6 +105,7 @@ func addMx() *addMetricsStruct {
 			FineFallback:      fineFb,
 			HashDedupDegraded: hashDedup, VectorDedupError: vecDedup,
 			WMCacheWriteFailed: wmCache,
+			AddFailures:        addFailures,
 		}
 		// Pre-register zero observations so the time series exists before the
 		// first real request lands. Keeps Grafana panels alive on a cold start.
@@ -108,6 +117,10 @@ func addMx() *addMetricsStruct {
 		}
 		for _, r := range []string{"llm_timeout", "circuit_open", "canceled", "llm_error", "unknown"} {
 			fineFb.Add(ctx, 0, metric.WithAttributes(attribute.String("reason", r)))
+		}
+		// BUG B: pre-register the failure reason labels at zero.
+		for _, r := range []string{"canceled", "timeout", "error", "llm_exhausted"} {
+			addFailures.Add(ctx, 0, metric.WithAttributes(attribute.String("reason", r)))
 		}
 	})
 	return addInstruments
