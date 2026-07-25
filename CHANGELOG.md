@@ -359,6 +359,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [memdb-go/v0.23.2] — 2026-07-25
+
+### [0.23.2](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.1...memdb-go/v0.23.2) (2026-07-25)
+
+### Bug Fixes
+
+* **data_loss:** persist memories when the LLM 429 ladder is exhausted ([#403](https://github.com/anatolykoptev/memdb/issues/403)) ([ed9a346](https://github.com/anatolykoptev/memdb/commit/ed9a346fc397b20b3469a438361a3edb9d9770b3))
+* **test:** add missing fallbackModels arg to livepg test ([2d3f67d](https://github.com/anatolykoptev/memdb/commit/2d3f67d5aa8beaf0ac6d42ec80eb547994e982af))
+* **test:** fix pre-existing livepg test failures exposed by Docker image ([067940a](https://github.com/anatolykoptev/memdb/commit/067940a16aedcc851468e45c143228523ccd1edf))
+
+### Refactoring
+
+* dedup tier 1 + migrate language detection to go-kit/langdetect ([#399](https://github.com/anatolykoptev/memdb/issues/399)) ([145922b](https://github.com/anatolykoptev/memdb/commit/145922bf0a1b7eedb9c128994d23e1697c53e39f))
+
 ## [0.23.0] — 2026-04-26 — M10 user_profiles + perf + security audit
 
 Headline: **MemDB scores 72.5% LLM Judge** on LoCoMo chat-50 stratified
@@ -832,7 +846,8 @@ Initial public release. Baseline for changelog. See
 [docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md) for the detailed history
 of Python → Go migration phases 1–4.5 that preceded this tag.
 
-[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.2...HEAD
+[memdb-go/v0.23.2]: https://github.com/anatolykoptev/memdb/releases/tag/memdb-go/v0.23.2
 [0.23.0]: https://github.com/anatolykoptev/memdb/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/anatolykoptev/memdb/compare/v2.2.0...v0.22.0
 [2.2.0]: https://github.com/anatolykoptev/memdb/releases/tag/v2.2.0
