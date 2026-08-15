@@ -129,3 +129,66 @@ func TestAuthRetryDelay_InvalidEnvFallsBack(t *testing.T) {
 type devNull struct{}
 
 func (d *devNull) Write(p []byte) (int, error) { return len(p), nil }
+
+// TestClient_ReasoningContentFallback verifies that when a reasoning model
+// (e.g. deepseek-v4-flash) returns an empty content field but populates
+// reasoning_content, the client falls back to reasoning_content so the
+// extraction pipeline receives the actual answer.
+func TestClient_ReasoningContentFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{
+					"role":              "assistant",
+					"content":           "",
+					"reasoning_content": "extracted fact here",
+				}, "finish_reason": "stop"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-key", "test-model", nil, slog.New(slog.NewTextHandler(&devNull{}, &slog.HandlerOptions{Level: slog.LevelError})))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resp, err := c.Chat(ctx, []map[string]string{{"role": "user", "content": "hi"}}, 100)
+	if err != nil {
+		t.Fatalf("Chat should succeed, got err: %v", err)
+	}
+	if resp != "extracted fact here" {
+		t.Fatalf("expected reasoning_content fallback 'extracted fact here', got %q", resp)
+	}
+}
+
+// TestClient_ContentPreferredOverReasoning verifies that when both content
+// and reasoning_content are present, content wins (reasoning_content is
+// only a fallback for empty content).
+func TestClient_ContentPreferredOverReasoning(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{
+					"role":              "assistant",
+					"content":           "primary",
+					"reasoning_content": "fallback-only",
+				}, "finish_reason": "stop"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "test-key", "test-model", nil, slog.New(slog.NewTextHandler(&devNull{}, &slog.HandlerOptions{Level: slog.LevelError})))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resp, err := c.Chat(ctx, []map[string]string{{"role": "user", "content": "hi"}}, 100)
+	if err != nil {
+		t.Fatalf("Chat should succeed, got err: %v", err)
+	}
+	if resp != "primary" {
+		t.Fatalf("expected 'primary' (content wins), got %q", resp)
+	}
+}

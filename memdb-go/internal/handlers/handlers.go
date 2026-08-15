@@ -43,6 +43,7 @@ type Handler struct {
 	embedRegistry   *embedder.Registry           // nil = single-model mode (uses embedder field)
 	searchService   *search.SearchService        // nil = search falls back to proxy
 	llmExtractor    *llm.LLMExtractor            // nil = mode=fine falls back to proxy
+	bufferExtractor *llm.LLMExtractor            // nil = buffer mode uses llmExtractor (same model)
 	llmChat         *llm.Client                  // nil = chat falls back to proxy
 	profiler        *scheduler.Profiler          // nil = profile summaries disabled
 	tracker         *scheduler.TaskStatusTracker // nil = fall back to stream-based status
@@ -98,6 +99,14 @@ func (h *Handler) SetSearchService(svc *search.SearchService) {
 // When set, mode=fine requests are handled natively instead of proxied to Python.
 func (h *Handler) SetLLMExtractor(e *llm.LLMExtractor) {
 	h.llmExtractor = e
+}
+
+// SetBufferExtractor sets a separate LLM extractor for buffer-mode add.
+// When set, buffer flushes use this extractor (e.g. a higher-quality but
+// slower model like GLM-5.2). When nil, buffer mode falls back to
+// llmExtractor (same model as fine mode).
+func (h *Handler) SetBufferExtractor(e *llm.LLMExtractor) {
+	h.bufferExtractor = e
 }
 
 // SetChatLLM sets the LLM client for native chat handlers.

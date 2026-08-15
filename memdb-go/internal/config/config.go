@@ -87,6 +87,7 @@ type Config struct {
 	LLMDefaultModel   string   `json:"llm_default_model"`
 	LLMSearchModel    string   `json:"llm_search_model"`    // model for search LLM calls: rerank, iterative (default: gemini-2.0-flash)
 	LLMExtractModel   string   `json:"llm_extract_model"`   // model for fine-mode extraction (default: gemini-2.0-flash-lite)
+	LLMBufferModel    string   `json:"llm_buffer_model"`    // model for buffer-mode extraction; empty = fall back to LLMExtractModel (env: MEMDB_BUFFER_LLM_MODEL)
 	LLMReorgModel     string   `json:"llm_reorg_model"`     // model for memory reorganizer consolidation (default: gemini-2.5-flash-lite)
 	LLMFallbackModels []string `json:"llm_fallback_models"` // fallback models tried on quota errors (comma-separated env)
 	ReorgUseHNSW      bool     `json:"reorg_use_hnsw"`      // use HNSW index for FindNearDuplicates (env: MEMDB_REORG_USE_HNSW, default false) — deprecated, prefer ReorgDupStrategy
@@ -252,6 +253,7 @@ func Load() *Config {
 		LLMDefaultModel:     envStr("MEMDB_LLM_MODEL", "gemini-2.5-flash"),
 		LLMSearchModel:      envStr("MEMDB_LLM_SEARCH_MODEL", "gemini-2.0-flash"),
 		LLMExtractModel:     envStr("MEMDB_LLM_EXTRACT_MODEL", "gemini-2.0-flash-lite"),
+		LLMBufferModel:      envStr("MEMDB_BUFFER_LLM_MODEL", ""),
 		LLMReorgModel:       envStr("MEMDB_REORG_LLM_MODEL", "gemini-2.5-flash-lite"),
 		LLMFallbackModels:   envCSV("MEMDB_LLM_FALLBACK_MODELS", nil),
 		ReorgUseHNSW:        envBool("MEMDB_REORG_USE_HNSW", false),

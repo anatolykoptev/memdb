@@ -327,6 +327,9 @@ func embedCircuitEnabled() bool {
 }
 
 // initLLMExtractor creates the LLM extractor for fine-mode native add (non-fatal if URL not set).
+// When MEMDB_BUFFER_LLM_MODEL is set, a separate extractor is created for
+// buffer-mode add (e.g. a higher-quality but slower model like GLM-5.2),
+// letting fine-mode stay on a fast model (e.g. cerebras-gpt-oss-120b).
 func initLLMExtractor(cfg *config.Config, h *handlers.Handler, logger *slog.Logger) *llm.LLMExtractor {
 	if cfg.LLMProxyURL == "" {
 		return nil
@@ -339,5 +342,17 @@ func initLLMExtractor(cfg *config.Config, h *handlers.Handler, logger *slog.Logg
 		slog.String("url", cfg.LLMProxyURL),
 		slog.Any("fallback_models", cfg.LLMFallbackModels),
 	)
+	// Buffer-mode extractor: separate model for async buffer flushes.
+	// Empty MEMDB_BUFFER_LLM_MODEL = no separate extractor; buffer mode
+	// falls back to llmExtractor (same model as fine mode).
+	if cfg.LLMBufferModel != "" {
+		bufClient := llm.NewClient(cfg.LLMProxyURL, cfg.LLMProxyAPIKey, cfg.LLMBufferModel, cfg.LLMFallbackModels, logger)
+		bufExtractor := llm.NewLLMExtractorWithClient(bufClient)
+		h.SetBufferExtractor(bufExtractor)
+		logger.Info("buffer llm extractor initialized",
+			slog.String("model", bufExtractor.Model()),
+			slog.String("fine_model", extractor.Model()),
+		)
+	}
 	return extractor
 }

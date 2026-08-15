@@ -352,7 +352,8 @@ func (c *Client) chatOnce(ctx context.Context, model string, messages []map[stri
 	var result struct {
 		Choices []struct {
 			Message struct {
-				Content string `json:"content"`
+				Content          string `json:"content"`
+				ReasoningContent string `json:"reasoning_content"`
 			} `json:"message"`
 		} `json:"choices"`
 		Error *struct {
@@ -368,7 +369,15 @@ func (c *Client) chatOnce(ctx context.Context, model string, messages []map[stri
 	if len(result.Choices) == 0 {
 		return "", &APIError{StatusCode: resp.StatusCode, Message: "no choices in response"}
 	}
-	return result.Choices[0].Message.Content, nil
+	// Reasoning models (deepseek-v4-flash, o1-style) may return the
+	// actual answer in reasoning_content with an empty content field.
+	// Fall back to reasoning_content so these models work without
+	// special-casing every caller.
+	content := result.Choices[0].Message.Content
+	if content == "" {
+		content = result.Choices[0].Message.ReasoningContent
+	}
+	return content, nil
 }
 
 // --- Error classification ---
