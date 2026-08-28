@@ -359,6 +359,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [memdb-go/v0.23.1] — 2026-07-19
+
+Release v0.23.1
+
 ## [0.23.0] — 2026-04-26 — M10 user_profiles + perf + security audit
 
 Headline: **MemDB scores 72.5% LLM Judge** on LoCoMo chat-50 stratified
@@ -832,7 +836,8 @@ Initial public release. Baseline for changelog. See
 [docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md) for the detailed history
 of Python → Go migration phases 1–4.5 that preceded this tag.
 
-[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.1...HEAD
+[memdb-go/v0.23.1]: https://github.com/anatolykoptev/memdb/releases/tag/memdb-go/v0.23.1
 [0.23.0]: https://github.com/anatolykoptev/memdb/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/anatolykoptev/memdb/compare/v2.2.0...v0.22.0
 [2.2.0]: https://github.com/anatolykoptev/memdb/releases/tag/v2.2.0
