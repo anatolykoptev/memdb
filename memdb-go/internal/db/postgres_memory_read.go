@@ -30,6 +30,21 @@ func (p *Postgres) GetMemoryByPropertyID(ctx context.Context, propertyID string)
 	return map[string]any{"memory_id": id, "properties": propsStr}, nil
 }
 
+// GetMemoryUserID returns the node's person identity (properties.user_id),
+// or "" when the node is missing. Used by NativeUpdateMemory to preserve the
+// stored person when the caller supplies only the cube (legacy shape).
+func (p *Postgres) GetMemoryUserID(ctx context.Context, memoryID, cubeID string) (string, error) {
+	var uid string
+	err := p.pool.QueryRow(ctx, fmt.Sprintf(queries.GetMemoryUserID, graphName), memoryID, cubeID).Scan(&uid)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("get memory user_id: %w", err)
+	}
+	return uid, nil
+}
+
 // GetMemoriesByPropertyIDs retrieves full memory nodes by property UUID (no user_name filter).
 func (p *Postgres) GetMemoriesByPropertyIDs(ctx context.Context, ids []string) ([]map[string]any, error) {
 	q := fmt.Sprintf(queries.GetMemoriesByPropertyIDs, graphName)

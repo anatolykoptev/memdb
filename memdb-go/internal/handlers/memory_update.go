@@ -37,10 +37,22 @@ func (h *Handler) memUpdater() memoryUpdater {
 
 // updateMemoryRequest is the POST /product/update_memory payload.
 type updateMemoryRequest struct {
-	MemoryID *string        `json:"memory_id"`
-	UserID   *string        `json:"user_id"` // cube id
-	Text     *string        `json:"text"`
-	Info     map[string]any `json:"info,omitempty"`
+	MemoryID *string `json:"memory_id"`
+	// user_id is the cube id in the legacy shape, or the person id when
+	// writable_cube_ids is present (MemDBClient.Update contract).
+	UserID          *string        `json:"user_id"`
+	WritableCubeIDs []string       `json:"writable_cube_ids,omitempty"`
+	Text            *string        `json:"text"`
+	Info            map[string]any `json:"info,omitempty"`
+}
+
+// memoryUserIDReader is an optional memoryUpdater capability: returns the
+// node's person identity (properties.user_id) so an update that arrives
+// without an explicit person (legacy user_id=cube shape) preserves the stored
+// identity instead of wiping it — vector search filters on user_id, so a
+// wiped value makes the updated memory unsearchable.
+type memoryUserIDReader interface {
+	GetMemoryUserID(ctx context.Context, memoryID, cubeID string) (string, error)
 }
 
 // NativeUpdateMemory replaces a memory node's text+embedding+info atomically.
@@ -92,8 +104,22 @@ func (h *Handler) NativeUpdateMemory(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	cubeID := *req.UserID
+	personID := ""
+	if len(req.WritableCubeIDs) > 0 && req.WritableCubeIDs[0] != "" {
+		cubeID = req.WritableCubeIDs[0]
+		personID = *req.UserID
+	}
 	text := *req.Text
 	memoryID := *req.MemoryID
+
+	updater := h.memUpdater()
+	if personID == "" {
+		if rdr, ok := updater.(memoryUserIDReader); ok {
+			if uid, err := rdr.GetMemoryUserID(ctx, memoryID, cubeID); err == nil {
+				personID = uid
+			}
+		}
+	}
 
 	embedding, err := h.embedSingle(ctx, text)
 	if err != nil {
@@ -113,6 +139,7 @@ func (h *Handler) NativeUpdateMemory(w http.ResponseWriter, r *http.Request) {
 		Memory:     text,
 		MemoryType: memTypeLongTerm,
 		UserName:   cubeID,
+		UserID:     personID,
 		AgentID:    "",
 		SessionID:  "",
 		Mode:       modeRaw,
@@ -137,7 +164,6 @@ func (h *Handler) NativeUpdateMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updater := h.memUpdater()
 	if err := updater.UpdateMemoryByID(ctx, memoryID, cubeID, propsJSON, db.FormatVector(embedding)); err != nil {
 		if errors.Is(err, db.ErrMemoryNotFound) {
 			h.logger.Info("update_memory: target not found (likely consolidated)",

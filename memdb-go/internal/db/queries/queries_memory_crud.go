@@ -213,6 +213,15 @@ WHERE properties->>(('id'::text)) = $1
   AND properties->>(('user_name'::text)) = $2
 RETURNING properties->>(('id'::text))`
 
+// GetMemoryUserID returns the person identity (properties.user_id) for a
+// single memory node, scoped to (property UUID, user_name).
+// Args: $1 = memory_id, $2 = user_name (cube id)
+const GetMemoryUserID = `
+SELECT properties::text::jsonb->>'user_id'
+FROM %[1]s."Memory"
+WHERE properties->>(('id'::text)) = $1
+  AND properties->>(('user_name'::text)) = $2`
+
 // --- CE pre-compute (M10 Stream 6) ---
 
 // SetCEScoresTopK persists pre-computed cross-encoder top-K neighbour scores
