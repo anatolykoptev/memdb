@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.3](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.2...memdb-go/v0.23.3) (2026-09-24)
+
+
+### Bug Fixes
+
+* **update_memory:** preserve person identity and honor writable_cube_ids ([#407](https://github.com/anatolykoptev/memdb/issues/407)) ([be7aa12](https://github.com/anatolykoptev/memdb/commit/be7aa127ca2e6c2afde8027c473784fc2884d31d))
+
 ## [0.23.2](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.1...memdb-go/v0.23.2) (2026-07-25)
 
 
