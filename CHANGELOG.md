@@ -359,6 +359,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [memdb-go/v0.23.3] — 2026-09-25
+
+### [0.23.3](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.2...memdb-go/v0.23.3) (2026-09-24)
+
+### Bug Fixes
+
+* **update_memory:** preserve person identity and honor writable_cube_ids ([#407](https://github.com/anatolykoptev/memdb/issues/407)) ([be7aa12](https://github.com/anatolykoptev/memdb/commit/be7aa127ca2e6c2afde8027c473784fc2884d31d))
+
 ## [0.23.0] — 2026-04-26 — M10 user_profiles + perf + security audit
 
 Headline: **MemDB scores 72.5% LLM Judge** on LoCoMo chat-50 stratified
@@ -832,7 +840,8 @@ Initial public release. Baseline for changelog. See
 [docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md) for the detailed history
 of Python → Go migration phases 1–4.5 that preceded this tag.
 
-[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.3...HEAD
+[memdb-go/v0.23.3]: https://github.com/anatolykoptev/memdb/releases/tag/memdb-go/v0.23.3
 [0.23.0]: https://github.com/anatolykoptev/memdb/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/anatolykoptev/memdb/compare/v2.2.0...v0.22.0
 [2.2.0]: https://github.com/anatolykoptev/memdb/releases/tag/v2.2.0
