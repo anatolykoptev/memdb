@@ -282,18 +282,16 @@ func TestExtractors_AllModelsEmpty_KeepEmptyOutcome(t *testing.T) {
 // longConversation clears the extractors' minimum-input guards.
 var longConversation = strings.Repeat("user: I moved to San Francisco last month and started a new job.\nassistant: Congratulations on the move!\n", 8)
 
-// When model a failed and the deadline then stops the chain before model b
-// starts, a's error must survive next to ctx.Err() — callers that classify
-// errors (fine→fast fallback reasons) would otherwise see only a timeout.
+// When the model failed and the deadline then ends the chain (here: during its
+// retry backoff), its error must survive next to ctx.Err() — callers that
+// classify errors would otherwise see only a timeout.
 func TestChat_DeadlineKeepsModelError(t *testing.T) {
 	_, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
 		"a": replyStatus(http.StatusInternalServerError),
-		"b": replyContent("ok"),
 	})
-	c := NewClient(srv.URL, "k", "a", []string{"b"}, quietLogger())
+	c := NewClient(srv.URL, "k", "a", nil, quietLogger())
 
-	// Shorter than a's first backoff (2s): the deadline fires during the sleep,
-	// so b never starts.
+	// Shorter than the first backoff (2s): the deadline fires during the sleep.
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	_, err := c.Chat(ctx, chatMsgs, 100)
@@ -419,5 +417,29 @@ func TestChat_LongChain_PrimaryKeepsHalfTheBudget(t *testing.T) {
 	got, err := c.Chat(ctx, chatMsgs, 100)
 	if err != nil || got != "ok" {
 		t.Fatalf("healthy primary must answer: got %q err=%v (fallback b calls=%d)", got, err, ms.count("b"))
+	}
+}
+
+// Prod after the fleet llm.env switch: 310 "transient error, retrying" in 80 min
+// from fallbacks answering 5xx — each retry + 2s/4s backoff burned budget the
+// next model could have used. With a next model available, a transient 5xx
+// switches at once; only the last model runs the retry ladder.
+func TestChat_TransientSwitchesWhenFallbackExists(t *testing.T) {
+	ms, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyStatus(http.StatusBadGateway),
+		"b": replyContent("ok"),
+	})
+	c := NewClient(srv.URL, "k", "a", []string{"b"}, quietLogger())
+
+	start := time.Now()
+	got, err := c.Chat(context.Background(), chatMsgs, 100)
+	if err != nil || got != "ok" {
+		t.Fatalf("want b's answer, got %q err=%v", got, err)
+	}
+	if n := ms.count("a"); n != 1 {
+		t.Fatalf("a transient 5xx with a fallback available must not be retried: a calls=%d", n)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Fatalf("switch must not wait for backoff, took %v", d)
 	}
 }

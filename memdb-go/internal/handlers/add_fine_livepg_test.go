@@ -23,9 +23,11 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -65,6 +67,12 @@ func newStubExtractorServer(t *testing.T, captured *stubExtractorRequest, factTe
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
+		if errors.Is(err, net.ErrClosed) {
+			// Teardown race, not a test failure: a background LLM call from the
+			// fine-add pipeline was still in flight when the stub server closed
+			// (memdb#418). Nothing to assert on a connection we are shutting down.
+			return
+		}
 		if err != nil {
 			t.Errorf("stub extractor: read body: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
