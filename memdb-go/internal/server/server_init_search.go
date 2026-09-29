@@ -101,7 +101,7 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Cl
 		if !ok {
 			codeCfg = embedder.ONNXModelConfig{Dim: 768, MaxLen: 512, PadID: 0}
 		}
-		codeEmb, codeErr := embedder.NewONNXEmbedder(cfg.ONNXModelDirCode, codeCfg, logger)
+		codeEmb, codeErr := embedder.NewONNXEmbedder(cfg.ONNXModelDirCode, codeCfg, logger) //nolint:staticcheck // SA4023 related info, see the check below
 		if codeErr != nil { //nolint:staticcheck // SA4023: always true only under !cgo, where NewONNXEmbedder is the erroring stub (onnx_stub.go)
 			logger.Warn("code embedder init failed", slog.Any("error", codeErr))
 		} else {
