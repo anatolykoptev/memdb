@@ -48,3 +48,34 @@ func TestLoad_MemdbOverridesWinOverFleet(t *testing.T) {
 		t.Errorf("LLMFallbackModels = %v, want %v", c.LLMFallbackModels, want)
 	}
 }
+
+// MEMDB_LLM_MODEL must beat the fleet LLM_MODEL for every role that has no
+// role-specific override — a per-deployment .env pin depends on this order.
+func TestLoad_MemdbDefaultModelBeatsFleet(t *testing.T) {
+	for _, k := range []string{"MEMDB_LLM_SEARCH_MODEL", "MEMDB_LLM_EXTRACT_MODEL", "MEMDB_REORG_LLM_MODEL"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("MEMDB_LLM_MODEL", "memdb-pin")
+	t.Setenv("LLM_MODEL", "fleet-primary")
+
+	c := Load()
+	for name, got := range map[string]string{
+		"LLMDefaultModel": c.LLMDefaultModel, "LLMSearchModel": c.LLMSearchModel,
+		"LLMExtractModel": c.LLMExtractModel, "LLMReorgModel": c.LLMReorgModel,
+	} {
+		if got != "memdb-pin" {
+			t.Errorf("%s = %q, want MEMDB_LLM_MODEL over LLM_MODEL", name, got)
+		}
+	}
+}
+
+// With neither memdb nor fleet vars set, every role lands on the built-in floor.
+func TestLoad_NoModelEnv_UsesBuiltinDefault(t *testing.T) {
+	for _, k := range []string{"MEMDB_LLM_MODEL", "MEMDB_LLM_SEARCH_MODEL", "MEMDB_LLM_EXTRACT_MODEL", "MEMDB_REORG_LLM_MODEL", "LLM_MODEL"} {
+		t.Setenv(k, "")
+	}
+	c := Load()
+	if c.LLMDefaultModel != "gemini-2.5-flash" || c.LLMReorgModel != c.LLMDefaultModel {
+		t.Errorf("default=%q reorg=%q, want both on the built-in floor", c.LLMDefaultModel, c.LLMReorgModel)
+	}
+}
