@@ -8,9 +8,10 @@
 // error switches after the retries are exhausted. Each model is tried once even
 // if it is listed as both primary and fallback.
 //
-// Deadline: when the caller's ctx has a deadline, each attempt gets at most half
-// of the remaining budget so a hanging model cannot starve the fallbacks, and no
-// attempt starts after the deadline has passed.
+// Deadline: when the caller's ctx has a deadline, an attempt on a model that has
+// a fallback after it gets half of the remaining budget (so a hanging model
+// cannot starve the fallbacks) and the last model gets all of it; no attempt
+// starts after the deadline has passed.
 package llm
 
 import (
@@ -175,7 +176,7 @@ func (c *Client) Model() string { return c.model }
 //
 //	models = unique([primary] + fallbackModels)
 //	for each model (stop as soon as ctx is done):
-//	    for attempt 0..2, each in an equal share of the remaining deadline:
+//	    for attempt 0..2, each in half the remaining deadline (all of it on the last model):
 //	        if success (non-empty content): return
 //	        if auth error && more attempts: rotation delay + retry
 //	        if quota / empty content / own-slice timeout: next model
@@ -369,10 +370,12 @@ func (c *Client) classifyAttemptError(ctx context.Context, apiErr *APIError, mod
 	return retryStop
 }
 
-// chatAttempt runs one chatOnce inside an equal share of the caller's remaining
-// budget across the models still to try (modelsLeft includes this one), so the
-// last model — or the only one — keeps the whole remainder and a slow but
-// healthy model is never cut short. No slice when ctx has no deadline. An
+// chatAttempt runs one chatOnce inside a slice of the caller's remaining
+// budget: half of it while another model is still to try (modelsLeft includes
+// this one), all of it for the last — or only — model, so a slow but healthy
+// model is never cut short. Half, not remaining/modelsLeft: an equal share
+// across the fleet's 10-model chain gave a healthy primary ~4.5s of a 45s
+// budget and timed it out (memdb#410). No slice when ctx has no deadline. An
 // attempt that hits its own slice while the caller still has time is reported
 // as kindAttemptTimeout so the loop moves on instead of retrying a hung model.
 func (c *Client) chatAttempt(ctx context.Context, model string, modelsLeft int, messages []map[string]string, maxTokens int) (string, *APIError) {
@@ -380,7 +383,11 @@ func (c *Client) chatAttempt(ctx context.Context, model string, modelsLeft int, 
 	if !ok {
 		return c.chatOnce(ctx, model, messages, maxTokens)
 	}
-	attemptCtx, cancel := context.WithTimeout(ctx, time.Until(deadline)/time.Duration(modelsLeft))
+	slice := time.Until(deadline) // last model: the whole remainder
+	if modelsLeft > 1 {
+		slice /= 2
+	}
+	attemptCtx, cancel := context.WithTimeout(ctx, slice)
 	defer cancel()
 	content, apiErr := c.chatOnce(attemptCtx, model, messages, maxTokens)
 	if apiErr != nil && attemptCtx.Err() != nil && ctx.Err() == nil {
