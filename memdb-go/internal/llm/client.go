@@ -1,12 +1,16 @@
 // Package llm provides a shared LLM client with retry and model fallback.
 //
-// Retry: up to 3 attempts with exponential backoff (2s base, 2x multiplier,
-// 30s cap, jitter). Auth errors (401/403) fail immediately.
+// Retry: up to 3 attempts per model with exponential backoff (2s base, 2x
+// multiplier, 30s cap, jitter) on 5xx; 401/403 retry after a rotation delay.
 //
-// Model fallback: on quota errors (429 or body containing "quota"/"rate limit"),
-// the client tries each fallback model in order before giving up.
+// Model fallback: quota errors (429, "quota"/"rate limit"), an empty 200 and an
+// attempt that hit its own timeout switch to the next model at once; any other
+// error switches after the retries are exhausted. Each model is tried once even
+// if it is listed as both primary and fallback.
 //
-// Retry + model-fallback patterns.
+// Deadline: when the caller's ctx has a deadline, each attempt gets at most half
+// of the remaining budget so a hanging model cannot starve the fallbacks, and no
+// attempt starts after the deadline has passed.
 package llm
 
 import (
@@ -14,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -189,12 +194,13 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 	// Use primary model as the label for the top-level duration (first model tried).
 	primaryModel := c.model
 
-	models := make([]string, 0, 1+len(c.fallbackModels))
-	models = append(models, c.model)
-	models = append(models, c.fallbackModels...)
+	models := uniqueModels(c.model, c.fallbackModels)
 
 	var lastErr error
 	for i, model := range models {
+		if ctx.Err() != nil {
+			break
+		}
 		content, err, switchModel := c.chatModelLoop(ctx, model, models, i, messages, maxTokens)
 		if err != nil {
 			mx.Requests.Add(ctx, 1, metric.WithAttributes(
@@ -225,7 +231,25 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 	))
 	mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
 		metric.WithAttributes(attribute.String("model", primaryModel)))
+	if lastErr == nil {
+		lastErr = ctx.Err()
+	}
 	return "", lastErr
+}
+
+// uniqueModels returns primary followed by fallbacks, dropping empties and
+// repeats so a model listed twice is not tried twice.
+func uniqueModels(primary string, fallbacks []string) []string {
+	models := make([]string, 0, 1+len(fallbacks))
+	seen := make(map[string]bool, 1+len(fallbacks))
+	for _, m := range append([]string{primary}, fallbacks...) {
+		if m == "" || seen[m] {
+			continue
+		}
+		seen[m] = true
+		models = append(models, m)
+	}
+	return models
 }
 
 // retryDecision describes the outcome of a single attempt.
@@ -245,7 +269,10 @@ func (c *Client) chatModelLoop(ctx context.Context, model string, models []strin
 	var lastErr error
 
 	for attempt := range maxRetries {
-		content, apiErr := c.chatOnce(ctx, model, messages, maxTokens)
+		if ctx.Err() != nil {
+			break
+		}
+		content, apiErr := c.chatAttempt(ctx, model, messages, maxTokens)
 		if apiErr == nil {
 			return content, nil, nil
 		}
@@ -296,6 +323,20 @@ func (c *Client) classifyAttemptError(ctx context.Context, apiErr *APIError, mod
 			slog.String("model", model), slog.Int("status", apiErr.StatusCode))
 		return retryNextModel
 	}
+	// An empty 200 or an attempt that used up its own time slice will most
+	// likely repeat on the same model; spend the remaining budget elsewhere.
+	if kind := apiErr.skipKind(); kind != "" {
+		c.logger.WarnContext(ctx, "llm attempt unusable, switching model",
+			slog.String("model", model), slog.String("reason", kind), slog.Bool("has_next", hasNext))
+		llmMetrics().Requests.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("model", model),
+			attribute.String("outcome", kind),
+		))
+		if hasNext {
+			return retryNextModel
+		}
+		return retryStop
+	}
 	if apiErr.IsTransient() && attempt < maxRetries-1 {
 		delay := backoff(attempt)
 		c.logger.WarnContext(ctx, "llm transient error, retrying",
@@ -309,6 +350,24 @@ func (c *Client) classifyAttemptError(ctx context.Context, apiErr *APIError, mod
 		return retryContinue
 	}
 	return retryStop
+}
+
+// chatAttempt runs one chatOnce inside a time slice of at most half the
+// caller's remaining budget (no slice when ctx has no deadline). An attempt
+// that hits its own slice while the caller still has time is reported as
+// kindAttemptTimeout so the loop moves on instead of retrying a hung model.
+func (c *Client) chatAttempt(ctx context.Context, model string, messages []map[string]string, maxTokens int) (string, *APIError) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return c.chatOnce(ctx, model, messages, maxTokens)
+	}
+	attemptCtx, cancel := context.WithTimeout(ctx, time.Until(deadline)/2)
+	defer cancel()
+	content, apiErr := c.chatOnce(attemptCtx, model, messages, maxTokens)
+	if apiErr != nil && attemptCtx.Err() != nil && ctx.Err() == nil {
+		apiErr.kind = kindAttemptTimeout
+	}
+	return content, apiErr
 }
 
 // chatOnce performs a single HTTP round-trip to the chat completions endpoint.
@@ -368,16 +427,43 @@ func (c *Client) chatOnce(ctx context.Context, model string, messages []map[stri
 	if len(result.Choices) == 0 {
 		return "", &APIError{StatusCode: resp.StatusCode, Message: "no choices in response"}
 	}
-	return result.Choices[0].Message.Content, nil
+	content := result.Choices[0].Message.Content
+	if strings.TrimSpace(content) == "" {
+		return "", &APIError{StatusCode: resp.StatusCode, Message: ErrEmptyContent.Error(), kind: kindEmptyContent}
+	}
+	return content, nil
 }
 
 // --- Error classification ---
+
+// ErrEmptyContent is returned (wrapped in *APIError) when a 200 response
+// carries no content — typically a reasoning model that spent max_tokens on
+// thinking. Callers can match it with errors.Is.
+var ErrEmptyContent = errors.New("llm returned empty content")
 
 // APIError is a structured error from the LLM API.
 type APIError struct {
 	StatusCode int
 	Message    string
+	kind       string // kindEmptyContent / kindAttemptTimeout, else ""
 }
+
+// Outcome labels for attempts that switch model immediately.
+const (
+	kindEmptyContent   = "empty_content"
+	kindAttemptTimeout = "attempt_timeout"
+)
+
+// Unwrap lets callers match an empty reply with errors.Is(err, ErrEmptyContent).
+func (e *APIError) Unwrap() error {
+	if e.kind == kindEmptyContent {
+		return ErrEmptyContent
+	}
+	return nil
+}
+
+// skipKind reports why this attempt should switch model without retrying.
+func (e *APIError) skipKind() string { return e.kind }
 
 func (e *APIError) Error() string {
 	if e.StatusCode > 0 {

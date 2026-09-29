@@ -1,0 +1,191 @@
+package llm
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+// These tests drive Client.Chat end to end against an httptest server that
+// answers per model, reproducing the prod failure modes behind #410:
+//   - a 200 whose content is empty (reasoning model spent max_tokens thinking)
+//   - a model that hangs until the caller's deadline
+//   - a primary model that is also listed in the fallbacks
+
+type modelServer struct {
+	mu    sync.Mutex
+	calls map[string]int
+	reply map[string]func(w http.ResponseWriter, r *http.Request)
+}
+
+func newModelServer(t *testing.T, reply map[string]func(w http.ResponseWriter, r *http.Request)) (*modelServer, *httptest.Server) {
+	t.Helper()
+	ms := &modelServer{calls: map[string]int{}, reply: reply}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		ms.mu.Lock()
+		ms.calls[body.Model]++
+		ms.mu.Unlock()
+		ms.reply[body.Model](w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return ms, srv
+}
+
+func (ms *modelServer) count(model string) int {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+	return ms.calls[model]
+}
+
+func replyContent(content string) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]any{"role": "assistant", "content": content}, "finish_reason": "stop"},
+			},
+		})
+	}
+}
+
+func replyStatus(code int) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": http.StatusText(code)}})
+	}
+}
+
+func replyHang(w http.ResponseWriter, r *http.Request) {
+	select {
+	case <-r.Context().Done():
+	case <-time.After(10 * time.Second):
+	}
+}
+
+var chatMsgs = []map[string]string{{"role": "user", "content": "hi"}}
+
+func quietLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(&devNull{}, &slog.HandlerOptions{Level: slog.LevelError}))
+}
+
+// Empty content on a 200 must fall through to the next model instead of being
+// handed to the caller as a successful "" (prod: "parse llm json (): unexpected
+// end of JSON input").
+func TestChat_EmptyContentFallsBackToNextModel(t *testing.T) {
+	ms, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyContent("  \n"),
+		"b": replyContent(`{"ok":true}`),
+	})
+	c := NewClient(srv.URL, "k", "a", []string{"b"}, quietLogger())
+
+	got, err := c.Chat(context.Background(), chatMsgs, 100)
+	if err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if got != `{"ok":true}` {
+		t.Fatalf("want model b's content, got %q", got)
+	}
+	if n := ms.count("a"); n != 1 {
+		t.Fatalf("empty reply is not transient: want 1 call to a, got %d", n)
+	}
+}
+
+func TestChat_AllModelsEmpty_ReturnsErrEmptyContent(t *testing.T) {
+	_, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyContent(""),
+		"b": replyContent(""),
+	})
+	c := NewClient(srv.URL, "k", "a", []string{"b"}, quietLogger())
+
+	got, err := c.Chat(context.Background(), chatMsgs, 100)
+	if !errors.Is(err, ErrEmptyContent) {
+		t.Fatalf("want ErrEmptyContent, got content=%q err=%v", got, err)
+	}
+}
+
+// A hanging primary must not consume the caller's whole deadline: each attempt
+// gets at most half the remaining budget, and a timed-out attempt moves on to
+// the next model (prod: reorganizer 45s budget vs 90s http timeout).
+func TestChat_HangingModelTimesOutAndFallsBack(t *testing.T) {
+	ms, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyHang,
+		"b": replyContent("ok"),
+	})
+	c := NewClient(srv.URL, "k", "a", []string{"b"}, quietLogger())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	got, err := c.Chat(ctx, chatMsgs, 100)
+	if err != nil {
+		t.Fatalf("Chat: %v (model b was never reached)", err)
+	}
+	if got != "ok" {
+		t.Fatalf("want ok, got %q", got)
+	}
+	if n := ms.count("a"); n != 1 {
+		t.Fatalf("a hung once; retrying the same hanging model wastes the budget: want 1 call, got %d", n)
+	}
+}
+
+// Once the caller's deadline has passed, no further attempts or "retrying"
+// warnings may be produced (prod: 10 retry WARNs logged in the same millisecond
+// after every consolidation timeout).
+func TestChat_StopsAtParentDeadline(t *testing.T) {
+	_, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyStatus(http.StatusInternalServerError),
+		"b": replyStatus(http.StatusInternalServerError),
+	})
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&lockedWriter{w: &buf}, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	c := NewClient(srv.URL, "k", "a", []string{"b"}, logger)
+
+	// Shorter than the first backoff (2s): the deadline fires during the sleep.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if _, err := c.Chat(ctx, chatMsgs, 100); err == nil {
+		t.Fatal("want an error when every model fails")
+	}
+	if n := strings.Count(buf.String(), "llm transient error, retrying"); n != 1 {
+		t.Fatalf("want exactly 1 retry warning before the deadline, got %d:\n%s", n, buf.String())
+	}
+}
+
+// A primary model repeated in the fallback list is tried once, not twice
+// (prod: MEMDB_REORG_LLM_MODEL=nv-glm-5.3 is also in MEMDB_LLM_FALLBACK_MODELS).
+func TestChat_PrimaryInFallbacksIsTriedOnce(t *testing.T) {
+	ms, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyStatus(http.StatusTooManyRequests),
+		"b": replyContent("ok"),
+	})
+	c := NewClient(srv.URL, "k", "a", []string{"a", "b"}, quietLogger())
+
+	if _, err := c.Chat(context.Background(), chatMsgs, 100); err != nil {
+		t.Fatalf("Chat: %v", err)
+	}
+	if n := ms.count("a"); n != 1 {
+		t.Fatalf("want 1 call to a, got %d", n)
+	}
+}
+
+type lockedWriter struct {
+	mu sync.Mutex
+	w  *bytes.Buffer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
