@@ -31,8 +31,9 @@ const (
 	// relationDetectorTimeout is the per-pair LLM deadline.
 	relationDetectorTimeout = 30 * time.Second
 
-	// relationDetectorMaxTokens — JSON response is 3 short fields, so budget is tight.
-	relationDetectorMaxTokens = 200
+	// relationDetectorMaxTokens — the JSON is 3 short fields, but reasoning models
+	// think first; 200 sits in the range where the probe got empty replies.
+	relationDetectorMaxTokens = 512
 
 	// relationRationaleMaxLen truncates the rationale to keep the edge row bounded.
 	relationRationaleMaxLen = 200

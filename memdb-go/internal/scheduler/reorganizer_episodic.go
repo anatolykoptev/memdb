@@ -22,7 +22,7 @@ const (
 	episodicMemType          = "EpisodicMemory"
 	episodicSummaryTimeout   = 45 * time.Second // timeout for background episodic summary goroutine
 	episodicConvMaxChars     = 6000             // ~4000 tokens; truncate to avoid prompt overflow
-	episodicSummaryMaxTokens = 300              // max_tokens for episodic summary LLM call
+	episodicSummaryMaxTokens = 600              // max_tokens for episodic summary: 3-5 sentences plus reasoning overhead
 )
 
 // generateEpisodicSummary asynchronously creates an EpisodicMemory node for the session.
