@@ -162,6 +162,25 @@ func TestChat_StopsAtParentDeadline(t *testing.T) {
 	}
 }
 
+// A ctx that is already done must yield an error, never ("", nil): callers
+// such as the chat handler would otherwise answer the user with nothing.
+func TestChat_ExpiredContextReturnsError(t *testing.T) {
+	ms, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyContent("ok"),
+	})
+	c := NewClient(srv.URL, "k", "a", nil, quietLogger())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got, err := c.Chat(ctx, chatMsgs, 100)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got content=%q err=%v", got, err)
+	}
+	if n := ms.count("a"); n != 0 {
+		t.Fatalf("no request may start after cancellation, got %d", n)
+	}
+}
+
 // A primary model repeated in the fallback list is tried once, not twice
 // (prod: MEMDB_REORG_LLM_MODEL=nv-glm-5.3 is also in MEMDB_LLM_FALLBACK_MODELS).
 func TestChat_PrimaryInFallbacksIsTriedOnce(t *testing.T) {

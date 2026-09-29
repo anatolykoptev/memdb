@@ -198,9 +198,6 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 
 	var lastErr error
 	for i, model := range models {
-		if ctx.Err() != nil {
-			break
-		}
 		content, err, switchModel := c.chatModelLoop(ctx, model, models, i, messages, maxTokens)
 		if err != nil {
 			mx.Requests.Add(ctx, 1, metric.WithAttributes(
