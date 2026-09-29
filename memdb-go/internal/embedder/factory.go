@@ -90,7 +90,7 @@ func New(cfg Config, logger *slog.Logger) (Embedder, error) {
 			modelCfg = mc
 		}
 		e, err := NewONNXEmbedder(cfg.ONNXModelDir, modelCfg, logger)
-		if err != nil {
+		if err != nil { //nolint:staticcheck // SA4023: always true only under !cgo, where NewONNXEmbedder is the erroring stub (onnx_stub.go)
 			return nil, fmt.Errorf("embedder: onnx init: %w", err)
 		}
 		logger.Info("embedder: onnx", slog.String("model_dir", cfg.ONNXModelDir))
