@@ -101,8 +101,10 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Cl
 		if !ok {
 			codeCfg = embedder.ONNXModelConfig{Dim: 768, MaxLen: 512, PadID: 0}
 		}
-		codeEmb, codeErr := embedder.NewONNXEmbedder(cfg.ONNXModelDirCode, codeCfg, logger)
-		if codeErr != nil {
+		// SA4023: CI lints with CGO_ENABLED=0, where NewONNXEmbedder is the stub in
+		// embedder/onnx_stub.go that always errors, so the check reads as always true.
+		codeEmb, codeErr := embedder.NewONNXEmbedder(cfg.ONNXModelDirCode, codeCfg, logger) //nolint:staticcheck
+		if codeErr != nil {                                                                 //nolint:staticcheck
 			logger.Warn("code embedder init failed", slog.Any("error", codeErr))
 		} else {
 			registry.Register("code-rank-embed", codeEmb)
