@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -352,5 +353,47 @@ func TestDeadlineErr_EmptyReplyDoesNotMaskCancellation(t *testing.T) {
 	var apiErr *APIError
 	if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("non-empty model error must be kept next to the deadline, got %v", err)
+	}
+}
+
+type rtFunc func(*http.Request) (*http.Response, error)
+
+func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// Pins the Chat call site of deadlineErr (not just the helper): model a answers
+// empty and the caller gives up at that moment; model b's loop sees the dead
+// ctx, so Chat ends on an empty lastErr. The error must read as cancelled, not
+// as an empty reply the extractors would turn into "nothing found".
+func TestChat_EmptyThenCancel_ReportsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := NewClient("http://llm.invalid", "k", "a", []string{"b"}, quietLogger())
+	c.httpClient = &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		cancel()
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Request: r,
+			Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":""}}]}`))}, nil
+	})}
+
+	_, err := c.Chat(ctx, chatMsgs, 10)
+	if errors.Is(err, ErrEmptyContent) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled without ErrEmptyContent, got %v", err)
+	}
+}
+
+// A transient failure that lands after the caller's deadline must not log a
+// "retrying" warning — nothing will be retried (prod noise behind #410).
+func TestChat_NoRetryWarningAfterDeadline(t *testing.T) {
+	_, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyHang,
+	})
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&lockedWriter{w: &buf}, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	c := NewClient(srv.URL, "k", "a", nil, logger)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	_, _ = c.Chat(ctx, chatMsgs, 100)
+	if n := strings.Count(buf.String(), "llm transient error, retrying"); n != 0 {
+		t.Fatalf("want no retry warning after the deadline, got %d:\n%s", n, buf.String())
 	}
 }

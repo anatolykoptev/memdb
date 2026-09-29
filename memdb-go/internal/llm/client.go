@@ -291,6 +291,9 @@ func (c *Client) chatModelLoop(ctx context.Context, model string, models []strin
 			return content, nil, nil
 		}
 		lastErr = apiErr
+		if ctx.Err() != nil {
+			break // the caller is gone: nothing will be retried, so don't log or count a retry
+		}
 
 		decision := c.classifyAttemptError(ctx, apiErr, model, attempt, hasNext)
 		switch decision {
