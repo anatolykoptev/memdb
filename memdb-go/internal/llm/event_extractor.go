@@ -116,6 +116,9 @@ func (e *EventExtractor) Extract(ctx context.Context, blob string, now time.Time
 	}
 
 	raw, err := e.client.Chat(ctx, msgs, eventExtractMaxTokens)
+	if errors.Is(err, ErrEmptyContent) {
+		raw, err = "", nil // keep the empty-reply path: format-reminder retry, outcome "empty"
+	}
 	if err != nil {
 		return nil, fmt.Errorf("event extract chat: %w", err)
 	}
@@ -134,6 +137,9 @@ func (e *EventExtractor) Extract(ctx context.Context, blob string, now time.Time
 			"section with `- TAG\tVALUE` lines. No prose around the sections.",
 	})
 	raw, err = e.client.Chat(ctx, retryMsgs, eventExtractMaxTokens)
+	if errors.Is(err, ErrEmptyContent) {
+		raw, err = "", nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("event extract retry: %w", err)
 	}

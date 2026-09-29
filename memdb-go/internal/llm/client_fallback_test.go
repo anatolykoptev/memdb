@@ -139,6 +139,48 @@ func TestChat_HangingModelTimesOutAndFallsBack(t *testing.T) {
 	}
 }
 
+func replyAfter(d time.Duration, content string) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(d):
+		}
+		replyContent(content)(w, r)
+	}
+}
+
+// A slow but healthy model must keep the caller's whole budget when it is the
+// last (or only) model — slicing it would turn a success into a timeout.
+func TestChat_SlowHealthyOnlyModelSucceeds(t *testing.T) {
+	_, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyAfter(1200*time.Millisecond, "ok"),
+	})
+	c := NewClient(srv.URL, "k", "a", nil, quietLogger())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if got, err := c.Chat(ctx, chatMsgs, 100); err != nil || got != "ok" {
+		t.Fatalf("slow model inside the budget must succeed: got %q err=%v", got, err)
+	}
+}
+
+// With a fallback, a hung primary gets an equal share of the budget and the
+// fallback gets the rest — not a geometrically shrinking remainder.
+func TestChat_FallbackGetsRemainingBudget(t *testing.T) {
+	_, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyHang,
+		"b": replyAfter(1200*time.Millisecond, "ok"),
+	})
+	c := NewClient(srv.URL, "k", "a", []string{"b"}, quietLogger())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if got, err := c.Chat(ctx, chatMsgs, 100); err != nil || got != "ok" {
+		t.Fatalf("fallback must get the remaining budget: got %q err=%v", got, err)
+	}
+}
+
 // Once the caller's deadline has passed, no further attempts or "retrying"
 // warnings may be produced (prod: 10 retry WARNs logged in the same millisecond
 // after every consolidation timeout).
@@ -151,8 +193,9 @@ func TestChat_StopsAtParentDeadline(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&lockedWriter{w: &buf}, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	c := NewClient(srv.URL, "k", "a", []string{"b"}, logger)
 
-	// Shorter than the first backoff (2s): the deadline fires during the sleep.
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	// Shorter than the first backoff (2s): the deadline fires during the sleep;
+	// long enough that a slow -race runner does not trip the attempt slice.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if _, err := c.Chat(ctx, chatMsgs, 100); err == nil {
 		t.Fatal("want an error when every model fails")
@@ -207,4 +250,57 @@ func (l *lockedWriter) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.w.Write(p)
+}
+
+// When every model answers empty, the event and profile extractors keep their
+// pre-#414 behaviour: the format-reminder retry is still sent and the result is
+// "nothing extracted", not an LLM error (their outcome metric stays "empty").
+func TestExtractors_AllModelsEmpty_KeepEmptyOutcome(t *testing.T) {
+	ms, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyContent(""),
+	})
+	c := NewClient(srv.URL, "k", "a", nil, quietLogger())
+
+	events, err := NewEventExtractor(c).Extract(context.Background(), longConversation, time.Now())
+	if err != nil || len(events) != 0 {
+		t.Fatalf("event: want (empty, nil), got %v, %v", events, err)
+	}
+	if n := ms.count("a"); n != 2 {
+		t.Fatalf("event: want first call + format-reminder retry = 2, got %d", n)
+	}
+
+	profiles, err := NewProfileExtractor(c).ExtractProfile(context.Background(), longConversation, "u", "cube")
+	if err != nil || len(profiles) != 0 {
+		t.Fatalf("profile: want (empty, nil), got %v, %v", profiles, err)
+	}
+	if n := ms.count("a"); n != 4 {
+		t.Fatalf("profile: want 2 more calls (first + retry), got total %d", n)
+	}
+}
+
+// longConversation clears the extractors' minimum-input guards.
+var longConversation = strings.Repeat("user: I moved to San Francisco last month and started a new job.\nassistant: Congratulations on the move!\n", 8)
+
+// When model a failed and the deadline then stops the chain before model b
+// starts, a's error must survive next to ctx.Err() — callers that classify
+// errors (fine→fast fallback reasons) would otherwise see only a timeout.
+func TestChat_DeadlineKeepsModelError(t *testing.T) {
+	_, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyStatus(http.StatusInternalServerError),
+		"b": replyContent("ok"),
+	})
+	c := NewClient(srv.URL, "k", "a", []string{"b"}, quietLogger())
+
+	// Shorter than a's first backoff (2s): the deadline fires during the sleep,
+	// so b never starts.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := c.Chat(ctx, chatMsgs, 100)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("want model a's 500 in the error chain, got %v", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want context.DeadlineExceeded too, got %v", err)
+	}
 }

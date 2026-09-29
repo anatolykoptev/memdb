@@ -173,15 +173,15 @@ func (c *Client) Model() string { return c.model }
 //
 // Algorithm:
 //
-//	models = [primary] + fallbackModels
-//	for each model:
-//	    for attempt 0..2:
-//	        if success: return
-//	        if auth error: fail immediately
-//	        if quota error && more models: break to next model
+//	models = unique([primary] + fallbackModels)
+//	for each model (stop as soon as ctx is done):
+//	    for attempt 0..2, each in an equal share of the remaining deadline:
+//	        if success (non-empty content): return
+//	        if auth error && more attempts: rotation delay + retry
+//	        if quota / empty content / own-slice timeout: next model
 //	        if transient && more attempts: backoff + retry
-//	    if quota error && more models: continue
-//	    return error
+//	    next model
+//	return last error (joined with ctx.Err() when the deadline ended it)
 //
 // Observability note: this legacy path increments memdb_llm_requests_total
 // with only model+outcome labels — NO status label — so 429/502 rates are
@@ -217,10 +217,10 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 				metric.WithAttributes(attribute.String("model", primaryModel)))
 			return content, nil
 		}
-		lastErr = switchModel
-		if lastErr == nil {
+		if switchModel == nil {
 			break
 		}
+		lastErr = switchModel
 	}
 	mx.Requests.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("model", primaryModel),
@@ -228,8 +228,13 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 	))
 	mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
 		metric.WithAttributes(attribute.String("model", primaryModel)))
-	if lastErr == nil {
-		lastErr = ctx.Err()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if lastErr == nil {
+			return "", ctxErr
+		}
+		// Keep the model's own failure next to the deadline so callers that
+		// classify errors (e.g. fine→fast fallback reasons) still see it.
+		return "", errors.Join(lastErr, ctxErr)
 	}
 	return "", lastErr
 }
@@ -269,7 +274,7 @@ func (c *Client) chatModelLoop(ctx context.Context, model string, models []strin
 		if ctx.Err() != nil {
 			break
 		}
-		content, apiErr := c.chatAttempt(ctx, model, messages, maxTokens)
+		content, apiErr := c.chatAttempt(ctx, model, len(models)-modelIdx, messages, maxTokens)
 		if apiErr == nil {
 			return content, nil, nil
 		}
@@ -349,16 +354,18 @@ func (c *Client) classifyAttemptError(ctx context.Context, apiErr *APIError, mod
 	return retryStop
 }
 
-// chatAttempt runs one chatOnce inside a time slice of at most half the
-// caller's remaining budget (no slice when ctx has no deadline). An attempt
-// that hits its own slice while the caller still has time is reported as
-// kindAttemptTimeout so the loop moves on instead of retrying a hung model.
-func (c *Client) chatAttempt(ctx context.Context, model string, messages []map[string]string, maxTokens int) (string, *APIError) {
+// chatAttempt runs one chatOnce inside an equal share of the caller's remaining
+// budget across the models still to try (modelsLeft includes this one), so the
+// last model — or the only one — keeps the whole remainder and a slow but
+// healthy model is never cut short. No slice when ctx has no deadline. An
+// attempt that hits its own slice while the caller still has time is reported
+// as kindAttemptTimeout so the loop moves on instead of retrying a hung model.
+func (c *Client) chatAttempt(ctx context.Context, model string, modelsLeft int, messages []map[string]string, maxTokens int) (string, *APIError) {
 	deadline, ok := ctx.Deadline()
 	if !ok {
 		return c.chatOnce(ctx, model, messages, maxTokens)
 	}
-	attemptCtx, cancel := context.WithTimeout(ctx, time.Until(deadline)/2)
+	attemptCtx, cancel := context.WithTimeout(ctx, time.Until(deadline)/time.Duration(modelsLeft))
 	defer cancel()
 	content, apiErr := c.chatOnce(attemptCtx, model, messages, maxTokens)
 	if apiErr != nil && attemptCtx.Err() != nil && ctx.Err() == nil {
@@ -463,6 +470,9 @@ func (e *APIError) Unwrap() error {
 func (e *APIError) skipKind() string { return e.kind }
 
 func (e *APIError) Error() string {
+	if e.kind == kindEmptyContent {
+		return "llm error: " + e.Message
+	}
 	if e.StatusCode > 0 {
 		return fmt.Sprintf("llm api error %d: %s", e.StatusCode, e.Message)
 	}
