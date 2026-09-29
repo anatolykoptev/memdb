@@ -397,3 +397,27 @@ func TestChat_NoRetryWarningAfterDeadline(t *testing.T) {
 		t.Fatalf("want no retry warning after the deadline, got %d:\n%s", n, buf.String())
 	}
 }
+
+// Prod after the fleet llm.env switch: a 10-model chain split the caller's 45s
+// equally, so the primary got ~4.5s and timed out while healthy (78
+// attempt_timeout vs 24 success in 80 min). A healthy primary replying at 30%
+// of the budget must succeed however long the fallback chain is.
+func TestChat_LongChain_PrimaryKeepsHalfTheBudget(t *testing.T) {
+	reply := map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyAfter(900*time.Millisecond, "ok"),
+	}
+	fallbacks := []string{}
+	for _, m := range []string{"b", "c", "d", "e", "f", "g", "h", "i", "j"} {
+		reply[m] = replyContent("fallback-" + m)
+		fallbacks = append(fallbacks, m)
+	}
+	ms, srv := newModelServer(t, reply)
+	c := NewClient(srv.URL, "k", "a", fallbacks, quietLogger())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	got, err := c.Chat(ctx, chatMsgs, 100)
+	if err != nil || got != "ok" {
+		t.Fatalf("healthy primary must answer: got %q err=%v (fallback b calls=%d)", got, err, ms.count("b"))
+	}
+}
