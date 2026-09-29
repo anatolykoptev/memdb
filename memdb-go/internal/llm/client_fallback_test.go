@@ -304,3 +304,53 @@ func TestChat_DeadlineKeepsModelError(t *testing.T) {
 		t.Fatalf("want context.DeadlineExceeded too, got %v", err)
 	}
 }
+
+// Devin review #414 (1): a single hanging model under a caller deadline must
+// surface context.DeadlineExceeded, not only a synthetic transport 500.
+func TestChat_LastModelHang_ReportsDeadline(t *testing.T) {
+	_, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"a": replyHang,
+	})
+	c := NewClient(srv.URL, "k", "a", nil, quietLogger())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	if _, err := c.Chat(ctx, chatMsgs, 100); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want context.DeadlineExceeded, got %v", err)
+	}
+}
+
+// Devin review #414 (2): no configured model must be an error, never ("", nil).
+func TestChat_NoModelConfigured_ReturnsError(t *testing.T) {
+	ms, srv := newModelServer(t, map[string]func(http.ResponseWriter, *http.Request){})
+	c := NewClient(srv.URL, "k", "", []string{""}, quietLogger())
+
+	got, err := c.Chat(context.Background(), chatMsgs, 100)
+	if err == nil {
+		t.Fatalf("want an error for an empty model list, got content=%q", got)
+	}
+	if n := ms.count(""); n != 0 {
+		t.Fatalf("no request should be sent, got %d", n)
+	}
+}
+
+// Devin review #414 (3): when the deadline ends a chain whose last reply was
+// empty, the error must match the ctx error but NOT ErrEmptyContent — otherwise
+// the extractors map it to "nothing found" and swallow the cancellation.
+func TestDeadlineErr_EmptyReplyDoesNotMaskCancellation(t *testing.T) {
+	empty := &APIError{StatusCode: http.StatusOK, Message: ErrEmptyContent.Error(), kind: kindEmptyContent}
+	err := deadlineErr(empty, context.Canceled)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+	if errors.Is(err, ErrEmptyContent) {
+		t.Fatalf("a cancelled chain must not read as an empty reply: %v", err)
+	}
+
+	other := &APIError{StatusCode: http.StatusInternalServerError, Message: "boom"}
+	err = deadlineErr(other, context.DeadlineExceeded)
+	var apiErr *APIError
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("non-empty model error must be kept next to the deadline, got %v", err)
+	}
+}

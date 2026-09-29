@@ -195,6 +195,9 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 	primaryModel := c.model
 
 	models := uniqueModels(c.model, c.fallbackModels)
+	if len(models) == 0 {
+		return "", ErrNoModel
+	}
 
 	var lastErr error
 	for i, model := range models {
@@ -232,11 +235,20 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 		if lastErr == nil {
 			return "", ctxErr
 		}
-		// Keep the model's own failure next to the deadline so callers that
-		// classify errors (e.g. fine→fast fallback reasons) still see it.
-		return "", errors.Join(lastErr, ctxErr)
+		return "", deadlineErr(lastErr, ctxErr)
 	}
 	return "", lastErr
+}
+
+// deadlineErr is the error Chat returns when the caller's ctx ended the chain.
+// A model failure is kept next to the ctx error (errors.Is/As still reach
+// both), except an empty reply: joining ErrEmptyContent would let callers that
+// map it to "nothing found" swallow the cancellation, so only its text is kept.
+func deadlineErr(lastErr, ctxErr error) error {
+	if errors.Is(lastErr, ErrEmptyContent) {
+		return fmt.Errorf("%w (last reply: %s)", ctxErr, lastErr.Error())
+	}
+	return errors.Join(lastErr, ctxErr)
 }
 
 // uniqueModels returns primary followed by fallbacks, dropping empties and
@@ -444,6 +456,9 @@ func (c *Client) chatOnce(ctx context.Context, model string, messages []map[stri
 // carries no content — typically a reasoning model that spent max_tokens on
 // thinking. Callers can match it with errors.Is.
 var ErrEmptyContent = errors.New("llm returned empty content")
+
+// ErrNoModel is returned when neither a primary nor a fallback model is set.
+var ErrNoModel = errors.New("llm: no model configured")
 
 // APIError is a structured error from the LLM API.
 type APIError struct {
