@@ -1,11 +1,12 @@
 // Package llm provides a shared LLM client with retry and model fallback.
 //
-// Retry: up to 3 attempts per model with exponential backoff (2s base, 2x
-// multiplier, 30s cap, jitter) on 5xx; 401/403 retry after a rotation delay.
+// Retry: 401/403 retry after a rotation delay. A transient 5xx is retried (up to
+// 3 attempts, exponential backoff: 2s base, 2x, 30s cap, jitter) only on the
+// last model of the chain; with a next model available it switches at once.
 //
-// Model fallback: quota errors (429, "quota"/"rate limit"), an empty 200 and an
-// attempt that hit its own timeout switch to the next model at once; any other
-// error switches after the retries are exhausted. Each model is tried once even
+// Model fallback: quota errors (429, "quota"/"rate limit"), a transient 5xx, an
+// empty 200 and an attempt that hit its own timeout switch to the next model at
+// once; any other error switches after the retries are exhausted. Each model is tried once even
 // if it is listed as both primary and fallback.
 //
 // Deadline: when the caller's ctx has a deadline, an attempt on a model that has
@@ -180,7 +181,7 @@ func (c *Client) Model() string { return c.model }
 //	        if success (non-empty content): return
 //	        if auth error && more attempts: rotation delay + retry
 //	        if quota / empty content / own-slice timeout: next model
-//	        if transient && more attempts: backoff + retry
+//	        if transient: next model if any, else backoff + retry
 //	    next model
 //	return last error (joined with ctx.Err() when the deadline ended it)
 //
@@ -354,6 +355,19 @@ func (c *Client) classifyAttemptError(ctx context.Context, apiErr *APIError, mod
 			return retryNextModel
 		}
 		return retryStop
+	}
+	// With a next model in the chain, a transient 5xx switches at once: the
+	// fallback is worth more than a second try at a model that just failed,
+	// and the backoff would spend the caller's budget. Only the last model
+	// runs the retry ladder.
+	if apiErr.IsTransient() && hasNext {
+		c.logger.WarnContext(ctx, "llm transient error, switching model",
+			slog.String("model", model), slog.Int("status", apiErr.StatusCode))
+		llmMetrics().Requests.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("model", model),
+			attribute.String("outcome", "transient_switch"),
+		))
+		return retryNextModel
 	}
 	if apiErr.IsTransient() && attempt < maxRetries-1 {
 		delay := backoff(attempt)
