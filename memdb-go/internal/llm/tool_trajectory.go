@@ -6,6 +6,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -100,6 +101,9 @@ func ExtractToolTrajectory(ctx context.Context, client *Client, messages string)
 	}
 
 	raw, err := client.Chat(ctx, msgs, trajectoryMaxTokens)
+	if errors.Is(err, ErrEmptyContent) {
+		return nil, nil //nolint:nilnil // every model answered empty = no trajectories found
+	}
 	if err != nil {
 		return nil, fmt.Errorf("extract tool trajectory: %w", err)
 	}

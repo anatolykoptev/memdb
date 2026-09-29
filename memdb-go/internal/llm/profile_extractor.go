@@ -177,6 +177,9 @@ func (e *ProfileExtractor) ExtractProfile(ctx context.Context, conversation, use
 	}
 
 	raw, err := e.client.Chat(ctx, msgs, profileExtractMaxTokens)
+	if errors.Is(err, ErrEmptyContent) {
+		raw, err = "", nil // keep the empty-reply path: format-reminder retry, outcome "empty"
+	}
 	if err != nil {
 		return nil, fmt.Errorf("profile extract chat: %w", err)
 	}
@@ -194,6 +197,9 @@ func (e *ProfileExtractor) ExtractProfile(ctx context.Context, conversation, use
 		"content": "Please STRICTLY follow the output format: a `---` divider followed by lines starting with `- TOPIC\tSUB_TOPIC\tMEMO`. No prose around the list.",
 	})
 	raw, err = e.client.Chat(ctx, retryMsgs, profileExtractMaxTokens)
+	if errors.Is(err, ErrEmptyContent) {
+		raw, err = "", nil
+	}
 	if err != nil {
 		// Treat retry transport error as empty (caller logs "llm_error").
 		return nil, fmt.Errorf("profile extract retry: %w", err)

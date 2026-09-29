@@ -1,12 +1,16 @@
 // Package llm provides a shared LLM client with retry and model fallback.
 //
-// Retry: up to 3 attempts with exponential backoff (2s base, 2x multiplier,
-// 30s cap, jitter). Auth errors (401/403) fail immediately.
+// Retry: up to 3 attempts per model with exponential backoff (2s base, 2x
+// multiplier, 30s cap, jitter) on 5xx; 401/403 retry after a rotation delay.
 //
-// Model fallback: on quota errors (429 or body containing "quota"/"rate limit"),
-// the client tries each fallback model in order before giving up.
+// Model fallback: quota errors (429, "quota"/"rate limit"), an empty 200 and an
+// attempt that hit its own timeout switch to the next model at once; any other
+// error switches after the retries are exhausted. Each model is tried once even
+// if it is listed as both primary and fallback.
 //
-// Retry + model-fallback patterns.
+// Deadline: when the caller's ctx has a deadline, each attempt gets at most half
+// of the remaining budget so a hanging model cannot starve the fallbacks, and no
+// attempt starts after the deadline has passed.
 package llm
 
 import (
@@ -14,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -168,15 +173,15 @@ func (c *Client) Model() string { return c.model }
 //
 // Algorithm:
 //
-//	models = [primary] + fallbackModels
-//	for each model:
-//	    for attempt 0..2:
-//	        if success: return
-//	        if auth error: fail immediately
-//	        if quota error && more models: break to next model
+//	models = unique([primary] + fallbackModels)
+//	for each model (stop as soon as ctx is done):
+//	    for attempt 0..2, each in an equal share of the remaining deadline:
+//	        if success (non-empty content): return
+//	        if auth error && more attempts: rotation delay + retry
+//	        if quota / empty content / own-slice timeout: next model
 //	        if transient && more attempts: backoff + retry
-//	    if quota error && more models: continue
-//	    return error
+//	    next model
+//	return last error (joined with ctx.Err() when the deadline ended it)
 //
 // Observability note: this legacy path increments memdb_llm_requests_total
 // with only model+outcome labels — NO status label — so 429/502 rates are
@@ -189,9 +194,10 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 	// Use primary model as the label for the top-level duration (first model tried).
 	primaryModel := c.model
 
-	models := make([]string, 0, 1+len(c.fallbackModels))
-	models = append(models, c.model)
-	models = append(models, c.fallbackModels...)
+	models := uniqueModels(c.model, c.fallbackModels)
+	if len(models) == 0 {
+		return "", ErrNoModel
+	}
 
 	var lastErr error
 	for i, model := range models {
@@ -214,10 +220,10 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 				metric.WithAttributes(attribute.String("model", primaryModel)))
 			return content, nil
 		}
-		lastErr = switchModel
-		if lastErr == nil {
+		if switchModel == nil {
 			break
 		}
+		lastErr = switchModel
 	}
 	mx.Requests.Add(ctx, 1, metric.WithAttributes(
 		attribute.String("model", primaryModel),
@@ -225,7 +231,39 @@ func (c *Client) Chat(ctx context.Context, messages []map[string]string, maxToke
 	))
 	mx.Duration.Record(ctx, float64(time.Since(start).Milliseconds()),
 		metric.WithAttributes(attribute.String("model", primaryModel)))
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if lastErr == nil {
+			return "", ctxErr
+		}
+		return "", deadlineErr(lastErr, ctxErr)
+	}
 	return "", lastErr
+}
+
+// deadlineErr is the error Chat returns when the caller's ctx ended the chain.
+// A model failure is kept next to the ctx error (errors.Is/As still reach
+// both), except an empty reply: joining ErrEmptyContent would let callers that
+// map it to "nothing found" swallow the cancellation, so only its text is kept.
+func deadlineErr(lastErr, ctxErr error) error {
+	if errors.Is(lastErr, ErrEmptyContent) {
+		return fmt.Errorf("%w (last reply: %s)", ctxErr, lastErr.Error())
+	}
+	return errors.Join(lastErr, ctxErr)
+}
+
+// uniqueModels returns primary followed by fallbacks, dropping empties and
+// repeats so a model listed twice is not tried twice.
+func uniqueModels(primary string, fallbacks []string) []string {
+	models := make([]string, 0, 1+len(fallbacks))
+	seen := make(map[string]bool, 1+len(fallbacks))
+	for _, m := range append([]string{primary}, fallbacks...) {
+		if m == "" || seen[m] {
+			continue
+		}
+		seen[m] = true
+		models = append(models, m)
+	}
+	return models
 }
 
 // retryDecision describes the outcome of a single attempt.
@@ -245,11 +283,17 @@ func (c *Client) chatModelLoop(ctx context.Context, model string, models []strin
 	var lastErr error
 
 	for attempt := range maxRetries {
-		content, apiErr := c.chatOnce(ctx, model, messages, maxTokens)
+		if ctx.Err() != nil {
+			break
+		}
+		content, apiErr := c.chatAttempt(ctx, model, len(models)-modelIdx, messages, maxTokens)
 		if apiErr == nil {
 			return content, nil, nil
 		}
 		lastErr = apiErr
+		if ctx.Err() != nil {
+			break // the caller is gone: nothing will be retried, so don't log or count a retry
+		}
 
 		decision := c.classifyAttemptError(ctx, apiErr, model, attempt, hasNext)
 		switch decision {
@@ -296,6 +340,20 @@ func (c *Client) classifyAttemptError(ctx context.Context, apiErr *APIError, mod
 			slog.String("model", model), slog.Int("status", apiErr.StatusCode))
 		return retryNextModel
 	}
+	// An empty 200 or an attempt that used up its own time slice will most
+	// likely repeat on the same model; spend the remaining budget elsewhere.
+	if kind := apiErr.skipKind(); kind != "" {
+		c.logger.WarnContext(ctx, "llm attempt unusable, switching model",
+			slog.String("model", model), slog.String("reason", kind), slog.Bool("has_next", hasNext))
+		llmMetrics().Requests.Add(ctx, 1, metric.WithAttributes(
+			attribute.String("model", model),
+			attribute.String("outcome", kind),
+		))
+		if hasNext {
+			return retryNextModel
+		}
+		return retryStop
+	}
 	if apiErr.IsTransient() && attempt < maxRetries-1 {
 		delay := backoff(attempt)
 		c.logger.WarnContext(ctx, "llm transient error, retrying",
@@ -309,6 +367,26 @@ func (c *Client) classifyAttemptError(ctx context.Context, apiErr *APIError, mod
 		return retryContinue
 	}
 	return retryStop
+}
+
+// chatAttempt runs one chatOnce inside an equal share of the caller's remaining
+// budget across the models still to try (modelsLeft includes this one), so the
+// last model — or the only one — keeps the whole remainder and a slow but
+// healthy model is never cut short. No slice when ctx has no deadline. An
+// attempt that hits its own slice while the caller still has time is reported
+// as kindAttemptTimeout so the loop moves on instead of retrying a hung model.
+func (c *Client) chatAttempt(ctx context.Context, model string, modelsLeft int, messages []map[string]string, maxTokens int) (string, *APIError) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return c.chatOnce(ctx, model, messages, maxTokens)
+	}
+	attemptCtx, cancel := context.WithTimeout(ctx, time.Until(deadline)/time.Duration(modelsLeft))
+	defer cancel()
+	content, apiErr := c.chatOnce(attemptCtx, model, messages, maxTokens)
+	if apiErr != nil && attemptCtx.Err() != nil && ctx.Err() == nil {
+		apiErr.kind = kindAttemptTimeout
+	}
+	return content, apiErr
 }
 
 // chatOnce performs a single HTTP round-trip to the chat completions endpoint.
@@ -368,18 +446,51 @@ func (c *Client) chatOnce(ctx context.Context, model string, messages []map[stri
 	if len(result.Choices) == 0 {
 		return "", &APIError{StatusCode: resp.StatusCode, Message: "no choices in response"}
 	}
-	return result.Choices[0].Message.Content, nil
+	content := result.Choices[0].Message.Content
+	if strings.TrimSpace(content) == "" {
+		return "", &APIError{StatusCode: resp.StatusCode, Message: ErrEmptyContent.Error(), kind: kindEmptyContent}
+	}
+	return content, nil
 }
 
 // --- Error classification ---
+
+// ErrEmptyContent is returned (wrapped in *APIError) when a 200 response
+// carries no content — typically a reasoning model that spent max_tokens on
+// thinking. Callers can match it with errors.Is.
+var ErrEmptyContent = errors.New("llm returned empty content")
+
+// ErrNoModel is returned when neither a primary nor a fallback model is set.
+var ErrNoModel = errors.New("llm: no model configured")
 
 // APIError is a structured error from the LLM API.
 type APIError struct {
 	StatusCode int
 	Message    string
+	kind       string // kindEmptyContent / kindAttemptTimeout, else ""
 }
 
+// Outcome labels for attempts that switch model immediately.
+const (
+	kindEmptyContent   = "empty_content"
+	kindAttemptTimeout = "attempt_timeout"
+)
+
+// Unwrap lets callers match an empty reply with errors.Is(err, ErrEmptyContent).
+func (e *APIError) Unwrap() error {
+	if e.kind == kindEmptyContent {
+		return ErrEmptyContent
+	}
+	return nil
+}
+
+// skipKind reports why this attempt should switch model without retrying.
+func (e *APIError) skipKind() string { return e.kind }
+
 func (e *APIError) Error() string {
+	if e.kind == kindEmptyContent {
+		return "llm error: " + e.Message
+	}
 	if e.StatusCode > 0 {
 		return fmt.Sprintf("llm api error %d: %s", e.StatusCode, e.Message)
 	}

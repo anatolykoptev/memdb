@@ -6,6 +6,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -144,6 +145,9 @@ func ExtractSkill(ctx context.Context, client *Client, taskMessages string, exis
 	}
 
 	raw, err := client.Chat(ctx, msgs, skillMaxTokens)
+	if errors.Is(err, ErrEmptyContent) {
+		return nil, nil //nolint:nilnil // every model answered empty = no skill found
+	}
 	if err != nil {
 		return nil, fmt.Errorf("extract skill: %w", err)
 	}
