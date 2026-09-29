@@ -84,11 +84,11 @@ type Config struct {
 	// LLM proxy (OpenAI-compatible API base URL)
 	LLMProxyURL       string   `json:"llm_proxy_url"`
 	LLMProxyAPIKey    string   `json:"llm_proxy_api_key"`
-	LLMDefaultModel   string   `json:"llm_default_model"`
-	LLMSearchModel    string   `json:"llm_search_model"`    // model for search LLM calls: rerank, iterative (default: gemini-2.0-flash)
-	LLMExtractModel   string   `json:"llm_extract_model"`   // model for fine-mode extraction (default: gemini-2.0-flash-lite)
-	LLMReorgModel     string   `json:"llm_reorg_model"`     // model for memory reorganizer consolidation (default: gemini-2.5-flash-lite)
-	LLMFallbackModels []string `json:"llm_fallback_models"` // fallback models tried on quota errors (comma-separated env)
+	LLMDefaultModel   string   `json:"llm_default_model"`   // MEMDB_LLM_MODEL, else fleet LLM_MODEL, else gemini-2.5-flash
+	LLMSearchModel    string   `json:"llm_search_model"`    // model for search LLM calls: rerank, iterative (default: LLMDefaultModel)
+	LLMExtractModel   string   `json:"llm_extract_model"`   // model for fine-mode extraction (default: LLMDefaultModel)
+	LLMReorgModel     string   `json:"llm_reorg_model"`     // model for memory reorganizer consolidation (default: LLMDefaultModel)
+	LLMFallbackModels []string `json:"llm_fallback_models"` // fallback chain: MEMDB_LLM_FALLBACK_MODELS, else LLM_MODEL_FALLBACK (comma-separated)
 	ReorgUseHNSW      bool     `json:"reorg_use_hnsw"`      // use HNSW index for FindNearDuplicates (env: MEMDB_REORG_USE_HNSW, default false) — deprecated, prefer ReorgDupStrategy
 	// ReorgDupStrategy selects the near-duplicate detection path: "auto",
 	// "legacy", or "hnsw". Env: MEMDB_REORG_DUP_STRATEGY. When set it wins
@@ -200,6 +200,12 @@ func clampCoTTimeoutMS(v int) int {
 
 // Load reads configuration from environment variables with sensible defaults.
 func Load() *Config {
+	// Models follow the fleet's config/llm.env (LLM_MODEL / LLM_MODEL_FALLBACK,
+	// shipped to memdb-go via env_file) unless a MEMDB_* var overrides a role,
+	// so a fleet-wide model refresh reaches memdb without editing memdb's own
+	// config. The gemini default only applies when neither is set.
+	defaultModel := envStr("MEMDB_LLM_MODEL", envStr("LLM_MODEL", "gemini-2.5-flash"))
+
 	return &Config{
 		Port:            envInt("MEMDB_GO_PORT", defaultPort),
 		ReadTimeout:     envDuration("MEMDB_GO_READ_TIMEOUT", defaultReadTimeout),
@@ -249,11 +255,11 @@ func Load() *Config {
 
 		LLMProxyURL:         envStr("MEMDB_LLM_PROXY_URL", "https://api.openai.com/v1"),
 		LLMProxyAPIKey:      envStr("CLI_PROXY_API_KEY", ""),
-		LLMDefaultModel:     envStr("MEMDB_LLM_MODEL", "gemini-2.5-flash"),
-		LLMSearchModel:      envStr("MEMDB_LLM_SEARCH_MODEL", "gemini-2.0-flash"),
-		LLMExtractModel:     envStr("MEMDB_LLM_EXTRACT_MODEL", "gemini-2.0-flash-lite"),
-		LLMReorgModel:       envStr("MEMDB_REORG_LLM_MODEL", "gemini-2.5-flash-lite"),
-		LLMFallbackModels:   envCSV("MEMDB_LLM_FALLBACK_MODELS", nil),
+		LLMDefaultModel:     defaultModel,
+		LLMSearchModel:      envStr("MEMDB_LLM_SEARCH_MODEL", defaultModel),
+		LLMExtractModel:     envStr("MEMDB_LLM_EXTRACT_MODEL", defaultModel),
+		LLMReorgModel:       envStr("MEMDB_REORG_LLM_MODEL", defaultModel),
+		LLMFallbackModels:   envCSV("MEMDB_LLM_FALLBACK_MODELS", envCSV("LLM_MODEL_FALLBACK", nil)),
 		ReorgUseHNSW:        envBool("MEMDB_REORG_USE_HNSW", false),
 		ReorgDupStrategy:    envStr("MEMDB_REORG_DUP_STRATEGY", ""),
 		ReorgDupCrossover:   envInt("MEMDB_REORG_DUP_CROSSOVER", defaultReorgDupCrossover),

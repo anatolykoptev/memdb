@@ -63,6 +63,9 @@ func main() {
 	llmKey := os.Getenv("MEMDB_LLM_API_KEY")
 	llmModel := os.Getenv("MEMDB_LLM_MODEL")
 	if llmModel == "" {
+		llmModel = os.Getenv("LLM_MODEL") // fleet config/llm.env, as in internal/config
+	}
+	if llmModel == "" {
 		llmModel = "gemini-2.5-flash"
 	}
 	modelDir := os.Getenv("MEMDB_ONNX_MODEL_DIR")
