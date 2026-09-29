@@ -40,7 +40,7 @@ const (
 	episodicCandidateLimit = 200
 
 	// LLM call caps for tier summaries.
-	tierSummaryMaxTokens = 400
+	tierSummaryMaxTokens = 800 // reasoning models think before the JSON; 400 left 22 empty replies/day in prod (21 episodic + 1 semantic, #410)
 	tierSummaryTimeout   = 45 * time.Second
 
 	// memoryType* — memory_type field persisted for each tier's parent node.

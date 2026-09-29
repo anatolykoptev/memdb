@@ -37,7 +37,7 @@ func (r *Reorganizer) llmConsolidate(ctx context.Context, cluster []memNode) (co
 		{"role": "user", "content": fmt.Sprintf("Memory cluster to consolidate:\n%s", memoriesJSON)},
 	}
 
-	// 2-node clusters need only a short JSON response — cap tokens to reduce cost.
+	// 2-node clusters get a smaller cap; see consolidateLLMMaxTokensPair for why it is not tighter.
 	maxTok := consolidateLLMMaxTokens
 	if len(cluster) == 2 {
 		maxTok = consolidateLLMMaxTokensPair

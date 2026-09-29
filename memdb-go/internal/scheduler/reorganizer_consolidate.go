@@ -21,10 +21,10 @@ import (
 )
 
 const (
-	consolidateLogPreviewLen    = 80  // chars of merged text to log as preview
-	consolidateLLMMaxTokens     = 512 // max_tokens for consolidation LLM call
-	consolidateLLMMaxTokensPair = 192 // max_tokens for 2-node cluster (short JSON response)
-	consolidateErrTruncLen      = 200 // max chars of error LLM output to include in error message
+	consolidateLogPreviewLen    = 80   // chars of merged text to log as preview
+	consolidateLLMMaxTokens     = 1024 // max_tokens for consolidation LLM call (reasoning overhead + merged_text)
+	consolidateLLMMaxTokensPair = 512  // max_tokens for 2-node cluster: short JSON, but reasoning models spend ~100-250 tokens thinking first (192 → 0-60% empty replies, 2026-09-28 probe)
+	consolidateErrTruncLen      = 200  // max chars of error LLM output to include in error message
 
 	// maxClusterSize caps how many memories are sent to the LLM in one
 	// consolidation call. Larger clusters are split into chunks of this size
