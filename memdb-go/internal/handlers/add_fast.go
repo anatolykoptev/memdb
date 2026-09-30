@@ -169,6 +169,14 @@ func (h *Handler) batchEmbedFastTexts(ctx context.Context, texts []string) ([][]
 	if len(vecs) != len(texts) {
 		return nil, fmt.Errorf("embed result length mismatch: got %d want %d", len(vecs), len(texts))
 	}
+	// Reject zero vectors — pgvector <=> returns NaN for them, which
+	// breaks dedup (NaN < threshold is false → false duplicate →
+	// silent data loss). See isZeroVector doc for the ONNX fallback.
+	for i, v := range vecs {
+		if isZeroVector(v) {
+			return nil, fmt.Errorf("embedder returned zero vector for text %q: downstream cosine dedup would produce NaN", texts[i])
+		}
+	}
 	return vecs, nil
 }
 

@@ -490,12 +490,20 @@ type stubEmbedder struct{}
 func (s *stubEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	result := make([][]float32, len(texts))
 	for i := range texts {
-		result[i] = make([]float32, 1024)
+		// Non-zero stub: first element = 1.0 so the zero-vector guard
+		// in batchEmbedFastTexts / embedSingle doesn't reject it.
+		// All stubs share the same direction — unit tests that need
+		// distinct directions use livepgEmbedder instead.
+		v := make([]float32, 1024)
+		v[0] = 1.0
+		result[i] = v
 	}
 	return result, nil
 }
 func (s *stubEmbedder) EmbedQuery(_ context.Context, _ string) ([]float32, error) {
-	return make([]float32, 1024), nil
+	v := make([]float32, 1024)
+	v[0] = 1.0
+	return v, nil
 }
 func (s *stubEmbedder) Dimension() int { return 1024 }
 func (s *stubEmbedder) Close() error   { return nil }

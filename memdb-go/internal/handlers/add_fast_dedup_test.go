@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"math"
 	"strings"
 	"testing"
+
+	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
 
 // extractSessionID — defensive parsing of properties JSON.
@@ -120,5 +123,54 @@ func TestFastDedupSessionAware_UnknownValueDefaultsOn(t *testing.T) {
 func TestFastDedup_DocumentsContractSurface(t *testing.T) {
 	if !strings.Contains("session_id", "session") {
 		t.Fatal("sanity")
+	}
+}
+
+// TestIsZeroVector — the source-layer guard that prevents zero vectors
+// from entering the DB. pgvector <=> returns NaN for zero vectors, which
+// breaks all downstream score comparisons (NaN < threshold is false →
+// false duplicate → silent data loss).
+func TestIsZeroVector(t *testing.T) {
+	tests := []struct {
+		name string
+		vec  []float32
+		want bool
+	}{
+		{"nil", nil, true},
+		{"empty", []float32{}, true},
+		{"all zeros", make([]float32, 1024), true},
+		{"non-zero", []float32{0, 0, 0, 0.001}, false},
+		{"unit vector", []float32{1, 0, 0, 0}, false},
+		{"negative", []float32{0, -0.5, 0, 0}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isZeroVector(tc.vec); got != tc.want {
+				t.Errorf("isZeroVector(%v) = %v, want %v", tc.vec, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBuildSimilarCosineEdgesFromResults_NaNGuard — the consumer-layer
+// guard. When a stored embedding is a zero vector, pgvector returns NaN
+// for the cosine distance, and 1 - NaN = NaN. Without the guard, NaN
+// passes both `<= lo` (false) and `>= hi` (false), so the row would
+// produce a structural edge with NaN confidence.
+func TestBuildSimilarCosineEdgesFromResults_NaNGuard(t *testing.T) {
+	results := []db.VectorSearchResult{
+		{ID: "neigh-1", Score: math.NaN(), Properties: "{}"},
+		{ID: "neigh-2", Score: 0.85, Properties: "{}"},
+	}
+	edges := buildSimilarCosineEdgesFromResults("new-1", results, 0.5, 0.92, 10)
+	// NaN row must be skipped; only the 0.85 row should produce an edge.
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 edge (NaN skipped), got %d: %+v", len(edges), edges)
+	}
+	if edges[0].ToID != "neigh-2" {
+		t.Errorf("edge to wrong neighbour: got %s, want neigh-2", edges[0].ToID)
+	}
+	if math.IsNaN(edges[0].Confidence) {
+		t.Errorf("edge confidence is NaN — NaN guard failed")
 	}
 }

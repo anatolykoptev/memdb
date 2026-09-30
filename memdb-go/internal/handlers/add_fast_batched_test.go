@@ -54,7 +54,11 @@ func (r *recordingEmbedder) Embed(_ context.Context, texts []string) ([][]float3
 	}
 	out := make([][]float32, len(texts)-r.shortBy)
 	for i := range out {
-		out[i] = make([]float32, dim)
+		// Non-zero stub: first element = 1.0 so the zero-vector guard
+		// in batchEmbedFastTexts doesn't reject it.
+		v := make([]float32, dim)
+		v[0] = 1.0
+		out[i] = v
 	}
 	return out, nil
 }
@@ -64,7 +68,9 @@ func (r *recordingEmbedder) EmbedQuery(_ context.Context, _ string) ([]float32, 
 	if dim == 0 {
 		dim = 1024
 	}
-	return make([]float32, dim), nil
+	v := make([]float32, dim)
+	v[0] = 1.0
+	return v, nil
 }
 
 func (r *recordingEmbedder) Dimension() int { return 1024 }
