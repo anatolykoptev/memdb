@@ -672,14 +672,14 @@ func TestOpenAIEmbeddings_Registry_FallbackOnEmptyModel(t *testing.T) {
 // --- applyModelPrefix unit tests ---
 
 func TestApplyModelPrefix_E5(t *testing.T) {
-	result := applyModelPrefix([]string{"hello"}, "multilingual-e5-large")
+	result := applyModelPrefix([]string{"hello"}, "multilingual-e5-large", false)
 	if result[0] != "passage: hello" {
 		t.Errorf("got %q, want 'passage: hello'", result[0])
 	}
 }
 
 func TestApplyModelPrefix_CodeModel(t *testing.T) {
-	result := applyModelPrefix([]string{"func main()"}, "jina-code-v2")
+	result := applyModelPrefix([]string{"func main()"}, "jina-code-v2", false)
 	if result[0] != "func main()" {
 		t.Errorf("got %q, want raw text", result[0])
 	}
@@ -687,7 +687,7 @@ func TestApplyModelPrefix_CodeModel(t *testing.T) {
 
 func TestApplyModelPrefix_CodeRankEmbed_Doc(t *testing.T) {
 	// code-rank-embed (no suffix) = doc ingest path → raw, no prefix.
-	result := applyModelPrefix([]string{"func foo()"}, "code-rank-embed")
+	result := applyModelPrefix([]string{"func foo()"}, "code-rank-embed", false)
 	if result[0] != "func foo()" {
 		t.Errorf("got %q, want raw text (no prefix for doc embedding)", result[0])
 	}
@@ -696,7 +696,7 @@ func TestApplyModelPrefix_CodeRankEmbed_Doc(t *testing.T) {
 func TestApplyModelPrefix_CodeRankEmbed_Query(t *testing.T) {
 	// code-rank-embed-query = search query path → must prepend task instruction.
 	const wantPrefix = "Represent this query for searching relevant code: "
-	result := applyModelPrefix([]string{"find auth functions"}, "code-rank-embed-query")
+	result := applyModelPrefix([]string{"find auth functions"}, "code-rank-embed-query", false)
 	want := wantPrefix + "find auth functions"
 	if result[0] != want {
 		t.Errorf("got %q, want %q", result[0], want)
@@ -704,8 +704,60 @@ func TestApplyModelPrefix_CodeRankEmbed_Query(t *testing.T) {
 }
 
 func TestApplyModelPrefix_UnknownE5Variant(t *testing.T) {
-	result := applyModelPrefix([]string{"text"}, "some-e5-model")
+	result := applyModelPrefix([]string{"text"}, "some-e5-model", false)
 	if result[0] != "passage: text" {
 		t.Errorf("got %q, want 'passage: text' for e5 variant", result[0])
+	}
+}
+
+func TestApplyModelPrefix_E5Query(t *testing.T) {
+	result := applyModelPrefix([]string{"hello"}, "multilingual-e5-large", true)
+	if result[0] != "query: hello" {
+		t.Errorf("got %q, want 'query: hello'", result[0])
+	}
+}
+
+func TestApplyModelPrefix_QueryLeavesNonE5Alone(t *testing.T) {
+	result := applyModelPrefix([]string{"func main()"}, "jina-code-v2", true)
+	if result[0] != "func main()" {
+		t.Errorf("got %q, want raw text", result[0])
+	}
+}
+
+// RED-on-revert: drop the input_type handling in OpenAIEmbeddings and the
+// query is sent with "passage: ".
+func TestOpenAIEmbeddings_QueryInputType(t *testing.T) {
+	var capturedTexts []string
+	h := &Handler{
+		logger: discardLogger(),
+		embedder: &mockEmbedder{
+			embedFn: func(ctx context.Context, texts []string) ([][]float32, error) {
+				capturedTexts = texts
+				return [][]float32{{0.5}}, nil
+			},
+		},
+	}
+
+	body := `{"input": "alpha", "input_type": "query"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.OpenAIEmbeddings(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if len(capturedTexts) != 1 || capturedTexts[0] != "query: alpha" {
+		t.Errorf("texts=%q, want [\"query: alpha\"]", capturedTexts)
+	}
+}
+
+func TestOpenAIEmbeddings_InvalidInputTypeValue(t *testing.T) {
+	h := &Handler{logger: discardLogger(), embedder: &mockEmbedder{}}
+	body := `{"input": "alpha", "input_type": "search"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	h.OpenAIEmbeddings(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
 	}
 }

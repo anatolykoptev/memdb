@@ -846,7 +846,7 @@
         "properties": {
           "model": {
             "type": "string",
-            "description": "Ignored (model is configured server-side)"
+            "description": "Embedding model; defaults to multilingual-e5-large. Unknown models return 400."
           },
           "input": {
             "oneOf": [
@@ -861,6 +861,16 @@
               }
             ],
             "description": "Text(s) to embed"
+          },
+          "input_type": {
+            "type": "string",
+            "enum": [
+              "query",
+              "passage",
+              "document"
+            ],
+            "default": "passage",
+            "description": "Side of an asymmetric model. e5 models get the 'query: ' prefix for query and 'passage: ' otherwise; other models ignore it. Case-sensitive."
           }
         }
       },
