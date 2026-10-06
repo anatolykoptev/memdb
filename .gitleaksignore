@@ -23,3 +23,5 @@
 9c22cf1c0aa285e73f822e8766df8c35981b6625:openwork-memos-integration/apps/desktop/e2e/specs/settings.spec.ts:generic-api-key:449
 ec3d65785b9403e6332c0aaef45bde6314c19195:tests/mem_scheduler/test_config.py:generic-api-key:100
 ec3d65785b9403e6332c0aaef45bde6314c19195:tests/mem_scheduler/test_config.py:generic-api-key:124
+e083b60c9176e8d4e6b1e4d7a397e51e3626eea3:memdb-go/internal/server/middleware/auth_test.go:generic-api-key:296
+e083b60c9176e8d4e6b1e4d7a397e51e3626eea3:memdb-go/internal/server/middleware/auth_test.go:generic-api-key:308
