@@ -293,7 +293,7 @@ func TestAuth_EmbeddingsRequireAuth(t *testing.T) {
 	mw := Auth(testLogger(), AuthConfig{
 		Enabled:       true,
 		MasterKeyHash: hashKey("user-key"),
-		ServiceSecret: "internal-secret-123",
+		ServiceSecret: "internal-secret-123", // gitleaks:allow
 	})
 	handler := mw(testHandler())
 
@@ -305,7 +305,7 @@ func TestAuth_EmbeddingsRequireAuth(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodPost, "/v1/embeddings", strings.NewReader(`{"input":["x"]}`))
-	req.Header.Set("X-Service-Secret", "internal-secret-123")
+	req.Header.Set("X-Service-Secret", "internal-secret-123") // gitleaks:allow
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {

@@ -30,7 +30,7 @@ func registerRoutes(mux *http.ServeMux, h *handlers.Handler, serviceSecret strin
 	// ─── OpenAPI spec + Swagger UI ───────────────────────────────────────
 	registerOpenAPIRoutes(mux)
 
-	// ─── OpenAI-compatible embeddings (internal, no auth) ────────────────
+	// ─── OpenAI-compatible embeddings (internal; requires auth) ──────────
 	mux.HandleFunc("POST /v1/embeddings", h.OpenAIEmbeddings)
 
 	// ─── Server Router Endpoints (server_router.py — deployed) ─────────
