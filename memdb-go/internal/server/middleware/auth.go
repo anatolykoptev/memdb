@@ -76,9 +76,13 @@ func isAuthExempt(r *http.Request) bool {
 	// authentication gate for this subtree, enforcing X-Service-Secret.
 	// If you add /debug/pprof/ here you change the security model — do not
 	// remove this exemption without also updating pprofHandler.
+	//
+	// /v1/ (OpenAI-compatible POST /v1/embeddings) is deliberately NOT exempt:
+	// it proxies to the shared embedding model, and the public api.memdb.ai
+	// vhost made it free for anyone to use (memdb#423). Internal callers send
+	// X-Service-Secret like every other internal route.
 	return r.URL.Path == "/health" || r.URL.Path == "/ready" ||
 		r.URL.Path == "/metrics" ||
-		strings.HasPrefix(r.URL.Path, "/v1/") ||
 		strings.HasPrefix(r.URL.Path, "/debug/pprof/")
 }
 
