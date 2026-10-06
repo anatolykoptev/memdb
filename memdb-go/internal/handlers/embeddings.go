@@ -14,6 +14,9 @@ import (
 type openaiEmbeddingRequest struct {
 	Input json.RawMessage `json:"input"`
 	Model string          `json:"model"`
+	// InputType selects the side of an asymmetric model: "query" for search
+	// queries, "passage" (default; "document" is an alias) for indexed text.
+	InputType string `json:"input_type"`
 }
 
 // openaiEmbeddingResponse is the OpenAI-compatible embedding response format.
@@ -46,12 +49,19 @@ type openaiErrorDetail struct {
 	Code    any    `json:"code"`
 }
 
+// Instruction prefixes for e5 models, which embed queries and passages
+// asymmetrically: a query embedded with "passage: " ranks worse.
+const (
+	e5PassagePrefix = "passage: "
+	e5QueryPrefix   = "query: "
+)
+
 // modelPrefixes defines per-model text prefixes.
 // e5 models need "passage: " prefix; code-rank-embed-query requires a task
 // instruction prefix; other models (including code-rank-embed for doc ingest)
 // get raw text.
 var modelPrefixes = map[string]string{
-	"multilingual-e5-large": "passage: ",
+	"multilingual-e5-large": e5PassagePrefix,
 	"code-rank-embed-query": "Represent this query for searching relevant code: ",
 }
 
@@ -61,6 +71,12 @@ func (h *Handler) OpenAIEmbeddings(w http.ResponseWriter, r *http.Request) {
 	var req openaiEmbeddingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeOpenAIError(w, http.StatusBadRequest, "invalid request body: "+err.Error(), "invalid_request_error")
+		return
+	}
+
+	query, err := isQueryInput(req.InputType)
+	if err != nil {
+		h.writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error")
 		return
 	}
 
@@ -97,7 +113,7 @@ func (h *Handler) OpenAIEmbeddings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Apply model-specific prefix and run embedder.
-	input := applyModelPrefix(texts, model)
+	input := applyModelPrefix(texts, model, query)
 	embeddings, err := emb.Embed(r.Context(), input)
 	if err != nil {
 		h.writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error")
@@ -123,12 +139,27 @@ func (h *Handler) OpenAIEmbeddings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// isQueryInput reports whether input_type asks for query-side embeddings.
+func isQueryInput(inputType string) (bool, error) {
+	switch inputType {
+	case "query":
+		return true, nil
+	case "", "passage", "document":
+		return false, nil
+	}
+	return false, errors.New(`input_type must be "query", "passage" or "document"`)
+}
+
 // applyModelPrefix adds model-specific prefix to texts.
-// e5 models need "passage: " prefix; other models get raw text.
-func applyModelPrefix(texts []string, model string) []string {
+// e5 models need "passage: " (or "query: " when query is set); other models
+// get raw text.
+func applyModelPrefix(texts []string, model string, query bool) []string {
 	prefix, ok := modelPrefixes[model]
 	if !ok && strings.Contains(model, "e5") {
-		prefix = "passage: "
+		prefix = e5PassagePrefix
+	}
+	if query && prefix == e5PassagePrefix {
+		prefix = e5QueryPrefix
 	}
 	if prefix == "" {
 		return texts
