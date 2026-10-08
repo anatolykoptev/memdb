@@ -359,6 +359,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [memdb-go/v0.23.4] — 2026-10-08
+
+### [0.23.4](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.3...memdb-go/v0.23.4) (2026-10-06)
+
+### Features
+
+* **config:** take LLM models from the fleet llm.env unless MEMDB_* overrides ([#420](https://github.com/anatolykoptev/memdb/issues/420)) ([0f6ad0b](https://github.com/anatolykoptev/memdb/commit/0f6ad0be6d061bfcd788cb640a63e2765cf06e93))
+
+### Bug Fixes
+
+* **embeddings:** honour input_type=query for e5 models ([#426](https://github.com/anatolykoptev/memdb/issues/426)) ([1b0fc5b](https://github.com/anatolykoptev/memdb/commit/1b0fc5b5cb63e37d1c98efc3c230e6015c6fcbf9))
+* **llm:** fall back on empty replies and hung attempts within the caller's deadline ([#414](https://github.com/anatolykoptev/memdb/issues/414)) ([662499c](https://github.com/anatolykoptev/memdb/commit/662499c19bb7e456e5c28b5d4cd09525dcae7df6))
+* **llm:** give a model with a fallback half the remaining budget, not an equal share ([#421](https://github.com/anatolykoptev/memdb/issues/421)) ([5efc0b3](https://github.com/anatolykoptev/memdb/commit/5efc0b38f4842821f21d47d8d516dd0a20bbe9e2))
+* **llm:** switch model on a transient 5xx when a fallback exists; deflake livepg stub ([#422](https://github.com/anatolykoptev/memdb/issues/422)) ([8f9ea92](https://github.com/anatolykoptev/memdb/commit/8f9ea92071b5eec27da5e28d2fd9ad8e963a138e))
+* **scheduler:** raise reorganizer LLM token budgets for reasoning models ([#415](https://github.com/anatolykoptev/memdb/issues/415)) ([ceb52b2](https://github.com/anatolykoptev/memdb/commit/ceb52b226aea1364718e632ab51d841393ff5c52))
+* **security:** /v1/embeddings requires auth (closes [#423](https://github.com/anatolykoptev/memdb/issues/423)) ([#424](https://github.com/anatolykoptev/memdb/issues/424)) ([763f2f3](https://github.com/anatolykoptev/memdb/commit/763f2f3eebd40e38fc57f59352e144e6a334e6ed))
+
 ## [0.23.0] — 2026-04-26 — M10 user_profiles + perf + security audit
 
 Headline: **MemDB scores 72.5% LLM Judge** on LoCoMo chat-50 stratified
@@ -832,7 +849,8 @@ Initial public release. Baseline for changelog. See
 [docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md) for the detailed history
 of Python → Go migration phases 1–4.5 that preceded this tag.
 
-[Unreleased]: https://github.com/anatolykoptev/memdb/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.4...HEAD
+[memdb-go/v0.23.4]: https://github.com/anatolykoptev/memdb/releases/tag/memdb-go/v0.23.4
 [0.23.0]: https://github.com/anatolykoptev/memdb/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/anatolykoptev/memdb/compare/v2.2.0...v0.22.0
 [2.2.0]: https://github.com/anatolykoptev/memdb/releases/tag/v2.2.0
