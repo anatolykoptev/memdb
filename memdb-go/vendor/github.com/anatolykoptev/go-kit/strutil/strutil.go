@@ -5,6 +5,7 @@ package strutil
 import (
 	"strings"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -288,4 +289,38 @@ func DetectLang(text string) Lang {
 		return LangES
 	}
 	return LangEN
+}
+
+// UTF16Len returns the number of UTF-16 code units in s. Telegram counts
+// caption/message length in these units, not in bytes or runes: a Cyrillic
+// letter is 1 unit (2 UTF-8 bytes), and an emoji outside the BMP (e.g. 🔥)
+// is 2 units (1 rune). This is the unit every length decision measured
+// against a Telegram limit must use.
+func UTF16Len(s string) int {
+	return len(utf16.Encode([]rune(s)))
+}
+
+// UTF16ByteCut returns the byte offset of the longest prefix of s whose
+// UTF-16 unit count is <= maxUnits. Never splits a surrogate pair: a
+// non-BMP rune (2 UTF-16 units) is included only when both units fit, so
+// the returned prefix is always valid UTF-16 with no lone surrogates.
+func UTF16ByteCut(s string, maxUnits int) int {
+	if maxUnits <= 0 {
+		return 0
+	}
+	units := 0
+	off := 0
+	for off < len(s) {
+		r, size := utf8.DecodeRuneInString(s[off:])
+		ru := 1
+		if r >= 0x10000 { // non-BMP → surrogate pair (2 units)
+			ru = 2
+		}
+		if units+ru > maxUnits {
+			break
+		}
+		units += ru
+		off += size
+	}
+	return off
 }

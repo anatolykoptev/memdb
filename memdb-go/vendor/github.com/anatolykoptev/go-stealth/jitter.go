@@ -1,31 +1,14 @@
 package stealth
 
 import (
-	"context"
-	"math/rand"
-	"time"
+	"github.com/anatolykoptev/go-kit/pacing"
 )
 
-// Jitter defines a random delay range for anti-fingerprinting.
-type Jitter struct {
-	Min time.Duration
-	Max time.Duration
-}
+// Jitter is an alias for pacing.Jitter, preserving the stealth-package API for
+// existing callers (go-twitter vendor). New code should import pacing directly.
+type Jitter = pacing.Jitter
 
-// DefaultJitter is 500ms-2.5s, suitable for most scraping.
-var DefaultJitter = Jitter{
-	Min: 500 * time.Millisecond,
-	Max: 2500 * time.Millisecond,
-}
-
-// Sleep pauses for a random duration between Min and Max.
-// Returns ctx.Err() if the context is cancelled during the wait.
-func (j Jitter) Sleep(ctx context.Context) error {
-	d := j.Min + time.Duration(rand.Int63n(int64(j.Max-j.Min)))
-	select {
-	case <-time.After(d):
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
+// DefaultJitter is the canonical anti-fingerprint jitter (500ms–2.5s), backed
+// by pacing.DefaultJitter. Callers that need a different range should construct
+// their own pacing.Jitter.
+var DefaultJitter = pacing.DefaultJitter

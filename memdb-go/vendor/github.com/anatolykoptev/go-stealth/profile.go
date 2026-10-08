@@ -17,6 +17,55 @@ type BrowserProfile struct {
 	Mobile     bool
 }
 
+// BrowserIdentity is the single owner of everything a target observes about
+// this client's browser half: the TLS fingerprint (JA3/JA4), the User-Agent,
+// and the Client Hints (sec-ch-ua-*) derived from that User-Agent. It embeds
+// BrowserProfile as its core so every existing caller of BuiltinProfiles,
+// RandomProfile, PlatformMatchedProfile and session.WithProfile keeps
+// compiling unchanged — promoted fields give id.UserAgent, id.TLSProfile,
+// id.Browser, id.OS, id.Mobile directly, and id.BrowserProfile is reachable
+// when the whole struct is needed.
+//
+// A BrowserClient built with only a TLSProfile (the common case) resolves its
+// Identity() from BuiltinProfiles so the UA and Client Hints agree with the
+// JA3 by contract, not coincidence. WithIdentity sets profile and UA together
+// so they can never drift apart.
+type BrowserIdentity struct {
+	BrowserProfile
+	// ClientHints holds the sec-ch-ua-* headers derived from UserAgent via
+	// ClientHintsHeaders. nil for Safari/Firefox (they send no Client Hints).
+	ClientHints map[string]string
+}
+
+// UserAgentForProfile returns a User-Agent string from BuiltinProfiles whose
+// TLSProfile matches p. It returns the FIRST matching entry (BuiltinProfiles
+// holds per-OS variants sharing one TLS profile; the first is Windows where
+// available). Returns "" when no BuiltinProfiles entry matches p — this is
+// the documented no-entry behaviour, NOT a fallback: callers pairing a UA
+// with an unknown profile must handle the empty string rather than silently
+// presenting a mismatched UA. This is the single lookup the consumer repos
+// use to delete their hardcoded UA literals.
+func UserAgentForProfile(p TLSProfile) string {
+	bp, ok := profileForTLS(p)
+	if !ok {
+		return ""
+	}
+	return bp.UserAgent
+}
+
+// profileForTLS returns the first BuiltinProfiles entry whose TLSProfile
+// matches p, with ok=false when none match. Used by UserAgentForProfile and
+// by Identity() to resolve a full BrowserProfile (Browser/OS/Mobile included)
+// from a bare TLSProfile.
+func profileForTLS(p TLSProfile) (BrowserProfile, bool) {
+	for _, bp := range BuiltinProfiles {
+		if bp.TLSProfile == p {
+			return bp, true
+		}
+	}
+	return BrowserProfile{}, false
+}
+
 // BuiltinProfiles provides browser fingerprint diversity across Chrome, Safari,
 // Firefox, and Edge with per-OS variants.
 var BuiltinProfiles = []BrowserProfile{
@@ -29,6 +78,14 @@ var BuiltinProfiles = []BrowserProfile{
 		UserAgent:  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
 		TLSProfile: ProfileChrome133, Browser: "chrome", OS: "windows",
 	},
+	{
+		UserAgent:  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+		TLSProfile: ProfileChrome144, Browser: "chrome", OS: "windows",
+	},
+	{
+		UserAgent:  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+		TLSProfile: ProfileChrome146, Browser: "chrome", OS: "windows",
+	},
 	// Chrome — macOS
 	{
 		UserAgent:  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -37,6 +94,14 @@ var BuiltinProfiles = []BrowserProfile{
 	{
 		UserAgent:  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
 		TLSProfile: ProfileChrome133, Browser: "chrome", OS: "macos",
+	},
+	{
+		UserAgent:  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+		TLSProfile: ProfileChrome144, Browser: "chrome", OS: "macos",
+	},
+	{
+		UserAgent:  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+		TLSProfile: ProfileChrome146, Browser: "chrome", OS: "macos",
 	},
 	// Chrome — Linux
 	{
@@ -47,10 +112,22 @@ var BuiltinProfiles = []BrowserProfile{
 		UserAgent:  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
 		TLSProfile: ProfileChrome133, Browser: "chrome", OS: "linux",
 	},
+	{
+		UserAgent:  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+		TLSProfile: ProfileChrome144, Browser: "chrome", OS: "linux",
+	},
+	{
+		UserAgent:  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+		TLSProfile: ProfileChrome146, Browser: "chrome", OS: "linux",
+	},
 	// Chrome — Android
 	{
 		UserAgent:  "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
 		TLSProfile: ProfileChrome131, Browser: "chrome", OS: "android", Mobile: true,
+	},
+	{
+		UserAgent:  "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36",
+		TLSProfile: ProfileChrome146, Browser: "chrome", OS: "android", Mobile: true,
 	},
 
 	// Safari — macOS
@@ -86,6 +163,43 @@ var BuiltinProfiles = []BrowserProfile{
 	{
 		UserAgent:  "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0",
 		TLSProfile: ProfileFirefox133, Browser: "firefox", OS: "linux",
+	},
+	// Firefox 148 — Windows
+	{
+		UserAgent:  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0",
+		TLSProfile: ProfileFirefox148, Browser: "firefox", OS: "windows",
+	},
+	// Firefox 148 — macOS
+	{
+		UserAgent:  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:148.0) Gecko/20100101 Firefox/148.0",
+		TLSProfile: ProfileFirefox148, Browser: "firefox", OS: "macos",
+	},
+	// Firefox 148 — Linux
+	{
+		UserAgent:  "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:148.0) Gecko/20100101 Firefox/148.0",
+		TLSProfile: ProfileFirefox148, Browser: "firefox", OS: "linux",
+	},
+
+	// Brave 146 — Windows.
+	// Brave deliberately does NOT identify itself in the User-Agent: it sends
+	// a stock Chromium/Chrome UA on every platform. So a correct entry pairs
+	// brave_146 with a Chrome/146 UA, which looks wrong but is what real Brave
+	// emits. Do NOT "fix" this to a Brave-branded UA — none exists. The
+	// distinguishing signal is the TLS fingerprint (Brave_146 sets
+	// RandomExtensionOrder: true), not the UA.
+	{
+		UserAgent:  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+		TLSProfile: ProfileBrave146, Browser: "brave", OS: "windows",
+	},
+	// Brave 146 — macOS (Chrome/146 UA, see Windows entry rationale).
+	{
+		UserAgent:  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+		TLSProfile: ProfileBrave146, Browser: "brave", OS: "macos",
+	},
+	// Brave 146 — Linux (Chrome/146 UA, see Windows entry rationale).
+	{
+		UserAgent:  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+		TLSProfile: ProfileBrave146, Browser: "brave", OS: "linux",
 	},
 
 	// Edge — Windows (uses Chrome TLS fingerprint — same Chromium engine)
@@ -179,6 +293,12 @@ func PlatformMatchedProfile() BrowserProfile {
 
 // ClientHintsHeaders returns sec-ch-ua-* headers for Chromium-based UAs.
 // Returns nil for Safari/Firefox (they don't send Client Hints).
+//
+// The sec-ch-ua brand list is derived from the UA's Chrome major so the
+// client-hint brands agree with the User-Agent (and the TLS profile): a real
+// Chrome sends THREE brands — a GREASE brand, "Chromium";v="<major>", and
+// "Google Chrome";v="<major>". Edge replaces "Google Chrome" with
+// "Microsoft Edge";v="<edge major>".
 func ClientHintsHeaders(ua string) map[string]string {
 	if !strings.Contains(ua, "Chrome/") {
 		return nil
@@ -190,16 +310,20 @@ func ClientHintsHeaders(ua string) map[string]string {
 		mobile = "?1"
 	}
 
-	hints := map[string]string{
-		"sec-ch-ua":          fmt.Sprintf(`"Chromium";v="%s", "Not_A Brand";v="24"`, version),
-		"sec-ch-ua-mobile":   mobile,
-		"sec-ch-ua-platform": fmt.Sprintf(`"%s"`, platform),
-	}
+	const greaseBrand = `"Not_A Brand";v="24"`
 
-	// Edge adds its own brand
+	var secChUa string
 	if strings.Contains(ua, "Edg/") {
 		edgeVersion := extractEdgeVersion(ua)
-		hints["sec-ch-ua"] = fmt.Sprintf(`"Chromium";v="%s", "Microsoft Edge";v="%s", "Not_A Brand";v="24"`, version, edgeVersion)
+		secChUa = fmt.Sprintf(`%s, "Chromium";v="%s", "Microsoft Edge";v="%s"`, greaseBrand, version, edgeVersion)
+	} else {
+		secChUa = fmt.Sprintf(`%s, "Chromium";v="%s", "Google Chrome";v="%s"`, greaseBrand, version, version)
+	}
+
+	hints := map[string]string{
+		"sec-ch-ua":          secChUa,
+		"sec-ch-ua-mobile":   mobile,
+		"sec-ch-ua-platform": fmt.Sprintf(`"%s"`, platform),
 	}
 
 	return hints

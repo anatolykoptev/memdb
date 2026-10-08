@@ -5,6 +5,9 @@ import "github.com/anatolykoptev/go-stealth/proxypool"
 // WithWebshareCountry creates a Webshare backbone proxy pool targeting the given
 // ISO-2 country codes (e.g. "US", "GB"). Defaults to ["US"] if no countries are given.
 // The API call is made eagerly; if it fails, NewClient returns the error.
+//
+// The client owns the pool this option builds: call BrowserClient.Close to
+// stop the pool's periodic credential refresher when the client is done.
 func WithWebshareCountry(apiKey string, countries ...string) ClientOption {
 	return withWebshareCountryURL(apiKey, "", countries...)
 }
@@ -26,12 +29,16 @@ func withWebshareCountryURL(apiKey, baseURL string, countries ...string) ClientO
 			return
 		}
 		c.proxyPool = pool
+		c.poolCloser = pool
 	}
 }
 
 // WithWebshareRotating creates a Webshare rotating-endpoint proxy pool without
 // calling the Webshare API. Uses username-CC-rotate syntax.
 // Defaults to ["US"] when no countries are given.
+//
+// The client owns the pool this option builds (BrowserClient.Close releases
+// it); a rotating pool runs no refresher, so closing it is a no-op today.
 func WithWebshareRotating(username, password string, countries ...string) ClientOption {
 	return func(c *clientConfig) {
 		pool, err := proxypool.NewWebshareRotating(username, password, countries...)
@@ -40,5 +47,6 @@ func WithWebshareRotating(username, password string, countries ...string) Client
 			return
 		}
 		c.proxyPool = pool
+		c.poolCloser = pool
 	}
 }

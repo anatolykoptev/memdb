@@ -99,13 +99,13 @@ func (rt *roundTripper) CloseIdleConnections() {
 }
 
 func (rt *roundTripper) getHttp3Settings() map[uint64]uint64 {
-	if rt.http3Settings == nil || len(rt.http3Settings) == 0 {
+	if len(rt.http3Settings) == 0 {
 		return nil
 	}
 
 	// Build settings in the correct order
 	orderedSettings := make(map[uint64]uint64)
-	if rt.http3SettingsOrder != nil && len(rt.http3SettingsOrder) > 0 {
+	if len(rt.http3SettingsOrder) > 0 {
 		for _, id := range rt.http3SettingsOrder {
 			if val, ok := rt.http3Settings[id]; ok {
 				orderedSettings[id] = val
@@ -125,6 +125,7 @@ func buildHTTP3Transport(cfg *http3Config) (http.RoundTripper, error) {
 	}
 	if cfg.transportOptions != nil {
 		utlsConfig.RootCAs = cfg.transportOptions.RootCAs
+		utlsConfig.Certificates = cfg.transportOptions.Certificates
 	}
 
 	if cfg.serverNameOverwrite != "" {
@@ -159,7 +160,7 @@ func buildHTTP3Transport(cfg *http3Config) (http.RoundTripper, error) {
 		http3Settings[greaseID] = greaseValue
 
 		// Set the order if available, and append GREASE at the end
-		if cfg.http3SettingsOrder != nil && len(cfg.http3SettingsOrder) > 0 {
+		if len(cfg.http3SettingsOrder) > 0 {
 			orderWithGrease := make([]uint64, len(cfg.http3SettingsOrder)+1)
 			copy(orderWithGrease, cfg.http3SettingsOrder)
 			orderWithGrease[len(cfg.http3SettingsOrder)] = greaseID
@@ -167,14 +168,14 @@ func buildHTTP3Transport(cfg *http3Config) (http.RoundTripper, error) {
 		}
 	} else {
 		// Just use the settings order as-is without random GREASE
-		if cfg.http3SettingsOrder != nil && len(cfg.http3SettingsOrder) > 0 {
+		if len(cfg.http3SettingsOrder) > 0 {
 			t3.AdditionalSettingsOrder = cfg.http3SettingsOrder
 		}
 	}
 
 	t3.AdditionalSettings = http3Settings
 
-	if cfg.http3PseudoHeaderOrder != nil && len(cfg.http3PseudoHeaderOrder) > 0 {
+	if len(cfg.http3PseudoHeaderOrder) > 0 {
 		t3.PseudoHeaderOrder = cfg.http3PseudoHeaderOrder
 	}
 
@@ -193,19 +194,24 @@ func buildHTTP3Transport(cfg *http3Config) (http.RoundTripper, error) {
 
 		if maxResponseHeaderBytes > 0 {
 			t3.MaxResponseHeaderBytes = maxResponseHeaderBytes
-		} else if maxResponseHeaderBytes == 0 {
-			// Chrome's default MAX_FIELD_SECTION_SIZE
-			t3.MaxResponseHeaderBytes = CHROME_MAX_FIELD_SECTION_SIZE
-		} else {
+		} else if maxResponseHeaderBytes < 0 {
 			// -1 means don't send SETTINGS_MAX_FIELD_SECTION_SIZE (Firefox behavior)
 			t3.MaxResponseHeaderBytes = -1
+		} else {
+			t3.MaxResponseHeaderBytes = profileDefaultMaxResponseHeaderBytes(cfg)
 		}
 	} else {
-		// Chrome's default MAX_FIELD_SECTION_SIZE
-		t3.MaxResponseHeaderBytes = CHROME_MAX_FIELD_SECTION_SIZE
+		t3.MaxResponseHeaderBytes = profileDefaultMaxResponseHeaderBytes(cfg)
 	}
 
 	return t3, nil
+}
+
+func profileDefaultMaxResponseHeaderBytes(cfg *http3Config) int {
+	if cfg.http3PriorityParam > 0 {
+		return CHROME_MAX_FIELD_SECTION_SIZE
+	}
+	return -1
 }
 
 func (rt *roundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -295,6 +301,7 @@ func (rt *roundTripper) dialTLS(ctx context.Context, network, addr string) (net.
 	if rt.transportOptions != nil {
 		tlsConfig.RootCAs = rt.transportOptions.RootCAs
 		tlsConfig.KeyLogWriter = rt.transportOptions.KeyLogWriter
+		tlsConfig.Certificates = rt.transportOptions.Certificates
 	}
 
 	rawConn = rt.bandwidthTracker.TrackConnection(ctx, rawConn)
@@ -309,6 +316,7 @@ func (rt *roundTripper) dialTLS(ctx context.Context, network, addr string) (net.
 	err = rt.certificatePinner.Pin(conn, host)
 
 	if err != nil {
+		_ = conn.Close()
 		return nil, err
 	}
 
@@ -324,6 +332,7 @@ func (rt *roundTripper) dialTLS(ctx context.Context, network, addr string) (net.
 		utlsConfig := &tls.Config{ClientSessionCache: rt.clientSessionCache, InsecureSkipVerify: rt.insecureSkipVerify, OmitEmptyPsk: true}
 		if rt.transportOptions != nil {
 			utlsConfig.RootCAs = rt.transportOptions.RootCAs
+			utlsConfig.Certificates = rt.transportOptions.Certificates
 		}
 
 		if rt.serverNameOverwrite != "" {
@@ -439,6 +448,7 @@ func (rt *roundTripper) buildHttp1Transport() *http.Transport {
 	utlsConfig := &tls.Config{ClientSessionCache: rt.clientSessionCache, InsecureSkipVerify: rt.insecureSkipVerify, OmitEmptyPsk: true}
 	if rt.transportOptions != nil {
 		utlsConfig.RootCAs = rt.transportOptions.RootCAs
+		utlsConfig.Certificates = rt.transportOptions.Certificates
 	}
 
 	if rt.serverNameOverwrite != "" {
@@ -509,6 +519,7 @@ func (rt *roundTripper) dialTLSForWebsocket(ctx context.Context, network, addr s
 	if rt.transportOptions != nil {
 		tlsConfig.RootCAs = rt.transportOptions.RootCAs
 		tlsConfig.KeyLogWriter = rt.transportOptions.KeyLogWriter
+		tlsConfig.Certificates = rt.transportOptions.Certificates
 	}
 
 	rawConn = rt.bandwidthTracker.TrackConnection(ctx, rawConn)
@@ -531,11 +542,11 @@ func (rt *roundTripper) dialTLSForWebsocket(ctx context.Context, network, addr s
 
 func (rt *roundTripper) getDialTLSAddr(req *http.Request) string {
 	host := req.URL.Hostname()
-    port := req.URL.Port()
-    if port != "" {
-        return net.JoinHostPort(host, port)
-    }
-    return net.JoinHostPort(host, "443")
+	port := req.URL.Port()
+	if port != "" {
+		return net.JoinHostPort(host, port)
+	}
+	return net.JoinHostPort(host, "443")
 }
 
 func newRoundTripper(clientProfile profiles.ClientProfile, transportOptions *TransportOptions, serverNameOverwrite string, insecureSkipVerify bool, withRandomTlsExtensionOrder bool, forceHttp1 bool, disableHttp3 bool, enableH3Racing bool, certificatePins map[string][]string, badPinHandlerFunc BadPinHandlerFunc, disableIPV6 bool, disableIPV4 bool, bandwidthTracker bandwidth.BandwidthTracker, dialer ...proxy.ContextDialer) (http.RoundTripper, error) {

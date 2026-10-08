@@ -310,7 +310,14 @@ func (j *JinaRerankClient) doRequest(ctx context.Context, bodyBytes []byte) (*ji
 	if err != nil {
 		return nil, fmt.Errorf("jina: http request: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("jina: response body close failed",
+				slog.String("url", jinaEndpoint),
+				slog.Any("error", err),
+			)
+		}
+	}()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, jinaRespBodyLimit))
 	if err != nil {

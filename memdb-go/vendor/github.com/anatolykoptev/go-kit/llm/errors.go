@@ -10,6 +10,13 @@ import (
 	"time"
 )
 
+// ErrNoValidAPIKey is returned when a call is attempted with no usable API
+// key configured — the primary apiKey is empty, every fallback key is empty,
+// and no endpoint chain (each endpoint carries its own key) is configured.
+// Surfacing this explicitly avoids an opaque 401/403 from the upstream after
+// the empty-key attempts are silently skipped by the fallback loop.
+var ErrNoValidAPIKey = errors.New("llm: no valid API key configured")
+
 // APIError is a structured error returned by LLM API calls.
 // Use errors.As to extract status code, body, and error type from callers.
 type APIError struct {

@@ -30,6 +30,27 @@ func (e *CloudflareError) Error() string {
 
 // DetectCloudflare inspects a Response for Cloudflare challenge markers.
 // Returns nil if the response is not a Cloudflare challenge.
+//
+// Signal precedence (under the server~cloudflare gate):
+//  1. Block markers (any status) — a block page that also mentions
+//     challenge-platform or carries cf-mitigated must stay a block, not be
+//     promoted to a solvable challenge.
+//  2. cf-mitigated: challenge header (any status) — the documented,
+//     status-independent challenge-page signal. Top precedence among challenge
+//     signals.
+//  3. Body markers (any status): turnstile, then challenge-platform/_cf_chl_opt.
+//
+// Status is a kind hint, not a gate: 200 → ChallengeManagedAt200, otherwise
+// ChallengeJS. The fix is additive (recognise more challenges), never promotive
+// (a 403 WAF block carrying neither cf-mitigated nor block/body markers returns
+// nil — promoting unknown 403s would burn solver time on hard blocks).
+//
+// Cloudflare moved the JS/managed-challenge status from 503 to 403 on
+// 2023-03-01; cf-mitigated: challenge is set on all challenge-page types
+// regardless of status and is the only valid value for that header.
+//   - https://developers.cloudflare.com/cloudflare-challenges/challenge-types/challenge-pages/detect-response/
+//   - https://community.cloudflare.com/t/community-update-status-code-for-javascript-challenge-changing-from-503-to-403/445724
+//   - https://developers.cloudflare.com/rules/custom-errors/reference/error-page-types/
 func DetectCloudflare(resp *Response) *CloudflareError {
 	server := strings.ToLower(resp.Headers["server"])
 	if !strings.Contains(server, "cloudflare") {
@@ -38,37 +59,42 @@ func DetectCloudflare(resp *Response) *CloudflareError {
 
 	body := strings.ToLower(string(resp.Body))
 	rayID := resp.Headers["cf-ray"]
+	cfMitigated := strings.ToLower(resp.Headers["cf-mitigated"])
+	isChallengeHeader := strings.Contains(cfMitigated, "challenge")
 
-	if resp.StatusCode == 403 || resp.StatusCode == 503 {
-		if resp.StatusCode == 503 && strings.Contains(body, "challenge-platform") {
-			return &CloudflareError{Type: ChallengeJS, StatusCode: resp.StatusCode, RayID: rayID}
-		}
-
-		if strings.Contains(body, "turnstile-wrapper") || strings.Contains(body, "cf-turnstile") {
-			return &CloudflareError{Type: ChallengeTurnstile, StatusCode: resp.StatusCode, RayID: rayID}
-		}
-
-		if strings.Contains(body, "you have been blocked") || strings.Contains(body, "cf-error-details") {
-			return &CloudflareError{Type: ChallengeBlock, StatusCode: resp.StatusCode, RayID: rayID}
-		}
-
-		return nil
+	// 1. Block markers take top precedence so a block page that also mentions
+	//    challenge-platform or carries cf-mitigated stays a block.
+	if strings.Contains(body, "you have been blocked") ||
+		strings.Contains(body, "cf-error-details") ||
+		strings.Contains(body, `cf-error-code">1020`) {
+		return &CloudflareError{Type: ChallengeBlock, StatusCode: resp.StatusCode, RayID: rayID}
 	}
 
-	if resp.StatusCode == 200 {
-		cfMitigated := strings.ToLower(resp.Headers["cf-mitigated"])
-		if strings.Contains(cfMitigated, "challenge") {
-			return &CloudflareError{Type: ChallengeManagedAt200, StatusCode: 200, RayID: rayID}
-		}
-		if strings.Contains(body, "cf-turnstile") || strings.Contains(body, "turnstile-wrapper") {
-			return &CloudflareError{Type: ChallengeTurnstile, StatusCode: 200, RayID: rayID}
-		}
-		if strings.Contains(body, "_cf_chl_opt") || strings.Contains(body, "challenge-platform") {
-			return &CloudflareError{Type: ChallengeManagedAt200, StatusCode: 200, RayID: rayID}
-		}
+	// 2. cf-mitigated: challenge — status-independent, documented challenge signal.
+	if isChallengeHeader {
+		return &CloudflareError{Type: challengeKind(resp.StatusCode), StatusCode: resp.StatusCode, RayID: rayID}
+	}
+
+	// 3. Body markers — status-independent. Turnstile before generic challenge.
+	if strings.Contains(body, "turnstile-wrapper") || strings.Contains(body, "cf-turnstile") {
+		return &CloudflareError{Type: ChallengeTurnstile, StatusCode: resp.StatusCode, RayID: rayID}
+	}
+
+	if strings.Contains(body, "challenge-platform") || strings.Contains(body, "_cf_chl_opt") {
+		return &CloudflareError{Type: challengeKind(resp.StatusCode), StatusCode: resp.StatusCode, RayID: rayID}
 	}
 
 	return nil
+}
+
+// challengeKind maps the response status to the challenge kind: 200 is
+// ChallengeManagedAt200 (preserving the legacy 200-branch semantics), any other
+// status is ChallengeJS. Status is a kind hint, not a detection gate.
+func challengeKind(statusCode int) ChallengeType {
+	if statusCode == 200 {
+		return ChallengeManagedAt200
+	}
+	return ChallengeJS
 }
 
 // CloudflareDetectMiddleware inspects responses for Cloudflare challenges.

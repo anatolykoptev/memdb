@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -125,6 +126,19 @@ func (c *Client) rerankInternal(ctx context.Context, query string, docs []Doc, o
 			Scored: pass(),
 			Status: StatusSkipped,
 			Model:  c.cfgModel(),
+		}
+	}
+
+	// Deferred auth validation: WithRequireAuth asks for a non-empty token
+	// but NewClient cannot return a construction error (it returns *Client),
+	// so the check happens here, on the first real call. DryRun above is
+	// intentionally exempt (wiring tests without a server).
+	if c.cfg != nil && c.cfg.requireAuth && strings.TrimSpace(c.cfg.apiKey) == "" {
+		return &Result{
+			Scored: pass(),
+			Status: StatusDegraded,
+			Model:  c.cfgModel(),
+			Err:    ErrNoToken,
 		}
 	}
 

@@ -1,22 +1,28 @@
 package proxypool
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 )
 
+// errorBodyLimit bounds the API error body copied into the returned error —
+// the refresher hits this endpoint periodically, so an unbounded body cannot
+// be allowed to grow the error (and its log lines) without limit.
+const errorBodyLimit = 64 << 10
+
 // fetchAllProxies retrieves all pages from the Webshare API.
 // It stops after webshareMaxPages pages to guard against infinite loops.
-func fetchAllProxies(apiKey string, cfg WebshareConfig) ([]webshareProxy, error) {
+func fetchAllProxies(ctx context.Context, apiKey string, cfg WebshareConfig) ([]webshareProxy, error) {
 	firstURL := buildAPIURL(cfg)
 	client := cfg.HTTPClient
 
 	var all []webshareProxy
 	nextURL := firstURL
 	for range webshareMaxPages {
-		page, next, err := fetchPageWithNext(client, nextURL, apiKey)
+		page, next, err := fetchPageWithNext(ctx, client, nextURL, apiKey)
 		if err != nil {
 			return nil, err
 		}
@@ -34,14 +40,14 @@ func fetchAllProxies(apiKey string, cfg WebshareConfig) ([]webshareProxy, error)
 }
 
 // fetchPage fetches a single API page and returns raw proxy entries (no next link).
-func fetchPage(client *http.Client, apiURL, apiKey string) ([]webshareProxy, error) {
-	proxies, _, err := fetchPageWithNext(client, apiURL, apiKey)
+func fetchPage(ctx context.Context, client *http.Client, apiURL, apiKey string) ([]webshareProxy, error) {
+	proxies, _, err := fetchPageWithNext(ctx, client, apiURL, apiKey)
 	return proxies, err
 }
 
 // fetchPageWithNext fetches one page and returns proxies + the next-page URL (empty if none).
-func fetchPageWithNext(client *http.Client, apiURL, apiKey string) ([]webshareProxy, string, error) {
-	req, err := http.NewRequest(http.MethodGet, apiURL, nil)
+func fetchPageWithNext(ctx context.Context, client *http.Client, apiURL, apiKey string) ([]webshareProxy, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("proxy: build request: %w", err)
 	}
@@ -54,7 +60,7 @@ func fetchPageWithNext(client *http.Client, apiURL, apiKey string) ([]websharePr
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, errorBodyLimit))
 		return nil, "", fmt.Errorf("proxy: webshare API returned %d: %s", resp.StatusCode, string(body))
 	}
 

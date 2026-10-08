@@ -1,9 +1,9 @@
 package stealth
 
 import (
-	"math"
-	"math/rand"
 	"time"
+
+	"github.com/anatolykoptev/go-kit/pacing"
 )
 
 // BackoffConfig defines exponential backoff parameters with jitter.
@@ -22,12 +22,8 @@ var DefaultBackoff = BackoffConfig{
 	JitterPct:   0.3,
 }
 
-// Duration returns the backoff delay for the given attempt (0-indexed).
+// Duration returns the backoff delay for the given attempt (0-indexed),
+// delegating to pacing.ExponentialBackoff for the canonical jitter calculation.
 func (b BackoffConfig) Duration(attempt int) time.Duration {
-	base := float64(b.InitialWait) * math.Pow(b.Multiplier, float64(attempt))
-	if base > float64(b.MaxWait) {
-		base = float64(b.MaxWait)
-	}
-	jitter := base * b.JitterPct * (2*rand.Float64() - 1)
-	return max(time.Duration(base+jitter), 0)
+	return pacing.ExponentialBackoff(b.InitialWait, b.MaxWait, b.Multiplier, b.JitterPct, attempt)
 }

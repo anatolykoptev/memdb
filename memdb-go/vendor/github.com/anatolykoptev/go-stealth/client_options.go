@@ -3,6 +3,7 @@ package stealth
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -14,7 +15,9 @@ type ClientOption func(*clientConfig)
 type clientConfig struct {
 	proxyURL           string
 	proxyPool          ProxyPoolProvider
+	poolCloser         io.Closer // set only when an option created the pool itself (client-owned; caller-supplied pools are never closed)
 	profile            TLSProfile
+	identity           *BrowserIdentity
 	timeout            int
 	headerOrder        []string
 	followRedirs       bool
@@ -38,6 +41,18 @@ type clientConfig struct {
 
 func defaultConfig() *clientConfig {
 	return &clientConfig{
+		// The default profile stays ProfileChrome131, NOT the newest Chrome
+		// profile, on purpose. go-stealth's default profile is an implicit
+		// cross-repo contract: consumers that call NewClient() with no
+		// WithProfile pair this default JA3 with their OWN hardcoded
+		// User-Agent (e.g. go-twitter pins DefaultUserAgent to Chrome/131 and
+		// rides the bare default on its guest/pool path). Bumping the library
+		// default to a newer Chrome profile without bumping every consumer's
+		// hardcoded UA in lockstep produces a Chrome/<old> UA over a
+		// Chrome_<new> JA3 — the exact UA<->JA3 mismatch this package exists
+		// to eliminate. The newer Chrome profiles (144/146) remain available
+		// via explicit WithProfile; flip this default only in the same
+		// coordinated change that bumps every consumer's pinned UA.
 		profile:         ProfileChrome131,
 		timeout:         20,
 		dialControl:     defaultDenyDial,
@@ -57,6 +72,28 @@ func WithProxy(url string) ClientOption {
 func WithProfile(p TLSProfile) ClientOption {
 	return func(c *clientConfig) {
 		c.profile = p
+	}
+}
+
+// WithIdentity sets the browser identity — TLS profile and User-Agent (plus
+// Client Hints) — together, so they can never be configured apart and drift.
+// The identity's TLSProfile is installed as the backend's fingerprint, and
+// Identity() returns the supplied identity verbatim. If ClientHints is nil
+// for a Chromium UA, it is derived from the User-Agent via ClientHintsHeaders
+// so the identity the client reports is always complete.
+//
+// WithIdentity and WithProfile may both be passed; WithIdentity wins for the
+// profile (it sets c.profile too) and supplies the UA, which WithProfile
+// alone cannot do. Use WithIdentity when the caller already holds a
+// BrowserProfile from RandomProfile/PlatformMatchedProfile and wants the
+// client's reported identity to match exactly.
+func WithIdentity(id BrowserIdentity) ClientOption {
+	return func(c *clientConfig) {
+		if id.ClientHints == nil {
+			id.ClientHints = ClientHintsHeaders(id.UserAgent)
+		}
+		c.identity = &id
+		c.profile = id.TLSProfile
 	}
 }
 

@@ -3,7 +3,9 @@ package sparse
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -25,6 +27,16 @@ func NewClient(url string, opts ...Opt) (*Client, error) {
 		if tok := os.Getenv("EMBED_TOKEN"); tok != "" {
 			cfg.httpBearerToken = tok
 		}
+	}
+	// Auth validation: trim whitespace so a blank EMBED_TOKEN is treated as
+	// no token. With WithRequireAuth, fail fast at construction. Without
+	// it, log an Info line so misconfiguration is observable but backward
+	// compatibility (self-hosted backends without auth) is preserved.
+	if strings.TrimSpace(cfg.httpBearerToken) == "" {
+		if cfg.requireAuth {
+			return nil, ErrNoToken
+		}
+		slog.Info("sparse: no auth token configured — assuming self-hosted backend without auth")
 	}
 	return newClientFromInternal(cfg)
 }

@@ -30,3 +30,12 @@ type errHTTPStatus struct {
 func (e *errHTTPStatus) Error() string {
 	return fmt.Sprintf("status %d: %s", e.Code, e.Body)
 }
+
+// ErrNoToken is returned by NewClient when WithRequireAuth was set and no
+// bearer token is configured (neither an explicit opt nor the EMBED_TOKEN
+// env var, or the value is whitespace-only).
+//
+// Lets callers fail fast at construction time instead of receiving a 401
+// at the first sparse-embed call. Without WithRequireAuth, an empty token
+// is silently accepted (intended for self-hosted backends without auth).
+var ErrNoToken = errors.New("sparse: auth required but no token configured")

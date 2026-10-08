@@ -4,10 +4,11 @@ package retry
 import (
 	"context"
 	"errors"
-	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/anatolykoptev/go-kit/pacing"
 )
 
 // Default retry constants.
@@ -57,10 +58,9 @@ func (o *Options) applyDefaults() {
 	}
 }
 
-// applyJitter adds ±25% random variation to a delay.
+// applyJitter adds ±25% random variation to a delay via pacing.SymmetricJitter.
 func applyJitter(d time.Duration) time.Duration {
-	quarter := int64(d) / 4 //nolint:mnd // ±25% jitter
-	return time.Duration(int64(d) - quarter + rand.Int64N(2*quarter+1))
+	return pacing.SymmetricJitter(d, 0.25) //nolint:mnd // ±25% jitter
 }
 
 // waitWithContext waits for the given delay, respecting context cancellation.

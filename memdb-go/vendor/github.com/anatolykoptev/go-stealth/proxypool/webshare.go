@@ -1,12 +1,16 @@
 package proxypool
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // WebshareMode controls how proxy URLs are constructed and which endpoint is used.
@@ -24,6 +28,9 @@ const (
 // WebshareConfig holds options for NewWebshareWithConfig.
 // Countries: ISO-2 codes, empty = ["US"]. Mode: default ModeBackbone.
 // PageSize: default 100. BaseURL: override for tests (query params still appended).
+// RefreshInterval: periodic credential re-fetch, default 15min (with ±25%
+// jitter); a negative value disables periodic refresh. RefreshMinGap: minimum
+// gap between 407-triggered refreshes, default 1min.
 type WebshareConfig struct {
 	Countries  []string
 	Mode       WebshareMode
@@ -31,12 +38,34 @@ type WebshareConfig struct {
 	HTTPClient *http.Client
 	BaseURL    string
 	Logger     *slog.Logger
+
+	RefreshInterval time.Duration
+	RefreshMinGap   time.Duration
 }
 
 // Webshare implements ProxyPool using the Webshare API.
 type Webshare struct {
-	proxies []string
+	proxies atomic.Pointer[[]string] // current URL list; swapped atomically on refresh
 	counter atomic.Uint64
+
+	logger   *slog.Logger
+	fetch    func(ctx context.Context) ([]string, error) // nil = refresh unsupported (static creds)
+	interval time.Duration
+	minGap   time.Duration
+
+	sf          singleflight.Group // collapses concurrent refreshes into one fetch
+	triggerMu   sync.Mutex         // guards lastTrigger + closed + trigger-side wg.Add
+	lastTrigger time.Time
+	closed      bool
+
+	authFailures    atomic.Uint64
+	refreshOK       atomic.Uint64
+	refreshErrs     atomic.Uint64
+	lastRefreshNano atomic.Int64
+
+	stop context.CancelFunc // nil when refresh was never wired
+	ctx  context.Context    // cancelled by stop; carried into in-flight fetches
+	wg   sync.WaitGroup     // refresher loop + in-flight triggered refreshes
 }
 
 type webshareResponse struct {
@@ -75,17 +104,25 @@ func NewWebshareWithConfig(apiKey string, cfg WebshareConfig) (*Webshare, error)
 	if cfg.Mode == ModeRotating {
 		return buildRotatingFromAPI(apiKey, cfg, cfg.Logger)
 	}
-	proxies, err := fetchAllProxies(apiKey, cfg)
+	fetch := func(ctx context.Context) ([]string, error) {
+		proxies, err := fetchAllProxies(ctx, apiKey, cfg)
+		if err != nil {
+			return nil, err
+		}
+		return injectCountryModifiers(proxies, cfg.Countries, cfg.Mode), nil
+	}
+	result, err := fetch(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	result := injectCountryModifiers(proxies, cfg.Countries, cfg.Mode)
 	cfg.Logger.Info("proxy pool initialized",
 		slog.Int("count", len(result)),
 		slog.Any("countries", cfg.Countries),
 		slog.String("mode", modeString(cfg.Mode)),
 	)
-	return &Webshare{proxies: result}, nil
+	w := newWebsharePool(result, cfg.Logger)
+	w.enableRefresh(cfg, fetch)
+	return w, nil
 }
 
 // NewWebshareRotating builds a rotating pool without API calls (zero network).
@@ -101,11 +138,7 @@ func NewWebshareRotating(username, password string, countries ...string) (*Websh
 		return nil, err
 	}
 
-	proxies := make([]string, 0, len(deduped))
-	for _, c := range deduped {
-		u := fmt.Sprintf("http://%s-%s-rotate:%s@%s:80", username, c, password, webshareDefaultHost)
-		proxies = append(proxies, u)
-	}
+	proxies := rotatingURLs(username, password, deduped)
 
 	slog.Default().Info("proxy pool initialized",
 		slog.Int("count", len(proxies)),
@@ -113,7 +146,8 @@ func NewWebshareRotating(username, password string, countries ...string) (*Websh
 		slog.String("mode", "rotating"),
 	)
 
-	return &Webshare{proxies: proxies}, nil
+	// Static credentials — no API access, so no refresh is wired.
+	return newWebsharePool(proxies, slog.Default()), nil
 }
 
 // newWebshareFromURL is an internal helper used by legacy tests.
@@ -124,7 +158,7 @@ func newWebshareFromURL(apiURL, apiKey string) (*Webshare, error) {
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	proxies, err := fetchPage(client, apiURL, apiKey)
+	proxies, err := fetchPage(context.Background(), client, apiURL, apiKey)
 	if err != nil {
 		return nil, err
 	}
@@ -142,24 +176,25 @@ func newWebshareFromURL(apiURL, apiKey string) (*Webshare, error) {
 	}
 
 	slog.Info("proxy pool initialized", slog.Int("count", len(result)))
-	return &Webshare{proxies: result}, nil
+	return newWebsharePool(result, slog.Default()), nil
 }
 
 // buildRotatingFromAPI fetches credentials from one API page, then builds rotating URLs.
 func buildRotatingFromAPI(apiKey string, cfg WebshareConfig, logger *slog.Logger) (*Webshare, error) {
-	onePageURL := buildBaseURL(cfg.BaseURL) + "?mode=backbone&page_size=1"
-	page, err := fetchPage(cfg.HTTPClient, onePageURL, apiKey)
-	if err != nil {
-		return nil, err
-	}
-	if len(page) == 0 {
-		return nil, fmt.Errorf("proxy: webshare returned 0 proxies for rotating credentials")
+	fetch := func(ctx context.Context) ([]string, error) {
+		page, err := fetchPage(ctx, cfg.HTTPClient, buildBaseURL(cfg.BaseURL)+"?mode=backbone&page_size=1", apiKey)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			return nil, fmt.Errorf("proxy: webshare returned 0 proxies for rotating credentials")
+		}
+		return rotatingURLs(page[0].Username, page[0].Password, cfg.Countries), nil
 	}
 
-	proxies := make([]string, 0, len(cfg.Countries))
-	for _, c := range cfg.Countries {
-		u := fmt.Sprintf("http://%s-%s-rotate:%s@%s:80", page[0].Username, c, page[0].Password, webshareDefaultHost)
-		proxies = append(proxies, u)
+	proxies, err := fetch(context.Background())
+	if err != nil {
+		return nil, err
 	}
 
 	logger.Info("proxy pool initialized",
@@ -167,21 +202,53 @@ func buildRotatingFromAPI(apiKey string, cfg WebshareConfig, logger *slog.Logger
 		slog.Any("countries", cfg.Countries),
 		slog.String("mode", "rotating"),
 	)
-	return &Webshare{proxies: proxies}, nil
+	w := newWebsharePool(proxies, logger)
+	w.enableRefresh(cfg, fetch)
+	return w, nil
+}
+
+// rotatingURLs builds one username-CC-rotate URL per country for the
+// shared-gateway rotating endpoint.
+func rotatingURLs(username, password string, countries []string) []string {
+	urls := make([]string, 0, len(countries))
+	for _, c := range countries {
+		urls = append(urls, fmt.Sprintf("http://%s-%s-rotate:%s@%s:80", username, c, password, webshareDefaultHost))
+	}
+	return urls
+}
+
+// newWebsharePool stores the initial list atomically and attaches a logger.
+func newWebsharePool(list []string, logger *slog.Logger) *Webshare {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	w := &Webshare{logger: logger, ctx: context.Background()}
+	w.setProxies(list)
+	return w
+}
+
+func (w *Webshare) setProxies(list []string) { w.proxies.Store(&list) }
+
+func (w *Webshare) loadProxies() []string {
+	if p := w.proxies.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 // Next returns the next proxy URL in round-robin order.
 func (w *Webshare) Next() string {
-	if len(w.proxies) == 0 {
+	list := w.loadProxies()
+	if len(list) == 0 {
 		return ""
 	}
-	idx := w.counter.Add(1) % uint64(len(w.proxies))
-	return w.proxies[idx]
+	idx := w.counter.Add(1) % uint64(len(list))
+	return list[idx]
 }
 
 // Len returns the number of proxies in the pool.
 func (w *Webshare) Len() int {
-	return len(w.proxies)
+	return len(w.loadProxies())
 }
 
 // TransportProxy returns a function suitable for http.Transport.Proxy.
