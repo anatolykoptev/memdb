@@ -39,7 +39,8 @@ func runHTTP(ctx context.Context, server *mcp.Server, port string, logger *slog.
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return server
 	}, &mcp.StreamableHTTPOptions{
-		Stateless: true,
+		Stateless:      false,
+		SessionTimeout: 10 * time.Minute,
 	})
 
 	mux := http.NewServeMux()
