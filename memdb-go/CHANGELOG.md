@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.5](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.4...memdb-go/v0.23.5) (2026-10-08)
+
+
+### Bug Fixes
+
+* **mcp:** enable stateful sessions for standalone GET stream ([#429](https://github.com/anatolykoptev/memdb/issues/429)) ([55759a6](https://github.com/anatolykoptev/memdb/commit/55759a691a1377fa096ea3965f5febd9c457b01e))
+
 ## [0.23.4](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.3...memdb-go/v0.23.4) (2026-10-06)
 
 
