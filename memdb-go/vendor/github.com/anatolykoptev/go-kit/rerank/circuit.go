@@ -195,3 +195,14 @@ func makeCircuitHook(model string, obs Observer) func(CircuitState, CircuitState
 		safeCall(func() { obs.OnCircuitTransition(context.Background(), from, to) })
 	}
 }
+
+// ErrNoToken is returned by Rerank/RerankWithResult when WithRequireAuth was
+// set at construction and no API key is configured (neither WithAPIKey nor
+// the EMBED_TOKEN env var, or the value is whitespace-only).
+//
+// rerank.NewClient cannot return a construction error without a breaking
+// signature change (it returns *Client, not (*Client, error)), so the
+// check is deferred to the first call. Without WithRequireAuth, an empty
+// token is silently accepted (intended for self-hosted backends without
+// auth).
+var ErrNoToken = errors.New("rerank: auth required but no token configured")

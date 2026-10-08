@@ -50,6 +50,21 @@ func newTLSClientBackend(cfg BackendConfig) (HTTPDoer, error) {
 		opts = append(opts, tls_client.WithProxyUrl(cfg.ProxyURL))
 	}
 
+	// Chrome 133's pinned tls-client profile advertises h3 in ALPN and ALPS
+	// (profiles.Chrome_133, internal_browser_profiles.go:655-659/637-639), but
+	// real Chrome 133 on a cold connection — no prior Alt-Svc — advertises only
+	// h2 + http/1.1; h3 is discovered via Alt-Svc on later visits. The other
+	// Chrome profiles (131/144/146) already omit h3. WithDisableHttp3 strips h3
+	// from both the ALPN and ALPS extensions in the ClientHello
+	// (utls u_parrots.go:3278-3303), matching the cold-connection reference
+	// (testdata/reference_chrome_133.json ja4 t13d1516h2_…). It also disables
+	// h3 transport racing, which go-stealth does not use. Skipped when the
+	// caller explicitly opted into HTTP/3 (WithHTTP3): a warm connection
+	// legitimately advertises h3.
+	if cfg.Profile == ProfileChrome133 && !cfg.HTTP3 {
+		opts = append(opts, tls_client.WithDisableHttp3())
+	}
+
 	client, err := tls_client.NewHttpClient(nil, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("tls-client init: %w", err)
@@ -159,7 +174,11 @@ func (t *tlsClientDoer) GetCookieValue(rawURL, name string) string {
 var profileMap = map[TLSProfile]profiles.ClientProfile{
 	ProfileChrome131:   profiles.Chrome_131,
 	ProfileChrome133:   profiles.Chrome_133,
+	ProfileChrome144:   profiles.Chrome_144,
+	ProfileChrome146:   profiles.Chrome_146,
 	ProfileFirefox133:  profiles.Firefox_133,
+	ProfileFirefox148:  profiles.Firefox_148,
+	ProfileBrave146:    profiles.Brave_146,
 	ProfileSafari16:    profiles.Safari_16_0,
 	ProfileSafariIOS18: profiles.Safari_IOS_18_0,
 	ProfileSafariIOS17: profiles.Safari_IOS_17_0,

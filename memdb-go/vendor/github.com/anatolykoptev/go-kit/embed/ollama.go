@@ -191,7 +191,14 @@ func (c *OllamaClient) embedRaw(ctx context.Context, input []string) ([][]float3
 		if err != nil {
 			return nil, 0, fmt.Errorf("ollama: http request to %s: %w", url, err)
 		}
-		defer resp.Body.Close() //nolint:errcheck
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				slog.Warn("ollama: response body close failed",
+					slog.String("url", url),
+					slog.Any("error", err),
+				)
+			}
+		}()
 
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {

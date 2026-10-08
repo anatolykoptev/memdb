@@ -1,6 +1,9 @@
 package embed
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // ErrDimMismatch is returned by [Client.Embed] / [Client.EmbedQuery] /
 // [Client.EmbedWithResult] when the backend returns a vector whose length
@@ -38,3 +41,13 @@ type ErrDimMismatch struct {
 func (e *ErrDimMismatch) Error() string {
 	return fmt.Sprintf("embed: dimension mismatch (model=%q got=%d want=%d index=%d)", e.Model, e.Got, e.Want, e.Index)
 }
+
+// ErrNoToken is returned by NewClient when WithRequireAuth was set and no
+// bearer token is configured (neither an explicit opt nor the EMBED_TOKEN
+// env var, or the value is whitespace-only).
+//
+// This lets callers fail fast at construction time instead of receiving a
+// confusing 401 at the first embed call. Without WithRequireAuth, an empty
+// token is silently accepted (intended for self-hosted backends without
+// auth).
+var ErrNoToken = errors.New("embed: auth required but no token configured")

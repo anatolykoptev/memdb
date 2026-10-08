@@ -53,6 +53,12 @@ type cfgInternal struct {
 	// HTTP-specific
 	httpBearerToken string
 
+	// requireAuth, when set via WithRequireAuth, makes NewClient return
+	// ErrNoToken at construction time if no bearer token is configured
+	// (explicit opt or EMBED_TOKEN env). False = backward compatible
+	// (empty token silently accepted for self-hosted backends).
+	requireAuth bool
+
 	// Caller-supplied embedder (e.g. *onnx.Embedder from embed/onnx, or any
 	// custom implementation). When non-nil, takes precedence over backend
 	// factory dispatch — NewClient returns it directly. This allows ONNX
@@ -129,6 +135,18 @@ func WithLogger(l *slog.Logger) Opt {
 			c.logger = l
 		}
 	}
+}
+
+// WithRequireAuth makes NewClient validate that a bearer token is
+// configured at construction time. When set and the token is empty or
+// whitespace-only (no explicit opt and EMBED_TOKEN unset/blank), NewClient
+// returns ErrNoToken instead of building a client that would 401 at call
+// time.
+//
+// Without this option, an empty token is silently accepted — the intended
+// behavior for self-hosted backends that do not require auth.
+func WithRequireAuth() Opt {
+	return func(c *cfgInternal) { c.requireAuth = true }
 }
 
 // --- Backend selectors ---

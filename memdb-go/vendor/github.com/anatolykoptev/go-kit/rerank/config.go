@@ -30,6 +30,12 @@ type cfgInternal struct {
 	sourceWeights    map[string]float32 // per-source score multiplier; nil = disabled
 	// G4 fields
 	cache Cache // nil = disabled; caller wires Redis/LRU/sync.Map per runtime
+
+	// requireAuth, when set via WithRequireAuth, makes the Client return
+	// ErrNoToken from Rerank/RerankWithResult if no API key is configured
+	// (WithAPIKey or EMBED_TOKEN env). False = backward compatible.
+	// Deferred to first call because NewClient returns *Client (no error).
+	requireAuth bool
 }
 
 // Opt is a functional option for NewClient.
@@ -58,6 +64,18 @@ func WithModel(model string) Opt {
 // WithAPIKey sets the Bearer token for hosted reranker providers (e.g. Cohere).
 func WithAPIKey(key string) Opt {
 	return func(c *cfgInternal) { c.apiKey = key }
+}
+
+// WithRequireAuth makes the Client validate that an API key is configured
+// and return ErrNoToken from Rerank/RerankWithResult when it is missing
+// (no WithAPIKey and EMBED_TOKEN unset/blank, or whitespace-only).
+//
+// rerank.NewClient returns *Client (not (*Client, error)), so unlike
+// embed/sparse the check cannot happen at construction — it is deferred to
+// the first call. Without this option, an empty token is silently accepted
+// (intended for self-hosted backends without auth).
+func WithRequireAuth() Opt {
+	return func(c *cfgInternal) { c.requireAuth = true }
 }
 
 // WithTimeout sets the per-request HTTP timeout applied via context.WithTimeout.

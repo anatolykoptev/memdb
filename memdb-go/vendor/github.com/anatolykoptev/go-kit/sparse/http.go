@@ -268,7 +268,14 @@ func (h *HTTPSparseEmbedder) EmbedSparse(ctx context.Context, texts []string) ([
 		if doErr != nil {
 			return nil, 0, fmt.Errorf("http sparse: request: %w", doErr)
 		}
-		defer resp.Body.Close() //nolint:errcheck
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				slog.Warn("http sparse: response body close failed",
+					slog.String("url", url),
+					slog.Any("error", err),
+				)
+			}
+		}()
 
 		rb, readErr := io.ReadAll(io.LimitReader(resp.Body, httpSparseRespBodyLimit))
 		if readErr != nil {

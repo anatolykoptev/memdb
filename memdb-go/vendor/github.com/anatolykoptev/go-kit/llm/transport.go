@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"time"
@@ -69,7 +70,14 @@ func (c *Client) doRequest(ctx context.Context, baseURL, apiKey string, req *Cha
 	if err != nil {
 		return nil, fmt.Errorf("http request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("llm: response body close failed",
+				slog.String("url", baseURL+"/chat/completions"),
+				slog.Any("error", err),
+			)
+		}
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -200,13 +208,14 @@ func (c *Client) attemptEndpoint(ctx context.Context, ep Endpoint, req *ChatRequ
 	var cancelAttempt context.CancelFunc
 	if c.perAttemptTimeout > 0 {
 		attemptCtx, cancelAttempt = context.WithTimeout(ctx, c.perAttemptTimeout)
+		// Deferred cancel guarantees the child context (and its timer goroutine)
+		// is released even if doWithRetry panics — a non-deferred call would be
+		// skipped during a panic unwind, leaking the context.WithTimeout timer.
+		defer cancelAttempt()
 	}
 
 	result, err := c.doWithRetry(attemptCtx, ep.URL, ep.Key, &epReq)
 
-	if cancelAttempt != nil {
-		cancelAttempt()
-	}
 	// Served-model attribution: the model that returned the 200 is this
 	// endpoint's effective model. Set here (the single "try one endpoint"
 	// authority) so BOTH the chain loop and the never-fail-closed race guard
@@ -223,7 +232,28 @@ func (c *Client) attemptEndpoint(ctx context.Context, ep Endpoint, req *ChatRequ
 	return result, err
 }
 
+// hasNonEmptyFallbackKey reports whether any of the fallback keys is non-empty.
+func hasNonEmptyFallbackKey(keys []string) bool {
+	for _, k := range keys {
+		if k != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Client) executeInner(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
+	// No-endpoint path guard: when no endpoint chain is configured (each
+	// endpoint carries its own key), the only keys available are c.apiKey and
+	// c.fallbackKeys. If ALL of them are empty, every doWithRetry attempt would
+	// fire with an empty Bearer token → an opaque 401/403, and the fallback loop
+	// silently skips empty keys via `if key == "" { continue }`, leaving the
+	// caller with that opaque auth error. Fail fast with a clear sentinel
+	// instead. The endpoint-chain path is unaffected: each endpoint has its own
+	// ep.Key validated separately.
+	if len(c.endpoints) == 0 && c.apiKey == "" && !hasNonEmptyFallbackKey(c.fallbackKeys) {
+		return nil, ErrNoValidAPIKey
+	}
 	if len(c.endpoints) > 0 {
 		var lastErr error
 		attempted := false

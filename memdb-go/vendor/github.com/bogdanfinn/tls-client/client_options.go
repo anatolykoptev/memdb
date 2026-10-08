@@ -1,7 +1,9 @@
 package tls_client
 
 import (
+	"context"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -9,6 +11,7 @@ import (
 
 	http "github.com/bogdanfinn/fhttp"
 	"github.com/bogdanfinn/tls-client/profiles"
+	tls "github.com/bogdanfinn/utls"
 	"golang.org/x/net/proxy"
 )
 
@@ -25,6 +28,7 @@ type TransportOptions struct {
 	// RootCAs is the set of root certificate authorities used to verify
 	// the remote server's certificate.
 	RootCAs                *x509.CertPool
+	Certificates           []tls.Certificate
 	MaxIdleConns           int
 	MaxIdleConnsPerHost    int
 	MaxConnsPerHost        int
@@ -40,6 +44,26 @@ type (
 	ProxyDialerFactory func(proxyUrlStr string, timeout time.Duration, localAddr *net.TCPAddr, connectHeaders http.Header, logger Logger) (proxy.ContextDialer, error)
 )
 
+// ErrContinueHooks can be returned (or wrapped) by a PreRequestHookFunc to signal that
+// the error should be logged but hook execution should continue to the next hook.
+// By default any error returned from a hook aborts subsequent hooks and the request.
+var ErrContinueHooks = errors.New("continue hooks")
+
+// PreRequestHookFunc is called before each request is sent.
+// Return an error to abort the request, or wrap ErrContinueHooks to log and continue.
+type PreRequestHookFunc func(req *http.Request) error
+
+// PostResponseContext contains response metadata for PostHook handlers.
+type PostResponseContext struct {
+	Request  *http.Request
+	Response *http.Response
+	Error    error // Non-nil if request failed
+}
+
+// PostResponseHookFunc is called after each request completes.
+// Return an error to abort subsequent hooks, or wrap ErrContinueHooks to log and continue.
+type PostResponseHookFunc func(ctx *PostResponseContext) error
+
 type httpClientConfig struct {
 	cookieJar          http.CookieJar
 	customRedirectFunc func(req *http.Request, via []*http.Request) error
@@ -51,6 +75,7 @@ type httpClientConfig struct {
 	localAddr          *net.TCPAddr
 
 	dialer             net.Dialer
+	dialContext        func(ctx context.Context, network, addr string) (net.Conn, error)
 	proxyDialerFactory ProxyDialerFactory
 
 	proxyUrl                    string
@@ -72,7 +97,9 @@ type httpClientConfig struct {
 	disableIPV4 bool
 
 	enabledBandwidthTracker bool
-	euckrResponse           bool
+
+	preHooks  []PreRequestHookFunc
+	postHooks []PostResponseHookFunc
 }
 
 // WithProxyUrl configures an HTTP client to use the specified proxy URL.
@@ -113,9 +140,14 @@ func WithCookieJar(jar http.CookieJar) HttpClientOption {
 	}
 }
 
-// WithTimeoutMilliseconds configures an HTTP client to use the specified request timeout.
+// WithTimeoutMilliseconds configures a hard deadline for the entire request lifecycle.
 //
-// timeout is the request timeout in milliseconds.
+// This includes connection time, redirects, and reading the response body.
+// WARNING: If the timer expires, the connection is forcibly closed, even if you are
+// actively downloading data.
+//
+// - Use 0 to disable the deadline (Unlimited) for large downloads or long-polling.
+// - Default is 30000 milliseconds (30 seconds).
 func WithTimeoutMilliseconds(timeout int) HttpClientOption {
 	return func(config *httpClientConfig) {
 		config.timeout = time.Millisecond * time.Duration(timeout)
@@ -136,9 +168,14 @@ func WithProxyDialerFactory(proxyDialerFactory ProxyDialerFactory) HttpClientOpt
 	}
 }
 
-// WithTimeoutSeconds configures an HTTP client to use the specified request timeout.
+// WithTimeoutSeconds configures a hard deadline for the entire request lifecycle.
 //
-// timeout is the request timeout in seconds.
+// This includes connection time, redirects, and reading the response body.
+// WARNING: If the timer expires, the connection is forcibly closed, even if you are
+// actively downloading data.
+//
+// - Use 0 to disable the deadline (Unlimited) for large downloads or long-polling.
+// - Default is 30 seconds.
 func WithTimeoutSeconds(timeout int) HttpClientOption {
 	return func(config *httpClientConfig) {
 		config.timeout = time.Second * time.Duration(timeout)
@@ -302,8 +339,31 @@ func WithConnectHeaders(headers http.Header) HttpClientOption {
 	}
 }
 
-func WithEnableEuckrResponse() HttpClientOption {
+// WithPreHook adds a pre-request hook that is called before each request is sent.
+// Multiple hooks can be added and they will be executed in the order they were added.
+// If any hook returns an error, the request is aborted and subsequent hooks are not called.
+func WithPreHook(hook PreRequestHookFunc) HttpClientOption {
 	return func(config *httpClientConfig) {
-		config.euckrResponse = true
+		config.preHooks = append(config.preHooks, hook)
+	}
+}
+
+// WithPostHook adds a post-response hook that is called after each request completes.
+// Multiple hooks can be added and they will be executed in the order they were added.
+// All hooks are always executed, even if the request failed or a previous hook panicked.
+func WithPostHook(hook PostResponseHookFunc) HttpClientOption {
+	return func(config *httpClientConfig) {
+		config.postHooks = append(config.postHooks, hook)
+	}
+}
+
+// WithDialContext sets a custom dialer for TCP connections, allowing advanced networking
+// (Zero-DNS, socket tagging, DPI bypass).
+//
+// WARNING: This overrides built-in proxy settings. If you need a proxy, you must handle the CONNECT handshake manually.
+// CHECK: https://github.com/bogdanfinn/tls-client/pull/218#issuecomment-3858171801
+func WithDialContext(dialContext func(ctx context.Context, network, addr string) (net.Conn, error)) HttpClientOption {
+	return func(config *httpClientConfig) {
+		config.dialContext = dialContext
 	}
 }

@@ -112,7 +112,14 @@ func (v *VoyageClient) doRequest(ctx context.Context, bodyBytes []byte, texts []
 	if err != nil {
 		return nil, 0, fmt.Errorf("voyage: http request: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("voyage: response body close failed",
+				slog.String("url", voyageEndpoint),
+				slog.Any("error", err),
+			)
+		}
+	}()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

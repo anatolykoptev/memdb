@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 )
 
@@ -80,7 +81,14 @@ func (c *Client) callCohere(ctx context.Context, query string, docs []string) (*
 	if err != nil {
 		return nil, fmt.Errorf("do: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("rerank: response body close failed",
+				slog.String("url", c.cfg.url+"/v1/rerank"),
+				slog.Any("error", err),
+			)
+		}
+	}()
 
 	if resp.StatusCode/100 != 2 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, respBodyLimit))

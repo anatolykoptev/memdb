@@ -35,6 +35,13 @@ func applyConfigDefaults(cfg *WebshareConfig) error {
 		cfg.Logger = slog.Default()
 	}
 
+	if cfg.RefreshInterval == 0 {
+		cfg.RefreshInterval = defaultRefreshInterval
+	}
+	if cfg.RefreshMinGap <= 0 {
+		cfg.RefreshMinGap = defaultRefreshMinGap
+	}
+
 	return nil
 }
 

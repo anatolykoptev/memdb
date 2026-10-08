@@ -238,7 +238,14 @@ func (v *VoyageRerankClient) doRequest(ctx context.Context, bodyBytes []byte) (*
 	if err != nil {
 		return nil, fmt.Errorf("voyage: http request: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Warn("voyage: response body close failed",
+				slog.String("url", voyageRerankEndpoint),
+				slog.Any("error", err),
+			)
+		}
+	}()
 
 	if resp.StatusCode/100 != 2 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, respBodyLimit))

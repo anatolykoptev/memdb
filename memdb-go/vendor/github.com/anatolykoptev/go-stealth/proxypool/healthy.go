@@ -158,6 +158,15 @@ func (hp *HealthyProxyPool) RecordFailure(proxy string, latency time.Duration) {
 	recordFailureToStore(hp.store, proxy, latency, hp.config)
 }
 
+// ReportAuthFailure forwards a proxy auth failure (HTTP 407) to the wrapped
+// pool when it supports reacting to one (e.g. *Webshare refreshing its
+// credentials). Pools without support are unaffected.
+func (hp *HealthyProxyPool) ReportAuthFailure() {
+	if r, ok := hp.pool.(AuthFailureReporter); ok {
+		r.ReportAuthFailure()
+	}
+}
+
 // Stats returns a snapshot of health stats for all tracked proxies.
 func (hp *HealthyProxyPool) Stats() map[string]ProxyHealth {
 	hp.mu.Lock()

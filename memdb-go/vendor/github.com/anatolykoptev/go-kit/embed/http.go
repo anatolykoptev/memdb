@@ -135,7 +135,14 @@ func (h *HTTPEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 		if doErr != nil {
 			return nil, 0, fmt.Errorf("http embedder: request: %w", doErr)
 		}
-		defer resp.Body.Close() //nolint:errcheck
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				slog.Warn("http embedder: response body close failed",
+					slog.String("url", url),
+					slog.Any("error", err),
+				)
+			}
+		}()
 
 		rb, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
