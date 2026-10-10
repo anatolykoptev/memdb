@@ -7,14 +7,28 @@ import (
 	"log/slog"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // RegisterCubeTools registers create_cube, list_cubes, delete_cube, and get_user_cubes.
 // All tools call db.Postgres directly — no HTTP round-trip.
 func RegisterCubeTools(server *mcp.Server, pg *db.Postgres, logger *slog.Logger) {
+	// create_cube's settings field is map[string]any: inference emits
+	// additionalProperties:true — a bare JSON boolean that dict-typed MCP
+	// clients (e.g. the Python SDK) reject in tools/list. Dropping the keyword
+	// keeps the same "unconstrained" semantics while staying a schema object.
+	createCubeSchema, err := jsonschema.For[CreateCubeInput](nil)
+	if err != nil {
+		panic(fmt.Sprintf("create_cube input schema: %v", err))
+	}
+	if settings := createCubeSchema.Properties["settings"]; settings != nil {
+		settings.AdditionalProperties = nil
+	}
+
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_cube",
+		InputSchema: createCubeSchema,
 		Description: "Create a new memory cube for a user. Idempotent: calling with the same cube_id updates metadata without changing the owner.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input CreateCubeInput) (*mcp.CallToolResult, TextResult, error) {
 		return handleCreateCube(ctx, pg, input)
