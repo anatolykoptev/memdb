@@ -18,21 +18,20 @@ import (
 // truncated list must fail the schema gate, not pass it.
 const mcpRegisteredToolCount = 14
 
-// newTestMCPServer builds the MCP server with the same Register* calls as
-// cmd/mcp-server/main.go. nil pg/qd are safe: registration only captures them
-// in handler closures; no handler is invoked by ListTools.
+// newTestMCPServer builds the MCP server via the same RegisterAll used by
+// cmd/mcp-server/main.go — the registered set cannot drift between production
+// and this gate. nil pg/qd are safe: registration only captures them in
+// handler closures; no handler is invoked by ListTools.
 func newTestMCPServer(t *testing.T) *mcp.Server {
 	t.Helper()
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "memdb-mcp",
 		Version: "0.22.0",
 	}, nil)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	RegisterSearchTool(server, "http://127.0.0.1:1", "", logger)
-	RegisterMemoryTools(server, nil, nil, logger)
-	RegisterUserTools(server, nil, logger)
-	RegisterCubeTools(server, nil, logger)
-	RegisterNativeGoProxyTools(server, "http://127.0.0.1:1", "", logger)
+	RegisterAll(server, Deps{
+		MemDBGoURL: "http://127.0.0.1:1",
+		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
 	return server
 }
 
