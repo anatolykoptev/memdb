@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.6](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.5...memdb-go/v0.23.6) (2026-10-10)
+
+
+### Bug Fixes
+
+* **mcp:** stop advertising boolean JSON Schemas in tools/list ([#432](https://github.com/anatolykoptev/memdb/issues/432)) ([062f728](https://github.com/anatolykoptev/memdb/commit/062f728814baf7b7a88ad847bd4e1db5196aaf10))
+
 ## [0.23.5](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.4...memdb-go/v0.23.5) (2026-10-08)
 
 
