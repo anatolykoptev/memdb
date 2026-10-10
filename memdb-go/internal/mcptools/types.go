@@ -67,7 +67,7 @@ type ProxyInput map[string]any
 
 // TextResult is a generic text output for MCP tools.
 type TextResult struct {
-	Result any `json:"result"`
+	Result any `json:"result" jsonschema:"Arbitrary result payload returned by the tool"`
 }
 
 // --- Proxy tool inputs (typed for proper JSON Schema generation) ---

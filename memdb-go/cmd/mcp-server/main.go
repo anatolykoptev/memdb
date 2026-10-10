@@ -96,11 +96,13 @@ func main() {
 		memdbGoURL = cfg.PythonBackendURL
 		logger.Warn("MEMDB_GO_URL not set, search will proxy to python backend")
 	}
-	mcptools.RegisterSearchTool(server, memdbGoURL, cfg.InternalServiceSecret, logger)
-	mcptools.RegisterMemoryTools(server, pg, qd, logger)
-	mcptools.RegisterUserTools(server, pg, logger)
-	mcptools.RegisterCubeTools(server, pg, logger)
-	mcptools.RegisterNativeGoProxyTools(server, memdbGoURL, cfg.InternalServiceSecret, logger)
+	mcptools.RegisterAll(server, mcptools.Deps{
+		PG:            pg,
+		QD:            qd,
+		MemDBGoURL:    memdbGoURL,
+		ServiceSecret: cfg.InternalServiceSecret,
+		Logger:        logger,
+	})
 
 	const mcpNativeToolCount = 10 // search + get_memory + delete_memory + delete_all_memories + create_user + get_user_info + create_cube + list_cubes + delete_cube + get_user_cubes
 	const mcpGoProxyToolCount = 4 // update_memory, add_memory, chat, clear_chat_history → memdb-go native backend
