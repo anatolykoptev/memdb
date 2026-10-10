@@ -359,6 +359,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [memdb-go/v0.23.6] — 2026-10-10
+
+### [0.23.6](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.5...memdb-go/v0.23.6) (2026-10-10)
+
+### Bug Fixes
+
+* **mcp:** stop advertising boolean JSON Schemas in tools/list ([#432](https://github.com/anatolykoptev/memdb/issues/432)) ([062f728](https://github.com/anatolykoptev/memdb/commit/062f728814baf7b7a88ad847bd4e1db5196aaf10))
+
 ## [memdb-go/v0.23.5] — 2026-10-08
 
 ### [0.23.5](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.4...memdb-go/v0.23.5) (2026-10-08)
@@ -840,7 +848,8 @@ Initial public release. Baseline for changelog. See
 [docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md) for the detailed history
 of Python → Go migration phases 1–4.5 that preceded this tag.
 
-[Unreleased]: https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.5...HEAD
+[Unreleased]: https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.6...HEAD
+[memdb-go/v0.23.6]: https://github.com/anatolykoptev/memdb/releases/tag/memdb-go/v0.23.6
 [memdb-go/v0.23.5]: https://github.com/anatolykoptev/memdb/releases/tag/memdb-go/v0.23.5
 [0.23.0]: https://github.com/anatolykoptev/memdb/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/anatolykoptev/memdb/compare/v2.2.0...v0.22.0
