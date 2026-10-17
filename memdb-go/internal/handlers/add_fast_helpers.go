@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -52,6 +53,9 @@ func mergeInfo(base map[string]any, hash string) map[string]any {
 }
 
 // embedSingle embeds a single text, returning the embedding vector.
+// Returns an error if the embedder returns a zero vector — pgvector
+// cosine distance (<=>) yields NaN for zero vectors, which breaks
+// downstream dedup (NaN < threshold is always false → false duplicate).
 func (h *Handler) embedSingle(ctx context.Context, text string) ([]float32, error) {
 	embeddings, err := h.embedder.Embed(ctx, []string{text})
 	if err != nil {
@@ -60,7 +64,29 @@ func (h *Handler) embedSingle(ctx context.Context, text string) ([]float32, erro
 	if len(embeddings) == 0 || len(embeddings[0]) == 0 {
 		return nil, errors.New("embedder returned empty result")
 	}
-	return embeddings[0], nil
+	vec := embeddings[0]
+	if isZeroVector(vec) {
+		return nil, fmt.Errorf("embedder returned zero vector for text %q: downstream cosine dedup would produce NaN", text)
+	}
+	return vec, nil
+}
+
+// isZeroVector returns true if every element of vec is 0.0 (or vec is
+// empty). A zero vector has no direction → pgvector <=> returns NaN →
+// all score-based comparisons (dedup, structural edges, rerank) break.
+// The ONNX embedder returns zero vectors when all texts tokenize to
+// zero length (onnx.go:171); this guard prevents them from entering
+// the DB where they would silently corrupt dedup.
+func isZeroVector(vec []float32) bool {
+	if len(vec) == 0 {
+		return true
+	}
+	for _, v := range vec {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // isDuplicate returns true if a near-duplicate already exists in the DB.
@@ -90,6 +116,16 @@ func (h *Handler) isDuplicate(ctx context.Context, embedding []float32, cubeID, 
 	}
 	sessionAware := sessionID != "" && fastDedupSessionAware()
 	for _, r := range results {
+		// NaN guard: pgvector <=> returns NaN when the stored embedding
+		// is a zero vector (e.g. ONNX embedder fell back to zero on
+		// empty tokenization). NaN < threshold is false in Go, so
+		// without this guard the loop would treat a NaN-scored row as
+		// a duplicate and silently drop the insert. Treat NaN/Inf as
+		// "not a match" and break — results are sorted desc, so a NaN
+		// at this position means the rest is garbage too.
+		if math.IsNaN(r.Score) || math.IsInf(r.Score, 0) {
+			break
+		}
 		if r.Score < threshold {
 			break // sorted desc; remaining are below threshold
 		}

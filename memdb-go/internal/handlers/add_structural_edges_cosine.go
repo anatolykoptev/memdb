@@ -8,6 +8,7 @@ package handlers
 import (
 	"context"
 	"log/slog"
+	"math"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/db"
 )
@@ -63,7 +64,10 @@ func buildSimilarCosineEdgesFromResults(newID string, results []db.VectorSearchR
 		}
 		// Half-open interval: skip near-duplicates that the dedup pass already
 		// rejected, and skip uninteresting low-similarity neighbours.
-		if r.Score <= lo || r.Score >= hi {
+		// NaN guard: zero-vector embeddings produce NaN cosine scores;
+		// without this check NaN would pass both <= and >= (both false)
+		// and create an edge with NaN confidence.
+		if math.IsNaN(r.Score) || math.IsInf(r.Score, 0) || r.Score <= lo || r.Score >= hi {
 			continue
 		}
 		edges = append(edges, db.MemoryEdgeRow{
