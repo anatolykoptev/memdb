@@ -29,8 +29,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anatolykoptev/go-kit/skills"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
-	"github.com/anatolykoptev/skillkit"
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -96,7 +96,7 @@ func validateISODates(ctx context.Context, in []string) []string {
 //go:embed skills/atomic-extractor.md
 var embeddedAtomicSkillRaw string
 
-// atomicSkill is the singleton skillkit.Embedded for the mem0
+// atomicSkill is the singleton skills.Embedded for the mem0
 // ADDITIVE_EXTRACTION_PROMPT used by ExtractAtomicFacts. The .md file
 // is the single source of truth, embedded into the binary; operators
 // can override at runtime via MEMDB_ATOMIC_SKILL_PATH for hot-reload
@@ -112,9 +112,9 @@ var embeddedAtomicSkillRaw string
 //
 // Always returns non-empty. Package init panics if embedded body is
 // empty after frontmatter strip (build-time invariant).
-var atomicSkill = skillkit.NewEmbedded("atomic-extractor", "MEMDB_ATOMIC_SKILL_PATH", embeddedAtomicSkillRaw,
-	skillkit.WithObserver(observability.SkillkitObserver()),
-	skillkit.WithTracer(observability.SkillkitTracer()),
+var atomicSkill = skills.NewEmbedded("atomic-extractor", "MEMDB_ATOMIC_SKILL_PATH", embeddedAtomicSkillRaw,
+	skills.WithObserver(observability.SkillkitObserver()),
+	skills.WithTracer(observability.SkillkitTracer()),
 )
 
 // AtomicSkillBody returns the live atomic-extractor prompt body. Used by

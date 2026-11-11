@@ -26,7 +26,7 @@ type Jitter struct {
 	Max time.Duration
 }
 
-// DefaultJitter is 500ms–2.5s, suitable for most scraping. Callers with tighter
+// DefaultJitter is 500ms–2.5s, suitable for most page fetching. Callers with tighter
 // or looser human-pace requirements should construct their own Jitter.
 var DefaultJitter = Jitter{
 	Min: 500 * time.Millisecond,

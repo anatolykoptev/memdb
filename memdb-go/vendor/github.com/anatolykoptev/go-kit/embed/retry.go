@@ -3,11 +3,12 @@ package embed
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math"
 	"math/rand/v2"
 	"net/http"
 	"time"
+
+	"github.com/anatolykoptev/go-kit/retry"
 )
 
 // RetryPolicy controls how many times and how quickly the embed backend is
@@ -143,7 +144,7 @@ func do[T any](ctx context.Context, p RetryPolicy, model string, obs Observer, f
 				if !timer.Stop() {
 					<-timer.C
 				}
-				return result, ctx.Err()
+				return result, retry.WrapContextErr(ctx, attempt+1, err)
 			case <-timer.C:
 			}
 		}
@@ -228,7 +229,7 @@ func withRetry[T any](ctx context.Context, cfg retryConfig, fn func() (T, int, e
 
 		select {
 		case <-ctx.Done():
-			return zero, fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			return zero, retry.WrapContextErr(ctx, attempt, err)
 		case <-time.After(delay):
 		}
 

@@ -5,6 +5,8 @@ import (
 	"math"
 	"math/rand/v2"
 	"time"
+
+	"github.com/anatolykoptev/go-kit/retry"
 )
 
 // RetryPolicy controls how many times and how quickly callCohere is retried
@@ -133,7 +135,7 @@ func do[T any](ctx context.Context, p RetryPolicy, model string, obs Observer, f
 		if sleep > 0 {
 			select {
 			case <-ctx.Done():
-				return result, ctx.Err()
+				return result, retry.WrapContextErr(ctx, attempt+1, err)
 			case <-time.After(sleep):
 			}
 		}

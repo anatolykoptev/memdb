@@ -3,10 +3,11 @@ package sparse
 import (
 	"context"
 	"errors"
-	"fmt"
 	"math/rand/v2"
 	"net/http"
 	"time"
+
+	"github.com/anatolykoptev/go-kit/retry"
 )
 
 // RetryConfig holds exponential backoff parameters for sparse retries.
@@ -124,7 +125,7 @@ func withRetry[T any](ctx context.Context, cfg RetryConfig, backend string, obs 
 		sleep := applyJitter(delay, cfg.Jitter)
 		select {
 		case <-ctx.Done():
-			return zero, fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			return zero, retry.WrapContextErr(ctx, attempt, err)
 		case <-time.After(sleep):
 		}
 

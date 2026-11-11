@@ -2,7 +2,7 @@ package search
 
 // skill_loader.go — D10 system-prompt loader with locale routing.
 //
-// Backed by github.com/anatolykoptev/skillkit (v0.2.0+). Three embedded
+// Backed by github.com/anatolykoptev/go-kit/skills. Three embedded
 // SKILL.md files (en, ru, zh) are the single source of truth; operators
 // may override each variant independently at runtime via its own env var
 // for hot-reload during prompt iteration without a rebuild + redeploy cycle.
@@ -33,8 +33,8 @@ import (
 	"context"
 	_ "embed"
 
+	"github.com/anatolykoptev/go-kit/skills"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
-	"github.com/anatolykoptev/skillkit"
 )
 
 //go:embed skills/d10-extractor.md
@@ -47,7 +47,7 @@ var embeddedD10SkillRU string
 var embeddedD10SkillZH string
 
 // d10SkillsByLocale routes D10 prompt selection by locale. Each entry
-// is a separate skillkit.Embedded instance with its own //go:embed
+// is a separate skills.Embedded instance with its own //go:embed
 // raw, env-override path, mtime cache, and Observer wiring. Per-locale
 // env override allows operators to hot-reload one variant independently
 // of the others.
@@ -55,27 +55,27 @@ var embeddedD10SkillZH string
 // Skill name attribute per instance is suffixed with the locale for
 // separate Prometheus counters (d10-extractor, d10-extractor-ru,
 // d10-extractor-zh). The "name" label feeds into observability/metrics.
-var d10SkillsByLocale = map[string]*skillkit.Embedded{
-	"en": skillkit.NewEmbedded(
+var d10SkillsByLocale = map[string]*skills.Embedded{
+	"en": skills.NewEmbedded(
 		"d10-extractor",
 		"MEMDB_D10_SKILL_PATH",
 		embeddedD10SkillEN,
-		skillkit.WithObserver(observability.SkillkitObserver()),
-		skillkit.WithTracer(observability.SkillkitTracer()),
+		skills.WithObserver(observability.SkillkitObserver()),
+		skills.WithTracer(observability.SkillkitTracer()),
 	),
-	"ru": skillkit.NewEmbedded(
+	"ru": skills.NewEmbedded(
 		"d10-extractor-ru",
 		"MEMDB_D10_SKILL_PATH_RU",
 		embeddedD10SkillRU,
-		skillkit.WithObserver(observability.SkillkitObserver()),
-		skillkit.WithTracer(observability.SkillkitTracer()),
+		skills.WithObserver(observability.SkillkitObserver()),
+		skills.WithTracer(observability.SkillkitTracer()),
 	),
-	"zh": skillkit.NewEmbedded(
+	"zh": skills.NewEmbedded(
 		"d10-extractor-zh",
 		"MEMDB_D10_SKILL_PATH_ZH",
 		embeddedD10SkillZH,
-		skillkit.WithObserver(observability.SkillkitObserver()),
-		skillkit.WithTracer(observability.SkillkitTracer()),
+		skills.WithObserver(observability.SkillkitObserver()),
+		skills.WithTracer(observability.SkillkitTracer()),
 	),
 }
 

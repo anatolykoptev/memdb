@@ -29,6 +29,8 @@ typedef struct {
   void *FreeGPUAllocation;
   void *GetD3D12ResourceFromAllocation;
   void *SessionOptionsAppendExecutionProvider_DML2;
+  void *GetDMLDevice;
+  void *GetDMLCommandQueue;
 } DummyOrtDMLAPI;
 
 int SetAPIFromBase(OrtApiBase *api_base) {
@@ -222,6 +224,94 @@ OrtStatus *AppendExecutionProvider(OrtSessionOptions *o,
     keys, values, num_keys);
 }
 
+OrtStatus *SetOptimizedModelFilePath(OrtSessionOptions *o,
+  char *path) {
+  return ort_api->SetOptimizedModelFilePath(o, (const ORTCHAR_T*) path);
+}
+
+OrtStatus *EnableProfiling(OrtSessionOptions *o, char *path) {
+  return ort_api->EnableProfiling(o, (const ORTCHAR_T*) path);
+}
+
+OrtStatus *DisableProfiling(OrtSessionOptions *o) {
+  return ort_api->DisableProfiling(o);
+}
+
+OrtStatus *RegisterExecutionProviderLibrary(OrtEnv *env,
+  const char *registration_name, char *path) {
+  return ort_api->RegisterExecutionProviderLibrary(env, registration_name,
+    (const ORTCHAR_T *) path);
+}
+
+OrtStatus *UnregisterExecutionProviderLibrary(OrtEnv *env,
+  const char *registration_name) {
+  return ort_api->UnregisterExecutionProviderLibrary(env, registration_name);
+}
+
+OrtStatus *RegisterCustomOpsLibraryV2(
+    OrtSessionOptions *o,
+    const char *library_path) {
+    return ort_api->RegisterCustomOpsLibrary_V2(o, library_path);
+}
+
+OrtStatus *GetEpDevices(OrtEnv *env,
+  const OrtEpDevice * const **out_devices, size_t *out_count) {
+  return ort_api->GetEpDevices(env, out_devices, out_count);
+}
+
+const char *EpDeviceEpName(const OrtEpDevice *device) {
+  return ort_api->EpDevice_EpName(device);
+}
+
+const char *EpDeviceEpVendor(const OrtEpDevice *device) {
+  return ort_api->EpDevice_EpVendor(device);
+}
+
+OrtStatus *AppendExecutionProviderV2(OrtSessionOptions *o, OrtEnv *env,
+  const OrtEpDevice * const *ep_devices, size_t num_ep_devices,
+  const char **keys, const char **values, size_t num_keys) {
+  return ort_api->SessionOptionsAppendExecutionProvider_V2(o, env, ep_devices,
+    num_ep_devices, keys, values, num_keys);
+}
+
+OrtStatus *CreateArenaCfg(size_t max_mem, int arena_extend_strategy,
+  int initial_chunk_size_bytes, int max_dead_bytes_per_chunk,
+  OrtArenaCfg **out) {
+  return ort_api->CreateArenaCfg(max_mem, arena_extend_strategy,
+    initial_chunk_size_bytes, max_dead_bytes_per_chunk, out);
+}
+
+OrtStatus *CreateArenaCfgV2(const char *const *arena_config_keys,
+  const size_t *arena_config_values, size_t num_keys, OrtArenaCfg **out) {
+  return ort_api->CreateArenaCfgV2(arena_config_keys, arena_config_values,
+    num_keys, out);
+}
+
+void ReleaseArenaCfg(OrtArenaCfg *ptr) {
+  ort_api->ReleaseArenaCfg(ptr);
+}
+
+OrtStatus *CreateAndRegisterAllocator(OrtEnv *env,
+  const OrtMemoryInfo *mem_info, const OrtArenaCfg *arena_cfg) {
+  return ort_api->CreateAndRegisterAllocator(env, mem_info, arena_cfg);
+}
+
+OrtStatus *CreateAndRegisterAllocatorV2(OrtEnv *env,
+  const char *provider_type, const OrtMemoryInfo *mem_info,
+  const OrtArenaCfg *arena_cfg, const char *const *provider_options_keys,
+  const char *const *provider_options_values, size_t num_keys) {
+  return ort_api->CreateAndRegisterAllocatorV2(env, provider_type, mem_info,
+    arena_cfg, provider_options_keys, provider_options_values, num_keys);
+}
+
+OrtStatus *RegisterAllocator(OrtEnv *env, OrtAllocator *allocator) {
+  return ort_api->RegisterAllocator(env, allocator);
+}
+
+OrtStatus *UnregisterAllocator(OrtEnv *env, const OrtMemoryInfo *mem_info) {
+  return ort_api->UnregisterAllocator(env, mem_info);
+}
+
 OrtStatus *CreateSession(void *model_data, size_t model_data_length,
     OrtEnv *env, OrtSession **out, OrtSessionOptions *options) {
   OrtStatus *status = NULL;
@@ -293,6 +383,34 @@ OrtStatus *RunOptionsSetTerminate(OrtRunOptions *o) {
 
 OrtStatus *RunOptionsUnsetTerminate(OrtRunOptions *o) {
   return ort_api->RunOptionsUnsetTerminate(o);
+}
+
+OrtStatus *AddRunConfigEntry(OrtRunOptions *o, char *key, char *value) {
+  return ort_api->AddRunConfigEntry(o, key, value);
+}
+
+const char *GetRunConfigEntry(OrtRunOptions *o, char *key) {
+  return ort_api->GetRunConfigEntry(o, key);
+}
+
+OrtStatus *CreateLoraAdapter(char *path, OrtAllocator *allocator,
+  OrtLoraAdapter **out) {
+  return ort_api->CreateLoraAdapter((const ORTCHAR_T*) path, allocator, out);
+}
+
+OrtStatus *CreateLoraAdapterFromArray(void *bytes, size_t num_bytes,
+  OrtAllocator *allocator, OrtLoraAdapter **out) {
+  return ort_api->CreateLoraAdapterFromArray(bytes, num_bytes, allocator,
+    out);
+}
+
+void ReleaseLoraAdapter(OrtLoraAdapter *a) {
+  ort_api->ReleaseLoraAdapter(a);
+}
+
+OrtStatus *RunOptionsAddActiveLoraAdapter(OrtRunOptions *o,
+  OrtLoraAdapter *a) {
+  return ort_api->RunOptionsAddActiveLoraAdapter(o, a);
 }
 
 OrtStatus *RunSessionWithBinding(OrtSession *session, OrtIoBinding *b) {
@@ -564,3 +682,43 @@ OrtStatus *GetStringTensorElement(OrtValue *v, size_t buffer_length,
   return ort_api->GetStringTensorElement(v, buffer_length, index, buffer);
 }
 
+OrtStatus *CreateOrtCustomMemoryInfo(char *name, int allocator_type, int id,
+  int mem_type, OrtMemoryInfo **out) {
+  return ort_api->CreateMemoryInfo(name, (enum OrtAllocatorType) allocator_type,
+    id, (enum OrtMemType) mem_type, out);
+}
+
+OrtStatus *CreateOrtAllocator(OrtSession *session, OrtMemoryInfo *mem_info,
+  OrtAllocator **out) {
+  return ort_api->CreateAllocator(session, mem_info, out);
+}
+
+void ReleaseOrtAllocator(OrtAllocator *a) {
+  ort_api->ReleaseAllocator(a);
+}
+
+OrtStatus *GetMemoryInfoName(OrtMemoryInfo *info, const char **name) {
+  return ort_api->MemoryInfoGetName(info, name);
+}
+
+OrtStatus *AllocatorGetStats(OrtAllocator *a, OrtKeyValuePairs **out) {
+  // ort_api->AllocatorGetStats dereferences OrtAllocator::GetStats without
+  // checking it, but that function pointer is optional (see the OrtAllocator
+  // documentation in onnxruntime_c_api.h). Hand back an empty set of entries
+  // for allocators that don't implement it.
+  if (a == NULL || a->GetStats == NULL) {
+    ort_api->CreateKeyValuePairs(out);
+    return NULL;
+  }
+  return ort_api->AllocatorGetStats(a, out);
+}
+
+void GetKeyValuePairs(OrtKeyValuePairs *kvps, char ***keys, char ***values,
+  size_t *num_entries) {
+  ort_api->GetKeyValuePairs(kvps, (const char * const **) keys,
+    (const char * const **) values, num_entries);
+}
+
+void ReleaseKeyValuePairs(OrtKeyValuePairs *kvps) {
+  ort_api->ReleaseKeyValuePairs(kvps);
+}

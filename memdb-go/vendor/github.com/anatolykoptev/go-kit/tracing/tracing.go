@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"sync/atomic"
 	"time"
@@ -131,14 +132,16 @@ func Setup(ctx context.Context, serviceName string, opts ...Option) (ShutdownFun
 		return noopShutdown, nil
 	}
 
-	// WithEndpointURL accepts the canonical OTel env-var format — full URL
-	// like "http://jaeger:4318" or "https://otel.example:4318". Scheme drives
-	// TLS automatically (http=insecure, https=TLS). The legacy
-	// WithEndpoint(host:port) takes bare host and double-prefixes if you
-	// pass it a URL — caused parse errors in the fleet (memdb-go logs:
-	// `traces export: parse "http://http://jaeger:4318/v1/traces"`).
+	// WithEndpointURL takes a full URL ("http://jaeger:4318",
+	// "https://otel.example:4318"); the scheme drives TLS (http=insecure,
+	// https=TLS). Since otlptracehttp 1.45 it uses the URL path verbatim and
+	// no longer appends the signal path, so a pathless URL would POST to "/".
+	// withTracesPath fills in /v1/traces for those, keeping the documented
+	// pathless form working. (The legacy WithEndpoint(host:port) takes a bare
+	// host and double-prefixes a URL, which broke the fleet once: `parse
+	// "http://http://jaeger:4318/v1/traces"`.)
 	exporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpointURL(cfg.endpoint),
+		otlptracehttp.WithEndpointURL(withTracesPath(cfg.endpoint)),
 	)
 	if err != nil {
 		// Tracing is best-effort — degrade gracefully rather than blocking
@@ -167,6 +170,25 @@ func Setup(ctx context.Context, serviceName string, opts ...Option) (ShutdownFun
 	)
 	otel.SetTracerProvider(tp)
 	return tp.Shutdown, nil
+}
+
+// tracesPath is the OTLP/HTTP signal path for traces.
+const tracesPath = "/v1/traces"
+
+// withTracesPath returns endpoint with tracesPath as its path when the path is
+// empty or "/". A URL that already carries a path, and anything url.Parse does
+// not read as scheme plus host (e.g. a bare "host:port"), is returned as is.
+// Scheme and query are preserved.
+func withTracesPath(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return endpoint
+	}
+	if u.Path != "" && u.Path != "/" {
+		return endpoint
+	}
+	u.Path, u.RawPath = tracesPath, ""
+	return u.String()
 }
 
 // Tracer returns a Tracer scoped by name. Convention: pass the service name

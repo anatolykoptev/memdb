@@ -115,7 +115,7 @@ func Do[T any](ctx context.Context, opts Options, fn func() (T, error)) (T, erro
 			actualDelay := retryDelay(delay, lastErr, opts.Jitter)
 			if err := waitWithContext(ctx, actualDelay, opts.Timer); err != nil {
 				var zero T
-				return zero, wrapContextErr(ctx, attempts, lastErr)
+				return zero, WrapContextErr(ctx, attempts, lastErr)
 			}
 			switch opts.Backoff {
 			case BackoffFibonacci:
@@ -150,7 +150,7 @@ func Do[T any](ctx context.Context, opts Options, fn func() (T, error)) (T, erro
 	}
 
 	var zero T
-	return zero, wrapContextErr(ctx, attempts, lastErr)
+	return zero, WrapContextErr(ctx, attempts, lastErr)
 }
 
 // isRetryableStatus reports whether the HTTP status code warrants a retry.

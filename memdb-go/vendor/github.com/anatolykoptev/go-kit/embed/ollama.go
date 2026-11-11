@@ -2,12 +2,23 @@ package embed
 
 // OllamaClient — HTTP client for Ollama /api/embed (batch API, Ollama ≥ 0.3.6).
 //
-// # Compatibility with multilingual-e5-large
+// # Embedder vs storage convention — two separate layers
 //
-// Our reference ONNX embedder runs multilingual-e5-large WITHOUT any prefix —
-// raw text goes directly into the model. The model was fine-tuned to work with
-// "query: " / "passage: " prefixes for retrieval, but in our pipeline we store
-// raw-text embeddings for consistency.
+// The embedder (ONNX runtime or Ollama /api/embed) accepts raw text with no
+// prefix — the model takes whatever bytes it is given. That is a property of
+// the runtime, NOT of the corpus.
+//
+// The *storage convention* for e5-family corpora (multilingual-e5-large and
+// siblings) is the opposite: documents are embedded with the "passage: "
+// prefix and queries with the "query: " prefix. The model was fine-tuned to
+// expect these for retrieval, and the existing resume_vectors / algora corpora
+// in go-job were embedded with "passage: ". A caller that follows the old
+// wording of this comment ("we store raw-text embeddings") writes vectors into
+// a different region of the space — cosine ~0.97 against the stored ones,
+// high enough to look fine and low enough to reorder results. See issue #259.
+//
+// Use the exported [E5PassagePrefix] / [E5QueryPrefix] constants rather than
+// re-typing the string literals: the contract is checkable, not remembered.
 //
 // Ollama models have Modelfile templates that auto-prepend prefixes:
 //   - mxbai-embed-large  → "Represent this sentence for searching relevant passages: "
@@ -20,8 +31,10 @@ package embed
 //
 // Option A (recommended): Use a model whose Modelfile has no prefix template.
 //   - "jeffh/intfloat-multilingual-e5-large" on Ollama hub — same model as ONNX,
-//     no prefix in its Modelfile. Vectors will be identical to ONNX output.
-//   - Requires: WithOllamaDimension(1024) (default), no WithTextPrefix needed.
+//     no prefix in its Modelfile. Vectors will be identical to ONNX output
+//     when the SAME client-side prefix convention is applied (see above).
+//   - Requires: WithOllamaDimension(1024) (default), WithTextPrefix(E5PassagePrefix)
+//     + WithQueryPrefix(E5QueryPrefix) for e5 corpora.
 //
 // Option B: Use mxbai-embed-large but create a custom Modelfile that removes
 //   the prefix template:
@@ -60,6 +73,21 @@ const (
 	ollamaDefaultDim     = 1024
 	ollamaDefaultTimeout = 60 * time.Second
 )
+
+// E5PassagePrefix is the e5-family storage convention for documents
+// (multilingual-e5-large and siblings). The embedder itself accepts raw
+// text; this prefix is the *pipeline* convention the existing corpora
+// (resume_vectors, algora) were embedded with. Use it via
+// WithTextPrefix(E5PassagePrefix) when writing documents that must be
+// retrievable against those corpora. See issue #259.
+const E5PassagePrefix = "passage: "
+
+// E5QueryPrefix is the e5-family retrieval convention for queries. Use it
+// via WithQueryPrefix(E5QueryPrefix) so the query side of retrieval sees
+// the prefix the model was fine-tuned on. Paired with E5PassagePrefix on
+// the storage side; mixing the two (e.g. query prefix on a stored
+// document) silently degrades retrieval — see TestOllamaClient_E5PrefixesNotInterchangeable.
+const E5QueryPrefix = "query: "
 
 // OllamaClient calls the Ollama /api/embed endpoint.
 // Supports batch embedding (multiple texts in one request).
@@ -146,7 +174,30 @@ func NewOllamaClient(baseURL, model string, logger *slog.Logger, opts ...OllamaO
 	for _, opt := range opts {
 		opt(c)
 	}
+	// e5-family models are instruction-tuned for "query: "/"passage: " prefixes.
+	// A missing prefix does not error — retrieval just quietly degrades (cosine
+	// ~0.97 vs 1.0, enough to reorder results). Warn so the silent-degradation
+	// class from issue #259 surfaces at construction, not after a corpus is
+	// written. The caller may still intentionally use raw text (e.g. for a
+	// non-e5 corpus or a custom Modelfile that strips the template); the warning
+	// is informational, not a hard error.
+	if isE5Model(model) && c.textPrefix == "" && c.queryPrefix == "" {
+		c.logger.Warn("ollama embedder: model name suggests the e5 family, which requires "+
+			"\"query: \"/\"passage: \" prefixes for retrieval quality — set "+
+			"WithTextPrefix(E5PassagePrefix) and WithQueryPrefix(E5QueryPrefix), "+
+			"or retrieval against e5 corpora will look plausible but quietly degrade",
+			slog.String("model", model),
+		)
+	}
 	return c
+}
+
+// isE5Model reports whether model name hints at the e5 family
+// (intfloat/multilingual-e5-large and siblings). Match is case-insensitive
+// substring so registry-qualified names (e.g. "jeffh/intfloat-multilingual-e5-large")
+// and Ollama tags (e.g. "multilingual-e5-large:latest") are handled.
+func isE5Model(model string) bool {
+	return strings.Contains(strings.ToLower(model), "e5")
 }
 
 // ollamaEmbedRequest is the request body for POST /api/embed.
@@ -304,5 +355,17 @@ func (c *OllamaClient) Dimension() int {
 // Close is a no-op for the HTTP-based Ollama client.
 func (c *OllamaClient) Close() error { return nil }
 
-// Compile-time interface check.
-var _ Embedder = (*OllamaClient)(nil)
+// MaxBatchSize returns the maximum recommended batch size for Ollama's
+// /api/embed endpoint. Ollama has no hard documented limit, but large batches
+// can timeout on slow hardware; 32 is a safe default that matches the
+// ox-embed-server cap and keeps latency bounded.
+func (c *OllamaClient) MaxBatchSize() int { return ollamaMaxBatch }
+
+// ollamaMaxBatch is the recommended batch size for Ollama /api/embed.
+const ollamaMaxBatch = 32
+
+// Compile-time interface checks.
+var (
+	_ Embedder   = (*OllamaClient)(nil)
+	_ BatchSizer = (*OllamaClient)(nil)
+)

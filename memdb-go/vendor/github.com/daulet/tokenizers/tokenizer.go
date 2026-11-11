@@ -3,19 +3,22 @@ package tokenizers
 // TODO packaging: how do we build the rust lib for distribution?
 
 /*
-#cgo LDFLAGS: -ltokenizers -ldl -lm -lstdc++
+#cgo windows LDFLAGS: -ltokenizers -lm -lstdc++ -lws2_32 -luserenv
+#cgo linux LDFLAGS: -ltokenizers -ldl -lm -lstdc++
+#cgo darwin LDFLAGS: -ltokenizers -ldl -lm -lstdc++
 #include <stdlib.h>
 #include "tokenizers.h"
 
 // Link-time version check: this will fail to link if the library version doesn't match
 // Using a global variable that references the function ensures the linker must resolve it
-extern void tokenizers_version_1_23_0(void);
-void (*tokenizers_version_check)(void) = &tokenizers_version_1_23_0;
+extern void tokenizers_version_1_26_0(void);
+void (*tokenizers_version_check)(void) = &tokenizers_version_1_26_0;
 */
 import "C"
 
 // NOTE: There should be NO space between the comments and the `import "C"` line.
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,10 +26,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 )
 
 const baseURL = "https://huggingface.co"
+const defaultHTTPTimeout = 30 * time.Second
+
+var hfHTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
+var ErrTokenizerClosed = errors.New("tokenizer is nil or closed")
 
 // List of necessary tokenizer files and their mandatory status.
 // True means mandatory, false means optional.
@@ -96,7 +104,7 @@ func FromBytesWithTruncation(data []byte, maxLen uint32, dir TruncationDirection
 	}
 
 	var errPtr *C.char
-	tokenizer := C.tokenizers_from_bytes_with_truncation((*C.uchar)(unsafe.Pointer(&data[0])), C.uint(len(data)), C.uint(maxLen), C.uchar(dir), &errPtr)
+	tokenizer := C.tokenizers_from_bytes_with_truncation((*C.uchar)(unsafe.Pointer(&data[0])), C.uint(len(data)), C.size_t(maxLen), C.uchar(dir), &errPtr)
 	if tokenizer == nil {
 		if errPtr != nil {
 			errStr := C.GoString(errPtr)
@@ -172,30 +180,67 @@ func WithAuthToken(token string) TokenizerConfigOption {
 	}
 }
 
+func normalizeModelID(modelID string) (string, error) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return "", fmt.Errorf("modelID cannot be empty")
+	}
+	if strings.ContainsRune(modelID, '\x00') {
+		return "", fmt.Errorf("modelID contains an invalid null byte")
+	}
+	return modelID, nil
+}
+
+func safeJoinCacheDir(baseDir, modelID string) (string, error) {
+	cleanModelID := filepath.Clean(modelID)
+	if filepath.IsAbs(cleanModelID) {
+		return "", fmt.Errorf("modelID must be relative")
+	}
+	if cleanModelID == ".." || strings.HasPrefix(cleanModelID, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("modelID must not escape cache directory")
+	}
+
+	baseClean := filepath.Clean(baseDir)
+	target := filepath.Join(baseClean, cleanModelID)
+	rel, err := filepath.Rel(baseClean, target)
+	if err != nil {
+		return "", fmt.Errorf("failed to validate cache path: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("modelID must not escape cache directory")
+	}
+
+	return target, nil
+}
+
 // FromPretrained downloads necessary files and initializes the tokenizer.
 // Parameters:
 //   - modelID: The Hugging Face model identifier (e.g., "bert-base-uncased").
-//   - destination: Optional. If provided and not nil, files will be downloaded to this folder.
-//     If nil, a temporary directory will be used.
-//   - authToken: Optional. If provided and not nil, it will be used to authenticate requests.
+//   - WithCacheDir(path): Optional. If provided, files will be downloaded to this folder.
+//   - WithAuthToken(token): Optional. If provided, it will be used to authenticate requests.
 func FromPretrained(modelID string, opts ...TokenizerConfigOption) (*Tokenizer, error) {
 	cfg := &tokenizerConfig{}
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	if strings.TrimSpace(modelID) == "" {
-		return nil, fmt.Errorf("modelID cannot be empty")
+	normalizedModelID, err := normalizeModelID(modelID)
+	if err != nil {
+		return nil, err
 	}
 
 	// Construct the model URL
-	modelURL := fmt.Sprintf("%s/%s/resolve/main", baseURL, modelID)
+	modelURL := fmt.Sprintf("%s/%s/resolve/main", baseURL, normalizedModelID)
 
 	// Determine the download directory
 	var downloadDir string
+	isTempDir := false
 	if cfg.cacheDir != nil {
-		downloadDir = fmt.Sprintf("%s/%s", *cfg.cacheDir, modelID)
+		downloadDir, err = safeJoinCacheDir(*cfg.cacheDir, normalizedModelID)
+		if err != nil {
+			return nil, err
+		}
 		// Create the destination directory if it doesn't exist
-		err := os.MkdirAll(downloadDir, os.ModePerm)
+		err = os.MkdirAll(downloadDir, os.ModePerm)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create destination directory %s: %w", downloadDir, err)
 		}
@@ -206,6 +251,12 @@ func FromPretrained(modelID string, opts ...TokenizerConfigOption) (*Tokenizer, 
 			return nil, fmt.Errorf("error creating temporary directory: %w", err)
 		}
 		downloadDir = tmpDir
+		isTempDir = true
+	}
+	if isTempDir {
+		defer func() {
+			_ = os.RemoveAll(downloadDir)
+		}()
 	}
 
 	var wg sync.WaitGroup
@@ -237,9 +288,6 @@ func FromPretrained(modelID string, opts ...TokenizerConfigOption) (*Tokenizer, 
 	}
 
 	if len(errs) > 0 {
-		if err := os.RemoveAll(downloadDir); err != nil {
-			fmt.Printf("Warning: failed to clean up directory %s: %v\n", downloadDir, err)
-		}
 		return nil, errs[0]
 	}
 
@@ -266,7 +314,7 @@ func downloadFile(url, destination string, authToken *string) error {
 		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", *authToken))
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := hfHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to download from %s: %w", url, err)
 	}
@@ -290,7 +338,6 @@ func downloadFile(url, destination string, authToken *string) error {
 		return fmt.Errorf("failed to write to file %s: %w", destination, err)
 	}
 
-	fmt.Printf("Successfully downloaded %s\n", destination)
 	return nil
 }
 
@@ -344,7 +391,45 @@ func offsetVecToSlice(arrPtr *C.size_t, tokenLength int) []Offset {
 	return slice
 }
 
+func (t *Tokenizer) EncodeErr(str string, addSpecialTokens bool) ([]uint32, []string, error) {
+	if t == nil || t.tokenizer == nil {
+		return nil, nil, ErrTokenizerClosed
+	}
+	cStr := C.CString(str)
+	defer C.free(unsafe.Pointer(cStr))
+	options := encodeOpts{
+		AddSpecialTokens: C.bool(addSpecialTokens),
+		ReturnTokens:     C.bool(true),
+	}
+	res := C.tokenizers_encode(t.tokenizer, cStr, (*C.struct_tokenizers_encode_options)(unsafe.Pointer(&options)))
+	len := int(res.len)
+	if len == 0 {
+		if str == "" {
+			return nil, nil, nil
+		}
+		if res.ids == nil {
+			return nil, nil, fmt.Errorf("failed to encode input")
+		}
+		return nil, nil, nil
+	}
+	defer C.tokenizers_free_buffer(res)
+
+	ids := uintVecToSlice(res.ids, len)
+
+	var tokens []string
+	if res.tokens != nil {
+		tokens = make([]string, len)
+		for i, s := range (*[1 << 30]*C.char)(unsafe.Pointer(res.tokens))[:len:len] {
+			tokens[i] = C.GoString(s)
+		}
+	}
+	return ids, tokens, nil
+}
+
 func (t *Tokenizer) Encode(str string, addSpecialTokens bool) ([]uint32, []string) {
+	if t == nil || t.tokenizer == nil {
+		return nil, nil
+	}
 	cStr := C.CString(str)
 	defer C.free(unsafe.Pointer(cStr))
 	options := encodeOpts{
@@ -367,6 +452,7 @@ func (t *Tokenizer) Encode(str string, addSpecialTokens bool) ([]uint32, []strin
 			tokens[i] = C.GoString(s)
 		}
 	}
+
 	return ids, tokens
 }
 
@@ -410,7 +496,67 @@ func WithReturnOffsets() EncodeOption {
 	}
 }
 
+func (t *Tokenizer) EncodeWithOptionsErr(str string, addSpecialTokens bool, opts ...EncodeOption) (Encoding, error) {
+	if t == nil || t.tokenizer == nil {
+		return Encoding{}, ErrTokenizerClosed
+	}
+	cStr := C.CString(str)
+	defer C.free(unsafe.Pointer(cStr))
+
+	encOptions := encodeOpts{
+		AddSpecialTokens: C.bool(addSpecialTokens),
+	}
+	for _, opt := range opts {
+		opt(&encOptions)
+	}
+
+	res := C.tokenizers_encode(t.tokenizer, cStr, (*C.struct_tokenizers_encode_options)(unsafe.Pointer(&encOptions)))
+	len := int(res.len)
+	if len == 0 {
+		if str == "" {
+			return Encoding{}, nil
+		}
+		if res.ids == nil {
+			return Encoding{}, fmt.Errorf("failed to encode input")
+		}
+		return Encoding{}, nil
+	}
+	defer C.tokenizers_free_buffer(res)
+
+	encoding := Encoding{}
+	encoding.IDs = uintVecToSlice(res.ids, len)
+
+	if encOptions.ReturnTypeIDs && res.type_ids != nil {
+		encoding.TypeIDs = uintVecToSlice(res.type_ids, len)
+	}
+
+	if encOptions.ReturnTokens && res.tokens != nil {
+		tokens := make([]string, len)
+		for i, s := range (*[1 << 30]*C.char)(unsafe.Pointer(res.tokens))[:len:len] {
+			tokens[i] = C.GoString(s)
+		}
+		encoding.Tokens = tokens
+	}
+
+	if encOptions.ReturnSpecialTokensMask && res.special_tokens_mask != nil {
+		encoding.SpecialTokensMask = uintVecToSlice(res.special_tokens_mask, len)
+	}
+
+	if encOptions.ReturnAttentionMask && res.attention_mask != nil {
+		encoding.AttentionMask = uintVecToSlice(res.attention_mask, len)
+	}
+
+	if encOptions.ReturnOffsets && res.offsets != nil {
+		encoding.Offsets = offsetVecToSlice(res.offsets, len)
+	}
+
+	return encoding, nil
+}
+
 func (t *Tokenizer) EncodeWithOptions(str string, addSpecialTokens bool, opts ...EncodeOption) Encoding {
+	if t == nil || t.tokenizer == nil {
+		return Encoding{}
+	}
 	cStr := C.CString(str)
 	defer C.free(unsafe.Pointer(cStr))
 
@@ -458,12 +604,34 @@ func (t *Tokenizer) EncodeWithOptions(str string, addSpecialTokens bool, opts ..
 	return encoding
 }
 
+func (t *Tokenizer) DecodeErr(tokenIDs []uint32, skipSpecialTokens bool) (string, error) {
+	if t == nil || t.tokenizer == nil {
+		return "", ErrTokenizerClosed
+	}
+	if len(tokenIDs) == 0 {
+		return "", nil
+	}
+	len := C.uint(len(tokenIDs))
+	res := C.tokenizers_decode(t.tokenizer, (*C.uint)(unsafe.Pointer(&tokenIDs[0])), len, C.bool(skipSpecialTokens))
+	if res == nil {
+		return "", fmt.Errorf("failed to decode token IDs")
+	}
+	defer C.tokenizers_free_string(res)
+	return C.GoString(res), nil
+}
+
 func (t *Tokenizer) Decode(tokenIDs []uint32, skipSpecialTokens bool) string {
+	if t == nil || t.tokenizer == nil {
+		return ""
+	}
 	if len(tokenIDs) == 0 {
 		return ""
 	}
 	len := C.uint(len(tokenIDs))
 	res := C.tokenizers_decode(t.tokenizer, (*C.uint)(unsafe.Pointer(&tokenIDs[0])), len, C.bool(skipSpecialTokens))
+	if res == nil {
+		return ""
+	}
 	defer C.tokenizers_free_string(res)
 	return C.GoString(res)
 }

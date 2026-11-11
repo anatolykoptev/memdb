@@ -28,3 +28,19 @@ func EmbedQueryViaEmbed(ctx context.Context, e Embedder, text string) ([]float32
 	}
 	return vecs[0], nil
 }
+
+// BatchSizer is an optional interface implemented by embedder backends that
+// know their own optimal batch size — the maximum number of texts the backend
+// accepts in a single Embed call without erroring or degrading.
+//
+// When the inner embedder of a *Client implements BatchSizer, the client's
+// chunking layer uses MaxBatchSize() as the default chunk size instead of the
+// hardcoded defaultChunkSize (32). Explicit overrides (WithChunkSize option,
+// GOKIT_EMBED_CHUNK_SIZE env) still take priority — the backend's self-reported
+// optimum is a default, not a ceiling.
+//
+// Backends that don't implement BatchSizer fall back to defaultChunkSize,
+// preserving existing behaviour.
+type BatchSizer interface {
+	MaxBatchSize() int
+}

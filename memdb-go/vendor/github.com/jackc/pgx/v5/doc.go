@@ -68,11 +68,41 @@ Use [Conn.Exec] to execute a query that does not return a result set.
         return errors.New("No row found to delete")
     }
 
+To match a column against a Go slice, pass the slice as one argument and use
+PostgreSQL's ANY. Bare IN $1 is invalid SQL, and IN ($1) compares against the
+array as a whole rather than its elements.
+
+    ids := []int64{1, 2, 3}
+    rows, _ := conn.Query(ctx, "select * from widgets where id = any($1)", ids)
+
+See https://www.postgresql.org/docs/current/functions-comparisons.html#FUNCTIONS-COMPARISONS-ANY-SOME.
+
 PostgreSQL Data Types
 
 pgx uses the [pgtype] package to converting Go values to and from PostgreSQL values. It supports many PostgreSQL types
 directly and is customizable and extendable. User defined data types such as enums, domains,  and composite types may
 require type registration. See that package's documentation for details.
+
+PostgreSQL arrays (including results from set-returning aggregates such as array_agg)
+can be scanned directly into a matching Go slice. For scalar columns, pass the slice
+as the scan destination:
+
+    var ids []int64
+    err := conn.QueryRow(ctx, "select array_agg(id) from things").Scan(&ids)
+
+For a column that is part of a row, combine the slice with the usual row-to-struct
+helpers. A struct field of slice type will pick up the array_agg column when
+collected via [CollectRows] and [RowToStructByName] (or
+[RowToAddrOfStructByPos]):
+
+    type ThingEntry struct {
+        GroupID  int64
+        ThingIDs []int64 `db:"thing_ids"`
+    }
+
+    rows, _ := conn.Query(ctx,
+        "select group_id, array_agg(thing_id) as thing_ids from things group by group_id")
+    entries, err := pgx.CollectRows(rows, pgx.RowToStructByName[ThingEntry])
 
 Transactions
 
@@ -189,8 +219,18 @@ implemented on top of [pgconn.PgConn]. The [Conn.PgConn] method can be used to a
 
 PgBouncer
 
-By default pgx automatically uses prepared statements. Prepared statements are incompatible with PgBouncer. This can be
-disabled by setting a different [QueryExecMode] in [ConnConfig.DefaultQueryExecMode].
+By default pgx automatically uses protocol-level named prepared statements. PgBouncer 1.21.0 and newer can use these
+prepared statements in transaction and statement pooling modes when its max_prepared_statements setting is greater than
+zero. In this configuration the default [QueryExecModeCacheStatement] mode may be used. See the PgBouncer documentation
+for limitations and configuration details: https://www.pgbouncer.org/config.html#max_prepared_statements.
+
+When using an older PgBouncer version or when prepared statement support is disabled, set
+[ConnConfig.DefaultQueryExecMode] to [QueryExecModeExec]. [QueryExecModeCacheDescribe] and
+[QueryExecModeSimpleProtocol] are also compatible with PgBouncer. Prefer [QueryExecModeExec] over
+[QueryExecModeSimpleProtocol] whenever possible. Do not use [QueryExecModeDescribeExec] with transaction pooling because
+PgBouncer may assign a different server connection between the describe and execute steps.
+
+SQL-level prepared statements created with PREPARE are not supported by PgBouncer in transaction pooling mode.
 */
 package pgx
 
