@@ -1,6 +1,6 @@
 // Package observability — skillkit_metrics.go.
 //
-// Singleton skillkit.Observer and skillkit.Tracer wired to MemDB's existing
+// Singleton skills.Observer and skills.Tracer wired to MemDB's existing
 // OTel MeterProvider and TracerProvider. Five metric instruments under scope
 // "memdb-go/skillkit" surface at /metrics via the same Prometheus exporter
 // used by D10 routing, scheduler loops, and cache metrics. Two span types
@@ -30,7 +30,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/anatolykoptev/skillkit"
+	"github.com/anatolykoptev/go-kit/skills"
 )
 
 const skillkitMeterScope = "memdb-go/skillkit"
@@ -53,8 +53,8 @@ var (
 var (
 	skillkitOnce sync.Once
 	skillkitInst *skillkitInstruments
-	skillkitObsv *skillkit.Observer
-	skillkitTrcr *skillkit.Tracer
+	skillkitObsv *skills.Observer
+	skillkitTrcr *skills.Tracer
 )
 
 // initSkillkitInstruments builds the OTel instruments and the Observer
@@ -116,7 +116,7 @@ func initSkillkitInstruments() {
 
 	skillkitInst = inst
 
-	skillkitObsv = &skillkit.Observer{
+	skillkitObsv = &skills.Observer{
 		BodyCall: func(name, source string) {
 			skillkitInst.bodyCalls.Add(context.Background(), 1, metric.WithAttributes(
 				attribute.String("name", name),
@@ -147,7 +147,7 @@ func initSkillkitInstruments() {
 		},
 	}
 
-	skillkitTrcr = &skillkit.Tracer{
+	skillkitTrcr = &skills.Tracer{
 		StartBody: func(ctx context.Context, name string) (context.Context, func(string)) {
 			ctx, span := otel.Tracer(skillkitMeterScope).Start(ctx, "skill.body",
 				trace.WithAttributes(attribute.String("skill.name", name)))
@@ -167,24 +167,24 @@ func initSkillkitInstruments() {
 	}
 }
 
-// SkillkitObserver returns the process-wide singleton *skillkit.Observer
+// SkillkitObserver returns the process-wide singleton *skills.Observer
 // for loader instrumentation. Wire into:
-//   - skillkit.NewEmbedded via skillkit.WithObserver(observability.SkillkitObserver())
-//   - skillkit.NewCatalog via Catalog.WithObserver(observability.SkillkitObserver())
+//   - skills.NewEmbedded via skills.WithObserver(observability.SkillkitObserver())
+//   - skills.NewCatalog via Catalog.WithObserver(observability.SkillkitObserver())
 //
 // See also SkillkitTracer() for the companion OTel span adapter.
 //
 // Thread-safe: the Observer itself is a struct of function pointers
 // set once at init; the OTel SDK instruments are concurrency-safe.
-func SkillkitObserver() *skillkit.Observer {
+func SkillkitObserver() *skills.Observer {
 	skillkitOnce.Do(initSkillkitInstruments)
 	return skillkitObsv
 }
 
-// SkillkitTracer returns the process-wide singleton *skillkit.Tracer
+// SkillkitTracer returns the process-wide singleton *skills.Tracer
 // for span-level tracing of skill body and catalog-load hot paths. Wire into:
-//   - skillkit.NewEmbedded via skillkit.WithTracer(observability.SkillkitTracer())
-//   - skillkit.NewCatalog via Catalog.WithTracer(observability.SkillkitTracer())
+//   - skills.NewEmbedded via skills.WithTracer(observability.SkillkitTracer())
+//   - skills.NewCatalog via Catalog.WithTracer(observability.SkillkitTracer())
 //
 // Two span types are emitted under the "memdb-go/skillkit" tracer scope:
 //   - "skill.body"           — per Embedded.BodyCtx call; attribute "skill.source"
@@ -194,7 +194,7 @@ func SkillkitObserver() *skillkit.Observer {
 //
 // Thread-safe: initialised exactly once by the same sync.Once that guards
 // SkillkitObserver (shared initSkillkitInstruments call).
-func SkillkitTracer() *skillkit.Tracer {
+func SkillkitTracer() *skills.Tracer {
 	skillkitOnce.Do(initSkillkitInstruments)
 	return skillkitTrcr
 }

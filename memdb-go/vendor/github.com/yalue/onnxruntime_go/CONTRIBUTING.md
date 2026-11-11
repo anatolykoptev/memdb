@@ -49,8 +49,7 @@ Tests
  - No tests should panic.  Always check errors and fail rather than allowing
    tests to panic.
 
- - Every change must ensure that `go test -v -bench=.` passes on every
-   supported platform.
+ - Every change must ensure that `go test -v -bench=.` passes.
 
  - Every test failure should be accompanied by a message containing the reason,
    either using `t.Logf()`, `t.Errorf()`, or `t.Fatalf()`.
@@ -61,8 +60,8 @@ Adding New Files
 
  - Apart from testing data, try not to add new source files.
 
- - Do not add third-party code or headers.  The only exception for now is
-   `onnxruntime_c_api.h`.
+ - Do not add third-party code or headers.  The only exceptions for now are
+   `onnxruntime_c_api.h`, `onnxruntime_ep_c_api.h`, and `onnxruntime_error_code.h`.
 
  - No C++ at all. Developing Go-to-C wrappers is annoying enough as it is.
 
@@ -74,8 +73,8 @@ Adding New Files
    these files are updated.  The libraries that are included were only intended
    to allow a majority of users to run `go test -v -bench=.` without further
    setup or modification. Currently: amd64 Windows, arm64 Linux (I wish I
-   hadn't included this!), arm64 osx, and amd64 osx. All other users must set
-   the `ONNXRUNTIME_SHARED_LIBRARY_PATH` environment variable to a valid path
+   hadn't included this!), and arm64 osx. All other users must set the
+   `ONNXRUNTIME_SHARED_LIBRARY_PATH` environment variable to a valid path
    to the correct `onnxruntime` shared library file prior to running tests.
 
  - If you need to add a .onnx file for a test, place both the .onnx file
@@ -134,4 +133,3 @@ A Few Notes on Organization
    function from Go's standard library. This different behavior is locked
    behind build constraints in `setup_env.go` and `setup_env_windows.go`,
    respectively.
-

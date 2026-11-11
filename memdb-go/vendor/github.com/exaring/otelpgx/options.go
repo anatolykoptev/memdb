@@ -62,12 +62,38 @@ func WithMeterAttributes(attrs ...attribute.KeyValue) Option {
 	})
 }
 
-// WithTrimSQLInSpanName will use the SQL statement's first word as the span
-// name. By default, the whole SQL statement is used as a span name, where
-// applicable.
+// Deprecated: This is now the default behavior; use [WithFullSQLInSpanName] to
+// opt back into the previous behavior of using the whole SQL statement.
+//
+// WithTrimSQLInSpanName uses the SQL statement's first word (the operation
+// name, e.g. "SELECT") as the span name.
 func WithTrimSQLInSpanName() Option {
 	return optionFunc(func(cfg *tracerConfig) {
-		cfg.trimQuerySpanName = true
+		cfg.fullQuerySpanName = false
+	})
+}
+
+// WithFullSQLInSpanName uses the whole SQL statement as the span name.
+//
+// This is generally discouraged: the OpenTelemetry database span conventions
+// recommend a low-cardinality span name, and redaction/masking rules are
+// typically applied to the db.query.text attribute rather than the span name,
+// so any sensitive data embedded in the statement can leak through the name.
+// By default, the low-cardinality operation name (e.g. "SELECT") is used
+// instead.
+//
+// See https://opentelemetry.io/docs/specs/semconv/db/database-spans/.
+func WithFullSQLInSpanName() Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.fullQuerySpanName = true
+	})
+}
+
+// WithDisableAcquireTracer disables tracing for connection acquire events from
+// the connection pool. By default, acquire tracing is enabled.
+func WithDisableAcquireTracer() Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.disableAcquireTracer = true
 	})
 }
 
@@ -84,7 +110,9 @@ type SpanNameCtxFunc func(ctx context.Context, stmt string) string
 // a SQL statement. The function will be called with the SQL statement as a
 // parameter.
 //
-// By default, the whole SQL statement is used as a span name, where applicable.
+// By default, the low-cardinality operation name (e.g. "SELECT") is extracted
+// from the SQL statement and used as the span name. This function also
+// determines the value of the db.operation.name attribute.
 func WithSpanNameFunc(fn SpanNameFunc) Option {
 	return WithSpanNameCtxFunc(func(_ context.Context, stmt string) string {
 		return fn(stmt)
@@ -95,18 +123,32 @@ func WithSpanNameFunc(fn SpanNameFunc) Option {
 // for a SQL statement. The function will be called with the context.Context and
 // SQL statement as a parameter.
 //
-// By default, the whole SQL statement is used as a span name, where applicable.
+// By default, the low-cardinality operation name (e.g. "SELECT") is extracted
+// from the SQL statement and used as the span name. This function also
+// determines the value of the db.operation.name attribute.
 func WithSpanNameCtxFunc(fn SpanNameCtxFunc) Option {
 	return optionFunc(func(cfg *tracerConfig) {
 		cfg.spanNameCtxFunc = fn
 	})
 }
 
-// WithDisableQuerySpanNamePrefix will disable the default prefix for the span
-// name. By default, the span name is prefixed with "batch query" or "query".
+// Deprecated: Span names are no longer prefixed by default, so this is a no-op.
+// Use [WithQuerySpanNamePrefix] to opt back into the previous prefixing
+// behavior.
+//
+// WithDisableQuerySpanNamePrefix disables the prefix for the span name.
 func WithDisableQuerySpanNamePrefix() Option {
 	return optionFunc(func(cfg *tracerConfig) {
 		cfg.prefixQuerySpanName = false
+	})
+}
+
+// WithQuerySpanNamePrefix prefixes the span name with the operation kind, i.e.
+// "query ", "prepare " or "batch query ". By default no prefix is added so that
+// span names follow the OpenTelemetry database span conventions.
+func WithQuerySpanNamePrefix() Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.prefixQuerySpanName = true
 	})
 }
 
@@ -126,11 +168,48 @@ func WithDisableSQLStatementInAttributes() Option {
 	})
 }
 
+// QueryParametersFilterFunc is a predicate that controls whether query parameters are recorded
+// for a given SQL statement. Return true to record parameters, false to omit them.
+type QueryParametersFilterFunc func(sql string) bool
+
 // WithIncludeQueryParameters includes the SQL query parameters in the span attribute with key pgx.query.parameters.
 // This is implicitly disabled if WithDisableSQLStatementInAttributes is used.
-func WithIncludeQueryParameters() Option {
+//
+// An optional filter can be provided to omit parameters for specific queries.
+func WithIncludeQueryParameters(filter ...QueryParametersFilterFunc) Option {
 	return optionFunc(func(cfg *tracerConfig) {
 		cfg.includeParams = true
+		if len(filter) > 0 {
+			cfg.queryParamsFilter = filter[0]
+		}
+	})
+}
+
+// OperationNameFunc returns the value for the db.operation.name attribute on
+// the db.client.operation.duration and db.client.operation.errors metrics,
+// given the SQL statement for a query, prepare, or batch-query call. Return
+// "" to omit the attribute for a particular call.
+type OperationNameFunc func(ctx context.Context, sql string) string
+
+// WithMetricOperationName enables the db.operation.name attribute on the
+// db.client.operation.duration and db.client.operation.errors metrics for
+// query, prepare, and per-statement batch-query calls, using fn to derive it
+// from each call's SQL statement. By default this is unset and these metrics
+// carry no operation name.
+//
+// This is deliberately independent of the span-naming hooks
+// (WithSpanNameFunc/WithSpanNameCtxFunc): metric attributes are recorded
+// regardless of trace sampling, so once set, fn runs on every call, sampled
+// or not. Pass [SQLOperationName] for the same low-cardinality parser the
+// span path uses by default, or a custom function — its output cardinality
+// becomes the metric's cardinality.
+//
+// connect/acquire/copy calls have no SQL statement to derive a name from, and
+// the aggregate duration/error count for a whole batch has no single
+// operation name to describe it; fn is never called for any of these.
+func WithMetricOperationName(fn OperationNameFunc) Option {
+	return optionFunc(func(cfg *tracerConfig) {
+		cfg.metricOperationNameFunc = fn
 	})
 }
 

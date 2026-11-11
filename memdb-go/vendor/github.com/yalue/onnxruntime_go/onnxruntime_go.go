@@ -269,6 +269,293 @@ func SetEnvironmentLogLevel(level LoggingLevel) error {
 	return nil
 }
 
+// RegisterExecutionProviderLibrary registers a dynamic execution provider
+// library. The library must export 'CreateEpFactories' and 'ReleaseEpFactory'
+// functions.
+func RegisterExecutionProviderLibrary(registrationName, libraryPath string) error {
+	if !IsInitialized() {
+		return NotInitializedError
+	}
+	cName := C.CString(registrationName)
+	defer C.free(unsafe.Pointer(cName))
+	cPath, err := createOrtCharString(libraryPath)
+	if err != nil {
+		return err
+	}
+	defer C.free(unsafe.Pointer(cPath))
+	status := C.RegisterExecutionProviderLibrary(ortEnv, cName, cPath)
+	if status != nil {
+		return statusToError(status)
+	}
+	return nil
+}
+
+// UnregisterExecutionProviderLibrary unregisters a dynamic execution provider
+// library previously registered with RegisterExecutionProviderLibrary.
+func UnregisterExecutionProviderLibrary(registrationName string) error {
+	if !IsInitialized() {
+		return NotInitializedError
+	}
+	cName := C.CString(registrationName)
+	defer C.free(unsafe.Pointer(cName))
+	status := C.UnregisterExecutionProviderLibrary(ortEnv, cName)
+	if status != nil {
+		return statusToError(status)
+	}
+	return nil
+}
+
+// EpDevice is an opaque handle to an OrtEpDevice: a single (execution
+// provider, hardware device) pair surfaced by an execution-provider plugin.
+//
+// EpDevice values returned from GetEpDevices are owned by the OrtEnv. Callers
+// must NOT call any release function on them; the underlying OrtEpDevice
+// remains valid until the originating plugin library is unregistered (via
+// UnregisterExecutionProviderLibrary) or the runtime environment is destroyed.
+type EpDevice struct {
+	p *C.OrtEpDevice
+}
+
+// EpName returns the execution provider name that owns this device, e.g.
+// "QNNExecutionProvider" or "OpenVINOExecutionProvider".
+func (d EpDevice) EpName() string {
+	if d.p == nil {
+		return ""
+	}
+	return C.GoString(C.EpDeviceEpName(d.p))
+}
+
+// EpVendor returns the execution provider's vendor string, e.g. "Microsoft"
+// or "Qualcomm".
+func (d EpDevice) EpVendor() string {
+	if d.p == nil {
+		return ""
+	}
+	return C.GoString(C.EpDeviceEpVendor(d.p))
+}
+
+// GetEpDevices returns the list of OrtEpDevice instances known to the
+// runtime, including those contributed by plugin execution providers loaded
+// via RegisterExecutionProviderLibrary. The returned EpDevices remain valid
+// until the corresponding plugin library is unregistered or the environment
+// is destroyed.
+func GetEpDevices() ([]EpDevice, error) {
+	if !IsInitialized() {
+		return nil, NotInitializedError
+	}
+	var raw **C.OrtEpDevice
+	var count C.size_t
+	status := C.GetEpDevices(ortEnv,
+		(***C.OrtEpDevice)(unsafe.Pointer(&raw)), &count)
+	if status != nil {
+		return nil, statusToError(status)
+	}
+	n := int(count)
+	if n == 0 || raw == nil {
+		return nil, nil
+	}
+	// raw points to an array of n const OrtEpDevice* owned by the env.
+	devices := make([]EpDevice, n)
+	src := unsafe.Slice(raw, n)
+	for i := 0; i < n; i++ {
+		devices[i] = EpDevice{p: src[i]}
+	}
+	return devices, nil
+}
+
+// AppendExecutionProviderV2 attaches a plugin execution provider to these
+// session options using one or more OrtEpDevice instances obtained from
+// GetEpDevices. All provided devices must belong to the same execution
+// provider (they are different hardware targets within that EP).
+//
+// This is the plugin-aware path; use it for any execution provider loaded
+// through RegisterExecutionProviderLibrary (QNN, newer OpenVINO, etc.). For
+// execution providers compiled into libonnxruntime, use the dedicated
+// wrappers (AppendExecutionProviderCUDA, AppendExecutionProviderCoreMLV2,
+// ...) or the V1 string-based AppendExecutionProvider.
+//
+// Wraps the C API SessionOptionsAppendExecutionProvider_V2.
+func (o *SessionOptions) AppendExecutionProviderV2(devices []EpDevice,
+	options map[string]string) error {
+	if len(devices) == 0 {
+		return fmt.Errorf("AppendExecutionProviderV2 requires at least one EpDevice")
+	}
+	for i, d := range devices {
+		if d.p == nil {
+			return fmt.Errorf("AppendExecutionProviderV2: devices[%d] "+
+				"is the zero EpDevice", i)
+		}
+	}
+
+	arr := make([]*C.OrtEpDevice, len(devices))
+	for i, d := range devices {
+		arr[i] = d.p
+	}
+	var arrPtr **C.OrtEpDevice
+	if len(arr) != 0 {
+		// Avoid dereferencing arr[0] if the array is empty, same as with the options map.
+		arrPtr = &(arr[0])
+	}
+
+	var keysPtr, valuesPtr **C.char
+	if len(options) != 0 {
+		keys, values := mapToCStrings(options)
+		defer freeCStrings(keys)
+		defer freeCStrings(values)
+		keysPtr = &(keys[0])
+		valuesPtr = &(values[0])
+	}
+
+	status := C.AppendExecutionProviderV2(o.o, ortEnv, arrPtr, C.size_t(len(arr)),
+		keysPtr, valuesPtr, C.size_t(len(options)))
+	if status != nil {
+		return statusToError(status)
+	}
+	return nil
+}
+
+// ArenaCfg wraps OrtArenaCfg for arena-based allocator configuration.
+type ArenaCfg struct {
+	c *C.OrtArenaCfg
+}
+
+// NewArenaCfg creates a configuration object for an arena-based allocator.
+// maxMem: Use 0 for ORT default.
+// arenaExtendStrategy: Use -1 for ORT default, 0 = kNextPowerOfTwo, 1 = kSameAsRequested.
+// initialChunkSize: Use -1 for ORT default.
+// maxDeadBytesPerChunk: Use -1 for ORT default.
+func NewArenaCfg(maxMem int, arenaExtendStrategy, initialChunkSize, maxDeadBytesPerChunk int) (*ArenaCfg, error) {
+	if !IsInitialized() {
+		return nil, NotInitializedError
+	}
+	var c *C.OrtArenaCfg
+	status := C.CreateArenaCfg(C.size_t(maxMem), C.int(arenaExtendStrategy),
+		C.int(initialChunkSize), C.int(maxDeadBytesPerChunk), &c)
+	if status != nil {
+		return nil, statusToError(status)
+	}
+	return &ArenaCfg{c: c}, nil
+}
+
+// NewArenaCfgV2 creates a configuration object for an arena-based allocator
+// using string-based configuration keys and size_t values.
+func NewArenaCfgV2(configs map[string]int) (*ArenaCfg, error) {
+	if !IsInitialized() {
+		return nil, NotInitializedError
+	}
+	numKeys := len(configs)
+	if numKeys == 0 {
+		return NewArenaCfg(0, -1, -1, -1)
+	}
+	keys := make([]*C.char, 0, numKeys)
+	values := make([]C.size_t, 0, numKeys)
+	for k, v := range configs {
+		keys = append(keys, C.CString(k))
+		values = append(values, C.size_t(v))
+	}
+	defer func() {
+		for _, k := range keys {
+			C.free(unsafe.Pointer(k))
+		}
+	}()
+
+	var c *C.OrtArenaCfg
+	status := C.CreateArenaCfgV2(&keys[0], &values[0], C.size_t(numKeys), &c)
+	if status != nil {
+		return nil, statusToError(status)
+	}
+	return &ArenaCfg{c: c}, nil
+}
+
+// Destroy releases the underlying OrtArenaCfg.
+func (c *ArenaCfg) Destroy() {
+	if c.c != nil {
+		C.ReleaseArenaCfg(c.c)
+		c.c = nil
+	}
+}
+
+// CreateAndRegisterAllocator creates an allocator and registers it with the
+// environment, enabling sharing between multiple sessions.
+func CreateAndRegisterAllocator(memInfo *C.OrtMemoryInfo, arenaCfg *ArenaCfg) error {
+	if !IsInitialized() {
+		return NotInitializedError
+	}
+	var cArenaCfg *C.OrtArenaCfg
+	if arenaCfg != nil {
+		cArenaCfg = arenaCfg.c
+	}
+	status := C.CreateAndRegisterAllocator(ortEnv, memInfo, cArenaCfg)
+	if status != nil {
+		return statusToError(status)
+	}
+	return nil
+}
+
+// CreateAndRegisterAllocatorV2 creates an allocator of a specific provider
+// type and registers it with the environment.
+func CreateAndRegisterAllocatorV2(providerType string, memInfo *C.OrtMemoryInfo, arenaCfg *ArenaCfg, options map[string]string) error {
+	if !IsInitialized() {
+		return NotInitializedError
+	}
+	var cArenaCfg *C.OrtArenaCfg
+	if arenaCfg != nil {
+		cArenaCfg = arenaCfg.c
+	}
+	cProviderType := C.CString(providerType)
+	defer C.free(unsafe.Pointer(cProviderType))
+
+	var keysPtr, valuesPtr **C.char
+	numOptions := len(options)
+	if numOptions > 0 {
+		keys, values := mapToCStrings(options)
+		defer freeCStrings(keys)
+		defer freeCStrings(values)
+		keysPtr = &keys[0]
+		valuesPtr = &values[0]
+	}
+
+	status := C.CreateAndRegisterAllocatorV2(ortEnv, cProviderType, memInfo,
+		cArenaCfg, keysPtr, valuesPtr, C.size_t(numOptions))
+	if status != nil {
+		return statusToError(status)
+	}
+	return nil
+}
+
+// UnregisterAllocator unregisters a previously registered allocator.
+func UnregisterAllocator(memInfo *C.OrtMemoryInfo) error {
+	if !IsInitialized() {
+		return NotInitializedError
+	}
+	status := C.UnregisterAllocator(ortEnv, memInfo)
+	if status != nil {
+		return statusToError(status)
+	}
+	return nil
+}
+
+// RegisterAllocator registers a custom allocator with the environment.
+func RegisterAllocator(allocator *C.OrtAllocator) error {
+	if !IsInitialized() {
+		return NotInitializedError
+	}
+	status := C.RegisterAllocator(ortEnv, allocator)
+	if status != nil {
+		return statusToError(status)
+	}
+	return nil
+}
+
+// GetMemoryInfo returns the environment-wide OrtMemoryInfo. This can be used
+// when registering shared allocators.
+func GetMemoryInfo() (*C.OrtMemoryInfo, error) {
+	if !IsInitialized() {
+		return nil, NotInitializedError
+	}
+	return ortMemoryInfo, nil
+}
+
 // The Shape type holds the shape of the tensors used by the network input and
 // outputs.
 type Shape []int64
@@ -543,6 +830,15 @@ const (
 	// Int4 types were introduced in ONNX 1.16. See https://onnx.ai/onnx/technical/int4.html
 	TensorElementDataTypeUint4 = C.ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT4 // maps to a pair of packed uint4 values (size == 1 byte)
 	TensorElementDataTypeInt4  = C.ONNX_TENSOR_ELEMENT_DATA_TYPE_INT4  // maps to a pair of packed int4 values (size == 1 byte)
+	// See https://onnx.ai/onnx/technical/float4.html for information about
+	// the float4 types.
+	TensorElementDataTypeFloat4E2M1 = C.ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT4E2M1
+	// 4 int2 elements are packed into a single byte. See
+	// https://onnx.ai/onnx/technical/int2.html for more information.
+	TensorElementDataTypeUint2 = C.ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT2
+	TensorElementDataTypeInt2  = C.ONNX_TENSOR_ELEMENT_DATA_TYPE_INT2
+	// Non-IEEE floating-point format, all values are powers of two.
+	TensorElementDataTypeFloat8E8M0 = C.ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E8M0
 )
 
 func (t TensorElementDataType) String() string {
@@ -593,6 +889,14 @@ func (t TensorElementDataType) String() string {
 		return "ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT4"
 	case TensorElementDataTypeInt4:
 		return "ONNX_TENSOR_ELEMENT_DATA_TYPE_INT4"
+	case TensorElementDataTypeFloat4E2M1:
+		return "ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT4E2M1"
+	case TensorElementDataTypeUint2:
+		return "ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT2"
+	case TensorElementDataTypeInt2:
+		return "ONNX_TENSOR_ELEMENT_DATA_TYPE_INT2"
+	case TensorElementDataTypeFloat8E8M0:
+		return "ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT8E8M0"
 	}
 	return fmt.Sprintf("Unknown tensor element data type: %d", int(t))
 }
@@ -1354,6 +1658,13 @@ func (o *CUDAProviderOptions) Destroy() error {
 // configured, then passed to SessionOptions.AppendExecutionProviderCUDA.)
 // The caller must call the Destroy() function on the returned struct when it's
 // no longer needed.
+//
+// WARNING: There is a known issue where the CUDA execution provider will
+// overwrite Go's default signal handlers. Users may need to back up and
+// re-install Go's signal handlers prior to initializing or using the CUDA
+// execution provider.
+// See https://github.com/yalue/onnxruntime_go/issues/140 for some discussion
+// of this issue.
 func NewCUDAProviderOptions() (*CUDAProviderOptions, error) {
 	if !IsInitialized() {
 		return nil, NotInitializedError
@@ -1620,6 +1931,13 @@ func (o *SessionOptions) SetMemPattern(isEnabled bool) error {
 // the session to use CUDA. Returns an error if your device (or onnxruntime
 // library) does not support CUDA. The CUDAProviderOptions struct can be
 // destroyed after this.
+//
+// WARNING: There is a known issue where the CUDA execution provider will
+// overwrite Go's default signal handlers. Users may need to back up and
+// re-install Go's signal handlers prior to initializing or using the CUDA
+// execution provider.
+// See https://github.com/yalue/onnxruntime_go/issues/140 for some discussion
+// of this issue.
 func (o *SessionOptions) AppendExecutionProviderCUDA(
 	cudaOptions *CUDAProviderOptions) error {
 	status := C.AppendExecutionProviderCUDAV2(o.o, cudaOptions.o)
@@ -1658,31 +1976,24 @@ func (o *SessionOptions) AppendExecutionProviderCoreML(flags uint32) error {
 	return nil
 }
 
-// AppendExecutionProviderCoreMLV2 is the new API for adding CoreML provider to ONNX Runtime.
-// This is the recommended way to add CoreML provider as of ONNX Runtime 1.20.0.
+// AppendExecutionProviderCoreMLV2 is the new API for adding CoreML provider to
+// ONNX Runtime. This is the recommended way to add CoreML provider as of
+// onnxruntime 1.20.0.
 //
-// For CoreML options, see:
+// For the list of supported options, see:
 // https://onnxruntime.ai/docs/execution-providers/CoreML-ExecutionProvider.html
 func (o *SessionOptions) AppendExecutionProviderCoreMLV2(options map[string]string) error {
-
-	// Handle case with no options
-	if len(options) == 0 {
-		status := C.AppendExecutionProviderCoreMLV2(o.o, nil, nil, 0)
-		if status != nil {
-			return statusToError(status)
-		}
-		return nil
+	var keysPtr, valuesPtr **C.char
+	if len(options) != 0 {
+		keys, values := mapToCStrings(options)
+		defer freeCStrings(keys)
+		defer freeCStrings(values)
+		keysPtr = &(keys[0])
+		valuesPtr = &(values[0])
 	}
 
-	// Convert map to arrays of keys and values
-	keys, values := mapToCStrings(options)
-	defer freeCStrings(keys)
-	defer freeCStrings(values)
-
-	// Call C function
-	status := C.AppendExecutionProviderCoreMLV2(o.o,
-		&keys[0], &values[0], C.size_t(len(options)))
-
+	status := C.AppendExecutionProviderCoreMLV2(o.o, keysPtr, valuesPtr,
+		C.size_t(len(options)))
 	if status != nil {
 		return statusToError(status)
 	}
@@ -1752,6 +2063,61 @@ func (o *SessionOptions) AppendExecutionProvider(providerName string,
 	return nil
 }
 
+// Wraps the SetOptimizedModelFilePath API function for these session options.
+// Onnxruntime will save the optimized model file to the given path, after
+// graph-level transformations.
+func (o *SessionOptions) SetOptimizedModelFilePath(path string) error {
+	ortCharPath, e := createOrtCharString(path)
+	if e != nil {
+		return fmt.Errorf("Error encoding optimized model file path: %w", e)
+	}
+	defer C.free(unsafe.Pointer(ortCharPath))
+	status := C.SetOptimizedModelFilePath(o.o, ortCharPath)
+	if status != nil {
+		return statusToError(status)
+	}
+	return nil
+}
+
+// Enables profiling for these session options. The profile will be a JSON file
+// with the given path prefix.
+func (o *SessionOptions) EnableProfiling(profileFilePrefix string) error {
+	ortCharPath, e := createOrtCharString(profileFilePrefix)
+	if e != nil {
+		return fmt.Errorf("Error encoding profile path prefix: %w", e)
+	}
+	defer C.free(unsafe.Pointer(ortCharPath))
+	status := C.EnableProfiling(o.o, ortCharPath)
+	if status != nil {
+		return statusToError(status)
+	}
+	return nil
+}
+
+// Disables profiling for these session options.
+func (o *SessionOptions) DisableProfiling() error {
+	status := C.DisableProfiling(o.o)
+	if status != nil {
+		return statusToError(status)
+	}
+	return nil
+}
+
+// Register custom ops from a shared library.
+func (o *SessionOptions) RegisterCustomOpsLibrary(path string) error {
+	ortCharPath, e := createOrtCharString(path)
+	if e != nil {
+		return fmt.Errorf("Unable to convert path to C path: %w", e)
+	}
+	defer C.free(unsafe.Pointer(ortCharPath))
+	status := C.RegisterCustomOpsLibraryV2(o.o, ortCharPath)
+	if status != nil {
+		return statusToError(status)
+	}
+
+	return nil
+}
+
 // Initializes and returns a SessionOptions struct, used when setting options
 // in new AdvancedSession instances. The caller must call the Destroy()
 // function on the returned struct when it's no longer needed.
@@ -1789,9 +2155,6 @@ func NewRunOptions() (*RunOptions, error) {
 
 // Destroy releases the underlying OrtRunOptions.
 func (o *RunOptions) Destroy() error {
-	if o == nil || o.o == nil {
-		return fmt.Errorf("The RunOptions are not initialized")
-	}
 	C.ReleaseRunOptions(o.o)
 	o.o = nil
 	return nil
@@ -1799,9 +2162,6 @@ func (o *RunOptions) Destroy() error {
 
 // Terminate sets the terminate flag so any ongoing Run using this RunOptions fails quickly.
 func (o *RunOptions) Terminate() error {
-	if o == nil || o.o == nil {
-		return fmt.Errorf("The RunOptions are not initialized")
-	}
 	status := C.RunOptionsSetTerminate(o.o)
 	if status != nil {
 		return statusToError(status)
@@ -1811,10 +2171,146 @@ func (o *RunOptions) Terminate() error {
 
 // UnsetTerminate clears the terminate flag so this RunOptions can be reused.
 func (o *RunOptions) UnsetTerminate() error {
-	if o == nil || o.o == nil {
-		return fmt.Errorf("The RunOptions are not initialized")
-	}
 	status := C.RunOptionsUnsetTerminate(o.o)
+	if status != nil {
+		return statusToError(status)
+	}
+	return nil
+}
+
+// AddRunConfigEntry sets a run configuration key to the given value. See the
+// onnxruntime_run_options_config_keys.h file in the onnxruntime sources for
+// documentation on valid keys and values. If the key was already set, this
+// will overwrite its old setting with the given value.
+func (o *RunOptions) AddRunConfigEntry(key, value string) error {
+	cKey := C.CString(key)
+	defer C.free(unsafe.Pointer(cKey))
+	cValue := C.CString(value)
+	defer C.free(unsafe.Pointer(cValue))
+	status := C.AddRunConfigEntry(o.o, cKey, cValue)
+	if status != nil {
+		return statusToError(status)
+	}
+	return nil
+}
+
+// The counterpart to AddRunConfigEntry,
+func (o *RunOptions) GetRunConfigEntry(key string) (string, error) {
+	cKey := C.CString(key)
+	defer C.free(unsafe.Pointer(cKey))
+	cValue := C.GetRunConfigEntry(o.o, cKey)
+	if cValue == nil {
+		return "", fmt.Errorf("GetRunConfigEntry returned NULL for key \"%s\"",
+			key)
+	}
+	nonConstPtr := (*C.char)(unsafe.Pointer(cValue))
+	return C.GoString(nonConstPtr), nil
+}
+
+// A wrapper around the OrtLoraAdapter C struct, holding a set of LoRA
+// parameters that can be activated on a RunOptions instance. Must be freed by
+// calling Destroy() on it when it's no longer needed.
+type LoraAdapter struct {
+	l *C.OrtLoraAdapter
+}
+
+// NewLoraAdapter loads the LoRA adapter file (in onnxruntime's .onnx_adapter
+// format) at the given path. The adapter's parameters stay on the CPU, and are
+// only copied to a device if the model requires it at inference time. The
+// caller must call Destroy() on the returned LoraAdapter when it's no longer
+// needed.
+func NewLoraAdapter(adapterFilePath string) (*LoraAdapter, error) {
+	if !IsInitialized() {
+		return nil, NotInitializedError
+	}
+	cPath, e := createOrtCharString(adapterFilePath)
+	if e != nil {
+		return nil, fmt.Errorf("Error encoding adapter file path: %w", e)
+	}
+	defer C.free(unsafe.Pointer(cPath))
+	var l *C.OrtLoraAdapter
+	status := C.CreateLoraAdapter(cPath, nil, &l)
+	if status != nil {
+		return nil, statusToError(status)
+	}
+	return &LoraAdapter{l: l}, nil
+}
+
+// The same as NewLoraAdapter, but takes a slice of bytes containing the
+// .onnx_adapter data rather than a file path.
+func NewLoraAdapterWithData(adapterData []byte) (*LoraAdapter, error) {
+	if !IsInitialized() {
+		return nil, NotInitializedError
+	}
+	if len(adapterData) == 0 {
+		return nil, fmt.Errorf("Missing adapter data")
+	}
+	var l *C.OrtLoraAdapter
+	status := C.CreateLoraAdapterFromArray(unsafe.Pointer(&(adapterData[0])),
+		C.size_t(len(adapterData)), nil, &l)
+	if status != nil {
+		return nil, statusToError(status)
+	}
+	return &LoraAdapter{l: l}, nil
+}
+
+// The same as NewLoraAdapter, but takes an allocator to hold the adapter's
+// parameters. Passing a device allocator, such as one returned by a session's
+// CreateAllocator function, copies the parameters to the device once at load
+// time rather than at each Run. Passing nil behaves like NewLoraAdapter. The
+// allocator must not be destroyed before the returned LoraAdapter is.
+func NewLoraAdapterWithAllocator(adapterFilePath string,
+	allocator *Allocator) (*LoraAdapter, error) {
+	if !IsInitialized() {
+		return nil, NotInitializedError
+	}
+	cPath, e := createOrtCharString(adapterFilePath)
+	if e != nil {
+		return nil, fmt.Errorf("Error encoding adapter file path: %w", e)
+	}
+	defer C.free(unsafe.Pointer(cPath))
+	var l *C.OrtLoraAdapter
+	status := C.CreateLoraAdapter(cPath, allocator.ortAllocator(), &l)
+	if status != nil {
+		return nil, statusToError(status)
+	}
+	return &LoraAdapter{l: l}, nil
+}
+
+// The same as NewLoraAdapterWithAllocator, but takes a slice of bytes
+// containing the .onnx_adapter data rather than a file path.
+func NewLoraAdapterWithDataAndAllocator(adapterData []byte,
+	allocator *Allocator) (*LoraAdapter, error) {
+	if !IsInitialized() {
+		return nil, NotInitializedError
+	}
+	if len(adapterData) == 0 {
+		return nil, fmt.Errorf("Missing adapter data")
+	}
+	var l *C.OrtLoraAdapter
+	status := C.CreateLoraAdapterFromArray(unsafe.Pointer(&(adapterData[0])),
+		C.size_t(len(adapterData)), allocator.ortAllocator(), &l)
+	if status != nil {
+		return nil, statusToError(status)
+	}
+	return &LoraAdapter{l: l}, nil
+}
+
+// Destroy releases the underlying OrtLoraAdapter. Don't destroy a LoraAdapter
+// while it's still active on a RunOptions instance that may still be used.
+func (l *LoraAdapter) Destroy() error {
+	C.ReleaseLoraAdapter(l.l)
+	l.l = nil
+	return nil
+}
+
+// AddActiveLoraAdapter adds the given LoRA adapter to the list of adapters
+// that are active during any Run using this RunOptions instance. More than one
+// adapter can be active at the same time, but parameters belonging to
+// different active adapters must not overlap. This setting does not affect
+// RunWithBinding.
+func (o *RunOptions) AddActiveLoraAdapter(adapter *LoraAdapter) error {
+	status := C.RunOptionsAddActiveLoraAdapter(o.o, adapter.l)
 	if status != nil {
 		return statusToError(status)
 	}
@@ -2271,7 +2767,7 @@ func (b *IoBinding) GetBoundOutputNames() ([]string, error) {
 
 	// Start by getting go slice views of the C buffers to make it easier to
 	// work with.
-	sizesSlice := unsafe.Slice(resultSizes, resultCount)
+	sizesSlice := unsafe.Slice(resultSizes, int(resultCount))
 	totalSize := uint64(0)
 	// There is likely a more efficient way, but it's much easier to just get
 	// a go slice of the entire buffer. NOTE: The strings in this buffer are
@@ -2284,10 +2780,10 @@ func (b *IoBinding) GetBoundOutputNames() ([]string, error) {
 
 	// We'll take advantage of the byte-slice-to-string conversion to copy the
 	// data into go-managed memory.
-	toReturn := make([]string, resultCount)
+	toReturn := make([]string, int(resultCount))
 	prevEndOffset := uint64(0)
 	for i, stringLength := range sizesSlice {
-		toReturn[i] = string(charsSlice[prevEndOffset:stringLength])
+		toReturn[i] = string(charsSlice[prevEndOffset : prevEndOffset+uint64(stringLength)])
 		prevEndOffset += uint64(stringLength)
 	}
 
@@ -2325,9 +2821,9 @@ func (b *IoBinding) GetBoundOutputValues() ([]Value, error) {
 	if status != nil {
 		return nil, statusToError(status)
 	}
-	valuesSlice := unsafe.Slice(valuesBuffer, numValues)
+	valuesSlice := unsafe.Slice(valuesBuffer, int(numValues))
 
-	toReturn := make([]Value, numValues)
+	toReturn := make([]Value, int(numValues))
 	for i := range valuesSlice {
 		toReturn[i], e = createGoValueFromOrtValue(valuesSlice[i])
 		if e != nil {
@@ -2390,6 +2886,153 @@ func (b *IoBinding) ClearBoundOutputs() {
 		return
 	}
 	C.ClearBoundOutputs(b.o)
+}
+
+// Wraps the C OrtAllocatorType enum, used when creating a MemoryInfo.
+type AllocatorType int
+
+const (
+	AllocatorTypeInvalid AllocatorType = C.OrtInvalidAllocator
+	AllocatorTypeDevice  AllocatorType = C.OrtDeviceAllocator
+	AllocatorTypeArena   AllocatorType = C.OrtArenaAllocator
+)
+
+// Wraps the C OrtMemType enum, used when creating a MemoryInfo.
+type MemType int
+
+const (
+	MemTypeCPUInput  MemType = C.OrtMemTypeCPUInput
+	MemTypeCPUOutput MemType = C.OrtMemTypeCPUOutput
+	MemTypeCPU       MemType = C.OrtMemTypeCPU
+	MemTypeDefault   MemType = C.OrtMemTypeDefault
+)
+
+// A MemoryInfo describes a memory location tensors can live in, such as the
+// memory of a CUDA device. (The library's default tensors all live in the
+// implicit CPU location; this type exists for referring to the others.) It
+// must be freed using Destroy when no longer needed.
+type MemoryInfo struct {
+	o *C.OrtMemoryInfo
+}
+
+// Creates a MemoryInfo referring to the named memory location; for example,
+// NewMemoryInfo("Cuda", AllocatorTypeDevice, 0, MemTypeDefault) refers to the
+// memory of the first CUDA device. The known location names are defined by
+// onnxruntime and its execution providers. The returned MemoryInfo must be
+// freed using Destroy when no longer needed.
+func NewMemoryInfo(name string, allocatorType AllocatorType, deviceID int,
+	memType MemType) (*MemoryInfo, error) {
+	if !IsInitialized() {
+		return nil, NotInitializedError
+	}
+	cName := C.CString(name)
+	defer C.free(unsafe.Pointer(cName))
+	var o *C.OrtMemoryInfo
+	status := C.CreateOrtCustomMemoryInfo(cName, C.int(allocatorType),
+		C.int(deviceID), C.int(memType), &o)
+	if status != nil {
+		return nil, statusToError(status)
+	}
+	return &MemoryInfo{
+		o: o,
+	}, nil
+}
+
+// Returns the name of the memory location this MemoryInfo refers to, e.g.
+// "Cpu" or "Cuda".
+func (m *MemoryInfo) Name() (string, error) {
+	var name *C.char
+	status := C.GetMemoryInfoName(m.o, &name)
+	if status != nil {
+		return "", statusToError(status)
+	}
+	return C.GoString(name), nil
+}
+
+// Frees the resources associated with the MemoryInfo.
+func (m *MemoryInfo) Destroy() error {
+	if m.o != nil {
+		C.ReleaseOrtMemoryInfo(m.o)
+		m.o = nil
+	}
+	return nil
+}
+
+// An Allocator allocates tensors in the memory location described by the
+// MemoryInfo it was created with - including non-CPU locations such as CUDA
+// device memory. It wraps a session's internal allocator and becomes invalid
+// when that session is destroyed, so Destroy the Allocator, and any
+// DeviceTensors allocated from it, before destroying the session.
+type Allocator struct {
+	o *C.OrtAllocator
+}
+
+// Creates an Allocator for this session, allocating in the location described
+// by the given MemoryInfo. The MemoryInfo is no longer needed after this
+// function returns. The returned Allocator must be freed using Destroy before
+// the session it came from.
+func (s *DynamicAdvancedSession) CreateAllocator(m *MemoryInfo) (*Allocator,
+	error) {
+	var o *C.OrtAllocator
+	status := C.CreateOrtAllocator(s.s.ortSession, m.o, &o)
+	if status != nil {
+		return nil, statusToError(status)
+	}
+	return &Allocator{
+		o: o,
+	}, nil
+}
+
+// Frees the resources associated with the Allocator. Tensors allocated from
+// it must be destroyed first.
+func (a *Allocator) Destroy() error {
+	if a.o != nil {
+		C.ReleaseOrtAllocator(a.o)
+		a.o = nil
+	}
+	return nil
+}
+
+// Returns the statistics the allocator reports, such as the number of bytes
+// currently in use ("InUse"), the peak number of bytes in use ("MaxInUse"),
+// and the number of times the allocator released unused memory back to the
+// system ("NumArenaShrinkages"). The full set of keys is defined by
+// onnxruntime and may grow over time, so the values are returned as a map.
+// Allocators that do not implement OrtAllocator::GetStats return an empty
+// map. The returned map is a copy: it remains valid after the Allocator is
+// destroyed.
+func (a *Allocator) GetStats() (map[string]string, error) {
+	var kvps *C.OrtKeyValuePairs
+	status := C.AllocatorGetStats(a.o, &kvps)
+	if status != nil {
+		return nil, statusToError(status)
+	}
+	defer C.ReleaseKeyValuePairs(kvps)
+	var keys, values **C.char
+	var numEntries C.size_t
+	C.GetKeyValuePairs(kvps, &keys, &values, &numEntries)
+	toReturn := make(map[string]string, int(numEntries))
+	if numEntries == 0 {
+		return toReturn, nil
+	}
+	// The arrays returned by GetKeyValuePairs point into the OrtKeyValuePairs
+	// instance, which is released above, so copy everything into Go strings
+	// before returning.
+	keySlice := unsafe.Slice(keys, int(numEntries))
+	valueSlice := unsafe.Slice(values, int(numEntries))
+	for i := 0; i < int(numEntries); i++ {
+		toReturn[C.GoString(keySlice[i])] = C.GoString(valueSlice[i])
+	}
+	return toReturn, nil
+}
+
+// Returns the underlying OrtAllocator, or NULL for a nil Allocator, so callers
+// can treat "no allocator" and "nil allocator" the same way.
+func (a *Allocator) ortAllocator() *C.OrtAllocator {
+	if a == nil {
+		return nil
+	}
+	return a.o
 }
 
 // Creates and returns a ModelMetadata instance for this session's model. The

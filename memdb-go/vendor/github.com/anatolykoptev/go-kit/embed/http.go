@@ -196,5 +196,13 @@ func (h *HTTPEmbedder) Dimension() int { return h.dim }
 // Close is a no-op for the HTTP-based embedder.
 func (h *HTTPEmbedder) Close() error { return nil }
 
-// Compile-time interface check.
-var _ Embedder = (*HTTPEmbedder)(nil)
+// MaxBatchSize returns the maximum batch size for the HTTP embedder, matching
+// the ox-embed-server EMBED_MAX_INPUT_ARRAY default (32). Override the server
+// cap and this constant together — a mismatch causes HTTP 400 on the larger side.
+func (h *HTTPEmbedder) MaxBatchSize() int { return defaultChunkSize }
+
+// Compile-time interface checks.
+var (
+	_ Embedder   = (*HTTPEmbedder)(nil)
+	_ BatchSizer = (*HTTPEmbedder)(nil)
+)

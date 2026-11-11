@@ -72,7 +72,7 @@ func newClientFromInternal(cfg *cfgInternal) (*Client, error) {
 		cb = NewCircuitBreaker(cbCfg, model, makeCircuitHook(model, cfg.observer))
 	}
 
-	// E5: resolve chunkSize. Priority: explicit opt > env > default.
+	// E5: resolve chunkSize. Priority: explicit opt > env > BatchSizer > default.
 	chunkSz := cfg.chunkSize
 	if chunkSz <= 0 {
 		// Try environment override.
@@ -83,6 +83,15 @@ func newClientFromInternal(cfg *cfgInternal) (*Client, error) {
 					slog.Int("default", defaultChunkSize),
 				)
 			} else {
+				chunkSz = n
+			}
+		}
+	}
+	if chunkSz <= 0 {
+		// Ask the backend for its self-reported optimal batch size.
+		// Falls back to defaultChunkSize when the backend doesn't implement BatchSizer.
+		if bs, ok := inner.(BatchSizer); ok {
+			if n := bs.MaxBatchSize(); n > 0 {
 				chunkSz = n
 			}
 		}

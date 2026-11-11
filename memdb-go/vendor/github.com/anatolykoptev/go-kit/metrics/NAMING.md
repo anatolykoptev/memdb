@@ -62,7 +62,7 @@ Colon `:` в имени — ТОЛЬКО для recording rules / aggregated met
 
 | Файл | До | После |
 |------|-----|-------|
-| `go-hully/internal/metrics/metrics.go` | `api:$endpoint:success` | `Label("api_requests_total","endpoint",e,"status","success")` |
+| `service-a/internal/metrics/metrics.go` | `api:$endpoint:success` | `Label("api_requests_total","endpoint",e,"status","success")` |
 | `go-wp/internal/wptools/shared/rest.go` | `Incr("wp_rest_calls")` | `Incr("wp_rest_calls_total")` |
 | `go-engine/llm/client.go` | manual call+err incr pair | `TrackCall(reg, "llm_calls_total", "llm_errors_total", fn)` |
 | legacy `api.latency.count` | `.` separator | `api_latency_seconds` (prom histogram) |

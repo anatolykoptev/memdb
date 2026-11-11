@@ -25,8 +25,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anatolykoptev/go-kit/skills"
 	"github.com/anatolykoptev/memdb/memdb-go/internal/observability"
-	"github.com/anatolykoptev/skillkit"
 )
 
 //go:embed skills/*/SKILL.md
@@ -55,21 +55,21 @@ const schedulerSkillsDirEnv = "MEMDB_SCHEDULER_SKILLS_DIR"
 // catalog is single-tier (embedded only).
 var schedulerCatalog = buildSchedulerCatalog()
 
-func buildSchedulerCatalog() *skillkit.Catalog {
-	tiers := []skillkit.Tier{}
+func buildSchedulerCatalog() *skills.Catalog {
+	tiers := []skills.Tier{}
 	if dir := strings.TrimSpace(os.Getenv(schedulerSkillsDirEnv)); dir != "" {
-		tiers = append(tiers, skillkit.NewDirTier(
+		tiers = append(tiers, skills.NewDirTier(
 			"scheduler-workspace",
 			dir,
-			skillkit.WithMtimeCache(),
+			skills.WithMtimeCache(),
 		))
 	}
-	tiers = append(tiers, skillkit.NewEmbedFSTier(
+	tiers = append(tiers, skills.NewEmbedFSTier(
 		"scheduler-builtin",
 		schedulerSkillsFS,
 		"skills",
 	))
-	return skillkit.NewCatalog(tiers...).
+	return skills.NewCatalog(tiers...).
 		WithObserver(observability.SkillkitObserver()).
 		WithTracer(observability.SkillkitTracer())
 }
@@ -124,7 +124,7 @@ func SchedulerSkillDiagnostic() string {
 		workspaceDir, len(loaded), namesOf(loaded))
 }
 
-func namesOf(infos []skillkit.SkillInfo) []string {
+func namesOf(infos []skills.SkillInfo) []string {
 	out := make([]string, 0, len(infos))
 	for _, info := range infos {
 		out = append(out, info.Name)

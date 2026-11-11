@@ -155,10 +155,77 @@ OrtStatus *AppendExecutionProviderDirectML(OrtSessionOptions *o,
 OrtStatus *AppendExecutionProviderOpenVINOV2(OrtSessionOptions *o,
   const char **keys, const char **values, int num_keys);
 
-// Wraps ort_api->AppendExecutionProvider
+// Wraps ort_api->SessionOptionsAppendExecutionProvider
 OrtStatus *AppendExecutionProvider(OrtSessionOptions *o,
   const char *provider_name, const char **keys, const char **values,
   int num_keys);
+
+// Wraps ort_api->SetOptimizedModelFilePath. NOTE: takes an ORTCHAR_T*.
+OrtStatus *SetOptimizedModelFilePath(OrtSessionOptions *o,
+  char *path);
+
+// Wraps ort_api->EnableProfiling. NOTE: takes an ORTCHAR_T*.
+OrtStatus *EnableProfiling(OrtSessionOptions *o, char *path);
+
+// Wraps ort_api->DisableProfiling.
+OrtStatus *DisableProfiling(OrtSessionOptions *o);
+
+// Wraps ort_api->RegisterExecutionProviderLibrary
+OrtStatus *RegisterExecutionProviderLibrary(OrtEnv *env,
+  const char *registration_name, char *path);
+
+// Wraps ort_api->RegisterCustomOpsLibraryV2
+OrtStatus *RegisterCustomOpsLibraryV2(OrtSessionOptions *o,
+ const char *library_name);
+
+// Wraps ort_api->UnregisterExecutionProviderLibrary
+OrtStatus *UnregisterExecutionProviderLibrary(OrtEnv *env,
+  const char *registration_name);
+
+// Wraps ort_api->GetEpDevices. The returned array is owned by the OrtEnv and
+// must NOT be freed by the caller; the pointers inside it remain valid until
+// the corresponding plugin library is unregistered or the env is released.
+OrtStatus *GetEpDevices(OrtEnv *env,
+  const OrtEpDevice * const **out_devices, size_t *out_count);
+
+// Wraps ort_api->EpDevice_EpName.
+const char *EpDeviceEpName(const OrtEpDevice *device);
+
+// Wraps ort_api->EpDevice_EpVendor.
+const char *EpDeviceEpVendor(const OrtEpDevice *device);
+
+// Wraps ort_api->SessionOptionsAppendExecutionProvider_V2.
+OrtStatus *AppendExecutionProviderV2(OrtSessionOptions *o, OrtEnv *env,
+  const OrtEpDevice * const *ep_devices, size_t num_ep_devices,
+  const char **keys, const char **values, size_t num_keys);
+
+// Wraps ort_api->CreateArenaCfg
+OrtStatus *CreateArenaCfg(size_t max_mem, int arena_extend_strategy,
+  int initial_chunk_size_bytes, int max_dead_bytes_per_chunk,
+  OrtArenaCfg **out);
+
+// Wraps ort_api->CreateArenaCfgV2
+OrtStatus *CreateArenaCfgV2(const char *const *arena_config_keys,
+  const size_t *arena_config_values, size_t num_keys, OrtArenaCfg **out);
+
+// Wraps ort_api->ReleaseArenaCfg
+void ReleaseArenaCfg(OrtArenaCfg *ptr);
+
+// Wraps ort_api->CreateAndRegisterAllocator
+OrtStatus *CreateAndRegisterAllocator(OrtEnv *env,
+  const OrtMemoryInfo *mem_info, const OrtArenaCfg *arena_cfg);
+
+// Wraps ort_api->CreateAndRegisterAllocatorV2
+OrtStatus *CreateAndRegisterAllocatorV2(OrtEnv *env,
+  const char *provider_type, const OrtMemoryInfo *mem_info,
+  const OrtArenaCfg *arena_cfg, const char *const *provider_options_keys,
+  const char *const *provider_options_values, size_t num_keys);
+
+// Wraps ort_api->RegisterAllocator
+OrtStatus *RegisterAllocator(OrtEnv *env, OrtAllocator *allocator);
+
+// Wraps ort_api->UnregisterAllocator
+OrtStatus *UnregisterAllocator(OrtEnv *env, const OrtMemoryInfo *mem_info);
 
 // Creates an ORT session using the given model. The given options pointer may
 // be NULL; if it is, then we'll use default options.
@@ -191,6 +258,27 @@ void ReleaseRunOptions(OrtRunOptions *o);
 OrtStatus *RunOptionsSetTerminate(OrtRunOptions *o);
 // Wraps ort_api->RunOptionsUnsetTerminate
 OrtStatus *RunOptionsUnsetTerminate(OrtRunOptions *o);
+// Wraps ort_api->AddRunConfigEntry
+OrtStatus *AddRunConfigEntry(OrtRunOptions *o, char *key, char *value);
+// Wraps ort_api->GetRunConfigEntry
+const char *GetRunConfigEntry(OrtRunOptions *o, char *key);
+
+// LoraAdapter helpers
+// Wraps ort_api->CreateLoraAdapter. The allocator may be NULL, in which case
+// the adapter's parameters stay on the CPU until a run requires them on a
+// device.
+// NOTE: takes an ORTCHAR_T*.
+OrtStatus *CreateLoraAdapter(char *path, OrtAllocator *allocator,
+  OrtLoraAdapter **out);
+// Wraps ort_api->CreateLoraAdapterFromArray. The allocator may be NULL like
+// CreateLoraAdapter.
+OrtStatus *CreateLoraAdapterFromArray(void *bytes, size_t num_bytes,
+  OrtAllocator *allocator, OrtLoraAdapter **out);
+// Wraps ort_api->ReleaseLoraAdapter
+void ReleaseLoraAdapter(OrtLoraAdapter *a);
+// Wraps ort_api->RunOptionsAddActiveLoraAdapter
+OrtStatus *RunOptionsAddActiveLoraAdapter(OrtRunOptions *o,
+  OrtLoraAdapter *a);
 
 // Wraps ort_api->RunWithBinding.
 OrtStatus *RunSessionWithBinding(OrtSession *session, OrtIoBinding *b);
@@ -364,6 +452,41 @@ OrtStatus *GetStringTensorElementLength(OrtValue *v, size_t index,
 // Wraps ort_api->GetStringTensorElement
 OrtStatus *GetStringTensorElement(OrtValue *v, size_t buffer_length,
   size_t index, void *buffer);
+
+// Wraps ort_api->CreateMemoryInfo, for creating memory infos referring to
+// non-CPU device memory, such as "Cuda". (CreateOrtMemoryInfo above always
+// creates the default CPU memory info.)
+OrtStatus *CreateOrtCustomMemoryInfo(char *name, int allocator_type, int id,
+  int mem_type, OrtMemoryInfo **out);
+
+// Wraps ort_api->CreateAllocator. The returned allocator wraps the session's
+// internal allocator for the given memory info, and becomes invalid when the
+// session is released.
+OrtStatus *CreateOrtAllocator(OrtSession *session, OrtMemoryInfo *mem_info,
+  OrtAllocator **out);
+
+// Wraps ort_api->ReleaseAllocator. Must only be used with allocators created
+// by CreateOrtAllocator, never with the default allocator.
+void ReleaseOrtAllocator(OrtAllocator *a);
+
+// Wraps ort_api->MemoryInfoGetName. The returned name is owned by onnxruntime
+// and valid for the memory info's lifetime; do not free it.
+OrtStatus *GetMemoryInfoName(OrtMemoryInfo *info, const char **name);
+
+// Wraps ort_api->AllocatorGetStats, which calls OrtAllocator::GetStats. That
+// function pointer is optional, so an allocator that does not implement it
+// yields an empty set of entries rather than crashing. The returned instance
+// must be freed using ReleaseKeyValuePairs.
+OrtStatus *AllocatorGetStats(OrtAllocator *a, OrtKeyValuePairs **out);
+
+// Wraps ort_api->GetKeyValuePairs. The returned arrays are owned by the
+// OrtKeyValuePairs instance and remain valid until it is released; do not
+// free the strings or the arrays themselves.
+void GetKeyValuePairs(OrtKeyValuePairs *kvps, char ***keys, char ***values,
+  size_t *num_entries);
+
+// Wraps ort_api->ReleaseKeyValuePairs.
+void ReleaseKeyValuePairs(OrtKeyValuePairs *kvps);
 
 #ifdef __cplusplus
 }  // extern "C"

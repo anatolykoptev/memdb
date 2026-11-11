@@ -166,5 +166,15 @@ func (v *VoyageClient) Dimension() int { return voyageDimension }
 // Close is a no-op for the HTTP-based VoyageAI client.
 func (v *VoyageClient) Close() error { return nil }
 
-// Compile-time interface check.
-var _ Embedder = (*VoyageClient)(nil)
+// MaxBatchSize returns the VoyageAI API batch limit. Voyage accepts up to 128
+// input texts per /v1/embeddings request; exceeding this returns HTTP 400.
+func (v *VoyageClient) MaxBatchSize() int { return voyageMaxBatch }
+
+// voyageMaxBatch is the VoyageAI /v1/embeddings input array limit.
+const voyageMaxBatch = 128
+
+// Compile-time interface checks.
+var (
+	_ Embedder   = (*VoyageClient)(nil)
+	_ BatchSizer = (*VoyageClient)(nil)
+)

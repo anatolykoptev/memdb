@@ -28,9 +28,6 @@ var (
 	// The following errors are not part of the json specification, but
 	// compliant extensions specific to this implementation.
 
-	// ErrServerOverloaded is returned when a message was refused due to a
-	// server being temporarily unable to accept any new messages.
-	ErrServerOverloaded = NewError(-32000, "overloaded")
 	// ErrUnknown should be used for all non coded errors.
 	ErrUnknown = NewError(-32001, "unknown error")
 	// ErrServerClosing is returned for calls that arrive while the server is closing.
@@ -90,7 +87,7 @@ func (err *WireError) Error() string {
 
 func (err *WireError) Is(other error) bool {
 	w, ok := other.(*WireError)
-	if !ok {
+	if !ok || w == nil {
 		return false
 	}
 	return err.Code == w.Code
