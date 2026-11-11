@@ -198,7 +198,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 * add livepg integration job with Postgres+pgvector+AGE ([#366](https://github.com/anatolykoptev/memdb/issues/366)) ([c16fcba](https://github.com/anatolykoptev/memdb/commit/c16fcba92cb6ba6351ef7b36ad4bcae6f0779ab7))
 * add release-please for automated Go releases ([e3051ef](https://github.com/anatolykoptev/memdb/commit/e3051ef0b577d3d11359b032ea42e122079e0098))
-* align with krolik CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
+* align with the fleet CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
 * **esc-1:** composite test-pg image with AGE 1.6.0 prebuilt ([#378](https://github.com/anatolykoptev/memdb/issues/378)) ([06ade7f](https://github.com/anatolykoptev/memdb/commit/06ade7fa3040ed25554a1daa99a3e2ba34e21134))
 * **esc-2:** Helm Redis 7→8 + maxmemory+allkeys-lru ([#376](https://github.com/anatolykoptev/memdb/issues/376)) ([e7917f9](https://github.com/anatolykoptev/memdb/commit/e7917f9100d21afff245873c8a1a732c681d1866))
 * GOWORK=off go build ./... — ok ([f41ce92](https://github.com/anatolykoptev/memdb/commit/f41ce920c187db70b1db3e33d79e94a216e70e0c))

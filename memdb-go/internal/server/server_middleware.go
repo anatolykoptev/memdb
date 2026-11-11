@@ -53,7 +53,7 @@ func initBrowserClient(cfg *config.Config, logger *slog.Logger) enginesearch.Bro
 	}
 	pool, err := proxypool.NewWebshare(cfg.WebshareAPIKey)
 	if err != nil {
-		logger.Warn("failed to init proxy pool, direct scraping disabled", slog.Any("error", err))
+		logger.Warn("failed to init proxy pool, direct fetching disabled", slog.Any("error", err))
 		return nil
 	}
 	f := fetch.New(fetch.WithProxyPool(pool))

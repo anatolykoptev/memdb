@@ -336,7 +336,7 @@
 ### Build & CI
 
 * add livepg integration job with Postgres+pgvector+AGE ([#366](https://github.com/anatolykoptev/memdb/issues/366)) ([c16fcba](https://github.com/anatolykoptev/memdb/commit/c16fcba92cb6ba6351ef7b36ad4bcae6f0779ab7))
-* align with krolik CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
+* align with the fleet CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
 * **esc-1:** composite test-pg image with AGE 1.6.0 prebuilt ([#378](https://github.com/anatolykoptev/memdb/issues/378)) ([06ade7f](https://github.com/anatolykoptev/memdb/commit/06ade7fa3040ed25554a1daa99a3e2ba34e21134))
 * GOWORK=off go build ./... — ok ([f41ce92](https://github.com/anatolykoptev/memdb/commit/f41ce920c187db70b1db3e33d79e94a216e70e0c))
 * GOWORK=off go build ./... ✓ ([dd3b70e](https://github.com/anatolykoptev/memdb/commit/dd3b70eb60ceaa525c865d85ee5821bf58b3779b))
@@ -628,7 +628,7 @@
 ### Build & CI
 
 * add livepg integration job with Postgres+pgvector+AGE ([#366](https://github.com/anatolykoptev/memdb/issues/366)) ([c16fcba](https://github.com/anatolykoptev/memdb/commit/c16fcba92cb6ba6351ef7b36ad4bcae6f0779ab7))
-* align with krolik CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
+* align with the fleet CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
 * **esc-1:** composite test-pg image with AGE 1.6.0 prebuilt ([#378](https://github.com/anatolykoptev/memdb/issues/378)) ([06ade7f](https://github.com/anatolykoptev/memdb/commit/06ade7fa3040ed25554a1daa99a3e2ba34e21134))
 * GOWORK=off go build ./... — ok ([f41ce92](https://github.com/anatolykoptev/memdb/commit/f41ce920c187db70b1db3e33d79e94a216e70e0c))
 * GOWORK=off go build ./... ✓ ([dd3b70e](https://github.com/anatolykoptev/memdb/commit/dd3b70eb60ceaa525c865d85ee5821bf58b3779b))
@@ -922,7 +922,7 @@
 ### Build & CI
 
 * add livepg integration job with Postgres+pgvector+AGE ([#366](https://github.com/anatolykoptev/memdb/issues/366)) ([c16fcba](https://github.com/anatolykoptev/memdb/commit/c16fcba92cb6ba6351ef7b36ad4bcae6f0779ab7))
-* align with krolik CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
+* align with the fleet CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
 * **esc-1:** composite test-pg image with AGE 1.6.0 prebuilt ([#378](https://github.com/anatolykoptev/memdb/issues/378)) ([06ade7f](https://github.com/anatolykoptev/memdb/commit/06ade7fa3040ed25554a1daa99a3e2ba34e21134))
 * GOWORK=off go build ./... — ok ([f41ce92](https://github.com/anatolykoptev/memdb/commit/f41ce920c187db70b1db3e33d79e94a216e70e0c))
 * GOWORK=off go build ./... ✓ ([dd3b70e](https://github.com/anatolykoptev/memdb/commit/dd3b70eb60ceaa525c865d85ee5821bf58b3779b))
@@ -1221,7 +1221,7 @@
 ### Build & CI
 
 * add livepg integration job with Postgres+pgvector+AGE ([#366](https://github.com/anatolykoptev/memdb/issues/366)) ([c16fcba](https://github.com/anatolykoptev/memdb/commit/c16fcba92cb6ba6351ef7b36ad4bcae6f0779ab7))
-* align with krolik CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
+* align with the fleet CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
 * **esc-1:** composite test-pg image with AGE 1.6.0 prebuilt ([#378](https://github.com/anatolykoptev/memdb/issues/378)) ([06ade7f](https://github.com/anatolykoptev/memdb/commit/06ade7fa3040ed25554a1daa99a3e2ba34e21134))
 * GOWORK=off go build ./... — ok ([f41ce92](https://github.com/anatolykoptev/memdb/commit/f41ce920c187db70b1db3e33d79e94a216e70e0c))
 * GOWORK=off go build ./... ✓ ([dd3b70e](https://github.com/anatolykoptev/memdb/commit/dd3b70eb60ceaa525c865d85ee5821bf58b3779b))
@@ -1523,7 +1523,7 @@
 ### Build & CI
 
 * add livepg integration job with Postgres+pgvector+AGE ([#366](https://github.com/anatolykoptev/memdb/issues/366)) ([c16fcba](https://github.com/anatolykoptev/memdb/commit/c16fcba92cb6ba6351ef7b36ad4bcae6f0779ab7))
-* align with krolik CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
+* align with the fleet CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
 * **esc-1:** composite test-pg image with AGE 1.6.0 prebuilt ([#378](https://github.com/anatolykoptev/memdb/issues/378)) ([06ade7f](https://github.com/anatolykoptev/memdb/commit/06ade7fa3040ed25554a1daa99a3e2ba34e21134))
 * GOWORK=off go build ./... — ok ([f41ce92](https://github.com/anatolykoptev/memdb/commit/f41ce920c187db70b1db3e33d79e94a216e70e0c))
 * GOWORK=off go build ./... ✓ ([dd3b70e](https://github.com/anatolykoptev/memdb/commit/dd3b70eb60ceaa525c865d85ee5821bf58b3779b))
@@ -1686,7 +1686,7 @@
 ### Build & CI
 
 * add livepg integration job with Postgres+pgvector+AGE ([#366](https://github.com/anatolykoptev/memdb/issues/366)) ([c16fcba](https://github.com/anatolykoptev/memdb/commit/c16fcba92cb6ba6351ef7b36ad4bcae6f0779ab7))
-* align with krolik CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
+* align with the fleet CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
 * **esc-1:** composite test-pg image with AGE 1.6.0 prebuilt ([#378](https://github.com/anatolykoptev/memdb/issues/378)) ([06ade7f](https://github.com/anatolykoptev/memdb/commit/06ade7fa3040ed25554a1daa99a3e2ba34e21134))
 * GOWORK=off go build ./... — ok ([f41ce92](https://github.com/anatolykoptev/memdb/commit/f41ce920c187db70b1db3e33d79e94a216e70e0c))
 * GOWORK=off go build ./... ✓ ([dd3b70e](https://github.com/anatolykoptev/memdb/commit/dd3b70eb60ceaa525c865d85ee5821bf58b3779b))
@@ -1994,7 +1994,7 @@
 ### Build & CI
 
 * add livepg integration job with Postgres+pgvector+AGE ([#366](https://github.com/anatolykoptev/memdb/issues/366)) ([c16fcba](https://github.com/anatolykoptev/memdb/commit/c16fcba92cb6ba6351ef7b36ad4bcae6f0779ab7))
-* align with krolik CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
+* align with the fleet CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
 * **esc-1:** composite test-pg image with AGE 1.6.0 prebuilt ([#378](https://github.com/anatolykoptev/memdb/issues/378)) ([06ade7f](https://github.com/anatolykoptev/memdb/commit/06ade7fa3040ed25554a1daa99a3e2ba34e21134))
 * GOWORK=off go build ./... — ok ([f41ce92](https://github.com/anatolykoptev/memdb/commit/f41ce920c187db70b1db3e33d79e94a216e70e0c))
 * GOWORK=off go build ./... ✓ ([dd3b70e](https://github.com/anatolykoptev/memdb/commit/dd3b70eb60ceaa525c865d85ee5821bf58b3779b))
@@ -2303,7 +2303,7 @@
 ### Build & CI
 
 * add livepg integration job with Postgres+pgvector+AGE ([#366](https://github.com/anatolykoptev/memdb/issues/366)) ([c16fcba](https://github.com/anatolykoptev/memdb/commit/c16fcba92cb6ba6351ef7b36ad4bcae6f0779ab7))
-* align with krolik CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
+* align with the fleet CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
 * **esc-1:** composite test-pg image with AGE 1.6.0 prebuilt ([#378](https://github.com/anatolykoptev/memdb/issues/378)) ([06ade7f](https://github.com/anatolykoptev/memdb/commit/06ade7fa3040ed25554a1daa99a3e2ba34e21134))
 * GOWORK=off go build ./... — ok ([f41ce92](https://github.com/anatolykoptev/memdb/commit/f41ce920c187db70b1db3e33d79e94a216e70e0c))
 * GOWORK=off go build ./... ✓ ([dd3b70e](https://github.com/anatolykoptev/memdb/commit/dd3b70eb60ceaa525c865d85ee5821bf58b3779b))
@@ -2614,7 +2614,7 @@
 ### Build & CI
 
 * add livepg integration job with Postgres+pgvector+AGE ([#366](https://github.com/anatolykoptev/memdb/issues/366)) ([c16fcba](https://github.com/anatolykoptev/memdb/commit/c16fcba92cb6ba6351ef7b36ad4bcae6f0779ab7))
-* align with krolik CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
+* align with the fleet CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
 * **esc-1:** composite test-pg image with AGE 1.6.0 prebuilt ([#378](https://github.com/anatolykoptev/memdb/issues/378)) ([06ade7f](https://github.com/anatolykoptev/memdb/commit/06ade7fa3040ed25554a1daa99a3e2ba34e21134))
 * GOWORK=off go build ./... — ok ([f41ce92](https://github.com/anatolykoptev/memdb/commit/f41ce920c187db70b1db3e33d79e94a216e70e0c))
 * GOWORK=off go build ./... ✓ ([dd3b70e](https://github.com/anatolykoptev/memdb/commit/dd3b70eb60ceaa525c865d85ee5821bf58b3779b))
@@ -2777,7 +2777,7 @@
 ### Build & CI
 
 * add livepg integration job with Postgres+pgvector+AGE ([#366](https://github.com/anatolykoptev/memdb/issues/366)) ([c16fcba](https://github.com/anatolykoptev/memdb/commit/c16fcba92cb6ba6351ef7b36ad4bcae6f0779ab7))
-* align with krolik CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
+* align with the fleet CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
 * **esc-1:** composite test-pg image with AGE 1.6.0 prebuilt ([#378](https://github.com/anatolykoptev/memdb/issues/378)) ([06ade7f](https://github.com/anatolykoptev/memdb/commit/06ade7fa3040ed25554a1daa99a3e2ba34e21134))
 * GOWORK=off go build ./... — ok ([f41ce92](https://github.com/anatolykoptev/memdb/commit/f41ce920c187db70b1db3e33d79e94a216e70e0c))
 * GOWORK=off go build ./... ✓ ([dd3b70e](https://github.com/anatolykoptev/memdb/commit/dd3b70eb60ceaa525c865d85ee5821bf58b3779b))
@@ -3091,7 +3091,7 @@
 ### Build & CI
 
 * add livepg integration job with Postgres+pgvector+AGE ([#366](https://github.com/anatolykoptev/memdb/issues/366)) ([c16fcba](https://github.com/anatolykoptev/memdb/commit/c16fcba92cb6ba6351ef7b36ad4bcae6f0779ab7))
-* align with krolik CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
+* align with the fleet CI convention ([#380](https://github.com/anatolykoptev/memdb/issues/380)) ([26b1bfd](https://github.com/anatolykoptev/memdb/commit/26b1bfd7f90af1c719f05ad5fa0b075c7f84281f))
 * **esc-1:** composite test-pg image with AGE 1.6.0 prebuilt ([#378](https://github.com/anatolykoptev/memdb/issues/378)) ([06ade7f](https://github.com/anatolykoptev/memdb/commit/06ade7fa3040ed25554a1daa99a3e2ba34e21134))
 * GOWORK=off go build ./... — ok ([f41ce92](https://github.com/anatolykoptev/memdb/commit/f41ce920c187db70b1db3e33d79e94a216e70e0c))
 * GOWORK=off go build ./... ✓ ([dd3b70e](https://github.com/anatolykoptev/memdb/commit/dd3b70eb60ceaa525c865d85ee5821bf58b3779b))
