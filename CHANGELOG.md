@@ -359,6 +359,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [memdb-go/v0.23.7] — 2026-11-11
+
+### [0.23.7](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.6...memdb-go/v0.23.7) (2026-11-11)
+
+### Refactoring
+
+* load skills through go-kit/skills instead of skillkit ([#440](https://github.com/anatolykoptev/memdb/issues/440)) ([64785a1](https://github.com/anatolykoptev/memdb/commit/64785a1f97aab1705db03c52756b3638184548d8))
+
 ## [memdb-go/v0.23.5] — 2026-10-08
 
 ### [0.23.5](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.4...memdb-go/v0.23.5) (2026-10-08)
@@ -840,7 +848,8 @@ Initial public release. Baseline for changelog. See
 [docs/ROADMAP-GO-MIGRATION.md](docs/ROADMAP-GO-MIGRATION.md) for the detailed history
 of Python → Go migration phases 1–4.5 that preceded this tag.
 
-[Unreleased]: https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.5...HEAD
+[Unreleased]: https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.7...HEAD
+[memdb-go/v0.23.7]: https://github.com/anatolykoptev/memdb/releases/tag/memdb-go/v0.23.7
 [memdb-go/v0.23.5]: https://github.com/anatolykoptev/memdb/releases/tag/memdb-go/v0.23.5
 [0.23.0]: https://github.com/anatolykoptev/memdb/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/anatolykoptev/memdb/compare/v2.2.0...v0.22.0
