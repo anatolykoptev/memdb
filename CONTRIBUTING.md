@@ -12,10 +12,10 @@ Thank you for your interest in contributing!
 
 ### Prerequisites
 
-- Go 1.26+
+- Go 1.26+ (the version in `memdb-go/go.mod`)
 - Docker + Docker Compose
-- PostgreSQL 17 (via Docker is fine)
-- Python 3.10+ (for the Python layer)
+- PostgreSQL 17 with pgvector and Apache AGE (via Docker is fine)
+- Python 3.10+ only for `examples/python*` and pre-commit; the service itself is pure Go
 
 ### Clone and Build
 
@@ -23,32 +23,25 @@ Thank you for your interest in contributing!
 git clone https://github.com/anatolykoptev/memdb.git
 cd memdb
 
-# Go service
-cd memdb-go
-go mod download
+# Go service (the Makefile is at the repository root)
 make build
-
-# Python layer
-pip install -r docker/requirements.txt
 ```
 
 ### Running the Stack Locally
 
 ```bash
 cp .env.example .env
-# Edit .env with your credentials
-cd docker && docker compose up
+# Edit .env: set MEMDB_LLM_API_KEY and POSTGRES_PASSWORD
+docker compose -f docker/docker-compose.yml up -d
 ```
 
 ## Running Tests
 
-Before opening a PR, ensure these all pass:
+Before opening a PR, run the gate CI runs (`.github/workflows/preflight.yml`):
 
 ```bash
-cd memdb-go
-go build ./...
-go vet ./...
-go test ./...
+make preflight    # go vet, go build, go test and a gofmt check, all in memdb-go
+make lint         # golangci-lint, run by the CI Lint job
 ```
 
 ### Integration tests (require Postgres + Apache AGE)
@@ -72,12 +65,6 @@ go test -tags livepg ./...
 - Lint: `make lint` (runs golangci-lint)
 - Files target ≤200 lines; hard limit 300 lines
 - No `panic`/`unwrap` in request handlers
-
-### Python
-
-- Formatter: `ruff format .`
-- Linter: `ruff check .`
-- Run both before committing: `ruff check . && ruff format --check .`
 
 ### Pre-commit Hooks
 
@@ -108,7 +95,7 @@ Example: `feat(api): add memory search pagination`
 1. Branch from `main`: `git checkout -b feat/short-description`
 2. One concern per PR — keep scope focused
 3. Link the related issue in the PR description: `Fixes #123`
-4. CI must pass (16-matrix builds: 4 OS × 4 Python versions)
+4. CI must pass: preflight, build and test, lint, the live-Postgres job and the secret scan. A pull request that touches only documents skips the heavy jobs
 5. Request review from a maintainer
 
 PRs that mix unrelated concerns will be asked to split.
