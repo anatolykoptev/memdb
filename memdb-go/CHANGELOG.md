@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.7](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.6...memdb-go/v0.23.7) (2026-11-11)
+
+
+### Refactoring
+
+* load skills through go-kit/skills instead of skillkit ([#440](https://github.com/anatolykoptev/memdb/issues/440)) ([64785a1](https://github.com/anatolykoptev/memdb/commit/64785a1f97aab1705db03c52756b3638184548d8))
+
 ## [0.23.6](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.5...memdb-go/v0.23.6) (2026-10-10)
 
 
