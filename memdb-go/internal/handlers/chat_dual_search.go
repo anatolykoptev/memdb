@@ -139,18 +139,18 @@ func resolveDualSpeakerParams(req *nativeChatRequest) (dualSpeakerLegParams, dua
 	}
 
 	return dualSpeakerLegParams{
-			query:          *req.Query,
-			agentID:        stringOrEmpty(req.AgentID),
-			topKPerSpeaker: topKPerSpeaker,
-			prefTopK:       prefTopK,
-			includePref:    derefBoolOr(req.IncludePreference, true),
-			dedup:          chatResolveDedup(req.Mode),
-			level:          level,
-		}, dualSpeakerMergeParams{
-			topK:          topK,
-			threshold:     threshold,
-			mergeStrategy: mergeStrategy,
-		}, nil
+		query:          *req.Query,
+		agentID:        stringOrEmpty(req.AgentID),
+		topKPerSpeaker: topKPerSpeaker,
+		prefTopK:       prefTopK,
+		includePref:    derefBoolOr(req.IncludePreference, true),
+		dedup:          chatResolveDedup(req.Mode),
+		level:          level,
+	}, dualSpeakerMergeParams{
+		topK:          topK,
+		threshold:     threshold,
+		mergeStrategy: mergeStrategy,
+	}, nil
 }
 
 // runDualSpeakerLegs fans out one search.SearchByLevel per speaker in
