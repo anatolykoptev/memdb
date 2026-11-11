@@ -17,7 +17,7 @@ package handlers
 //     to a non-zero argument (not the pre-registration zero).
 //
 // These are pure unit tests — no Postgres, no LLM, no OTel provider needed.
-// The metric recording helpers are verified via input/output, not by scraping
+// The metric recording helpers are verified via input/output, not by polling
 // Prometheus output (that is covered by observability.TestM12MetricsExportWireNames).
 
 import (

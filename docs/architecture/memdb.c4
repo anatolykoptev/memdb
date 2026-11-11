@@ -180,7 +180,7 @@ model {
 }
 
 deployment {
-  oracle = vm "Oracle ARM VM (krolik-box)" {
+  oracle = vm "Oracle ARM VM (build server)" {
     description "Главный сервер. Docker compose stack, 4 vCPU ARM."
     
     pg_node = instanceOf memdb.postgres

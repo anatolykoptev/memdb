@@ -81,7 +81,7 @@ func initEmbedder(cfg *config.Config, h *handlers.Handler, cacheClient *cache.Cl
 		registry.Register("code-rank-embed-query", codeEmb) // same embedder, prefix handled by applyModelPrefix
 		// Backward-compat alias: route "jina-code-v2" requests to the code-rank-embed
 		// backend during the deprecation window. The jina ONNX sidecar was retired
-		// 2026-04-17; embed.krolik.tools now serves code-rank-embed vectors
+		// 2026-04-17; the embed service now serves code-rank-embed vectors
 		// regardless of the requested model name. Callers (e.g. go-code MCP before
 		// its cutover PR deploys) continue to receive valid vectors instead of HTTP 400.
 		// Remove once the coordinated go-code cutover is confirmed deployed.
