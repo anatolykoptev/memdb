@@ -6,7 +6,7 @@
 **One docker-compose. Pure Go.**
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-green.svg?logo=apache)](https://opensource.org/license/apache-2-0/)
-[![Version](https://img.shields.io/badge/version-0.23.0-blue.svg)](https://github.com/anatolykoptev/memdb/releases)
+[![Version](https://img.shields.io/badge/version-0.23.6-blue.svg)](https://github.com/anatolykoptev/memdb/releases)
 [![LoCoMo LLM-Judge](https://img.shields.io/badge/LoCoMo%20LLM--Judge-72.5%25-blue.svg?logo=anthropic)](evaluation/locomo/MILESTONES.md)
 [![Go](https://img.shields.io/badge/Go-1.26+-00ADD8.svg?logo=go)](https://go.dev/)
 [![GitHub stars](https://img.shields.io/github/stars/anatolykoptev/memdb?style=social)](https://github.com/anatolykoptev/memdb/stargazers)
@@ -14,13 +14,13 @@
 
 <img src="docs/assets/architecture.svg" alt="MemDB architecture: agent → memdb-go → Postgres (pgvector + Apache AGE) + Redis + Qdrant + embed-server, plus memdb-mcp" width="100%" />
 
-<!-- TODO demo: record with asciinema + agg → docs/assets/demo.gif (recipe in docs/assets/README.md) -->
+<!-- Demo recording pending: asciinema + agg → docs/assets/demo.gif (recipe in docs/assets/README.md) -->
 <!-- <img src="docs/assets/demo.gif" alt="MemDB 30-second demo: docker compose up, add memory, search memory" width="100%" /> -->
 
 [**Quick Start**](#quick-start-5-minutes) ·
 [**Use Cases**](#use-cases) ·
 [**Comparison**](#why-memdb) ·
-[**Documentation**](docs/) ·
+[**Documentation**](docs/INDEX.md) ·
 [**Roadmap**](#roadmap) ·
 [**Discord**](https://discord.gg/8vhbTZgf)
 
@@ -51,7 +51,7 @@ Honest comparison with comparable open-source memory systems. `?` marks unverifi
 
 | | **MemDB** | Mem0 | Letta | Zep | Memobase |
 |---|---|---|---|---|---|
-| Self-hostable | **✅ Yes** (pure Go binary) | ✅ Yes (Python) <!-- TODO verify --> | ✅ Yes (Python) <!-- TODO verify --> | ✅ Yes <!-- TODO verify --> | ✅ Yes <!-- TODO verify --> |
+| Self-hostable | **✅ Yes** (pure Go binary) | ✅ Yes (Python) | ✅ Yes (Python) | ✅ Yes | ✅ Yes |
 | Single static binary | **✅ Yes** | ❌ No | ❌ No | ❌ No | ❌ No |
 | LoCoMo LLM-Judge | **72.5% (excl cat-5, v0.23.0 / M10)** | 66.88% | ~58% `?` | **75.14%** (self-reported) | 75.78% (excl. cat-5) |
 | pgvector + AGE graph | **✅ Yes** | ⚠️ Partial `?` | ❌ No | ⚠️ Yes (Neo4j) `?` | ⚠️ Partial `?` |
@@ -105,7 +105,7 @@ Recalls a customer's prior issues and account context. They never re-explain. Sc
 </tr>
 </table>
 
-<!-- TODO telegram-bot-demo.png: drop bot screenshot here once recorded (see docs/assets/README.md) -->
+<!-- Telegram bot screenshot pending: docs/assets/telegram-bot-demo.png (see docs/assets/README.md) -->
 <!-- <p align="center"><img src="docs/assets/telegram-bot-demo.png" alt="Telegram bot remembering a user preference across two chats a day apart" width="80%" /></p> -->
 
 Plus **agentic workflows** — persistent skill / trajectory memory: the agent remembers which tools succeeded for which task category and uses that history to plan future runs.
@@ -268,7 +268,7 @@ MemDB tracks LoCoMo (Long Conversation Memory) scores per release; full per-mile
 deltas live in [evaluation/locomo/MILESTONES.md](evaluation/locomo/MILESTONES.md).
 
 Highlights:
-- **v0.23.0 / M10 (current):** **72.5% LLM Judge** on chat-50 stratified (excl cat-5, Memobase convention) — between MemOS (73.31%) and Zep (75.14%) — +5.62pp ahead of Mem0 (66.88%), -0.81pp short of MemOS, -2.64pp short of Zep, -3.28pp short of Memobase (75.78%) leader. Full corpus 1986 QAs: **50.9% LLM Judge** (excl cat-5). Ingest 7.5× faster than M9 (40 min vs 5 h).
+- **v0.23.0 / M10 (latest measured release):** **72.5% LLM Judge** on chat-50 stratified (excl cat-5, Memobase convention) — between MemOS (73.31%) and Zep (75.14%) — +5.62pp ahead of Mem0 (66.88%), -0.81pp short of MemOS, -2.64pp short of Zep, -3.28pp short of Memobase (75.78%) leader. Full corpus 1986 QAs: **50.9% LLM Judge** (excl cat-5). Ingest 7.5× faster than M9 (40 min vs 5 h).
 - **v0.22.0 / M9:** 70.0% LLM Judge on chat-50 (excl cat-5) — first published Memobase-comparable measurement.
 - **M7 Stage 2 (conv-26 full, 199 QAs):** F1 **0.238**, hit@k 0.769 — first MemOS-tier result on a full single conversation.
 
@@ -341,14 +341,16 @@ migrations auto-apply on startup.
 
 ## Configuration
 
-Key environment variables (full list in `.env.example`):
+Key environment variables (full list in `.env.example`). The defaults below are the ones
+`docker/docker-compose.yml` applies; the binary's own fallbacks differ for the model
+(`gemini-2.5-flash`) and the embedder (`onnx`), so set them explicitly outside Compose.
 
 | Variable | Default | Description |
 |---|---|---|
 | `MEMDB_LLM_PROXY_URL` | `https://api.openai.com/v1` | OpenAI-compatible base URL |
 | `MEMDB_LLM_API_KEY` | — | API key for the LLM provider |
 | `MEMDB_LLM_MODEL` | `gpt-4o-mini` | Model name |
-| `MEMDB_EMBEDDER_TYPE` | `http` | `http` (embed-server), `ollama`, or `onnx` |
+| `MEMDB_EMBEDDER_TYPE` | `http` | `http` (embed-server), `ollama`, `voyage` or `onnx` |
 | `MEMDB_EMBED_URL` | — | Base URL for embed-server (when type=http) |
 | `POSTGRES_PASSWORD` | — | Required; no default |
 | `MEMDB_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
@@ -392,7 +394,7 @@ Pull requests, issues, and design discussion are welcome.
 - [GitHub Discussions](https://github.com/anatolykoptev/memdb/discussions) — questions and design ideas
 - [Discord](https://discord.gg/8vhbTZgf) — chat with maintainers and other users
 
-<!-- TODO star-history.svg: embed star-history.com chart for anatolykoptev/memdb after launch -->
+<!-- Star-history chart pending: docs/assets/star-history.svg -->
 <!-- <p align="center"><a href="https://star-history.com/#anatolykoptev/memdb&Date"><img src="docs/assets/star-history.svg" alt="MemDB star history" width="80%" /></a></p> -->
 
 ---
@@ -436,9 +438,9 @@ Apache 2.0 — see [LICENSE](LICENSE).
 
 **[⭐ Star us on GitHub](https://github.com/anatolykoptev/memdb)** ·
 **[💬 Join Discord](https://discord.gg/8vhbTZgf)** ·
-**[📖 Docs](docs/)** ·
+**[📖 Docs](docs/INDEX.md)** ·
 **[🗺️ Roadmap](#roadmap)**
 
-Built with care in Go. Apache 2.0. v0.23.0.
+Built with care in Go. Apache 2.0.
 
 </div>
