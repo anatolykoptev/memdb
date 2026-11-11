@@ -119,10 +119,17 @@ jobs:
           }
           # Does file $1 carry $2 on a line that is code? A comment line ("// see CLAUDE.md") names
           # a doc without reading it; directives that read ARE live (//go:embed, #[doc = include_str!]).
+          # An occurrence inside a URL (https://host/blob/main/README.md) is a link, not a read.
           live_mention() {
             git -C "$scratch" cat-file blob "FETCH_HEAD:$1" 2>/dev/null | LC_ALL=C awk -v n="$2" '
-              index($0, n) { l = $0; sub(/^[ \t]+/, "", l)
-                if (l ~ /^(\/\/go:|#\[|#!|#include|#embed|#import)/ || l !~ /^(\/\/|#|\*|\/\*|--|<!--)/) { found = 1; exit } }
+              { s = $0; off = 0
+                while ((i = index(s, n)) > 0) {
+                  pre = substr($0, 1, off + i - 1); sub(/[A-Za-z0-9_@+.\/:~%-]*$/, "", pre)
+                  tok = substr($0, length(pre) + 1, off + i - 1 - length(pre))
+                  if (tok !~ /:\/\//) { l = $0; sub(/^[ \t]+/, "", l)
+                    # a flag line (`--config docs/x.md`) is code; only `-- ` / `--` alone is an SQL comment
+                    if (l ~ /^(\/\/go:|#\[|#!|#include|#embed|#import)/ || l !~ /^(\/\/|#|\* |\*\/|\*$|\/\*|-- |--$|<!--)/) { found = 1; exit } }
+                  off += i + length(n) - 1; s = substr(s, i + length(n)) } }
               END { exit !found }'
           }
           # Does a non-doc tracked file read any of the candidate docs? 0 = no, 1 = yes (why says
