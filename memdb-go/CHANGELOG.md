@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.8](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.7...memdb-go/v0.23.8) (2026-11-14)
+
+
+### Refactoring
+
+* remove unreachable code reported by deadcode ([#445](https://github.com/anatolykoptev/memdb/issues/445)) ([dd1e63f](https://github.com/anatolykoptev/memdb/commit/dd1e63f1764b891ccab44fd8cff38c69092b0380))
+
 ## [0.23.7](https://github.com/anatolykoptev/memdb/compare/memdb-go/v0.23.6...memdb-go/v0.23.7) (2026-11-11)
 
 
