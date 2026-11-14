@@ -72,14 +72,6 @@ type EventExtractor struct {
 // profile and atomic extractors.
 func NewEventExtractor(c *Client) *EventExtractor { return &EventExtractor{client: c} }
 
-// Model returns the underlying primary model name (telemetry).
-func (e *EventExtractor) Model() string {
-	if e == nil || e.client == nil {
-		return ""
-	}
-	return e.client.Model()
-}
-
 // defaultEventTags is the canonical Memobase event tag list. Used when the
 // caller does not supply project-specific tags (we don't have the Memobase
 // "project profile" concept yet — F3.1 stretch).

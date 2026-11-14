@@ -186,10 +186,6 @@ func NewAtomicExtractor(c *Client) *AtomicExtractor {
 	return &AtomicExtractor{client: c}
 }
 
-// Client returns the underlying chat client. Exposed so tests can swap in
-// httptest-backed transports without rebuilding the wrapper.
-func (e *AtomicExtractor) Client() *Client { return e.client }
-
 // AtomicWordMin / AtomicWordMax bracket the per-fact word-count window the
 // mem0 prompt promises (15-80 with up to 100 for detail-rich content).
 // Validation is lenient: out-of-window facts log a warning but still ship.

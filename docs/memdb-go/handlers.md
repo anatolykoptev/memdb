@@ -244,7 +244,6 @@ OpenAI-совместимый endpoint для векторизации. Испо
 |---|---|
 | `cacheGet(ctx, key)` | Читает из Redis, возвращает nil при промахе |
 | `cacheSet(ctx, key, value, ttl)` | Пишет в Redis с TTL |
-| `cacheDelete(ctx, key)` | Удаляет ключ |
 | `cacheInvalidate(ctx, patterns...)` | SCAN + DEL по паттернам (production-safe) |
 
 Все операции — no-op если `redis == nil`.

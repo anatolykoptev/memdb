@@ -142,9 +142,6 @@ func NewProfileExtractor(c *Client) *ProfileExtractor {
 	return &ProfileExtractor{client: c}
 }
 
-// Model returns the underlying primary model name.
-func (e *ProfileExtractor) Model() string { return e.client.Model() }
-
 // ExtractProfile sends the conversation memo to the LLM and returns the
 // parsed []db.InsertProfileParams rows ready for postgres BulkUpsert.
 //

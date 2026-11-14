@@ -2,7 +2,6 @@ package search
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,15 +10,6 @@ import (
 	"testing"
 	"time"
 )
-
-// fakeBrowser implements enginesearch.BrowserDoer for testing direct scraper paths.
-type fakeBrowser struct {
-	doFunc func(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error)
-}
-
-func (fb *fakeBrowser) Do(method, url string, headers map[string]string, body io.Reader) ([]byte, map[string]string, int, error) {
-	return fb.doFunc(method, url, headers, body)
-}
 
 // --- Hard Red: Concurrent safety ---
 

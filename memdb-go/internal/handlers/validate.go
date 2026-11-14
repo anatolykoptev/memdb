@@ -271,12 +271,6 @@ func (h *Handler) ValidatedChat(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ValidatedChatStream validates and proxies POST /product/chat/stream.
-func (h *Handler) ValidatedChatStream(w http.ResponseWriter, r *http.Request) {
-	// Same validation as chat
-	h.ValidatedChat(w, r)
-}
-
 // ValidatedGetMemory validates and proxies POST /product/get_memory.
 func (h *Handler) ValidatedGetMemory(w http.ResponseWriter, r *http.Request) {
 	body, ok := h.readBody(w, r)

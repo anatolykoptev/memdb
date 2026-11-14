@@ -5,7 +5,6 @@ package rpc
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -46,80 +45,6 @@ func NewPythonClient(baseURL string, logger *slog.Logger) *PythonClient {
 		},
 		logger: logger,
 	}
-}
-
-// ProxyRequest forwards an HTTP request to the Python backend and streams the response back.
-// This is the main method used in Phase 1 — all endpoints proxy through here.
-func (c *PythonClient) ProxyRequest(ctx context.Context, w http.ResponseWriter, r *http.Request) {
-	targetURL := c.baseURL + r.URL.Path
-	if r.URL.RawQuery != "" {
-		targetURL += "?" + r.URL.RawQuery
-	}
-
-	c.logger.DebugContext(ctx, "proxying request",
-		slog.String("method", r.Method),
-		slog.String("target", targetURL),
-	)
-
-	// Create the proxied request
-	proxyReq, err := http.NewRequestWithContext(ctx, r.Method, targetURL, r.Body)
-	if err != nil {
-		c.writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create proxy request: %v", err))
-		return
-	}
-
-	// Copy headers from original request
-	for key, values := range r.Header {
-		for _, v := range values {
-			proxyReq.Header.Add(key, v)
-		}
-	}
-
-	// Choose the right HTTP client before sending.
-	// SSE streams must use sseClient (no Timeout) — using httpClient would kill
-	// long-running streams after 120s. We detect SSE intent from the request:
-	//   1. Accept: text/event-stream — explicit client signal
-	//   2. Known SSE path suffixes (/stream, /wait/stream)
-	httpCli := c.httpClient
-	if isSSERequest(r) {
-		httpCli = c.sseClient
-	}
-
-	start := time.Now()
-	resp, err := httpCli.Do(proxyReq)
-	if err != nil {
-		c.logger.ErrorContext(ctx, "proxy request failed",
-			slog.String("target", targetURL),
-			slog.Any("error", err),
-			slog.Duration("duration", time.Since(start)),
-		)
-		c.writeError(w, http.StatusBadGateway, fmt.Sprintf("backend unavailable: %v", err))
-		return
-	}
-	defer resp.Body.Close()
-
-	c.logger.DebugContext(ctx, "proxy response received",
-		slog.String("target", targetURL),
-		slog.Int("status", resp.StatusCode),
-		slog.Duration("duration", time.Since(start)),
-	)
-
-	// Copy response headers
-	for key, values := range resp.Header {
-		for _, v := range values {
-			w.Header().Add(key, v)
-		}
-	}
-
-	// Check if this is an SSE stream and handle accordingly.
-	// Use the context-aware scanner-based proxy for correct SSE framing.
-	if isSSEContentType(resp.Header.Get("Content-Type")) {
-		c.streamSSEProxy(ctx, w, resp)
-		return
-	}
-
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
 }
 
 func (c *PythonClient) writeError(w http.ResponseWriter, code int, message string) {
