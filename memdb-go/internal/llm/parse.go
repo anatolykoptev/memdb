@@ -160,17 +160,6 @@ func WithJSONResponseMode() ChatOpt {
 	return func(o *chatStructuredOpts) { o.useJSONResponseMode = true }
 }
 
-// WithParseRetryReminder customises the reminder appended to the final user
-// message when the helper retries after a json.Unmarshal failure.
-// Default: "Your previous response was not valid JSON. Respond with strict JSON only, no prose."
-func WithParseRetryReminder(reminder string) ChatOpt {
-	return func(o *chatStructuredOpts) {
-		if reminder != "" {
-			o.parseRetryReminder = reminder
-		}
-	}
-}
-
 func resolveStructuredOpts(opts []ChatOpt) chatStructuredOpts {
 	o := chatStructuredOpts{
 		maxRetries:         defaultStructuredMaxRetries,

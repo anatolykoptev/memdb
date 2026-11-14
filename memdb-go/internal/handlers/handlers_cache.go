@@ -41,16 +41,6 @@ func (h *Handler) cacheSet(ctx context.Context, key string, value []byte, ttl ti
 	}
 }
 
-// cacheDelete removes a specific key from Redis. No-op if redis is nil. Errors are debug-logged.
-func (h *Handler) cacheDelete(ctx context.Context, key string) {
-	if h.redis == nil {
-		return
-	}
-	if err := h.redis.Client().Del(ctx, key).Err(); err != nil {
-		h.logger.Debug("cache delete error", slog.String("key", key), slog.Any("error", err))
-	}
-}
-
 // cacheInvalidate deletes keys matching the given patterns. Uses SCAN (production-safe).
 // No-op if redis is nil. Errors are debug-logged.
 func (h *Handler) cacheInvalidate(ctx context.Context, patterns ...string) {

@@ -160,12 +160,6 @@ func (h *Handler) SetWorkingMemoryCache(c workingMemoryCacher) {
 	h.wmCache = c
 }
 
-// Embedder returns the configured embedder, or nil if not yet set.
-// Used by server.go to pass the embedder to the scheduler Reorganizer.
-func (h *Handler) Embedder() embedder.Embedder {
-	return h.embedder
-}
-
 // Close releases all database connections and resources held by the handler.
 func (h *Handler) Close() {
 	if h.embedder != nil {

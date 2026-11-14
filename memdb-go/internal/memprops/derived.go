@@ -128,38 +128,3 @@ func BuildDerivedMemoryProps(p DerivedMemoryProps) (map[string]any, error) {
 	}
 	return props, nil
 }
-
-// LatestObservationDate scans a slice of memory-row property maps and
-// returns the maximum of `observation_date` (with `chat_time` as fallback
-// per row). Returns "" when no row carries a usable date.
-func LatestObservationDate(rows []map[string]any) string {
-	latest := ""
-	for _, r := range rows {
-		ts := pickPropDate(r, "observation_date", "chat_time")
-		if ts == "" {
-			continue
-		}
-		if len(ts) > 10 {
-			ts = ts[:10]
-		}
-		if ts > latest {
-			latest = ts
-		}
-	}
-	return latest
-}
-
-func pickPropDate(props map[string]any, keys ...string) string {
-	for _, k := range keys {
-		v, ok := props[k]
-		if !ok {
-			continue
-		}
-		s, ok := v.(string)
-		if !ok || strings.TrimSpace(s) == "" {
-			continue
-		}
-		return s
-	}
-	return ""
-}

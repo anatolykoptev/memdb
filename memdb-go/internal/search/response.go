@@ -108,90 +108,6 @@ func FormatMemoryItem(props map[string]any, includeEmbedding bool) map[string]an
 	}
 }
 
-// BuildSearchResult creates a SearchResult with proper buckets from
-// pre-formatted memory items. Each slice of items becomes a single
-// MemoryBucket under the corresponding field.
-//
-// textMems covers fact-type memories (LongTermMemory, UserMemory,
-// WorkingMemory, OuterMemory) which go into text_mem.
-// skillMems go into skill_mem, prefMems go into pref_mem.
-// tool_mem, act_mem, and para_mem are always empty (they require
-// activation/parametric memory which is not implemented in Go).
-func BuildSearchResult(textMems, skillMems, prefMems []map[string]any, cubeID string) *SearchResult {
-	result := NewEmptySearchResult()
-
-	// Ensure non-nil slices for JSON serialization.
-	if textMems == nil {
-		textMems = []map[string]any{}
-	}
-	if skillMems == nil {
-		skillMems = []map[string]any{}
-	}
-	if prefMems == nil {
-		prefMems = []map[string]any{}
-	}
-
-	result.TextMem = []MemoryBucket{{
-		CubeID:     cubeID,
-		Memories:   textMems,
-		TotalNodes: len(textMems),
-	}}
-
-	result.SkillMem = []MemoryBucket{{
-		CubeID:     cubeID,
-		Memories:   skillMems,
-		TotalNodes: len(skillMems),
-	}}
-
-	result.PrefMem = []MemoryBucket{{
-		CubeID:     cubeID,
-		Memories:   prefMems,
-		TotalNodes: len(prefMems),
-	}}
-
-	// tool_mem gets an empty bucket for the cube (matches Python behavior
-	// where post_process_textual_mem always appends a tool_mem bucket).
-	result.ToolMem = []MemoryBucket{{
-		CubeID:     cubeID,
-		Memories:   []map[string]any{},
-		TotalNodes: 0,
-	}}
-
-	return result
-}
-
-// SplitByMemoryType splits formatted memories by metadata.memory_type.
-// This matches formatters_handler.py:post_process_textual_mem() which
-// partitions text_formatted_mem into fact_mem, tool_mem, and skill_mem.
-//
-// Classification:
-//   - fact: WorkingMemory, LongTermMemory, UserMemory, OuterMemory
-//   - tool: ToolSchemaMemory, ToolTrajectoryMemory
-//   - skill: SkillMemory
-//
-// Items with unrecognized memory_type are placed in factMem.
-func SplitByMemoryType(formatted []map[string]any) (factMem, toolMem, skillMem []map[string]any) {
-	factMem = make([]map[string]any, 0, len(formatted))
-	toolMem = make([]map[string]any, 0)
-	skillMem = make([]map[string]any, 0)
-
-	for _, item := range formatted {
-		memType := extractMemoryType(item)
-		switch memType {
-		case "SkillMemory":
-			skillMem = append(skillMem, item)
-		case "ToolSchemaMemory", "ToolTrajectoryMemory":
-			toolMem = append(toolMem, item)
-		default:
-			// WorkingMemory, LongTermMemory, UserMemory, OuterMemory,
-			// and any unrecognized types go to factMem.
-			factMem = append(factMem, item)
-		}
-	}
-
-	return factMem, toolMem, skillMem
-}
-
 // firstSegment returns the portion of id before the first "-".
 // If id contains no "-", the entire id is returned.
 func firstSegment(id string) string {
@@ -199,17 +115,6 @@ func firstSegment(id string) string {
 		return id[:idx]
 	}
 	return id
-}
-
-// extractMemoryType reads metadata.memory_type from a formatted memory item.
-// Returns empty string if the field is missing or not a string.
-func extractMemoryType(item map[string]any) string {
-	meta, ok := item["metadata"].(map[string]any)
-	if !ok {
-		return ""
-	}
-	mt, _ := meta["memory_type"].(string)
-	return mt
 }
 
 // intAsFloat extracts a numeric JSON field from props and returns it as

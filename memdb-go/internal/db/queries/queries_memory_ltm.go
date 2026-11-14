@@ -87,12 +87,6 @@ WHERE a.properties->>(('user_name'::text)) = $1
 ORDER BY score DESC
 LIMIT $4`
 
-// SearchLTMByVectorSQL returns the SearchLTMByVector query string for testing.
-func SearchLTMByVectorSQL() string { return SearchLTMByVector }
-
-// FindNearDuplicatesSQL returns the FindNearDuplicates query string for testing.
-func FindNearDuplicatesSQL() string { return FindNearDuplicates }
-
 // FindNearDuplicatesHNSW returns near-duplicate pairs using the HNSW index on the embedding column.
 // For each activated memory a, it pulls top-K nearest neighbours via an indexed LATERAL scan,
 // then filters by the cosine-similarity threshold. O(N·topK·log N) vs the O(N²) self-join

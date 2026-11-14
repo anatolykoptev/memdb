@@ -10,24 +10,7 @@ import (
 	"testing"
 
 	"github.com/anatolykoptev/memdb/memdb-go/internal/embedder"
-	"github.com/anatolykoptev/memdb/memdb-go/internal/rpc"
 )
-
-// newMockPython creates a mock Python backend that returns a fixed proxied response.
-// The caller must call Close() on the returned server when done.
-func newMockPython(t *testing.T) (*httptest.Server, *rpc.PythonClient) {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"code":    200,
-			"message": "proxied",
-			"data":    map[string]any{},
-		})
-	}))
-	client := rpc.NewPythonClient(srv.URL, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	return srv, client
-}
 
 // discardLogger returns a logger that discards all output.
 func discardLogger() *slog.Logger {

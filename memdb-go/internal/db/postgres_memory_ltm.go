@@ -166,12 +166,6 @@ func (p *Postgres) FindNearDuplicatesHNSWByIDs(ctx context.Context, userName str
 	return pairs, rows.Err()
 }
 
-// FindNearDuplicatesHNSWSQL returns the HNSW SQL template for testing.
-func FindNearDuplicatesHNSWSQL() string { return queries.FindNearDuplicatesHNSW }
-
-// FindNearDuplicatesHNSWByIDsSQL returns the HNSW ByIDs SQL template for testing.
-func FindNearDuplicatesHNSWByIDsSQL() string { return queries.FindNearDuplicatesHNSWByIDs }
-
 // ListMemoriesByHierarchyLevel returns activated memories for a cube at a given
 // hierarchy_level ('raw' | 'episodic' | 'semantic'). Used by the D3 TreeManager
 // to batch-load candidates for clustering + LLM consolidation per tier.

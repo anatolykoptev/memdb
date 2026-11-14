@@ -222,25 +222,6 @@ func StripEmbeddings(items []map[string]any) {
 	}
 }
 
-// CapWorkingMemScores caps the relativity score for WorkingMemory items
-// to prevent them from dominating text results with a perfect 1.00 score.
-func CapWorkingMemScores(items []map[string]any) {
-	for _, item := range items {
-		meta, _ := item["metadata"].(map[string]any)
-		if meta == nil {
-			continue
-		}
-		mtype, _ := meta["memory_type"].(string)
-		if mtype != "WorkingMemory" {
-			continue
-		}
-		score, _ := meta["relativity"].(float64)
-		if score > WorkingMemMaxScore {
-			meta["relativity"] = WorkingMemMaxScore
-		}
-	}
-}
-
 // CrossSourceDedupByText removes items from secondary slices that have
 // identical text (case-insensitive) to items already in the primary (text_mem).
 // text_mem has the highest priority; duplicates are removed from skill/tool/pref.
