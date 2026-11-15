@@ -31,6 +31,12 @@ type Config struct {
 	// development. Production deployments must NOT set this — Validate()
 	// refuses to start without auth config when DevMode is false.
 	DevMode bool `json:"dev_mode"`
+	// Env (env: MEMDB_ENV) names the deployment: "eval" for an instance that
+	// exists to receive benchmark data, "prod" for everything else. Unset or
+	// unrecognised values are "prod". Reported by /health as data.env;
+	// evaluation harnesses refuse to run unless it is "eval", and a non-eval
+	// instance rejects harness-marked requests (middleware.EvalHarnessGuard).
+	Env string `json:"env"`
 
 	// Logging
 	LogLevel  string `json:"log_level"`
@@ -218,6 +224,7 @@ func Load() *Config {
 		MasterKeyHash:         envStr("MASTER_KEY_HASH", ""),
 		InternalServiceSecret: envStr("INTERNAL_SERVICE_SECRET", ""),
 		DevMode:               envBool("MEMDB_DEV", false),
+		Env:                   NormalizeEnv(envStr("MEMDB_ENV", "")),
 
 		LogLevel:  envStr("MEMDB_LOG_LEVEL", "info"),
 		LogFormat: envStr("MEMDB_LOG_FORMAT", "json"),

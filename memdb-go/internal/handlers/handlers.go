@@ -191,6 +191,15 @@ func (h *Handler) Close() {
 
 // --- Health endpoints (handled directly by Go, no proxy) ---
 
+// envName reports the deployment environment (config.EnvProd or
+// config.EnvEval). Without a config it is prod, the fail-closed default.
+func (h *Handler) envName() string {
+	if h.cfg == nil {
+		return config.EnvProd
+	}
+	return h.cfg.Env
+}
+
 // Health returns a simple health check response.
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	hostname, _ := os.Hostname()
@@ -202,6 +211,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 			"status":     "healthy",
 			"go_version": runtime.Version(),
 			"hostname":   hostname,
+			"env":        h.envName(),
 			"timestamp":  time.Now().UTC().Format(time.RFC3339),
 		},
 	})
