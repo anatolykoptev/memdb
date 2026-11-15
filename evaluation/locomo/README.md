@@ -92,9 +92,25 @@ Full run (all 10 convs) → `LOCOMO_FULL=1 make eval-locomo`. Expect
 
 ### Prerequisites
 
-1. **memdb-go running** at `http://localhost:8080` (or set `MEMDB_URL`).
-   Easiest: `cd ~/deploy/server-config && docker compose up -d memdb-go`.
-2. **Auth.** memdb-go requires `Authorization: Bearer` or `X-Service-Secret`.
+1. **An isolated eval instance, and an explicit target.** Harnesses have no
+   default URL and refuse to run unless `GET /health` reports `data.env == "eval"`
+   (the server sets it from `MEMDB_ENV`; unset means `prod`). They also send
+   `X-MemDB-Eval-Harness: 1`, which every non-eval instance rejects with 403.
+   Start a throwaway stack (own compose project, own database, port 18080):
+
+   ```bash
+   export MEMDB_EMBED_URL=...        # embedder endpoint; MEMDB_LLM_API_KEY for fine mode
+   docker compose -f docker/docker-compose.eval.yml up -d --build
+   export MEMDB_URL=http://127.0.0.1:18080
+   curl -s "$MEMDB_URL/health"       # data.env must be "eval"
+   # ... run the harness, then drop the eval database:
+   docker compose -f docker/docker-compose.eval.yml down -v
+   ```
+
+   Never point a harness at a real deployment: `evaluation/eval_guard.py` and
+   `evaluation/eval_guard.sh` exit 2 (no target) or 3 (not an eval instance).
+2. **Auth.** The eval stack runs with `MEMDB_DEV=1` and needs none. Another
+   eval instance with auth on requires `Authorization: Bearer` or `X-Service-Secret`.
    Set either:
    - `MEMDB_API_KEY=<plain-master-key>` — Bearer token (matches
      `MASTER_KEY_HASH` in the service env), or
@@ -127,23 +143,23 @@ Enables per-category measurement of Phase D features (see table above).
 ### Full LoCoMo run
 
 ```bash
-LOCOMO_FULL=1 MEMDB_URL=http://localhost:8080 make eval-locomo
+LOCOMO_FULL=1 MEMDB_URL=http://127.0.0.1:18080 make eval-locomo
 ```
 
 ### Manual steps (for debugging)
 
 ```bash
 # 1. Ingest (--categories flag is accepted but doesn't affect what's ingested)
-python3 evaluation/locomo/ingest.py --sample --memdb-url http://localhost:8080
+python3 evaluation/locomo/ingest.py --sample --memdb-url "$MEMDB_URL"
 
 # 2. Query — default (10 category-1 QAs)
 python3 evaluation/locomo/query.py --sample \
-    --memdb-url http://localhost:8080 \
+    --memdb-url "$MEMDB_URL" \
     --out evaluation/locomo/results/predictions.json
 
 # 2. Query — 5-category expanded (50 QAs)
 python3 evaluation/locomo/query.py --sample \
-    --memdb-url http://localhost:8080 \
+    --memdb-url "$MEMDB_URL" \
     --categories=1,2,3,4,5 \
     --out evaluation/locomo/results/predictions-5cat.json
 

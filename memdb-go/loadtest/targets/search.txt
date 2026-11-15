@@ -1,4 +1,5 @@
-POST http://localhost:8080/product/search
+POST ${MEMDB_URL}/product/search
+X-MemDB-Eval-Harness: 1
 Content-Type: application/json
 X-Service-Secret: ${SERVICE_SECRET}
 @search-body.json

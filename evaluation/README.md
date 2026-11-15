@@ -18,6 +18,15 @@ This repository provides tools and scripts for evaluating the `LoCoMo`, `LongMem
 ## Configuration
 Copy the `.env-example` file to `.env`, and fill in the required environment variables according to your environment and API keys.
 
+## Target safety
+
+No harness has a default target, and none writes to an instance that is not an
+evaluation instance: the target must report `env=eval` on `/health`, and every
+request carries `X-MemDB-Eval-Harness`, which a non-eval server rejects. Start
+an isolated instance with `docker/docker-compose.eval.yml` (see
+`locomo/README.md`). The legacy scripts in `scripts/` read the target from
+`MEMOS_URL`, with the same check.
+
 ## Setup MemDB
 ### local server
 ```bash

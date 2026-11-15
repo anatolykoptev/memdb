@@ -1,4 +1,5 @@
-POST http://localhost:8080/product/chat/stream
+POST ${MEMDB_URL}/product/chat/stream
+X-MemDB-Eval-Harness: 1
 Content-Type: application/json
 X-Service-Secret: ${SERVICE_SECRET}
 @chat-stream-body.json

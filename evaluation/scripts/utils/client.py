@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from eval_guard import guard, harness_headers  # noqa: E402
 load_dotenv()
 
 
@@ -144,8 +146,13 @@ class MemobaseClient:
 
 class MemosApiClient:
     def __init__(self):
-        self.memos_url = os.getenv("MEMOS_URL")
-        self.headers = {"Content-Type": "application/json", "Authorization": os.getenv("MEMOS_KEY")}
+        # No default target; MEMOS_URL must name an instance that reports env=eval.
+        self.memos_url = guard(None, os.getenv("MEMOS_URL"))
+        self.headers = {
+            "Content-Type": "application/json",
+            "Authorization": os.getenv("MEMOS_KEY"),
+            **harness_headers(),
+        }
 
     def add(self, messages, user_id, conv_id, batch_size: int = 9999):
         """

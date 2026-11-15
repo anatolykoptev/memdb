@@ -8,7 +8,7 @@
 # inside the raw-mode "no LLM" contract.
 #
 # Env:
-#   POSTGRES_CONTAINER   default: postgres (the docker compose service name)
+#   POSTGRES_CONTAINER   REQUIRED, no default; must belong to the memdb-eval compose project
 #   POSTGRES_USER        default: memos
 #   POSTGRES_DB          default: memos
 #   DRY_RUN=1            wrap in BEGIN; ROLLBACK; — prints affected rows but
@@ -23,7 +23,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SQL_FILE="$SCRIPT_DIR/backfill_event_dates_regex.sql"
 
-POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-postgres}"
+# shellcheck source=../../eval_guard.sh
+source "$SCRIPT_DIR/../../eval_guard.sh"
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-}"
+eval_guard_container "$POSTGRES_CONTAINER"
 POSTGRES_USER="${POSTGRES_USER:-memos}"
 POSTGRES_DB="${POSTGRES_DB:-memos}"
 
@@ -34,7 +37,7 @@ fi
 
 if ! docker ps --format '{{.Names}}' | grep -qx "$POSTGRES_CONTAINER"; then
     echo "!! Postgres container '$POSTGRES_CONTAINER' not running" >&2
-    echo "!! Override with POSTGRES_CONTAINER=<name> bash $(basename "$0")" >&2
+    echo "!! Set POSTGRES_CONTAINER=<eval stack postgres container>" >&2
     exit 3
 fi
 

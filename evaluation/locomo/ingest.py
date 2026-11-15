@@ -42,6 +42,9 @@ from pathlib import Path
 
 import requests
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from eval_guard import guard, harness_headers  # noqa: E402
+
 # LOCOMO_INGEST_PARALLELISM caps client-side parallel /add HTTP calls.
 # Default 1 = sequential (legacy behavior). Set to N>1 to fan out N session
 # ingests concurrently. Effective ceiling is min(N, MEMDB_ADD_WORKERS server
@@ -73,6 +76,7 @@ def build_headers() -> dict:
         headers["Authorization"] = f"Bearer {key}"
     if secret := os.getenv("MEMDB_SERVICE_SECRET"):
         headers["X-Service-Secret"] = secret
+    headers.update(harness_headers())
     return headers
 
 
@@ -343,7 +347,7 @@ def main() -> int:
     g.add_argument("--sample", action="store_true", help="Use sample_conversations.json (1 conv).")
     g.add_argument("--full", action="store_true", help="Use full locomo10.json (10 convs).")
     g.add_argument("--conversations", type=Path, help="Path to a conversations JSON.")
-    p.add_argument("--memdb-url", default="http://localhost:8080", help="memdb-go base URL.")
+    p.add_argument("--memdb-url", default=None, help="memdb-go base URL (or env MEMDB_URL). No default: the target must report env=eval on /health.")
     p.add_argument("--dry-run", action="store_true", help="Parse only, do not POST.")
     p.add_argument(
         "--categories",
@@ -372,6 +376,11 @@ def main() -> int:
         help="Disable reverse-role ingest (pre-F9 baseline mode).",
     )
     args = p.parse_args()
+    # Dry-run POSTs nothing, so it needs no target; anything else must name an eval instance.
+    if args.dry_run:
+        args.memdb_url = args.memdb_url or os.getenv("MEMDB_URL") or ""
+    else:
+        args.memdb_url = guard(args.memdb_url, os.getenv("MEMDB_URL"))
 
     try:
         categories = parse_categories(args.categories)
