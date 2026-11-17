@@ -1,6 +1,6 @@
 // Package pacing provides anti-fingerprint request spacing primitives for
-// stealth HTTP clients: uniform random jitter, per-key pacing, and symmetric
-// percentage jitter for backoff. These are the canonical implementations for
+// stealth HTTP clients: uniform random jitter, per-key pacing, heavy-tailed
+// human-like gap spreads (Spread), and symmetric percentage jitter for backoff. These are the canonical implementations for
 // the go-* fleet — go-stealth, go-twitter, and go-kit's own retry/breaker
 // packages delegate here instead of carrying ad-hoc copies.
 //
@@ -197,4 +197,93 @@ func ExponentialBackoff(initial, max time.Duration, multiplier, jitterPct float6
 		base = float64(max)
 	}
 	return SymmetricJitter(time.Duration(base), jitterPct)
+}
+
+// DefaultSpreadSigma is the log-space spread Spread uses when Sigma is zero,
+// negative, NaN or infinite.
+const DefaultSpreadSigma = 1.0
+
+// maxSpreadSigma bounds Sigma so sigma*z cannot reach Inf (and Inf*0 = NaN)
+// inside the exponent; beyond this the clamp to [Min, Max] dominates anyway.
+const maxSpreadSigma = 10.0
+
+// Spread draws human-like gaps: log-normal around a target mean, clamped to
+// [Min, Max]. Unlike Jitter (uniform, so every gap sits in one narrow band),
+// the log-normal is heavy-tailed: most gaps are shorter than Mean, a minority
+// are several times longer. A caller spacing N actions per day with
+// Mean = 24h/N therefore sees both short gaps and long pauses.
+//
+// mu is chosen so the UNCLAMPED mean equals Mean (mu = ln(Mean) - sigma^2/2).
+// Clamping shifts the realized mean: the Min floor lifts it, the Max cap
+// lowers it. Because the distribution's mass is in the right tail, the cap
+// usually dominates, so with a tight Max the realized mean lands BELOW Mean
+// (the median is always below Mean: Mean*exp(-sigma^2/2)).
+//
+// Degenerate inputs never panic and never yield a negative value:
+//   - Mean <= 0: no distribution to sample; returns the floor (Min, or 0).
+//   - Min < 0: treated as 0. Max <= 0: no cap.
+//   - Min > Max (Max > 0): the floor wins; every draw is Min.
+//   - Sigma zero, negative, NaN or Inf: DefaultSpreadSigma. Sigma above 10 is
+//     reduced to 10.
+//   - Overflow (huge Mean/Sigma): saturates at Max, or math.MaxInt64 ns.
+type Spread struct {
+	Mean  time.Duration // target average gap (e.g. 24h/F)
+	Sigma float64       // log-space spread; 0 = DefaultSpreadSigma; bigger = burstier
+	Min   time.Duration // hard floor
+	Max   time.Duration // hard cap (0 = no cap)
+}
+
+// Duration draws one gap using the package-global random source.
+func (s Spread) Duration() time.Duration {
+	return s.DurationFrom(nil)
+}
+
+// DurationFrom draws one gap from r, so tests can seed it for deterministic
+// output. A nil r uses the package-global source.
+func (s Spread) DurationFrom(r *rand.Rand) time.Duration {
+	lo, hi := s.bounds()
+	if s.Mean <= 0 {
+		return lo
+	}
+	sigma := s.Sigma
+	if sigma <= 0 || math.IsNaN(sigma) || math.IsInf(sigma, 0) {
+		sigma = DefaultSpreadSigma
+	}
+	sigma = min(sigma, maxSpreadSigma)
+
+	var z float64
+	if r != nil {
+		z = r.NormFloat64()
+	} else {
+		z = rand.NormFloat64()
+	}
+	mu := math.Log(float64(s.Mean)) - sigma*sigma/2
+	x := math.Exp(mu + sigma*z)
+
+	var d time.Duration
+	switch {
+	case math.IsNaN(x):
+		d = s.Mean
+	case x >= float64(math.MaxInt64):
+		d = math.MaxInt64
+	default:
+		d = time.Duration(x)
+	}
+	if d < lo {
+		d = lo
+	}
+	if hi > 0 && d > hi {
+		d = hi
+	}
+	return d
+}
+
+// bounds returns the effective floor (>= 0) and cap (0 = none, else >= floor).
+func (s Spread) bounds() (lo, hi time.Duration) {
+	lo = max(s.Min, 0)
+	hi = s.Max
+	if hi > 0 && hi < lo {
+		hi = lo
+	}
+	return lo, hi
 }

@@ -154,7 +154,7 @@ func (m *modelCooldown) cooling(model string) bool {
 	m.mu.Unlock()
 
 	if onChange != nil {
-		fireCooldownObserver(onChange, model, false, 0)
+		fireCooldownObserver(onChange, labelOf(model), false, 0)
 	}
 	return false
 }
@@ -200,7 +200,7 @@ func (m *modelCooldown) recordFailure(model string, retryAfter time.Duration) {
 	// Run async + recover so a misbehaving observer (panic/block) cannot stall or
 	// crash the request path. Mirrors CircuitBreaker.doTransition (circuit.go).
 	if reached && !wasActivelyCooling && onChange != nil {
-		fireCooldownObserver(onChange, model, true, d)
+		fireCooldownObserver(onChange, labelOf(model), true, d)
 	}
 }
 
@@ -218,7 +218,7 @@ func (m *modelCooldown) recordSuccess(model string) {
 	m.mu.Unlock()
 
 	if wasCooling && onChange != nil {
-		fireCooldownObserver(onChange, model, false, 0)
+		fireCooldownObserver(onChange, labelOf(model), false, 0)
 	}
 }
 
@@ -283,4 +283,28 @@ func isQuotaError(err error) bool {
 	default:
 		return false
 	}
+}
+
+// deadCooldownKey scopes a dead-model cooldown to (endpoint base URL, model): a
+// 502 "unknown provider for model m" on proxy A says nothing about m on proxy B
+// (catalogs and credentials may differ), so B must stay eligible. The model name
+// leads so labelOf can recover it for the observer. Quota (429/503) cooldown
+// stays keyed by bare model — unchanged — since quota is per upstream account,
+// shared by every proxy that routes the model to it.
+func deadCooldownKey(ep Endpoint) string {
+	return ep.Model + "\x00" + ep.URL
+}
+
+// labelOf returns the model part of a cooldown key (the whole key for a bare
+// model key), so observers and the llm_model_cooldown_active gauge keep a
+// model-name label.
+func labelOf(key string) string {
+	model, _, _ := strings.Cut(key, "\x00")
+	return model
+}
+
+// endpointCooling reports whether ep is skipped: either its model is in quota
+// cooldown, or this exact (URL, model) is in dead-model cooldown. nil-safe.
+func endpointCooling(cd *modelCooldown, ep Endpoint) bool {
+	return cd.cooling(ep.Model) || cd.cooling(deadCooldownKey(ep))
 }

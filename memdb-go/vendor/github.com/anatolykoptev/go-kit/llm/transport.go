@@ -124,7 +124,7 @@ func (c *Client) doRequest(ctx context.Context, baseURL, apiKey string, req *Cha
 // (when every model is cooled, no skip happens and the primary is still tried).
 func (c *Client) hasNonCooledEndpoint() bool {
 	for _, ep := range c.endpoints {
-		if !c.cooldown.cooling(ep.Model) {
+		if !endpointCooling(c.cooldown, ep) {
 			return true
 		}
 	}
@@ -150,7 +150,7 @@ func (c *Client) cooldownCandidates() (endpoints []Endpoint, skipCooled bool) {
 }
 
 // recordCooldownOutcome feeds an attempt result to the cooldown bookkeeping: a
-// success clears the model's cooldown; a quota-class failure drives it. No-op
+// success clears the model's cooldown; a quota-class or dead-model failure drives it. No-op
 // when cooldown is disabled.
 func (c *Client) recordCooldownOutcome(ep Endpoint, err error) {
 	if c.cooldown == nil {
@@ -158,16 +158,26 @@ func (c *Client) recordCooldownOutcome(ep Endpoint, err error) {
 	}
 	if err == nil {
 		c.cooldown.recordSuccess(ep.Model)
+		c.cooldown.recordSuccess(deadCooldownKey(ep))
 		return
 	}
+	var apiErr *APIError
+	_ = errors.As(err, &apiErr)
+	var retryAfter time.Duration
+	if apiErr != nil {
+		retryAfter = apiErr.RetryAfter
+	}
+	// Quota-class: keyed by bare model (per-account, shared across proxies).
 	if isQuotaError(err) {
-		var apiErr *APIError
-		_ = errors.As(err, &apiErr)
-		var retryAfter time.Duration
-		if apiErr != nil {
-			retryAfter = apiErr.RetryAfter
-		}
 		c.cooldown.recordFailure(ep.Model, retryAfter)
+		return
+	}
+	// Dead model: keyed by (URL, model) so a proxy-local death never skips the
+	// same model on another proxy. A retired/withdrawn model is skipped for the
+	// window instead of failing on every request. Request-shaped failovers (413,
+	// context overflow, empty completion) are not model health and do not cool.
+	if apiErr != nil && isModelGone(apiErr) {
+		c.cooldown.recordFailure(deadCooldownKey(ep), retryAfter)
 	}
 }
 
@@ -298,7 +308,7 @@ func (c *Client) executeInner(ctx context.Context, req *ChatRequest) (*ChatRespo
 		for _, ep := range tryOrder {
 			// Skip a model in quota cooldown, but only while a healthier
 			// candidate remains — degraded > dead.
-			if skipCooled && c.cooldown.cooling(ep.Model) {
+			if skipCooled && endpointCooling(c.cooldown, ep) {
 				continue
 			}
 			attempted = true

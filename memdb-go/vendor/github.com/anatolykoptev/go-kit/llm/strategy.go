@@ -68,7 +68,7 @@ func shuffleEndpoints(eps []Endpoint, r *rand.Rand) []Endpoint {
 func eligibleEndpoints(all []Endpoint, cd *modelCooldown) []Endpoint {
 	out := make([]Endpoint, 0, len(all))
 	for _, ep := range all {
-		if !cd.cooling(ep.Model) {
+		if !endpointCooling(cd, ep) {
 			out = append(out, ep)
 		}
 	}

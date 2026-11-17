@@ -9,8 +9,8 @@ github.com/alicebob/miniredis/v2 v2.40.0 h1:6IgTQbvm2JiMYZ8yur/acNJzVjtSOWCelxXb
 github.com/alicebob/miniredis/v2 v2.40.0/go.mod h1:TcL7YfarKPGDAthEtl5NBeHZfeUQj6OXMm/+iu5cLMM=
 github.com/anatolykoptev/go-engine v1.3.1 h1:B/deUA0pRpX9+hYOOTE7XPPuh69idlX4PVuxHcRVCJ8=
 github.com/anatolykoptev/go-engine v1.3.1/go.mod h1:ZcJMqmoy+GP9HJRrj5G0y7reyIM8NbMX6IMyHYmwoEQ=
-github.com/anatolykoptev/go-kit v0.97.21 h1:uBc2RKAfvwbM4Q3mPX9TNhHZX3JMlphZcs7iYtEIFzU=
-github.com/anatolykoptev/go-kit v0.97.21/go.mod h1:UggcOlHEI7khAi8FUdUM5LwvEyfsEWWbm3J2VuWSDFg=
+github.com/anatolykoptev/go-kit v0.97.24 h1:57LvK0kf02HuUr145UxHZHCUjaUBWkaJFZ9jtiH/+Ok=
+github.com/anatolykoptev/go-kit v0.97.24/go.mod h1:UggcOlHEI7khAi8FUdUM5LwvEyfsEWWbm3J2VuWSDFg=
 github.com/anatolykoptev/go-stealth v1.22.4 h1:Ib7iDxaFsR/vs4mbtSR5mjC3ed3efkvJT8DOyxoJXw8=
 github.com/anatolykoptev/go-stealth v1.22.4/go.mod h1:z/FHpSVL2llFSAsnA9aLXKvV3wlOot1B5gEfVLYMGi4=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
