@@ -61,6 +61,14 @@ func newAPIError(statusCode int, body string, retryable bool, retryAfter time.Du
 		e.Code = parsed.Error.Code
 		e.Param = parsed.Error.Param
 	}
+	// The proxy answers 502 for an alias it does not define. That is a model
+	// death, not a transient gateway blip: re-sending the identical request
+	// recurs, so it must not burn same-endpoint retries (and backoff) before the
+	// chain advances. Other 502s stay retryable. Set here so the non-stream and
+	// stream paths (both build errors via newAPIError) agree.
+	if statusCode == http.StatusBadGateway && isUnknownProvider(e.Body) {
+		e.Retryable = false
+	}
 	return e
 }
 
@@ -114,16 +122,126 @@ func isModelUnavailable(apiErr *APIError) bool {
 	if apiErr.Param == "model" {
 		return true
 	}
+	body := strings.ToLower(apiErr.Body)
+	// Precise phrase (opencode zen: "Upstream request failed: Model is
+	// unavailable."). Matched as a phrase, never as the bare word "model", so
+	// "response_format ... is not available for this model" still aborts.
+	if strings.Contains(body, "model is unavailable") || strings.Contains(body, "model unavailable") {
+		return true
+	}
 	// Body-marker fallback: structured unavailability term + structured
 	// model-listing indicator. Deliberately excludes the bare word "model"
 	// to avoid false-positives on capability-mismatch messages.
-	body := strings.ToLower(apiErr.Body)
 	hasUnavailSignal := strings.Contains(body, "not available") ||
 		strings.Contains(body, "not found") ||
 		strings.Contains(body, "does not exist")
 	hasModelListing := strings.Contains(body, "available_models") ||
 		strings.Contains(body, "available:")
 	return hasUnavailSignal && hasModelListing
+}
+
+// model404Terms are lowercased substrings that, together with the word "model",
+// mark a 404 body as "this model is gone". Derived from real bodies seen through
+// the fleet proxy: "This model is unavailable for free" (OpenRouter :free
+// withdrawn), "<id> is no longer available on OpenRouter", "... has reached its
+// end of life" (NVIDIA), plus the OpenAI-family ("The model `x` does not exist")
+// and Gemini ("models/x is not found") shapes.
+var model404Terms = []string{
+	"not found",
+	"unavailable",
+	"no longer available",
+	"end of life",
+	"deprecated",
+	"does not exist",
+}
+
+// isModelNotFound404 reports whether a 404 identifies a dead model. A 404 is NOT
+// model-specific by status alone: a wrong base URL returns 404 (often HTML or
+// plain text) on every model, and the chain must abort on that rather than burn
+// every endpoint. Signals, any of:
+//   - error.param == "model" or error.code == "model_not_found" (OpenAI family);
+//   - error.type == "not_found_error" with the word "model" in error.message
+//     (Anthropic: "model: claude-x");
+//   - in a JSON error object only: the word "model" plus a model404Terms entry
+//     in error.message, or "no longer available" / "end of life" alone (the
+//     OpenRouter body names the id, not the word "model"). HTML/plain-text
+//     bodies never qualify on phrases.
+func isModelNotFound404(apiErr *APIError) bool {
+	if apiErr.StatusCode != http.StatusNotFound {
+		return false
+	}
+	if apiErr.Param == "model" || apiErr.Code == "model_not_found" {
+		return true
+	}
+	// Phrase markers need model-specific evidence: a structured JSON error
+	// object (the real OpenRouter/NVIDIA bodies are all `{"error":{"message":..}}`)
+	// whose message carries the phrase. HTML or plain-text 404s never qualify on
+	// phrases alone — "This API route is no longer available" is route
+	// retirement, not model retirement.
+	msg, ok := jsonErrorMessage(apiErr.Body)
+	if !ok {
+		return false
+	}
+	msg = strings.ToLower(msg)
+	if strings.Contains(msg, "no longer available") || strings.Contains(msg, "end of life") {
+		return true
+	}
+	if !strings.Contains(msg, "model") {
+		return false
+	}
+	if apiErr.Type == "not_found_error" {
+		return true
+	}
+	for _, t := range model404Terms {
+		if strings.Contains(msg, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// jsonErrorMessage extracts error.message from a `{"error":{"message":"..."}}`
+// body. ok is false for HTML, plain text, or JSON without that shape.
+func jsonErrorMessage(body string) (msg string, ok bool) {
+	var parsed struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal([]byte(body), &parsed) != nil || parsed.Error.Message == "" {
+		return "", false
+	}
+	return parsed.Error.Message, true
+}
+
+// isUnknownProvider reports whether a 502 body is the proxy's answer for an
+// alias it does not define ("unknown provider for model <alias>").
+func isUnknownProvider(body string) bool {
+	return strings.Contains(strings.ToLower(body), "unknown provider for model")
+}
+
+// isModelGone reports whether apiErr says the requested MODEL is dead upstream
+// (retired, withdrawn, or an alias the proxy no longer defines) — a per-model
+// failure the next chain model may not share. Drives both chain advance
+// (asFailover) and per-model cooldown. Request-shaped failovers (413,
+// context_length_exceeded, empty completion) are deliberately excluded: they say
+// nothing about the model's health, so they must not cool it.
+//   - 410 Gone: status alone. On a completions call it is model retirement
+//     (NVIDIA retired ids return it with an empty or non-JSON body).
+//   - 404: only with a model-death marker (isModelNotFound404).
+//   - 400/422: model-unavailable marker (isModelUnavailable).
+//   - 502 "unknown provider for model" (proxy alias gone).
+func isModelGone(apiErr *APIError) bool {
+	switch apiErr.StatusCode {
+	case http.StatusGone:
+		return true
+	case http.StatusNotFound:
+		return isModelNotFound404(apiErr)
+	case http.StatusBadGateway:
+		return isUnknownProvider(apiErr.Body)
+	default:
+		return isModelUnavailable(apiErr)
+	}
 }
 
 // asFailover reports whether err is a per-model failure that should advance
@@ -141,12 +259,18 @@ func isModelUnavailable(apiErr *APIError) bool {
 //     context-window-overflow shape.
 //   - HTTP 400/422 with a model-not-found marker — provider silently swapped
 //     the backing model; alias still lists in /v1/models but call fails.
-//     Marker required: param=model or body contains ("not available"/"not found"/
-//     "does not exist") AND ("available_models"/"available:"). See isModelUnavailable.
+//     Marker required: param=model, the phrase "model is unavailable", or body
+//     contains ("not available"/"not found"/"does not exist") AND
+//     ("available_models"/"available:"). See isModelUnavailable.
+//   - HTTP 410 (status alone), 404 with a model-death marker, 502 "unknown
+//     provider for model": the model is dead upstream. See isModelGone.
 //
 // A plain 400 or 422 with NO model marker is deliberately NOT a failover: it
 // recurs identically on every model, so the chain must abort, not burn every
 // endpoint.
+//
+// Note: 410 is also status-alone, on the same trade-off as 413 below. A 404
+// WITHOUT a marker (wrong base URL) still aborts.
 //
 // Note: 413 is matched on status alone (any body) — treated as model-specific.
 // A non-model 413 shared by every endpoint (e.g. a gateway payload-size limit)
@@ -163,7 +287,7 @@ func asFailover(err error) bool {
 	if apiErr.StatusCode == http.StatusBadRequest && apiErr.Code == "context_length_exceeded" {
 		return true
 	}
-	if isModelUnavailable(apiErr) {
+	if isModelGone(apiErr) {
 		return true
 	}
 	// An empty-completion response (HTTP 200, no usable content) is non-retryable
@@ -219,8 +343,8 @@ const errTypeUnknown = "unknown"
 //   - dependency_block   — 429; quota-class 503; or 403 with a quota marker
 //   - context_overflow   — 413 (TPM/payload too large) or 400 context_length_exceeded
 //   - empty_completion   — 200 with no usable content (reasoning truncated by max_tokens)
-//   - model_unavailable  — 422 (any body); or 400 with a model-not-found marker
-//     (param=model or body marker). Operator signal: a chain
+//   - model_unavailable  — 410; 404 / 400 / 422 with a model-death marker; 502
+//     "unknown provider for model". Operator signal: a chain
 //     model is listed in /v1/models but dead on actual call.
 //   - transient          — retryable 5xx / network (not quota-class)
 //   - client             — non-auth, non-overflow, non-model 4xx (bad request, etc.)
@@ -262,7 +386,7 @@ func ClassifyErrorType(err error) string {
 	// (provider silently swapped backing model). Checked BEFORE context_overflow
 	// because isModelUnavailable matches some 400/422 that asFailover also advances,
 	// but the metric must distinguish "model gone" from "request too large".
-	if isModelUnavailable(apiErr) {
+	if isModelGone(apiErr) {
 		return "model_unavailable"
 	}
 	// context_overflow: request too large for this model
