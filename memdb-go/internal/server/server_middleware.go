@@ -40,6 +40,7 @@ func applyMiddleware(next http.Handler, cfg *config.Config, cacheClient *cache.C
 		ServiceSecret: cfg.InternalServiceSecret,
 	})(h)
 	h = mw.CORS(h)
+	h = mw.EvalHarnessGuard(logger, cfg.Env == config.EnvEval)(h)
 	h = mw.RequestID(h)
 	h = mw.Recovery(logger)(h)
 	return h

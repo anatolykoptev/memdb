@@ -1,0 +1,78 @@
+# MemDB evaluation stack - an isolated instance for benchmarks, smoke and load tests.
+#
+# Every harness in evaluation/ and memdb-go/loadtest/ refuses to run unless the
+# target reports env=eval on /health. This file is how you get such a target:
+# its own compose project (memdb-eval), its own database volume, no shared
+# network, MEMDB_ENV=eval, and a host port that is not 8080.
+#
+#   docker compose -f docker/docker-compose.eval.yml up -d --build
+#   export MEMDB_URL=http://127.0.0.1:18080
+#   curl -s $MEMDB_URL/health        # data.env must be "eval"
+#   bash evaluation/locomo/run.sh
+#   docker compose -f docker/docker-compose.eval.yml down -v     # drops the eval database
+#
+# Required environment (shell or .env): MEMDB_EMBED_URL, plus MEMDB_LLM_API_KEY for
+# fine-mode ingest and chat. Optional: MEMDB_EVAL_PORT (default 18080), MEMDB_LLM_PROXY_URL,
+# MEMDB_LLM_MODEL.
+
+name: memdb-eval
+
+services:
+
+  postgres:
+    # pgvector + Apache AGE (Dockerfile.test-pg at the repository root).
+    build:
+      context: ..
+      dockerfile: Dockerfile.test-pg
+    environment:
+      POSTGRES_USER: memdb_eval
+      POSTGRES_PASSWORD: memdb_eval_throwaway   # throwaway instance, loopback only, no data worth protecting
+      POSTGRES_DB: memdb_eval
+    volumes:
+      - eval_pg_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memdb_eval -d memdb_eval"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - eval_network
+
+  memdb-go:
+    build:
+      context: ..
+      dockerfile: memdb-go/Dockerfile
+    ports:
+      - "127.0.0.1:${MEMDB_EVAL_PORT:-18080}:8080"   # loopback only; never 8080
+    environment:
+      MEMDB_ENV: eval            # the switch that makes /health report env=eval
+      MEMDB_DEV: "1"             # no auth on a loopback-only throwaway instance
+      MEMDB_GO_PORT: "8080"
+      MEMDB_POSTGRES_URL: postgresql://memdb_eval:memdb_eval_throwaway@postgres:5432/memdb_eval
+      MEMDB_LLM_PROXY_URL: ${MEMDB_LLM_PROXY_URL:-https://api.openai.com/v1}
+      CLI_PROXY_API_KEY: ${MEMDB_LLM_API_KEY:-}
+      MEMDB_LLM_MODEL: ${MEMDB_LLM_MODEL:-gpt-4o-mini}
+      MEMDB_EMBEDDER_TYPE: ${MEMDB_EMBEDDER_TYPE:-http}
+      MEMDB_EMBED_URL: ${MEMDB_EMBED_URL:?MEMDB_EMBED_URL must be set for the eval stack}
+      MEMDB_LOG_LEVEL: ${MEMDB_LOG_LEVEL:-info}
+      MEMDB_LOG_FORMAT: ${MEMDB_LOG_FORMAT:-json}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health | grep -q '\"env\":\"eval\"' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    networks:
+      - eval_network
+
+volumes:
+  eval_pg_data:
+
+networks:
+  eval_network:
+    driver: bridge

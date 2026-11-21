@@ -74,3 +74,10 @@ docker compose -f docker/docker-compose.yml down
 # Stop and delete all data (irreversible)
 docker compose -f docker/docker-compose.yml down -v
 ```
+
+## Evaluation stack
+
+`docker-compose.eval.yml` brings up an isolated MemDB (`MEMDB_ENV=eval`, its own
+database volume, loopback port 18080) for benchmarks and load tests. Benchmark
+harnesses refuse any instance that does not report `env=eval` on `/health`. See
+`evaluation/locomo/README.md`.

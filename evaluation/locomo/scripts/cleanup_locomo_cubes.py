@@ -18,7 +18,7 @@ Usage:
     python3 cleanup_locomo_cubes.py --full                     # all 10 convs
     python3 cleanup_locomo_cubes.py --conversations PATH       # custom file
     python3 cleanup_locomo_cubes.py --sample --dry-run        # print without deleting
-    python3 cleanup_locomo_cubes.py --sample --memdb-url URL  # custom URL
+    python3 cleanup_locomo_cubes.py --sample --memdb-url URL  # required (or MEMDB_URL); must be env=eval
 """
 
 from __future__ import annotations
@@ -31,6 +31,9 @@ from pathlib import Path
 from typing import NamedTuple
 
 import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from eval_guard import guard, harness_headers  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Paths — mirror ingest.py layout
@@ -53,6 +56,7 @@ def build_headers() -> dict:
         headers["Authorization"] = f"Bearer {key}"
     if secret := os.getenv("MEMDB_SERVICE_SECRET"):
         headers["X-Service-Secret"] = secret
+    headers.update(harness_headers())
     return headers
 
 
@@ -162,9 +166,11 @@ def main() -> int:
     g.add_argument("--sample", action="store_true", help="Use sample_conversations.json (1 conv).")
     g.add_argument("--full", action="store_true", help="Use full locomo10.json (10 convs).")
     g.add_argument("--conversations", type=Path, help="Path to a conversations JSON.")
-    p.add_argument("--memdb-url", default="http://localhost:8080", help="memdb-go base URL.")
+    p.add_argument("--memdb-url", default=None, help="memdb-go base URL (or env MEMDB_URL). No default: the target must report env=eval on /health.")
     p.add_argument("--dry-run", action="store_true", help="List cubes but do not delete.")
     args = p.parse_args()
+    # Even --dry-run lists cubes over HTTP, so the target is always checked.
+    args.memdb_url = guard(args.memdb_url, os.getenv("MEMDB_URL"))
 
     if args.sample:
         path = SAMPLE_DATA

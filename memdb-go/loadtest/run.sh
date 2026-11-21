@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # memdb-go load testing script using vegeta
-# Usage: ./run.sh [scenario] [options]
+# Usage: MEMDB_URL=<eval instance url> ./run.sh [scenario] [options]
+#
+# MEMDB_URL is REQUIRED (no default) and must report env=eval on /health: the add
+# scenario writes to a real cube. Start one with docker/docker-compose.eval.yml.
 #
 # Scenarios:
 #   health     - GET /health (baseline latency)
@@ -15,8 +18,6 @@
 # Options:
 #   -r RATE      Requests per second (default: 10)
 #   -d DURATION  Test duration (default: 30s)
-#   -g           Target Go gateway at :8080 (default)
-#   -p           Target Python backend at :8000
 #   -o DIR       Output directory (default: ./results)
 
 set -euo pipefail
@@ -28,23 +29,25 @@ RESULTS_DIR="${SCRIPT_DIR}/results"
 # Defaults
 RATE=10
 DURATION="30s"
-PORT=8080
-HOST="localhost"
 SCENARIO="${1:-all}"
 shift 2>/dev/null || true
 
 # Parse options
-while getopts "r:d:gpo:" opt 2>/dev/null; do
+while getopts "r:d:o:" opt 2>/dev/null; do
     case $opt in
         r) RATE="$OPTARG" ;;
         d) DURATION="$OPTARG" ;;
-        g) PORT=8080 ;;
-        p) PORT=8000 ;;
         o) RESULTS_DIR="$OPTARG" ;;
         *) ;;
     esac
 done
 
+# Target guard: no default, must be an eval instance.
+# shellcheck source=../../evaluation/eval_guard.sh
+source "${SCRIPT_DIR}/../../evaluation/eval_guard.sh"
+MEMDB_URL="${MEMDB_URL:-}"
+eval_guard_target "$MEMDB_URL"
+export MEMDB_URL="${MEMDB_URL%/}"
 # Check vegeta is installed
 if ! command -v vegeta &>/dev/null; then
     echo "Error: vegeta not found. Install with: go install github.com/tsenart/vegeta/v12@latest"
@@ -70,15 +73,13 @@ run_scenario() {
     local result_prefix="${RESULTS_DIR}/${name}_${TIMESTAMP}"
 
     echo "=== ${name} ==="
-    echo "  Target: :${PORT}, Rate: ${rate} req/s, Duration: ${duration}"
+    echo "  Target: ${MEMDB_URL}, Rate: ${rate} req/s, Duration: ${duration}"
 
     # Substitute variables in target file
     local tmp_dir
     tmp_dir=$(mktemp -d)
     envsubst < "${target_file}" > "$tmp_dir/target.txt"
 
-    # Replace port in target file
-    sed -i "s|localhost:8080|${HOST}:${PORT}|g" "$tmp_dir/target.txt"
 
     # Copy body files to temp dir so vegeta can find them
     cp "${TARGETS_DIR}"/*-body.json "$tmp_dir/" 2>/dev/null || true
@@ -111,7 +112,6 @@ run_ratelimit_test() {
     local tmp_dir
     tmp_dir=$(mktemp -d)
     envsubst < "${TARGETS_DIR}/health.txt" > "$tmp_dir/target.txt"
-    sed -i "s|localhost:8080|${HOST}:${PORT}|g" "$tmp_dir/target.txt"
 
     local result_prefix="${RESULTS_DIR}/ratelimit_${TIMESTAMP}"
 
@@ -166,26 +166,9 @@ case "$SCENARIO" in
         run_scenario "get_all" "${TARGETS_DIR}/get-all.txt"
         run_scenario "users" "${TARGETS_DIR}/users.txt"
         ;;
-    compare)
-        echo "=== Comparing Go gateway vs Python direct ==="
-        echo ""
-        PORT=8080
-        run_scenario "go_health" "${TARGETS_DIR}/health.txt"
-        run_scenario "go_get_all" "${TARGETS_DIR}/get-all.txt"
-        run_scenario "go_users" "${TARGETS_DIR}/users.txt"
-        run_scenario "go_search" "${TARGETS_DIR}/search.txt"
-        PORT=8000
-        run_scenario "py_health" "${TARGETS_DIR}/health.txt"
-        run_scenario "py_get_all" "${TARGETS_DIR}/get-all.txt"
-        run_scenario "py_users" "${TARGETS_DIR}/users.txt"
-        run_scenario "py_search" "${TARGETS_DIR}/search.txt"
-        echo "=== Comparison complete ==="
-        echo "Results in: ${RESULTS_DIR}/"
-        echo "View HTML plots for latency distribution"
-        ;;
     *)
         echo "Unknown scenario: $SCENARIO"
-        echo "Available: health, search, get_all, users, add, stream, ratelimit, all, compare"
+        echo "Available: health, search, get_all, users, add, stream, ratelimit, all"
         exit 1
         ;;
 esac

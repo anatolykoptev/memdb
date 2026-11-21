@@ -6,12 +6,12 @@ and asserts:
   - the response carries len(retrieved) <= top_k (budget is honored)
   - search_ms is positive (request actually round-tripped)
 
-Skipped by default — set `MEMDB_E2E_URL` (e.g. http://localhost:8080) to
+Skipped by default — set `MEMDB_E2E_URL` (an instance reporting env=eval) to
 enable.  The test cleans up after itself by calling /product/cubes/delete
 on the synthetic cube, so it is safe to re-run.
 
 Run:
-  MEMDB_E2E_URL=http://localhost:8080 python -m pytest \
+  MEMDB_E2E_URL=http://127.0.0.1:18080 python -m pytest \
     evaluation/locomo/tests/test_recall_budget_e2e.py -v
 """
 
@@ -31,6 +31,7 @@ if str(_LOCOMO_DIR) not in sys.path:
     sys.path.insert(0, str(_LOCOMO_DIR))
 
 import query as q   # noqa: E402
+from eval_guard import check_eval_instance  # noqa: E402
 
 
 _E2E_URL = os.getenv("MEMDB_E2E_URL", "")
@@ -40,6 +41,7 @@ _E2E_URL = os.getenv("MEMDB_E2E_URL", "")
 class TestRecallBudgetE2E(unittest.TestCase):
     def setUp(self) -> None:
         self.url = _E2E_URL.rstrip("/")
+        check_eval_instance(self.url)  # raises unless the target reports env=eval
         # Synthetic per-test cube id so concurrent runs don't collide.
         self.user_id = f"e2e_recall_{uuid.uuid4().hex[:8]}"
         self.headers = q.build_headers()

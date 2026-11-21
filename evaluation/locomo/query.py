@@ -72,6 +72,9 @@ from typing import Any, Callable, TypeVar
 
 import requests
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from eval_guard import guard, harness_headers  # noqa: E402
+
 # LoCoMo's raw-mode memories are short verbatim dialogue turns ("Caroline: Hey Mel!").
 # Question-form queries match these at cosine ~0.15-0.30, well below the
 # DefaultRelativity=0.5 threshold in memdb-go/internal/search/config.go.
@@ -341,6 +344,7 @@ def build_headers() -> dict:
         headers["Authorization"] = f"Bearer {key}"
     if secret := os.getenv("MEMDB_SERVICE_SECRET"):
         headers["X-Service-Secret"] = secret
+    headers.update(harness_headers())
     return headers
 
 
@@ -1236,7 +1240,7 @@ def main() -> int:
     g.add_argument("--sample", action="store_true")
     g.add_argument("--full", action="store_true")
     g.add_argument("--gold", type=Path, help="Custom gold JSON.")
-    p.add_argument("--memdb-url", default="http://localhost:8080")
+    p.add_argument("--memdb-url", default=None, help="memdb-go base URL (or env MEMDB_URL). No default: the target must report env=eval on /health.")
     p.add_argument("--top-k", type=int, default=20)
     p.add_argument(
         "--top-k-per-speaker",
@@ -1326,6 +1330,7 @@ def main() -> int:
         ),
     )
     args = p.parse_args()
+    args.memdb_url = guard(args.memdb_url, os.getenv("MEMDB_URL"))
 
     try:
         categories = parse_categories(args.categories)

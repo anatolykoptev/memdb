@@ -6,7 +6,8 @@
 # (see README). This script handles ingest → query → score → baseline save.
 #
 # Env:
-#   MEMDB_URL             memdb-go base URL (default: http://localhost:8080)
+#   MEMDB_URL             memdb-go base URL. REQUIRED, no default: the instance must
+#                         report env=eval on /health (docker/docker-compose.eval.yml)
 #   MEMDB_API_KEY         Bearer token (plain key matching MASTER_KEY_HASH)
 #   MEMDB_SERVICE_SECRET  X-Service-Secret alternative (from memdb-go env)
 #                         — at least one of MEMDB_API_KEY / _SERVICE_SECRET required
@@ -31,7 +32,9 @@ REPO_ROOT="$(cd "$EVAL_DIR/../.." && pwd)"
 RESULTS_DIR="$EVAL_DIR/results"
 mkdir -p "$RESULTS_DIR"
 
-MEMDB_URL="${MEMDB_URL:-http://localhost:8080}"
+# shellcheck source=../eval_guard.sh
+source "$EVAL_DIR/../eval_guard.sh"
+MEMDB_URL="${MEMDB_URL:-}"
 LOCOMO_CATEGORIES="${LOCOMO_CATEGORIES:-1}"
 # Embed-server for semsim. Default: local embed-server on :8082 (no auth needed).
 # Set EMBED_URL="" to disable embedding and fall back to BoW cosine.
@@ -53,13 +56,9 @@ fi
 
 CATEGORIES_FLAG="--categories=${LOCOMO_CATEGORIES}"
 
-# 0. Sanity: memdb-go reachable
-echo "==> checking memdb-go at $MEMDB_URL"
-if ! curl -sf --max-time 5 "$MEMDB_URL/health" >/dev/null 2>&1; then
-    echo "!! memdb-go not reachable at $MEMDB_URL/health"
-    echo "!! start it first: cd ~/deploy/server-config && docker compose up -d memdb-go"
-    exit 2
-fi
+# 0. Sanity: target given and reports env=eval
+echo "==> checking memdb-go at ${MEMDB_URL:-<unset>}"
+eval_guard_target "$MEMDB_URL"
 
 SHA=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 SUFFIX="${OUT_SUFFIX:-$SHA}"

@@ -118,6 +118,9 @@ phase_1() {
     # --- YOUR WORK HERE ---
     # Example: validate environment variables
     : "${MEMDB_URL:?MEMDB_URL must be set}"
+    # shellcheck source=../../eval_guard.sh
+    source "$(dirname "${BASH_SOURCE[0]}")/../../eval_guard.sh"
+    eval_guard_target "$MEMDB_URL"
     echo "[phase-1] MEMDB_URL=$MEMDB_URL"
     # --- END YOUR WORK ---
 

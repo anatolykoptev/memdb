@@ -1,2 +1,3 @@
-GET http://localhost:8080/product/users
+GET ${MEMDB_URL}/product/users
+X-MemDB-Eval-Harness: 1
 X-Service-Secret: ${SERVICE_SECRET}

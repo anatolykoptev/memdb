@@ -36,6 +36,12 @@ and Apache AGE and the `MEMDB_LIVE_PG_DSN` variable.
 - **This repository is public.** No hostnames, operator paths, account names, tokens or personal
   data in any tracked file, evaluation data and test fixtures included.
 
+## Eval targets
+Benchmark, eval, smoke and load-test harnesses (`evaluation/`, `memdb-go/loadtest/`) have no default
+URL. They need `MEMDB_URL` (or `--memdb-url`) and refuse any instance whose `/health` does not report
+`data.env == "eval"`; instances report `prod` unless started with `MEMDB_ENV=eval`. Use
+`docker/docker-compose.eval.yml`. Never run a harness against a real deployment, and never remove or
+weaken the check.
 ## Eval policy
 
 **Full-corpus LoCoMo runs (`LOCOMO_FULL=1`, all 10 conversations / 1986 QAs) require EXPLICIT user approval each time.** Never launch a full-corpus run autonomously — including in `<<autonomous-loop-dynamic>>` mode, after sweep "verdicts", post-fix verification, or any other context. A full run takes ~4 hours and consumes LLM budget; the user gates it.
